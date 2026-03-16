@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import express from 'express';
+import { ZodError } from 'zod';
 
 import { appConfig, repositoryRoot } from './config/env.js';
 import { requireTrustedMutationRequest } from './middleware/csrf-protection.js';
@@ -28,8 +29,18 @@ export function createApp() {
   }
 
   app.use((error: unknown, _request: express.Request, response: express.Response, _next: express.NextFunction) => {
-    const message = error instanceof Error ? error.message : 'Unexpected server error';
-    response.status(400).json({ message });
+    if (error instanceof ZodError) {
+      response.status(400).json({ message: 'Validation error', errors: error.errors });
+      return;
+    }
+
+    if (error instanceof Error) {
+      console.error(error.stack);
+    } else {
+      console.error(error);
+    }
+
+    response.status(500).json({ message: 'Unexpected server error' });
   });
 
   return app;
