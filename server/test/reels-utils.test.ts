@@ -31,7 +31,7 @@ function createCandidate(
 }
 
 describe('reels utils', () => {
-  it('keeps ranking stable for the same seed and affinity inputs', () => {
+  it('keeps ranking stable for the same seed and affinity inputs', async () => {
     const candidates = [
       createCandidate(1, { folderSlug: 'alpha' }),
       createCandidate(2, { folderSlug: 'beta', width: 1280, height: 720 }),
@@ -50,7 +50,7 @@ describe('reels utils', () => {
     expect(first.map((entry) => entry.candidate.id)).toEqual(second.map((entry) => entry.candidate.id));
   });
 
-  it('allows different seeds to reshuffle otherwise similar top candidates', () => {
+  it('allows different seeds to reshuffle otherwise similar top candidates', async () => {
     const candidates = [
       createCandidate(1, { takenAt: 1_778_100_000_000, sortTimestamp: 1_778_100_000_000 }),
       createCandidate(2, { takenAt: 1_778_100_000_000, sortTimestamp: 1_778_100_000_000 }),
@@ -63,7 +63,7 @@ describe('reels utils', () => {
     expect(firstSeedOrder).not.toEqual(secondSeedOrder);
   });
 
-  it('boosts liked and recently opened folder candidates when other signals are close', () => {
+  it('boosts liked and recently opened folder candidates when other signals are close', async () => {
     const candidates = [
       createCandidate(1, {
         folderSlug: 'liked-folder',
@@ -91,7 +91,7 @@ describe('reels utils', () => {
     expect(ranked[1]?.candidate.folderSlug).toBe('recent-folder');
   });
 
-  it('adds a diversity penalty so consecutive reels do not cluster by folder when alternatives exist', () => {
+  it('adds a diversity penalty so consecutive reels do not cluster by folder when alternatives exist', async () => {
     const queue = buildReelQueue(
       [
         createCandidate(1, {

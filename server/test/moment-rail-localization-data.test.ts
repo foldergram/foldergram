@@ -41,7 +41,8 @@ describe.sequential('moment rail localization data', () => {
 
     ({ appConfig } = await import('../src/config/env.js'));
     ({ galleryService } = await import('../src/services/gallery-service.js'));
-    ({ folderRepository, imageRepository, maintenanceRepository } = await import('../src/db/repositories.js'));
+    ({folderRepository, imageRepository, maintenanceRepository} = await import('../src/db/repositories.js'));
+    await (await import('../src/db/repositories.js')).initRepositories();
   });
 
   afterAll(async () => {
@@ -51,7 +52,7 @@ describe.sequential('moment rail localization data', () => {
   });
 
   beforeEach(async () => {
-    maintenanceRepository.resetLibraryIndex();
+    await maintenanceRepository.resetLibraryIndex();
     await Promise.all([
       fs.mkdir(appConfig.galleryRoot, { recursive: true }),
       fs.mkdir(appConfig.thumbnailsDir, { recursive: true }),
@@ -69,7 +70,7 @@ describe.sequential('moment rail localization data', () => {
         Array.from({ length: 30 }, (_, index) => new Date(2025, 4, 31, 12, index).getTime())
       );
 
-      const rail = galleryService.listMoments();
+      const rail = await galleryService.listMoments();
 
       expect(rail.railKind).toBe('moments');
       expect(rail.items.find((capsule) => capsule.id === 'on-this-day')).toMatchObject({
@@ -120,7 +121,7 @@ describe.sequential('moment rail localization data', () => {
       expect(rail.items.find((capsule) => capsule.id === 'from-last-year')).toMatchObject({
         momentDate: fromLastYear
       });
-      expect(galleryService.getMomentFeed('from-last-year', 1, 10)?.moment).toMatchObject({
+      expect((await galleryService.getMomentFeed('from-last-year', 1, 10))?.moment).toMatchObject({
         momentDate: fromLastYear
       });
     } finally {
@@ -133,7 +134,7 @@ describe.sequential('moment rail localization data', () => {
   }> {
     const slug = relativeFolderPath.replaceAll('/', '-');
     const folderName = path.posix.basename(relativeFolderPath);
-    const folder = folderRepository.upsert({
+    const folder = await folderRepository.upsert({
       slug,
       name: folderName,
       folderPath: relativeFolderPath
@@ -149,7 +150,7 @@ describe.sequential('moment rail localization data', () => {
       const previewRelativePath = getPreviewRelativePath(relativePath, mediaType);
       const fileSize = 1_000 + index;
 
-      const image = imageRepository.upsert({
+      const image = await imageRepository.upsert({
         folderId: folder.id,
         filename,
         extension,
@@ -173,7 +174,7 @@ describe.sequential('moment rail localization data', () => {
       });
 
       if (index === 0) {
-        folderRepository.setAvatar(folder.id, image.id);
+        await folderRepository.setAvatar(folder.id, image.id);
       }
     }
 

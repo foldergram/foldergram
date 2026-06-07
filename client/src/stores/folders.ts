@@ -6,8 +6,13 @@ import { updateCaptionInItems } from '../utils/caption';
 
 type FolderMediaFilter = 'all' | 'video';
 
+const LIST_LIMIT = 24;
+
 interface FoldersState {
   items: FolderSummary[];
+  listPage: number;
+  listHasMore: boolean;
+  listTotal: number;
   loadingList: boolean;
   pendingListRefresh: boolean;
   listError: string | null;
@@ -24,6 +29,9 @@ interface FoldersState {
 export const useFoldersStore = defineStore('folders', {
   state: (): FoldersState => ({
     items: [],
+    listPage: 1,
+    listHasMore: true,
+    listTotal: 0,
     loadingList: false,
     pendingListRefresh: false,
     listError: null,
@@ -99,6 +107,9 @@ export const useFoldersStore = defineStore('folders', {
 
     resetForRebuild() {
       this.items = [];
+      this.listPage = 1;
+      this.listHasMore = true;
+      this.listTotal = 0;
       this.loadingList = false;
       this.pendingListRefresh = false;
       this.listError = null;
@@ -111,6 +122,27 @@ export const useFoldersStore = defineStore('folders', {
       this.folderError = null;
     },
 
+    async loadMore() {
+      if (this.loadingList || !this.listHasMore) {
+        return;
+      }
+
+      this.loadingList = true;
+      this.listError = null;
+
+      try {
+        const payload = await fetchFolders(this.listPage, LIST_LIMIT);
+        this.items.push(...payload.items);
+        this.listPage += 1;
+        this.listHasMore = payload.hasMore;
+        this.listTotal = payload.total;
+      } catch (error) {
+        this.listError = error instanceof Error ? error.message : 'Unable to load folders';
+      } finally {
+        this.loadingList = false;
+      }
+    },
+
     async fetchFolders(force = false) {
       if (this.loadingList) {
         this.pendingListRefresh = this.pendingListRefresh || force;
@@ -121,16 +153,13 @@ export const useFoldersStore = defineStore('folders', {
         return;
       }
 
-      this.loadingList = true;
+      this.items = [];
+      this.listPage = 1;
+      this.listHasMore = true;
+      this.listTotal = 0;
       this.listError = null;
 
-      try {
-        this.items = await fetchFolders();
-      } catch (error) {
-        this.listError = error instanceof Error ? error.message : 'Unable to load folders';
-      } finally {
-        this.loadingList = false;
-      }
+      await this.loadMore();
 
       if (this.pendingListRefresh) {
         this.pendingListRefresh = false;
@@ -174,7 +203,7 @@ export const useFoldersStore = defineStore('folders', {
     async updateFolderProfile(slug: string, name: string, description: string | null) {
       const updated = await updateFolderProfile(slug, name, description);
       this.items = this.items.map((folder) => (folder.slug === slug ? updated : folder));
-      
+
       if (this.currentFolder?.slug === slug) {
         this.currentFolder = updated;
       }
@@ -183,7 +212,7 @@ export const useFoldersStore = defineStore('folders', {
     async setFolderCover(slug: string, imageId: number) {
       await setFolderCover(slug, imageId);
       await this.fetchFolders(true);
-      
+
       if (this.currentFolder?.slug === slug) {
         const payload = await fetchFolderImages(slug, 1, this.currentLimit, this.currentFilter === 'video' ? 'video' : undefined);
         this.currentFolder = payload.folder;

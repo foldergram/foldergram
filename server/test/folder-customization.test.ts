@@ -60,7 +60,8 @@ describe.sequential('folder customization', () => {
     ({ appConfig } = await import('../src/config/env.js'));
     apiModule = await import('../src/routes/api.js');
     ({ galleryService } = await import('../src/services/gallery-service.js'));
-    ({ folderRepository, imageRepository, maintenanceRepository } = await import('../src/db/repositories.js'));
+    ({folderRepository, imageRepository, maintenanceRepository} = await import('../src/db/repositories.js'));
+    await (await import('../src/db/repositories.js')).initRepositories();
   });
 
   afterAll(async () => {
@@ -70,14 +71,14 @@ describe.sequential('folder customization', () => {
   });
 
   beforeEach(async () => {
-    maintenanceRepository.resetLibraryIndex();
+    await maintenanceRepository.resetLibraryIndex();
 
     await fs.rm(appConfig.galleryRoot, { recursive: true, force: true });
     await fs.mkdir(appConfig.galleryRoot, { recursive: true });
   });
 
   describe('schema validation', () => {
-    it('validates PATCH folder body correctly', () => {
+    it('validates PATCH folder body correctly', async () => {
       const { patchFolderBodySchema } = apiModule;
 
       expect(patchFolderBodySchema.parse({ name: 'Valid Name', description: 'Some description' })).toEqual({
@@ -94,7 +95,7 @@ describe.sequential('folder customization', () => {
       expect(() => patchFolderBodySchema.parse({ name: 'Name', description: 'x'.repeat(301) })).toThrowError();
     });
 
-    it('validates POST folder body correctly', () => {
+    it('validates POST folder body correctly', async () => {
       const { folderCoverBodySchema } = apiModule;
 
       expect(folderCoverBodySchema.parse({ imageId: 10 })).toEqual({ imageId: 10 });
@@ -102,7 +103,7 @@ describe.sequential('folder customization', () => {
       expect(() => folderCoverBodySchema.parse({ imageId: 'abc' })).toThrowError();
     });
 
-    it('validates PATCH image caption body correctly', () => {
+    it('validates PATCH image caption body correctly', async () => {
       const { patchImageCaptionBodySchema } = apiModule;
 
       expect(patchImageCaptionBodySchema.parse({ caption: '  New caption  ' })).toEqual({
@@ -120,9 +121,9 @@ describe.sequential('folder customization', () => {
   });
 
   describe('gallery service operations', () => {
-    it('updates folder metadata', () => {
-      const folder = folderRepository.upsert({ slug: 'test-folder', name: 'Test Folder', folderPath: 'test-folder' });
-      imageRepository.upsert({
+    it('updates folder metadata', async () => {
+      const folder = await folderRepository.upsert({ slug: 'test-folder', name: 'Test Folder', folderPath: 'test-folder' });
+      await imageRepository.upsert({
         folderId: folder.id,
         filename: 'img1.jpg',
         relativePath: 'test/img1.jpg',
@@ -147,23 +148,23 @@ describe.sequential('folder customization', () => {
       });
       
       
-      const updated = galleryService.updateFolderMetadata('test-folder', 'New Name', 'A new bio for testing');
+      const updated = await galleryService.updateFolderMetadata('test-folder', 'New Name', 'A new bio for testing');
       
       expect(updated!.name).toBe('New Name');
       expect(updated!.description).toBe('A new bio for testing');
 
-      const DBFolder = folderRepository.getBySlug('test-folder');
+      const DBFolder = await folderRepository.getBySlug('test-folder');
       expect(DBFolder?.name).toBe('New Name');
       expect(DBFolder?.description).toBe('A new bio for testing');
     });
 
-    it('returns null updating non-existent metadata', () => {
-      expect(galleryService.updateFolderMetadata('non-existent', 'Name', null)).toBeFalsy();
+    it('returns null updating non-existent metadata', async () => {
+      expect(await galleryService.updateFolderMetadata('non-existent', 'Name', null)).toBeFalsy();
     });
 
-    it('updates an image caption and clears it back to the filename fallback', () => {
-      const folder = folderRepository.upsert({ slug: 'caption-folder', name: 'Caption Folder', folderPath: 'caption-folder' });
-      const image = imageRepository.upsert({
+    it('updates an image caption and clears it back to the filename fallback', async () => {
+      const folder = await folderRepository.upsert({ slug: 'caption-folder', name: 'Caption Folder', folderPath: 'caption-folder' });
+      const image = await imageRepository.upsert({
         folderId: folder.id,
         filename: 'photo-1.jpg',
         relativePath: 'caption-folder/photo-1.jpg',
@@ -187,18 +188,18 @@ describe.sequential('folder customization', () => {
         exifJson: null
       });
 
-      const updated = galleryService.updateImageCaption(image.id, 'Custom caption');
+      const updated = await galleryService.updateImageCaption(image.id, 'Custom caption');
       expect(updated?.caption).toBe('Custom caption');
-      expect(imageRepository.getById(image.id)?.caption).toBe('Custom caption');
+      expect((await imageRepository.getById(image.id))?.caption).toBe('Custom caption');
 
-      const cleared = galleryService.updateImageCaption(image.id, null);
+      const cleared = await galleryService.updateImageCaption(image.id, null);
       expect(cleared?.caption).toBeNull();
-      expect(imageRepository.getById(image.id)?.caption).toBeNull();
+      expect((await imageRepository.getById(image.id))?.caption).toBeNull();
     });
 
-    it('sets folder cover avatar', () => {
-      const folder = folderRepository.upsert({ slug: 'test-folder-2', name: 'Test 2', folderPath: 'test2' });
-      const image = imageRepository.upsert({
+    it('sets folder cover avatar', async () => {
+      const folder = await folderRepository.upsert({ slug: 'test-folder-2', name: 'Test 2', folderPath: 'test2' });
+      const image = await imageRepository.upsert({
         folderId: folder.id,
         filename: 'img1.jpg',
         relativePath: 'test2/img1.jpg',
@@ -222,16 +223,16 @@ describe.sequential('folder customization', () => {
         exifJson: null
       });
 
-      galleryService.setFolderAvatar('test-folder-2', image.id);
+      await galleryService.setFolderAvatar('test-folder-2', image.id);
       
-      const DBFolder = folderRepository.getBySlug('test-folder-2');
+      const DBFolder = await folderRepository.getBySlug('test-folder-2');
       expect(DBFolder?.avatar_image_id).toBe(image.id);
       expect(DBFolder?.avatar_source).toBe('manual');
     });
 
-    it('allows a video thumbnail to be used as the folder cover avatar', () => {
-      const folder = folderRepository.upsert({ slug: 'test-folder-video', name: 'Test Video', folderPath: 'test-video' });
-      const video = imageRepository.upsert({
+    it('allows a video thumbnail to be used as the folder cover avatar', async () => {
+      const folder = await folderRepository.upsert({ slug: 'test-folder-video', name: 'Test Video', folderPath: 'test-video' });
+      const video = await imageRepository.upsert({
         folderId: folder.id,
         filename: 'clip1.mp4',
         relativePath: 'test-video/clip1.mp4',
@@ -255,25 +256,25 @@ describe.sequential('folder customization', () => {
         exifJson: null
       });
 
-      expect(galleryService.setFolderAvatar('test-folder-video', video.id)).toBe(true);
+      expect(await galleryService.setFolderAvatar('test-folder-video', video.id)).toBe(true);
 
       // Manual avatar selection is revalidated during sync/rescan paths.
-      folderRepository.syncAvatarSelection(folder.id);
+      await folderRepository.syncAvatarSelection(folder.id);
 
-      const dbFolder = folderRepository.getBySlug('test-folder-video');
+      const dbFolder = await folderRepository.getBySlug('test-folder-video');
       expect(dbFolder?.avatar_image_id).toBe(video.id);
       expect(dbFolder?.avatar_source).toBe('manual');
 
-      const folderSummary = galleryService.getFolderBySlug('test-folder-video');
+      const folderSummary = await galleryService.getFolderBySlug('test-folder-video');
       expect(folderSummary?.avatarImageId).toBe(video.id);
       expect(folderSummary?.avatarUrl).toBe('/thumbnails/t/clip1.webp');
     });
 
-    it('exposes customized parent folder display names for nested folders', () => {
-      const parentFolder = folderRepository.upsert({ slug: 'italy', name: 'Italy', folderPath: 'Italy' });
-      const childFolder = folderRepository.upsert({ slug: 'italy-2022', name: '2022', folderPath: 'Italy/2022' });
+    it('exposes customized parent folder display names for nested folders', async () => {
+      const parentFolder = await folderRepository.upsert({ slug: 'italy', name: 'Italy', folderPath: 'Italy' });
+      const childFolder = await folderRepository.upsert({ slug: 'italy-2022', name: '2022', folderPath: 'Italy/2022' });
 
-      imageRepository.upsert({
+      await imageRepository.upsert({
         folderId: parentFolder.id,
         filename: 'rome.jpg',
         relativePath: 'Italy/rome.jpg',
@@ -297,7 +298,7 @@ describe.sequential('folder customization', () => {
         exifJson: null
       });
 
-      const childImage = imageRepository.upsert({
+      const childImage = await imageRepository.upsert({
         folderId: childFolder.id,
         filename: 'venice.jpg',
         relativePath: 'Italy/2022/venice.jpg',
@@ -321,22 +322,22 @@ describe.sequential('folder customization', () => {
         exifJson: null
       });
 
-      expect(galleryService.updateFolderMetadata('italy', 'Italia', null)?.name).toBe('Italia');
+      expect((await galleryService.updateFolderMetadata('italy', 'Italia', null))?.name).toBe('Italia');
 
-      const childSummary = galleryService.getFolderBySlug('italy-2022');
-      const childFeedItem = galleryService.getFeed(1, 10, 'recent').items.find((item) => item.folderSlug === 'italy-2022');
-      const childDetail = galleryService.getImageDetail(childImage.id);
+      const childSummary = await galleryService.getFolderBySlug('italy-2022');
+      const childFeedItem = (await galleryService.getFeed(1, 10, 'recent')).items.find((item) => item.folderSlug === 'italy-2022');
+      const childDetail = await galleryService.getImageDetail(childImage.id);
 
       expect(childSummary?.parentFolderName).toBe('Italia');
       expect(childFeedItem?.folderParentName).toBe('Italia');
       expect(childDetail?.folderParentName).toBe('Italia');
     });
 
-    it('returns null when setting cover for non-existent items', () => {
-      expect(galleryService.setFolderAvatar('non-existent', 123)).toBeNull();
+    it('returns null when setting cover for non-existent items', async () => {
+      expect(await galleryService.setFolderAvatar('non-existent', 123)).toBeNull();
       
-      const folder = folderRepository.upsert({ slug: 'test-folder-3', name: 'Test 3', folderPath: 'test3' });
-      expect(galleryService.setFolderAvatar('test-folder-3', 999)).toBeNull();
+      const folder = await folderRepository.upsert({ slug: 'test-folder-3', name: 'Test 3', folderPath: 'test3' });
+      expect(await galleryService.setFolderAvatar('test-folder-3', 999)).toBeNull();
     });
   });
 });

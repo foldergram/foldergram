@@ -91,7 +91,8 @@ describe.sequential('place resolution service', () => {
 
     ({ appConfig } = await import('../src/config/env.js'));
     ({ placeResolutionService, geodataService } = await import('../src/services/place-service.js'));
-    ({ imageRepository, placeRepository } = await import('../src/db/repositories.js'));
+    ({imageRepository, placeRepository} = await import('../src/db/repositories.js'));
+    await (await import('../src/db/repositories.js')).initRepositories();
   });
 
   afterEach(async () => {
@@ -105,12 +106,12 @@ describe.sequential('place resolution service', () => {
     await fs.rm(tempRoot, { recursive: true, force: true });
   });
 
-  it('clears stale place assignments when reverse geocoding finds no nearby city', () => {
+  it('clears stale place assignments when reverse geocoding finds no nearby city', async () => {
     vi.spyOn(geodataService, 'isPrepared').mockReturnValue(true);
     vi.spyOn(geodataService, 'findNearestCity').mockReturnValue(null);
     const assignPlaceSpy = vi.spyOn(imageRepository, 'assignPlace').mockImplementation(() => undefined);
 
-    const place = placeResolutionService.resolveImage({
+    const place = await placeResolutionService.resolveImage({
       id: 42,
       exif_json: JSON.stringify({
         latitude: 31.582,
@@ -122,11 +123,11 @@ describe.sequential('place resolution service', () => {
     expect(assignPlaceSpy).toHaveBeenCalledWith(42, null);
   });
 
-  it('keeps existing place assignments when offline geodata is not prepared', () => {
+  it('keeps existing place assignments when offline geodata is not prepared', async () => {
     const findNearestCitySpy = vi.spyOn(geodataService, 'findNearestCity');
     const assignPlaceSpy = vi.spyOn(imageRepository, 'assignPlace').mockImplementation(() => undefined);
 
-    const place = placeResolutionService.resolveImage({
+    const place = await placeResolutionService.resolveImage({
       id: 43,
       exif_json: JSON.stringify({
         latitude: 31.582,
@@ -263,7 +264,7 @@ describe.sequential('place resolution service', () => {
     expect(city?.asciiName).toBe('Arashiyama');
   });
 
-  it('updates existing place rows instead of reusing stale metadata', () => {
+  it('updates existing place rows instead of reusing stale metadata', async () => {
     vi.spyOn(geodataService, 'isPrepared').mockReturnValue(true);
     vi.spyOn(geodataService, 'findNearestCity').mockReturnValue({
       geonameId: 1172451,
@@ -305,7 +306,7 @@ describe.sequential('place resolution service', () => {
     });
     const assignPlaceSpy = vi.spyOn(imageRepository, 'assignPlace').mockImplementation(() => undefined);
 
-    const place = placeResolutionService.resolveImage({
+    const place = await placeResolutionService.resolveImage({
       id: 11,
       exif_json: JSON.stringify({
         latitude: 31.56,
@@ -321,7 +322,7 @@ describe.sequential('place resolution service', () => {
     });
   });
 
-  it('normalizes legacy coded region and country fields in place detail payloads', () => {
+  it('normalizes legacy coded region and country fields in place detail payloads', async () => {
     const detail = placeResolutionService.placeDetail({
       id: 9,
       slug: 'dera-ismail-khan',

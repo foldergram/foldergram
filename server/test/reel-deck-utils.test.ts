@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { getActiveReelId, resolveReelsAffinitySnapshot, shouldPrefetchReels } from '../../client/src/utils/reels.js';
 
 describe('reel deck utils', () => {
-  it('selects the panel whose center is closest to the viewport center', () => {
+  it('selects the panel whose center is closest to the viewport center', async () => {
     expect(
       getActiveReelId(
         [
@@ -17,17 +17,17 @@ describe('reel deck utils', () => {
     ).toBe(22);
   });
 
-  it('returns null when there are no visible panels', () => {
+  it('returns null when there are no visible panels', async () => {
     expect(getActiveReelId([], 0, 600)).toBeNull();
   });
 
-  it('requests a prefetch near the end of the queue only', () => {
+  it('requests a prefetch near the end of the queue only', async () => {
     expect(shouldPrefetchReels(0, 6)).toBe(false);
     expect(shouldPrefetchReels(3, 6)).toBe(true);
     expect(shouldPrefetchReels(4, 6)).toBe(true);
   });
 
-  it('freezes the first affinity snapshot for later pages in the same session', () => {
+  it('freezes the first affinity snapshot for later pages in the same session', async () => {
     const firstSnapshot = resolveReelsAffinitySnapshot(null, 'alpha', ['alpha', 'beta', 'beta']);
     const secondSnapshot = resolveReelsAffinitySnapshot(firstSnapshot, 'gamma', ['gamma', 'delta']);
 

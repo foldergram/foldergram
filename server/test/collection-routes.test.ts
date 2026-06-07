@@ -45,6 +45,7 @@ describe.sequential('collection routes', () => {
     await fs.mkdir(tempRoot, { recursive: true });
 
     vi.resetModules();
+    await (await import('../src/db/repositories.js')).initRepositories();
     ({ apiRouter } = await import('../src/routes/api.js'));
     ({ appConfig } = await import('../src/config/env.js'));
 
@@ -62,15 +63,15 @@ describe.sequential('collection routes', () => {
     await fs.rm(tempRoot, { recursive: true, force: true });
   });
 
-  it('surfaces a useful duplicate-name error that the app error middleware returns as 400 JSON', () => {
-    const createHandlerError = invokeRoute('/collections', 'post', {
+  it('surfaces a useful duplicate-name error that the app error middleware returns as 400 JSON', async () => {
+    const createHandlerError = await invokeRoute('/collections', 'post', {
       body: { name: 'Travel' },
       headers: {}
     });
     expect(createHandlerError).toBeUndefined();
 
     const duplicateResponse = createResponse();
-    const duplicateError = invokeRoute(
+    const duplicateError = await invokeRoute(
       '/collections',
       'post',
       {
@@ -86,9 +87,9 @@ describe.sequential('collection routes', () => {
     expect(duplicateResponse.json).toHaveBeenCalledWith({ message: 'Collection name already exists.' });
   });
 
-  it('returns 404 for the removed synthetic __all collection route', () => {
+  it('returns 404 for the removed synthetic __all collection route', async () => {
     const response = createResponse();
-    const error = invokeRoute(
+    const error = await invokeRoute(
       '/collections/:slug/images',
       'get',
       {
@@ -130,33 +131,50 @@ describe.sequential('collection routes', () => {
     return route.stack.map((layer) => layer.handle);
   }
 
-  function invokeRoute(
+  async function invokeRoute(
     pathname: string,
     method: RouteMethod,
     request: Partial<express.Request>,
     response = createResponse()
-  ) {
+  ): Promise<unknown> {
     const handlers = getRouteHandlers(pathname, method);
-    let currentIndex = 0;
     let thrownError: unknown;
+    const pendingPromises: Promise<unknown>[] = [];
 
-    const next: express.NextFunction = (error?: unknown) => {
-      if (error) {
-        throw error;
-      }
-
-      currentIndex += 1;
-      if (currentIndex < handlers.length) {
-        handlers[currentIndex]?.(request as express.Request, response as unknown as express.Response, next);
-      }
-    };
-
-    try {
-      handlers[0]?.(request as express.Request, response as unknown as express.Response, next);
-    } catch (error) {
-      thrownError = error;
+    function makeNext(index: number): express.NextFunction {
+      return (error?: unknown): void => {
+        if (error) {
+          thrownError ??= error;
+          return;
+        }
+        const nextIndex = index + 1;
+        if (nextIndex < handlers.length) {
+          const p = handlers[nextIndex]?.(
+            request as express.Request,
+            response as unknown as express.Response,
+            makeNext(nextIndex)
+          );
+          if (p instanceof Promise) {
+            pendingPromises.push(p.catch((e: unknown) => { thrownError ??= e; }));
+          }
+        }
+      };
     }
 
+    try {
+      const p = handlers[0]?.(
+        request as express.Request,
+        response as unknown as express.Response,
+        makeNext(0)
+      );
+      if (p instanceof Promise) {
+        await p.catch((e: unknown) => { thrownError ??= e; });
+      }
+    } catch (error) {
+      thrownError ??= error;
+    }
+
+    await Promise.all(pendingPromises);
     return thrownError;
   }
 });

@@ -1,10 +1,12 @@
 import { defineStore } from 'pinia';
 
-import { fetchLikes, likeImage, unlikeImage } from '../api/gallery';
+import { fetchLikeIds, fetchLikes, likeImage, unlikeImage } from '../api/gallery';
 import { i18n } from '../locales';
 import type { FeedItem, LikesMode } from '../types/api';
 import { updateCaptionInItems } from '../utils/caption';
 import { useAuthStore } from './auth';
+
+const DISPLAY_LIMIT = 24;
 
 interface LikesState {
   mode: LikesMode;
@@ -12,6 +14,9 @@ interface LikesState {
   likedIds: number[];
   pendingIds: number[];
   loading: boolean;
+  loadingMore: boolean;
+  hasMore: boolean;
+  page: number;
   error: string | null;
   initialized: boolean;
 }
@@ -93,6 +98,9 @@ export const useLikesStore = defineStore('likes', {
     likedIds: [],
     pendingIds: [],
     loading: false,
+    loadingMore: false,
+    hasMore: false,
+    page: 1,
     error: null,
     initialized: false
   }),
@@ -159,8 +167,31 @@ export const useLikesStore = defineStore('likes', {
       this.likedIds = [];
       this.pendingIds = [];
       this.loading = false;
+      this.loadingMore = false;
+      this.hasMore = false;
+      this.page = 1;
       this.error = null;
       this.initialized = false;
+    },
+
+    async loadMore() {
+      const authStore = useAuthStore();
+      if (this.loadingMore || !this.hasMore || authStore.likesMode !== 'shared') {
+        return;
+      }
+
+      this.loadingMore = true;
+
+      try {
+        const payload = await fetchLikes(this.page, DISPLAY_LIMIT);
+        this.items.push(...payload.items);
+        this.page += 1;
+        this.hasMore = payload.hasMore;
+      } catch {
+        // non-fatal; existing items remain visible
+      } finally {
+        this.loadingMore = false;
+      }
     },
 
     async initialize(force = false) {
@@ -176,11 +207,23 @@ export const useLikesStore = defineStore('likes', {
 
       this.loading = true;
       this.error = null;
+      this.items = [];
+      this.likedIds = [];
+      this.page = 1;
+      this.hasMore = false;
 
       try {
         if (authStore.likesMode === 'shared') {
-          const payload = await fetchLikes();
-          this.syncFromItems(payload.items, 'shared');
+          // Fetch all liked IDs (lightweight) for isLiked tracking, and first page for display
+          const [idsPayload, itemsPayload] = await Promise.all([
+            fetchLikeIds(),
+            fetchLikes(1, DISPLAY_LIMIT)
+          ]);
+          this.mode = 'shared';
+          this.likedIds = idsPayload.ids;
+          this.items = itemsPayload.items;
+          this.page = 2;
+          this.hasMore = itemsPayload.hasMore;
         } else {
           this.syncFromItems(readLocalFavorites(), 'local');
         }

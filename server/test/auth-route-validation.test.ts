@@ -37,7 +37,7 @@ describe.sequential('auth route validation', () => {
     await fs.rm(tempRoot, { recursive: true, force: true });
   });
 
-  it('rejects oversized login passwords before hashing them', () => {
+  it('rejects oversized login passwords before hashing them', async () => {
     expect(() =>
       authRequestBodySchemas.login.parse({
         password: 'x'.repeat(257)
@@ -45,7 +45,7 @@ describe.sequential('auth route validation', () => {
     ).toThrowError(/Password must be at most 256 characters\./);
   });
 
-  it('rejects oversized current passwords on password-disable requests', () => {
+  it('rejects oversized current passwords on password-disable requests', async () => {
     expect(() =>
       authRequestBodySchemas.disablePassword.parse({
         currentPassword: 'x'.repeat(257)
@@ -53,7 +53,7 @@ describe.sequential('auth route validation', () => {
     ).toThrowError(/Current password must be at most 256 characters\./);
   });
 
-  it('requires a viewer password when viewer access mode is password', () => {
+  it('requires a viewer password when viewer access mode is password', async () => {
     expect(() =>
       authRequestBodySchemas.viewerAccess.parse({
         mode: 'password'
@@ -61,7 +61,7 @@ describe.sequential('auth route validation', () => {
     ).toThrowError(/Viewer password is required when viewer access mode is password\./);
   });
 
-  it('accepts off mode without a viewer password', () => {
+  it('accepts off mode without a viewer password', async () => {
     expect(
       authRequestBodySchemas.viewerAccess.parse({
         mode: 'off'
@@ -71,7 +71,7 @@ describe.sequential('auth route validation', () => {
     });
   });
 
-  it('accepts public mode without a viewer password', () => {
+  it('accepts public mode without a viewer password', async () => {
     expect(
       authRequestBodySchemas.viewerAccess.parse({
         mode: 'public'
@@ -81,7 +81,7 @@ describe.sequential('auth route validation', () => {
     });
   });
 
-  it('rejects invalid home-feed default modes', () => {
+  it('rejects invalid home-feed default modes', async () => {
     expect(() =>
       settingsRequestBodySchemas.homeFeedDefault.parse({
         defaultMode: 'latest'
@@ -89,7 +89,7 @@ describe.sequential('auth route validation', () => {
     ).toThrowError();
   });
 
-  it('accepts random as a valid home-feed default mode', () => {
+  it('accepts random as a valid home-feed default mode', async () => {
     expect(
       settingsRequestBodySchemas.homeFeedDefault.parse({
         defaultMode: 'random'
@@ -99,7 +99,7 @@ describe.sequential('auth route validation', () => {
     });
   });
 
-  it('accepts zh as a valid app locale default', () => {
+  it('accepts zh as a valid app locale default', async () => {
     expect(
       settingsRequestBodySchemas.appLocale.parse({
         defaultLocale: 'zh'
@@ -109,7 +109,7 @@ describe.sequential('auth route validation', () => {
     });
   });
 
-  it('rejects invalid app locale defaults', () => {
+  it('rejects invalid app locale defaults', async () => {
     expect(() =>
       settingsRequestBodySchemas.appLocale.parse({
         defaultLocale: 'fr'
@@ -117,7 +117,7 @@ describe.sequential('auth route validation', () => {
     ).toThrowError();
   });
 
-  it('rejects invalid reels-feed default modes', () => {
+  it('rejects invalid reels-feed default modes', async () => {
     expect(() =>
       settingsRequestBodySchemas.reelsFeedDefault.parse({
         defaultMode: 'rediscover'
@@ -125,7 +125,7 @@ describe.sequential('auth route validation', () => {
     ).toThrowError();
   });
 
-  it('accepts recommended as a valid reels-feed default mode', () => {
+  it('accepts recommended as a valid reels-feed default mode', async () => {
     expect(
       settingsRequestBodySchemas.reelsFeedDefault.parse({
         defaultMode: 'recommended'
@@ -135,7 +135,7 @@ describe.sequential('auth route validation', () => {
     });
   });
 
-  it('rejects invalid folder image order defaults', () => {
+  it('rejects invalid folder image order defaults', async () => {
     expect(() =>
       settingsRequestBodySchemas.folderImageOrderDefault.parse({
         defaultOrder: 'recent'
@@ -143,7 +143,7 @@ describe.sequential('auth route validation', () => {
     ).toThrowError();
   });
 
-  it('accepts oldest as a valid folder image order default', () => {
+  it('accepts oldest as a valid folder image order default', async () => {
     expect(
       settingsRequestBodySchemas.folderImageOrderDefault.parse({
         defaultOrder: 'oldest'
@@ -153,7 +153,7 @@ describe.sequential('auth route validation', () => {
     });
   });
 
-  it('accepts parent-plus-folder as a valid nested folder title format', () => {
+  it('accepts parent-plus-folder as a valid nested folder title format', async () => {
     expect(
       settingsRequestBodySchemas.nestedFolderTitleFormat.parse({
         titleFormat: 'parent-plus-folder'
@@ -163,7 +163,7 @@ describe.sequential('auth route validation', () => {
     });
   });
 
-  it('rejects invalid nested folder title formats', () => {
+  it('rejects invalid nested folder title formats', async () => {
     expect(() =>
       settingsRequestBodySchemas.nestedFolderTitleFormat.parse({
         titleFormat: 'full-path'
@@ -171,7 +171,7 @@ describe.sequential('auth route validation', () => {
     ).toThrowError();
   });
 
-  it('accepts long story ids up to the folder-slug route limit', () => {
+  it('accepts long story ids up to the folder-slug route limit', async () => {
     expect(
       routeParamSchemas.storyId.parse({
         id: 'story-'.repeat(40)

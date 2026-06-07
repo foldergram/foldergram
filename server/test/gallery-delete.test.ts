@@ -44,12 +44,11 @@ describe.sequential('gallery folder deletion', () => {
     ({ appConfig } = await import('../src/config/env.js'));
     ({ galleryService } = await import('../src/services/gallery-service.js'));
 
-    ({
-      folderRepository,
+    ({folderRepository,
       imageRepository,
       folderScanStateRepository,
-      maintenanceRepository
-    } = await import('../src/db/repositories.js'));
+      maintenanceRepository} = await import('../src/db/repositories.js'));
+      await (await import('../src/db/repositories.js')).initRepositories();
   });
 
   afterAll(async () => {
@@ -59,7 +58,7 @@ describe.sequential('gallery folder deletion', () => {
   });
 
   beforeEach(async () => {
-    maintenanceRepository.resetLibraryIndex();
+    await maintenanceRepository.resetLibraryIndex();
     await Promise.all([
       fs.rm(appConfig.galleryRoot, { recursive: true, force: true }),
       fs.rm(appConfig.thumbnailsDir, { recursive: true, force: true }),
@@ -83,9 +82,9 @@ describe.sequential('gallery folder deletion', () => {
       deletedFolderCount: 1,
       deletedSourceFolder: false
     });
-    expect(folderRepository.getBySlug('parent')).toBeUndefined();
-    expect(imageRepository.getByRelativePath('parent/photo-1.jpg')).toBeUndefined();
-    expect(folderScanStateRepository.getAll()).toEqual([]);
+    expect(await folderRepository.getBySlug('parent')).toBeUndefined();
+    expect(await imageRepository.getByRelativePath('parent/photo-1.jpg')).toBeUndefined();
+    expect(await folderScanStateRepository.getAll()).toEqual([]);
     await expectPathMissing(path.join(appConfig.galleryRoot, 'parent'));
     await expectPathMissing(path.join(appConfig.thumbnailsDir, 'parent'));
     await expectPathMissing(path.join(appConfig.previewsDir, 'parent'));
@@ -119,11 +118,11 @@ describe.sequential('gallery folder deletion', () => {
       deletedFolderCount: 1,
       deletedSourceFolder: false
     });
-    expect(folderRepository.getBySlug('parent')).toBeUndefined();
-    expect(folderRepository.getBySlug('parent-child-a')).toBeDefined();
-    expect(imageRepository.getByRelativePath('parent/photo-1.jpg')).toBeUndefined();
-    expect(imageRepository.getByRelativePath('parent/child-a/photo-2.jpg')).toBeDefined();
-    expect(folderScanStateRepository.getAll().map((entry) => entry.folder_path)).toEqual(['parent/child-a']);
+    expect(await folderRepository.getBySlug('parent')).toBeUndefined();
+    expect(await folderRepository.getBySlug('parent-child-a')).toBeDefined();
+    expect(await imageRepository.getByRelativePath('parent/photo-1.jpg')).toBeUndefined();
+    expect(await imageRepository.getByRelativePath('parent/child-a/photo-2.jpg')).toBeDefined();
+    expect((await folderScanStateRepository.getAll()).map((entry) => entry.folder_path)).toEqual(['parent/child-a']);
     await expectPathMissing(path.join(appConfig.galleryRoot, 'parent', 'photo-1.jpg'));
     await expectPathPresent(path.join(appConfig.galleryRoot, 'parent'));
     await expectPathPresent(path.join(appConfig.galleryRoot, 'parent', 'child-a'));
@@ -148,11 +147,11 @@ describe.sequential('gallery folder deletion', () => {
       deletedFolderCount: 2,
       deletedSourceFolder: true
     });
-    expect(folderRepository.getBySlug('parent')).toBeUndefined();
-    expect(folderRepository.getBySlug('parent-child-a')).toBeUndefined();
-    expect(imageRepository.getByRelativePath('parent/photo-1.jpg')).toBeUndefined();
-    expect(imageRepository.getByRelativePath('parent/child-a/photo-2.jpg')).toBeUndefined();
-    expect(folderScanStateRepository.getAll()).toEqual([]);
+    expect(await folderRepository.getBySlug('parent')).toBeUndefined();
+    expect(await folderRepository.getBySlug('parent-child-a')).toBeUndefined();
+    expect(await imageRepository.getByRelativePath('parent/photo-1.jpg')).toBeUndefined();
+    expect(await imageRepository.getByRelativePath('parent/child-a/photo-2.jpg')).toBeUndefined();
+    expect(await folderScanStateRepository.getAll()).toEqual([]);
     await expectPathMissing(path.join(appConfig.galleryRoot, 'parent'));
     await expectPathMissing(path.join(appConfig.thumbnailsDir, 'parent'));
     await expectPathMissing(path.join(appConfig.previewsDir, 'parent'));
@@ -164,7 +163,7 @@ describe.sequential('gallery folder deletion', () => {
   }> {
     const slug = relativeFolderPath.replaceAll('/', '-');
     const folderName = path.posix.basename(relativeFolderPath);
-    const folder = folderRepository.upsert({
+    const folder = await folderRepository.upsert({
       slug,
       name: folderName,
       folderPath: relativeFolderPath
@@ -190,7 +189,7 @@ describe.sequential('gallery folder deletion', () => {
 
       const fileSize = Buffer.byteLength(`source:${relativePath}`);
       const mtimeMs = 1_700_000_000_000 + index;
-      const image = imageRepository.upsert({
+      const image = await imageRepository.upsert({
         folderId: folder.id,
         filename,
         extension,
@@ -216,8 +215,8 @@ describe.sequential('gallery folder deletion', () => {
       images.push(image);
     }
 
-    folderRepository.setAvatar(folder.id, images.at(0)?.id ?? null);
-    folderScanStateRepository.upsert({
+    await folderRepository.setAvatar(folder.id, images.at(0)?.id ?? null);
+    await folderScanStateRepository.upsert({
       folderPath: relativeFolderPath,
       signature: `signature:${relativeFolderPath}`,
       fileCount: filenames.length,

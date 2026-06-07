@@ -9,7 +9,7 @@ import {
 } from '../src/utils/scan-utils.js';
 
 describe('full scan options', () => {
-  it('repairs unchanged derivatives by default for non-startup full scans', () => {
+  it('repairs unchanged derivatives by default for non-startup full scans', async () => {
     expect(resolveFullScanOptions()).toEqual({
       repairUnchangedDerivatives: true,
       forceNewFileDerivatives: true,
@@ -18,7 +18,7 @@ describe('full scan options', () => {
     expect(shouldQueueDerivativeJobForStatus('unchanged', resolveFullScanOptions())).toBe(true);
   });
 
-  it('skips unchanged derivative verification when startup disables repair', () => {
+  it('skips unchanged derivative verification when startup disables repair', async () => {
     const startupOptions = resolveFullScanOptions({
       repairUnchangedDerivatives: false
     });
@@ -26,7 +26,7 @@ describe('full scan options', () => {
     expect(shouldQueueDerivativeJobForStatus('unchanged', startupOptions)).toBe(false);
   });
 
-  it('always queues derivatives for new and updated files', () => {
+  it('always queues derivatives for new and updated files', async () => {
     const startupOptions = resolveFullScanOptions({
       repairUnchangedDerivatives: false
     });
@@ -37,7 +37,7 @@ describe('full scan options', () => {
 });
 
 describe('folder scan signatures', () => {
-  it('creates stable signatures independent of discovery order', () => {
+  it('creates stable signatures independent of discovery order', async () => {
     const first = createFolderScanSignature([
       { relativePath: 'cats/z.png', fileSize: 30, mtimeMs: 100.2 },
       { relativePath: 'cats/a.png', fileSize: 10, mtimeMs: 50.8 }
@@ -55,7 +55,7 @@ describe('folder scan signatures', () => {
 });
 
 describe('folder shortcut decisions', () => {
-  it('only skips full folder processing when the stored signature matches on stable startup scans', () => {
+  it('only skips full folder processing when the stored signature matches on stable startup scans', async () => {
     expect(
       shouldSkipFolderBySignature({
         currentSignature: 'abc',
@@ -90,7 +90,7 @@ describe('folder shortcut decisions', () => {
     ).toBe(false);
   });
 
-  it('does not shortcut when the active indexed rows are missing or stale', () => {
+  it('does not shortcut when the active indexed rows are missing or stale', async () => {
     expect(
       shouldSkipFolderBySignature({
         currentSignature: 'abc',
@@ -105,7 +105,7 @@ describe('folder shortcut decisions', () => {
 });
 
 describe('unchanged image refresh decisions', () => {
-  it('refreshes unchanged rows when reactivation or path migration safety requires it', () => {
+  it('refreshes unchanged rows when reactivation or path migration safety requires it', async () => {
     expect(
       shouldRefreshUnchangedImage({
         absolutePathChanged: false,
@@ -134,7 +134,7 @@ describe('unchanged image refresh decisions', () => {
     ).toBe(true);
   });
 
-  it('skips unchanged row refreshes when the gallery root is stable and the row is already active', () => {
+  it('skips unchanged row refreshes when the gallery root is stable and the row is already active', async () => {
     expect(
       shouldRefreshUnchangedImage({
         absolutePathChanged: false,

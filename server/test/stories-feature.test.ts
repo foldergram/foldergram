@@ -59,7 +59,8 @@ describe.sequential('stories feature', () => {
     ({ appConfig } = await import('../src/config/env.js'));
     ({ galleryService } = await import('../src/services/gallery-service.js'));
     ({ scannerService } = await import('../src/services/scanner-service.js'));
-    ({ appSettingsRepository, maintenanceRepository } = await import('../src/db/repositories.js'));
+    ({appSettingsRepository, maintenanceRepository} = await import('../src/db/repositories.js'));
+    await (await import('../src/db/repositories.js')).initRepositories();
     ({ STORIES_MIGRATION_DECISION_SETTING_KEY, TREAT_STORIES_AS_FOLDERS_SETTING_KEY } = await import(
       '../src/constants/app-setting-keys.js'
     ));
@@ -104,9 +105,9 @@ describe.sequential('stories feature', () => {
       };
     });
 
-    maintenanceRepository.resetLibraryIndex();
-    appSettingsRepository.remove(TREAT_STORIES_AS_FOLDERS_SETTING_KEY);
-    appSettingsRepository.remove(STORIES_MIGRATION_DECISION_SETTING_KEY);
+    await maintenanceRepository.resetLibraryIndex();
+    await appSettingsRepository.remove(TREAT_STORIES_AS_FOLDERS_SETTING_KEY);
+    await appSettingsRepository.remove(STORIES_MIGRATION_DECISION_SETTING_KEY);
   });
 
   afterAll(async () => {
@@ -124,17 +125,17 @@ describe.sequential('stories feature', () => {
 
     await scannerService.scanAll('manual');
 
-    const folders = galleryService.listFolders();
+    const folders = await galleryService.listFolders();
     expect(folders).toHaveLength(1);
     expect(folders[0]?.folderPath).toBe('albums/beach');
     expect(folders[0]?.hasAvatarStory).toBe(true);
 
     const folder = folders[0]!;
-    expect(galleryService.getFeed(1, 20, 'recent').total).toBe(1);
-    expect(galleryService.searchMedia('avatar', 1, 20).total).toBe(0);
-    expect(galleryService.searchMedia('day-1', 1, 20).total).toBe(0);
+    expect((await galleryService.getFeed(1, 20, 'recent')).total).toBe(1);
+    expect((await galleryService.searchMedia('avatar', 1, 20)).total).toBe(0);
+    expect((await galleryService.searchMedia('day-1', 1, 20)).total).toBe(0);
 
-    const stories = galleryService.getFolderStories(folder.slug);
+    const stories = await galleryService.getFolderStories(folder.slug);
     expect(stories).not.toBeNull();
     expect(stories?.hasAvatarStory).toBe(true);
     expect(stories?.avatarStoryId).toBeTruthy();
@@ -145,7 +146,7 @@ describe.sequential('stories feature', () => {
     expect(stories?.items.every((capsule) => typeof capsule.latestActivityTimestamp === 'number')).toBe(true);
     expect(typeof stories?.highlights[0]?.latestActivityTimestamp).toBe('number');
 
-    const avatarFeed = galleryService.getFolderStoryFeed(folder.slug, stories!.avatarStoryId!, 1, 20);
+    const avatarFeed = await galleryService.getFolderStoryFeed(folder.slug, stories!.avatarStoryId!, 1, 20);
     expect(avatarFeed).not.toBeNull();
     expect(avatarFeed?.story.presentation).toBe('avatar');
     expect(typeof avatarFeed?.story.latestActivityTimestamp).toBe('number');
@@ -153,21 +154,21 @@ describe.sequential('stories feature', () => {
     expect(avatarFeed?.items.every((item) => item.folderSlug === folder.slug)).toBe(true);
     expect(avatarFeed?.items.every((item) => item.folderPath === folder.folderPath)).toBe(true);
 
-    const highlightFeed = galleryService.getFolderStoryFeed(folder.slug, stories!.highlights[0]!.id, 1, 20);
+    const highlightFeed = await galleryService.getFolderStoryFeed(folder.slug, stories!.highlights[0]!.id, 1, 20);
     expect(highlightFeed).not.toBeNull();
     expect(highlightFeed?.story.presentation).toBe('highlight');
     expect(typeof highlightFeed?.story.latestActivityTimestamp).toBe('number');
     expect(highlightFeed?.total).toBe(2);
     expect(highlightFeed?.items.every((item) => item.folderSlug === folder.slug)).toBe(true);
 
-    expect(galleryService.getStatus().storiesMigration).toEqual({
+    expect((await galleryService.getStatus()).storiesMigration).toEqual({
       hasLegacyStoriesCandidates: true,
       decisionPending: true
     });
   });
 
   it('restores legacy stories folders when the setting is enabled before scanning', async () => {
-    galleryService.setTreatStoriesAsFolders(true);
+    await galleryService.setTreatStoriesAsFolders(true);
 
     await createSourceFile('albums/beach/photo-main.jpg', 8_000);
     await createSourceFile('albums/beach/stories/avatar-1.jpg', 6_000);
@@ -175,8 +176,7 @@ describe.sequential('stories feature', () => {
 
     await scannerService.scanAll('manual');
 
-    const folders = galleryService
-      .listFolders()
+    const folders = (await galleryService.listFolders())
       .map((folder) => folder.folderPath)
       .sort();
 
@@ -186,10 +186,10 @@ describe.sequential('stories feature', () => {
       'albums/beach/stories/highlights'
     ]);
 
-    const ownerFolder = galleryService.listFolders().find((folder) => folder.folderPath === 'albums/beach');
+    const ownerFolder = (await galleryService.listFolders()).find((folder) => folder.folderPath === 'albums/beach');
     expect(ownerFolder).toBeDefined();
     expect(ownerFolder?.hasAvatarStory).toBe(false);
-    expect(galleryService.getFolderStories(ownerFolder!.slug)).toEqual({
+    expect(await galleryService.getFolderStories(ownerFolder!.slug)).toEqual({
       railKind: 'stories',
       railTitle: 'Stories',
       railDescription: `Stories and highlights for ${ownerFolder!.name}.`,
@@ -200,9 +200,9 @@ describe.sequential('stories feature', () => {
       highlights: []
     });
 
-    expect(galleryService.searchMedia('avatar', 1, 20).total).toBe(1);
-    expect(galleryService.getStatus().preferences.treatStoriesAsFolders).toBe(true);
-    expect(galleryService.getStatus().storiesMigration).toEqual({
+    expect((await galleryService.searchMedia('avatar', 1, 20)).total).toBe(1);
+    expect((await galleryService.getStatus()).preferences.treatStoriesAsFolders).toBe(true);
+    expect((await galleryService.getStatus()).storiesMigration).toEqual({
       hasLegacyStoriesCandidates: true,
       decisionPending: false
     });
@@ -225,9 +225,9 @@ describe.sequential('stories feature', () => {
 
     await scannerService.scanAll('manual');
 
-    const folder = galleryService.listFolders()[0]!;
+    const folder = (await galleryService.listFolders())[0]!;
     expect(folder.hasAvatarStory).toBe(true);
-    const stories = galleryService.getFolderStories(folder.slug);
+    const stories = await galleryService.getFolderStories(folder.slug);
     expect(stories).not.toBeNull();
     expect(stories?.hasAvatarStory).toBe(true);
     expect(stories?.avatarStoryId).toBeTruthy();
@@ -237,7 +237,7 @@ describe.sequential('stories feature', () => {
     expect(stories?.items[0]?.presentation).toBe('avatar');
     expect(stories?.items[0]?.imageCount).toBe(10);
 
-    const avatarFeed = galleryService.getFolderStoryFeed(folder.slug, stories!.avatarStoryId!, 1, 20);
+    const avatarFeed = await galleryService.getFolderStoryFeed(folder.slug, stories!.avatarStoryId!, 1, 20);
     expect(avatarFeed).not.toBeNull();
     expect(avatarFeed?.story.presentation).toBe('avatar');
     expect(avatarFeed?.total).toBe(10);

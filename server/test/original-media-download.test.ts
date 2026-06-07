@@ -64,7 +64,8 @@ describe.sequential('original media route download behavior', () => {
     vi.resetModules();
     ({ appConfig } = await import('../src/config/env.js'));
     ({ apiRouter } = await import('../src/routes/api.js'));
-    ({ folderRepository, imageRepository, maintenanceRepository, appSettingsRepository } = await import('../src/db/repositories.js'));
+    ({folderRepository, imageRepository, maintenanceRepository, appSettingsRepository} = await import('../src/db/repositories.js'));
+    await (await import('../src/db/repositories.js')).initRepositories();
 
     await Promise.all([
       fs.mkdir(appConfig.galleryRoot, { recursive: true }),
@@ -73,7 +74,7 @@ describe.sequential('original media route download behavior', () => {
       fs.mkdir(appConfig.previewsDir, { recursive: true })
     ]);
 
-    maintenanceRepository.resetLibraryIndex();
+    await maintenanceRepository.resetLibraryIndex();
   });
 
   afterAll(async () => {
@@ -83,12 +84,12 @@ describe.sequential('original media route download behavior', () => {
   });
 
   it('streams the original file inline when download is not requested', async () => {
-    const folder = folderRepository.upsert({ slug: 'album', name: 'Album', folderPath: 'album' });
+    const folder = await folderRepository.upsert({ slug: 'album', name: 'Album', folderPath: 'album' });
     const image = await createIndexedMedia(folder, 'photo.jpg', 1_000, 'preview');
     const handler = getRouteHandler('/originals/:id', 'get');
     const response = createResponse();
 
-    handler(
+    await handler(
       {
         params: { id: String(image.id) },
         query: {}
@@ -103,12 +104,12 @@ describe.sequential('original media route download behavior', () => {
   });
 
   it('downloads the original file as an attachment when download=1 is provided', async () => {
-    const folder = folderRepository.upsert({ slug: 'album-download', name: 'Album Download', folderPath: 'album-download' });
+    const folder = await folderRepository.upsert({ slug: 'album-download', name: 'Album Download', folderPath: 'album-download' });
     const image = await createIndexedMedia(folder, 'snow day.jpg', 2_000, 'preview');
     const handler = getRouteHandler('/originals/:id', 'get');
     const response = createResponse();
 
-    handler(
+    await handler(
       {
         params: { id: String(image.id) },
         query: { download: '1' }
@@ -123,7 +124,7 @@ describe.sequential('original media route download behavior', () => {
   });
 
   it('resolves originals from the current gallery root when cached absolute paths are stale', async () => {
-    const folder = folderRepository.upsert({ slug: 'album-relocated', name: 'Album Relocated', folderPath: 'album-relocated' });
+    const folder = await folderRepository.upsert({ slug: 'album-relocated', name: 'Album Relocated', folderPath: 'album-relocated' });
     const oldGalleryRoot = path.join(tempRoot, 'old-gallery-root');
     const image = await createIndexedMedia(folder, 'photo.jpg', 2_500, 'preview', null, {
       storedGalleryRoot: oldGalleryRoot
@@ -131,7 +132,7 @@ describe.sequential('original media route download behavior', () => {
     const handler = getRouteHandler('/originals/:id', 'get');
     const response = createResponse();
 
-    handler(
+    await handler(
       {
         params: { id: String(image.id) },
         query: {}
@@ -146,10 +147,10 @@ describe.sequential('original media route download behavior', () => {
   });
 
   it('does not serve an indexed original path that would escape the current gallery root', async () => {
-    const folder = folderRepository.upsert({ slug: 'album-traversal', name: 'Album Traversal', folderPath: 'album-traversal' });
+    const folder = await folderRepository.upsert({ slug: 'album-traversal', name: 'Album Traversal', folderPath: 'album-traversal' });
     const outsidePath = path.join(tempRoot, 'outside.jpg');
     await fs.writeFile(outsidePath, 'outside');
-    const image = imageRepository.upsert({
+    const image = await imageRepository.upsert({
       folderId: folder.id,
       filename: 'outside.jpg',
       extension: '.jpg',
@@ -175,7 +176,7 @@ describe.sequential('original media route download behavior', () => {
     const handler = getRouteHandler('/originals/:id', 'get');
     const response = createResponse();
 
-    handler(
+    await handler(
       {
         params: { id: String(image.id) },
         query: {}
@@ -190,14 +191,14 @@ describe.sequential('original media route download behavior', () => {
   });
 
   it('does not serve originals while a library rebuild is required after failed relocation', async () => {
-    const folder = folderRepository.upsert({ slug: 'album-blocked', name: 'Album Blocked', folderPath: 'album-blocked' });
+    const folder = await folderRepository.upsert({ slug: 'album-blocked', name: 'Album Blocked', folderPath: 'album-blocked' });
     const image = await createIndexedMedia(folder, 'photo.jpg', 2_750, 'preview');
     const handler = getRouteHandler('/originals/:id', 'get');
     const response = createResponse();
 
-    appSettingsRepository.set(LIBRARY_REBUILD_REQUIRED_SETTING_KEY, '1');
+    await appSettingsRepository.set(LIBRARY_REBUILD_REQUIRED_SETTING_KEY, '1');
 
-    handler(
+    await handler(
       {
         params: { id: String(image.id) },
         query: {}
@@ -212,14 +213,14 @@ describe.sequential('original media route download behavior', () => {
   });
 
   it('returns 404 when the original file is no longer available on disk', async () => {
-    const folder = folderRepository.upsert({ slug: 'album-missing', name: 'Album Missing', folderPath: 'album-missing' });
+    const folder = await folderRepository.upsert({ slug: 'album-missing', name: 'Album Missing', folderPath: 'album-missing' });
     const image = await createIndexedMedia(folder, 'missing.jpg', 3_000, 'preview');
     const handler = getRouteHandler('/originals/:id', 'get');
     const response = createResponse();
 
     await fs.rm(image.absolute_path, { force: true });
 
-    handler(
+    await handler(
       {
         params: { id: String(image.id) },
         query: {}
@@ -276,7 +277,7 @@ describe.sequential('original media route download behavior', () => {
     await fs.mkdir(path.dirname(sourceAbsolutePath), { recursive: true });
     await fs.writeFile(sourceAbsolutePath, `original:${filename}`);
 
-    return imageRepository.upsert({
+    return await imageRepository.upsert({
       folderId: folder.id,
       filename,
       extension,

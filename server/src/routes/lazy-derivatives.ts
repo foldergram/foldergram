@@ -83,9 +83,10 @@ async function serveOrGenerate(
     return;
   }
 
-  // Fast path: file already exists.
+  // Fast path: file already exists and is non-empty.
   try {
-    await fs.access(absoluteOutputPath);
+    const stat = await fs.stat(absoluteOutputPath);
+    if (stat.size === 0) throw new Error('empty');
     try {
       const result = await sendDerivativeFile(response, absoluteOutputPath);
       if (result === 'aborted') {
@@ -104,7 +105,7 @@ async function serveOrGenerate(
     // File does not exist — fall through to generation.
   }
 
-  if (scannerService.isLibraryRebuildRequired()) {
+  if (await scannerService.isLibraryRebuildRequired()) {
     applyDerivativeErrorHeaders(response);
     response.status(409).json({ message: 'Library rebuild required before generating derivatives.' });
     return;
@@ -113,12 +114,18 @@ async function serveOrGenerate(
   // Look up the source row by derivative path.
   const imageRecord =
     kind === 'thumbnail'
-      ? imageRepository.getByThumbnailPath(requestedPath)
-      : imageRepository.getByPreviewPath(requestedPath);
+      ? await imageRepository.getByThumbnailPath(requestedPath)
+      : await imageRepository.getByPreviewPath(requestedPath);
 
   if (!imageRecord) {
     applyDerivativeErrorHeaders(response);
     response.status(404).json({ message: 'Derivative not found.' });
+    return;
+  }
+
+  // Video previews are never served — always redirect to the original file.
+  if (kind === 'preview' && imageRecord.media_type === 'video') {
+    response.redirect(302, `/api/originals/${imageRecord.id}`);
     return;
   }
 

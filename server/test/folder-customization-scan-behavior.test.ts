@@ -56,7 +56,8 @@ describe.sequential('folder customization scan behavior', () => {
     ({ appConfig } = await import('../src/config/env.js'));
     ({ galleryService } = await import('../src/services/gallery-service.js'));
     ({ scannerService } = await import('../src/services/scanner-service.js'));
-    ({ imageRepository, folderRepository, maintenanceRepository, appSettingsRepository } = await import('../src/db/repositories.js'));
+    ({imageRepository, folderRepository, maintenanceRepository, appSettingsRepository} = await import('../src/db/repositories.js'));
+    await (await import('../src/db/repositories.js')).initRepositories();
     ({ FOLDER_IMAGE_DEFAULT_ORDER_SETTING_KEY } = await import('../src/constants/app-setting-keys.js'));
 
     await Promise.all([
@@ -97,71 +98,71 @@ describe.sequential('folder customization scan behavior', () => {
   });
 
   it('preserves a customized folder name and description across normal rescans', async () => {
-    maintenanceRepository.resetLibraryIndex();
+    await maintenanceRepository.resetLibraryIndex();
 
     await createSourceFile('albums/photo-1.jpg');
     await scannerService.scanAll('manual');
 
-    const updatedFolder = galleryService.updateFolderMetadata('albums', 'Custom Album', 'Hand-picked description');
+    const updatedFolder = await galleryService.updateFolderMetadata('albums', 'Custom Album', 'Hand-picked description');
     expect(updatedFolder?.name).toBe('Custom Album');
     expect(updatedFolder?.description).toBe('Hand-picked description');
 
     await createSourceFile('albums/photo-2.jpg');
     await scannerService.scanAll('manual');
 
-    const rescannedFolder = folderRepository.getBySlug('albums');
+    const rescannedFolder = await folderRepository.getBySlug('albums');
     expect(rescannedFolder?.name).toBe('Custom Album');
     expect(rescannedFolder?.description).toBe('Hand-picked description');
   });
 
   it('preserves a manually selected cover across normal rescans', async () => {
-    maintenanceRepository.resetLibraryIndex();
+    await maintenanceRepository.resetLibraryIndex();
 
     await createSourceFile('albums/photo-1.jpg', 1000);
     await createSourceFile('albums/photo-2.jpg');
     await scannerService.scanAll('manual');
 
-    const manualCover = imageRepository.getByRelativePath('albums/photo-1.jpg');
+    const manualCover = await imageRepository.getByRelativePath('albums/photo-1.jpg');
     expect(manualCover).toBeDefined();
-    expect(galleryService.setFolderAvatar('albums', manualCover!.id)).toBe(true);
+    expect(await galleryService.setFolderAvatar('albums', manualCover!.id)).toBe(true);
 
     await createSourceFile('albums/photo-3.jpg');
     await scannerService.scanAll('manual');
 
-    const rescannedFolder = folderRepository.getBySlug('albums');
+    const rescannedFolder = await folderRepository.getBySlug('albums');
     expect(rescannedFolder?.avatar_image_id).toBe(manualCover!.id);
     expect(rescannedFolder?.avatar_source).toBe('manual');
   });
 
   it('preserves a custom caption across normal rescans', async () => {
-    maintenanceRepository.resetLibraryIndex();
+    await maintenanceRepository.resetLibraryIndex();
 
     await createSourceFile('albums/photo-1.jpg');
     await scannerService.scanAll('manual');
 
-    const image = imageRepository.getByRelativePath('albums/photo-1.jpg');
+    const image = await imageRepository.getByRelativePath('albums/photo-1.jpg');
     expect(image).toBeDefined();
 
-    const updated = galleryService.updateImageCaption(image!.id, 'Golden hour on the ridge');
+    const updated = await galleryService.updateImageCaption(image!.id, 'Golden hour on the ridge');
     expect(updated?.caption).toBe('Golden hour on the ridge');
 
     await createSourceFile('albums/photo-2.jpg');
     await scannerService.scanAll('manual');
 
-    expect(imageRepository.getById(image!.id)?.caption).toBe('Golden hour on the ridge');
-    expect(galleryService.getImageDetail(image!.id)?.caption).toBe('Golden hour on the ridge');
+    expect((await imageRepository.getById(image!.id))?.caption).toBe('Golden hour on the ridge');
+    expect((await galleryService.getImageDetail(image!.id))?.caption).toBe('Golden hour on the ridge');
   });
 
   it('detects case-insensitive cover files in child albums and hides them from the feed, folder grid, and detail view', async () => {
-    maintenanceRepository.resetLibraryIndex();
+    await maintenanceRepository.resetLibraryIndex();
 
     await createSourceFile('family/trip/photo-1.jpg');
     await createSourceFile('family/trip/Cover.JPG', 1000);
     await scannerService.scanAll('manual');
 
-    const folder = folderRepository.getByFolderPath('family/trip');
-    const coverImage = imageRepository.getByRelativePath('family/trip/Cover.JPG');
-    const visiblePhoto = imageRepository.getByRelativePath('family/trip/photo-1.jpg');
+    const folder = await folderRepository.getByFolderPath('family/trip');
+    const coverImage = await imageRepository.getByRelativePath('family/trip/Cover.JPG');
+    const visiblePhoto = await imageRepository.getByRelativePath('family/trip/photo-1.jpg');
 
     expect(folder).toBeDefined();
     expect(coverImage).toBeDefined();
@@ -169,44 +170,44 @@ describe.sequential('folder customization scan behavior', () => {
     expect(folder?.avatar_image_id).toBe(coverImage?.id);
     expect(folder?.avatar_source).toBe('cover');
 
-    const folderPayload = galleryService.getFolderImages(folder!.slug, 1, 24);
+    const folderPayload = await galleryService.getFolderImages(folder!.slug, 1, 24);
     expect(folderPayload?.total).toBe(1);
     expect(folderPayload?.folder.avatarImageId).toBe(coverImage!.id);
     expect(folderPayload?.items.map((item) => item.id)).toEqual([visiblePhoto!.id]);
     expect(folderPayload?.items.map((item) => item.id)).not.toContain(coverImage!.id);
 
-    const feedPayload = galleryService.getFeed(1, 24, 'recent');
+    const feedPayload = await galleryService.getFeed(1, 24, 'recent');
     expect(feedPayload.items.map((item) => item.id)).not.toContain(coverImage!.id);
 
-    expect(galleryService.getImageDetail(coverImage!.id)?.id).toBe(coverImage!.id);
+    expect((await galleryService.getImageDetail(coverImage!.id))?.id).toBe(coverImage!.id);
   });
 
   it('uses the saved app folder photo order for folder grids and detail navigation', async () => {
-    maintenanceRepository.resetLibraryIndex();
+    await maintenanceRepository.resetLibraryIndex();
 
     await createSourceFile('albums/older.jpg', 20_000);
     await createSourceFile('albums/newer.jpg');
     await scannerService.scanAll('manual');
 
-    const olderImage = imageRepository.getByRelativePath('albums/older.jpg');
-    const newerImage = imageRepository.getByRelativePath('albums/newer.jpg');
+    const olderImage = await imageRepository.getByRelativePath('albums/older.jpg');
+    const newerImage = await imageRepository.getByRelativePath('albums/newer.jpg');
 
     expect(olderImage).toBeDefined();
     expect(newerImage).toBeDefined();
 
-    expect(galleryService.getFolderImages('albums', 1, 24)?.items.map((item) => item.id)).toEqual([
+    expect((await galleryService.getFolderImages('albums', 1, 24))?.items.map((item) => item.id)).toEqual([
       newerImage!.id,
       olderImage!.id
     ]);
 
-    appSettingsRepository.set(FOLDER_IMAGE_DEFAULT_ORDER_SETTING_KEY, 'oldest');
+    await appSettingsRepository.set(FOLDER_IMAGE_DEFAULT_ORDER_SETTING_KEY, 'oldest');
 
-    expect(galleryService.getFolderImages('albums', 1, 24)?.items.map((item) => item.id)).toEqual([
+    expect((await galleryService.getFolderImages('albums', 1, 24))?.items.map((item) => item.id)).toEqual([
       olderImage!.id,
       newerImage!.id
     ]);
-    expect(galleryService.getImageDetail(olderImage!.id)?.nextImageId).toBe(newerImage!.id);
-    expect(galleryService.getImageDetail(newerImage!.id)?.previousImageId).toBe(olderImage!.id);
+    expect((await galleryService.getImageDetail(olderImage!.id))?.nextImageId).toBe(newerImage!.id);
+    expect((await galleryService.getImageDetail(newerImage!.id))?.previousImageId).toBe(olderImage!.id);
   });
 
   async function createSourceFile(relativePath: string, mtimeOffsetMs = 0): Promise<void> {

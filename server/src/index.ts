@@ -20,8 +20,9 @@ import { createServer } from "node:http";
 
 import { appConfig } from "./config/env.js";
 import { createApp } from "./app.js";
-import { collectionRepository } from "./db/repositories.js";
+import { collectionRepository, initRepositories } from "./db/repositories.js";
 import { log } from "./services/log-service.js";
+import { authService } from "./services/auth-service.js";
 import { scannerService } from "./services/scanner-service.js";
 import { watcherService } from "./services/watcher-service.js";
 
@@ -48,11 +49,14 @@ function logServerReady(): void {
 }
 
 async function bootstrap(): Promise<void> {
+  await initRepositories();
+  await authService.initialize();
+  await scannerService.initialize();
   const app = createApp();
   const server = createServer(app);
   const portVariableName = appConfig.nodeEnv === "production" ? "SERVER_PORT" : "DEV_SERVER_PORT";
-  collectionRepository.ensureDefaultCollection();
-  const repairedCollectionMemberships = collectionRepository.repairDefaultMemberships();
+  await collectionRepository.ensureDefaultCollection();
+  const repairedCollectionMemberships = await collectionRepository.repairDefaultMemberships();
   if (repairedCollectionMemberships > 0) {
     log.info(`Repaired ${repairedCollectionMemberships} saved collection memberships`);
   }
@@ -72,17 +76,21 @@ async function bootstrap(): Promise<void> {
 
   server.listen(appConfig.port, () => {
     logServerReady();
-    const startupAction = scannerService.handleStartup("startup");
-    if (startupAction === "blocked") {
-      log.info("Gallery watcher deferred until the library rebuild completes");
-      return;
-    }
+    void scannerService.handleStartup("startup").then((startupAction) => {
+      if (startupAction === "blocked") {
+        log.info("Gallery watcher deferred until the library rebuild completes");
+        return;
+      }
 
-    if (startupAction === "idle" && appConfig.isDevelopment) {
-      log.info(
-        "Gallery watcher idle until a user-triggered scan or rebuild starts it",
-      );
-    }
+      if (startupAction === "idle" && appConfig.isDevelopment) {
+        log.info(
+          "Gallery watcher idle until a user-triggered scan or rebuild starts it",
+        );
+      }
+    }).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      log.error("Startup action failed", message);
+    });
   });
 
   async function shutdown(signal: string): Promise<void> {

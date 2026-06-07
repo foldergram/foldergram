@@ -38,7 +38,7 @@ describe.sequential('api cache control', () => {
     await fs.rm(tempRoot, { recursive: true, force: true });
   });
 
-  it('marks API responses as no-store when auth is disabled', () => {
+  it('marks API responses as no-store when auth is disabled', async () => {
     const response = {
       setHeader: vi.fn()
     };

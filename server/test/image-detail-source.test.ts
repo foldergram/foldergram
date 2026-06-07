@@ -41,7 +41,8 @@ describe.sequential('IMAGE_DETAIL_SOURCE config', () => {
 
     ({ appConfig } = await import('../src/config/env.js'));
     ({ galleryService } = await import('../src/services/gallery-service.js'));
-    ({ folderRepository, imageRepository, maintenanceRepository } = await import('../src/db/repositories.js'));
+    ({folderRepository, imageRepository, maintenanceRepository} = await import('../src/db/repositories.js'));
+    await (await import('../src/db/repositories.js')).initRepositories();
 
     await Promise.all([
       fs.mkdir(appConfig.galleryRoot, { recursive: true }),
@@ -67,11 +68,11 @@ describe.sequential('IMAGE_DETAIL_SOURCE config', () => {
   it('returns a preview URL for image detail when IMAGE_DETAIL_SOURCE=preview (default)', async () => {
     await setup('preview');
 
-    maintenanceRepository.resetLibraryIndex();
-    const folder = folderRepository.upsert({ slug: 'album', name: 'Album', folderPath: 'album' });
-    const image = createIndexedMedia(folder, 'photo.jpg', 1000, 'preview');
+    await maintenanceRepository.resetLibraryIndex();
+    const folder = await folderRepository.upsert({ slug: 'album', name: 'Album', folderPath: 'album' });
+    const image = await createIndexedMedia(folder, 'photo.jpg', 1000, 'preview');
 
-    const detail = galleryService.getImageDetail(image.id);
+    const detail = await galleryService.getImageDetail(image.id);
     expect(detail?.previewUrl).toMatch(/^\/previews\//);
     expect(detail?.previewUrl).not.toMatch(/^\/api\/originals\//);
   });
@@ -79,22 +80,22 @@ describe.sequential('IMAGE_DETAIL_SOURCE config', () => {
   it('returns an original URL for image detail when IMAGE_DETAIL_SOURCE=original', async () => {
     await setup('original');
 
-    maintenanceRepository.resetLibraryIndex();
-    const folder = folderRepository.upsert({ slug: 'album2', name: 'Album2', folderPath: 'album2' });
-    const image = createIndexedMedia(folder, 'photo.jpg', 1000, 'preview');
+    await maintenanceRepository.resetLibraryIndex();
+    const folder = await folderRepository.upsert({ slug: 'album2', name: 'Album2', folderPath: 'album2' });
+    const image = await createIndexedMedia(folder, 'photo.jpg', 1000, 'preview');
 
-    const detail = galleryService.getImageDetail(image.id);
+    const detail = await galleryService.getImageDetail(image.id);
     expect(detail?.previewUrl).toBe(`/api/originals/${image.id}`);
   });
 
   it('keeps preview URL for videos with playbackStrategy=preview regardless of IMAGE_DETAIL_SOURCE', async () => {
     await setup('original');
 
-    maintenanceRepository.resetLibraryIndex();
-    const folder = folderRepository.upsert({ slug: 'vids', name: 'Vids', folderPath: 'vids' });
-    const video = createIndexedMedia(folder, 'clip.webm', 2000, 'preview', 8000);
+    await maintenanceRepository.resetLibraryIndex();
+    const folder = await folderRepository.upsert({ slug: 'vids', name: 'Vids', folderPath: 'vids' });
+    const video = await createIndexedMedia(folder, 'clip.webm', 2000, 'preview', 8000);
 
-    const detail = galleryService.getImageDetail(video.id);
+    const detail = await galleryService.getImageDetail(video.id);
     expect(detail?.previewUrl).toMatch(/^\/previews\//);
     expect(detail?.playbackStrategy).toBe('preview');
   });
@@ -102,11 +103,11 @@ describe.sequential('IMAGE_DETAIL_SOURCE config', () => {
   it('keeps preview URLs for compatible videos while exposing playbackStrategy=original', async () => {
     await setup('preview');
 
-    maintenanceRepository.resetLibraryIndex();
-    const folder = folderRepository.upsert({ slug: 'vids2', name: 'Vids2', folderPath: 'vids2' });
-    const compatibleMp4 = createIndexedMedia(folder, 'compatible.mp4', 3000, 'original', 5000);
+    await maintenanceRepository.resetLibraryIndex();
+    const folder = await folderRepository.upsert({ slug: 'vids2', name: 'Vids2', folderPath: 'vids2' });
+    const compatibleMp4 = await createIndexedMedia(folder, 'compatible.mp4', 3000, 'original', 5000);
 
-    const detail = galleryService.getImageDetail(compatibleMp4.id);
+    const detail = await galleryService.getImageDetail(compatibleMp4.id);
     expect(detail?.previewUrl).toBe('/previews/vids2/compatible.mp4');
     expect(detail?.originalUrl).toBe(`/api/originals/${compatibleMp4.id}`);
     expect(detail?.playbackStrategy).toBe('original');
@@ -115,18 +116,18 @@ describe.sequential('IMAGE_DETAIL_SOURCE config', () => {
   it('feed items always use preview URLs regardless of IMAGE_DETAIL_SOURCE=original', async () => {
     await setup('original');
 
-    maintenanceRepository.resetLibraryIndex();
-    const folder = folderRepository.upsert({ slug: 'feed', name: 'Feed', folderPath: 'feed' });
-    createIndexedMedia(folder, 'photo.jpg', 1000, 'preview');
-    folderRepository.setAvatar(folder.id, imageRepository.getLatestFolderImageId(folder.id));
+    await maintenanceRepository.resetLibraryIndex();
+    const folder = await folderRepository.upsert({ slug: 'feed', name: 'Feed', folderPath: 'feed' });
+    await createIndexedMedia(folder, 'photo.jpg', 1000, 'preview');
+    await folderRepository.setAvatar(folder.id, await imageRepository.getLatestFolderImageId(folder.id));
 
-    const feedItems = galleryService.getFeed(1, 10, 'recent').items;
+    const feedItems = (await galleryService.getFeed(1, 10, 'recent')).items;
     expect(feedItems.length).toBe(1);
     // Feed images always use preview URLs, not originals
     expect(feedItems[0]!.previewUrl).toMatch(/^\/previews\//);
   });
 
-  function createIndexedMedia(
+  async function createIndexedMedia(
     folder: FolderRecord,
     filename: string,
     mtimeMs: number,
@@ -141,7 +142,7 @@ describe.sequential('IMAGE_DETAIL_SOURCE config', () => {
     const thumbnailRelativePath = getThumbnailRelativePath(relativePath);
     const fileSize = 2_048 + mtimeMs;
 
-    return imageRepository.upsert({
+    return await imageRepository.upsert({
       folderId: folder.id,
       filename,
       extension,

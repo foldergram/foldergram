@@ -25,7 +25,9 @@ yourself.
 | `DATA_DIR` | unset | Optional alias that falls back into `DATA_ROOT` resolution when `DATA_ROOT` is absent. |
 | `GALLERY_ROOT` | `./data/gallery` | Source media root. Foldergram scans below this path. |
 | `GALLERY_EXCLUDED_FOLDERS` | unset | Comma-separated folder exclusion rules. Names match anywhere in the gallery tree; values with a slash match one exact relative path below `GALLERY_ROOT`. |
-| `DB_DIR` | `./data/db` | SQLite directory. Database file is `gallery.sqlite`, and startup Dbmate migrations run against it automatically when the directory is available. |
+| `DB_DRIVER` | `sqlite` | Database backend. Accepted values: `sqlite`, `postgres`. |
+| `DATABASE_URL` | unset | PostgreSQL connection string. Required when `DB_DRIVER=postgres`. Example: `postgresql://user:pass@localhost:5432/foldergram?sslmode=disable`. |
+| `DB_DIR` | `./data/db` | SQLite only. Directory for `gallery.sqlite`. Startup Dbmate migrations run against it automatically when the directory is available. Ignored when `DB_DRIVER=postgres`. |
 | `THUMBNAILS_DIR` | `./data/thumbnails` | Generated thumbnail output root. |
 | `PREVIEWS_DIR` | `./data/previews` | Generated preview output root. |
 | `IMAGE_DETAIL_SOURCE` | `preview` | For image detail pages, use generated previews or stream originals. Videos ignore this flag. |
@@ -37,24 +39,31 @@ yourself.
 | `PUBLIC_DEMO_MODE` | `0` | When enabled, mutating API routes return `403` for read-only demo deployments. |
 | `CSRF_TRUSTED_ORIGINS` | unset | Comma-separated extra browser origins allowed for mutating API requests. Useful behind reverse proxies or HTTPS terminators. |
 
+## Database backends
+
+Foldergram supports two database backends selected by `DB_DRIVER`:
+
+| Driver | Connection | Use case |
+| --- | --- | --- |
+| `sqlite` (default) | File at `<DB_DIR>/gallery.sqlite` | Single-node installs, Docker Compose default |
+| `postgres` | `DATABASE_URL` connection string | Multi-instance or production deployments |
+
+Both drivers share the same migration set and repository interface. The PostgreSQL driver uses the `pg` Node.js client.
+
 ## Database migrations
 
-Foldergram stores the app database at `<DB_DIR>/gallery.sqlite`.
-
-When `DB_DIR` is available, startup automatically runs pending Dbmate
-migrations before the server opens that database. This happens for:
+Migrations are managed with Dbmate and run automatically on startup before the server accepts requests. This happens for:
 
 - Docker container startup
 - `pnpm dev`
 - `pnpm start`
 - `pnpm rescan`
 
-Fresh installs create the database from the baseline migration. Existing
-supported installs are baselined once on upgrade, so later releases can apply
-ordered schema changes automatically.
+For source installs, run `pnpm migrate` to apply pending migrations without starting the rest of the app.
 
-For source installs, use `pnpm migrate` if you want to apply pending
-migrations without starting the rest of the app.
+Fresh installs create the schema from the baseline migration. Existing installs apply any pending ordered migrations automatically on next startup.
+
+SQLite migrations live in `server/db/migrations/sqlite/`. PostgreSQL migrations live in `server/db/migrations/postgres/`. Both sets are kept in sync.
 
 ## Access protection configuration
 

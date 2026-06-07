@@ -39,6 +39,7 @@ interface AuthConfigSnapshot {
   sessionSecret: Buffer | null;
   sessionVersion: number;
   viewerAccessMode: ViewerAccessMode;
+  defaultLocale: SupportedLocale | null;
 }
 
 interface SessionPayload {
@@ -70,10 +71,6 @@ function parseSupportedLocale(value: string | null): SupportedLocale | null {
   }
 
   return (SUPPORTED_LOCALES as readonly string[]).includes(value) ? (value as SupportedLocale) : null;
-}
-
-function getDefaultLocale(): SupportedLocale | null {
-  return parseSupportedLocale(appSettingsRepository.get(APP_DEFAULT_LOCALE_SETTING_KEY));
 }
 
 function decodeBase64Url(value: string | null): Buffer | null {
@@ -151,26 +148,27 @@ function createStatus(role: AuthRole, authenticated: boolean, enabled: boolean, 
     role,
     accessMode,
     likesMode: capabilities.canUseSharedLikes ? 'shared' : 'local',
-    defaultLocale: getDefaultLocale(),
+    defaultLocale: authConfig.defaultLocale,
     capabilities
   };
 }
 
-function loadAuthConfig(): AuthConfigSnapshot {
-  const adminPasswordHash = decodeBase64Url(appSettingsRepository.get(AUTH_PASSWORD_HASH_SETTING_KEY));
-  const adminPasswordSalt = decodeBase64Url(appSettingsRepository.get(AUTH_PASSWORD_SALT_SETTING_KEY));
-  const viewerPasswordHash = decodeBase64Url(appSettingsRepository.get(AUTH_VIEWER_PASSWORD_HASH_SETTING_KEY));
-  const viewerPasswordSalt = decodeBase64Url(appSettingsRepository.get(AUTH_VIEWER_PASSWORD_SALT_SETTING_KEY));
-  const sessionSecret = decodeBase64Url(appSettingsRepository.get(AUTH_SESSION_SECRET_SETTING_KEY));
-  const sessionVersion = parseSessionVersion(appSettingsRepository.get(AUTH_SESSION_VERSION_SETTING_KEY));
+async function loadAuthConfig(): Promise<AuthConfigSnapshot> {
+  const adminPasswordHash = decodeBase64Url(await appSettingsRepository.get(AUTH_PASSWORD_HASH_SETTING_KEY));
+  const adminPasswordSalt = decodeBase64Url(await appSettingsRepository.get(AUTH_PASSWORD_SALT_SETTING_KEY));
+  const viewerPasswordHash = decodeBase64Url(await appSettingsRepository.get(AUTH_VIEWER_PASSWORD_HASH_SETTING_KEY));
+  const viewerPasswordSalt = decodeBase64Url(await appSettingsRepository.get(AUTH_VIEWER_PASSWORD_SALT_SETTING_KEY));
+  const sessionSecret = decodeBase64Url(await appSettingsRepository.get(AUTH_SESSION_SECRET_SETTING_KEY));
+  const sessionVersion = parseSessionVersion(await appSettingsRepository.get(AUTH_SESSION_VERSION_SETTING_KEY));
   const enabled = adminPasswordHash !== null && adminPasswordSalt !== null && sessionSecret !== null && sessionVersion > 0;
-  const rawViewerAccessMode = parseViewerAccessMode(appSettingsRepository.get(AUTH_VIEWER_ACCESS_MODE_SETTING_KEY));
+  const rawViewerAccessMode = parseViewerAccessMode(await appSettingsRepository.get(AUTH_VIEWER_ACCESS_MODE_SETTING_KEY));
   const viewerAccessMode =
     enabled && rawViewerAccessMode === 'password' && viewerPasswordHash !== null && viewerPasswordSalt !== null
       ? 'password'
       : enabled && rawViewerAccessMode === 'public'
         ? 'public'
         : 'off';
+  const defaultLocale = parseSupportedLocale(await appSettingsRepository.get(APP_DEFAULT_LOCALE_SETTING_KEY));
 
   return {
     enabled,
@@ -180,7 +178,8 @@ function loadAuthConfig(): AuthConfigSnapshot {
     viewerPasswordSalt: viewerAccessMode === 'password' ? viewerPasswordSalt : null,
     sessionSecret: enabled ? sessionSecret : null,
     sessionVersion: enabled ? sessionVersion : 0,
-    viewerAccessMode
+    viewerAccessMode,
+    defaultLocale
   };
 }
 
@@ -278,7 +277,17 @@ function isSecureRequest(request: express.Request): boolean {
   return firstValue === 'https' || firstValue === 'https:';
 }
 
-let authConfig = loadAuthConfig();
+let authConfig: AuthConfigSnapshot = {
+  enabled: false,
+  adminPasswordHash: null,
+  adminPasswordSalt: null,
+  viewerPasswordHash: null,
+  viewerPasswordSalt: null,
+  sessionSecret: null,
+  sessionVersion: 0,
+  viewerAccessMode: 'off',
+  defaultLocale: null
+};
 
 function getAnonymousStatus(): AuthStatus {
   return createStatus('anonymous', false, authConfig.enabled, authConfig.viewerAccessMode);
@@ -288,10 +297,10 @@ function createAuthenticatedStatus(role: SessionRole = 'admin'): AuthStatus {
   return createStatus(role, true, authConfig.enabled, authConfig.viewerAccessMode);
 }
 
-function storeSessionConfig(nextSessionVersion: number): void {
+async function storeSessionConfig(nextSessionVersion: number): Promise<void> {
   const sessionSecret = randomBytes(32);
-  appSettingsRepository.set(AUTH_SESSION_SECRET_SETTING_KEY, sessionSecret.toString('base64url'));
-  appSettingsRepository.set(AUTH_SESSION_VERSION_SETTING_KEY, String(nextSessionVersion));
+  await appSettingsRepository.set(AUTH_SESSION_SECRET_SETTING_KEY, sessionSecret.toString('base64url'));
+  await appSettingsRepository.set(AUTH_SESSION_VERSION_SETTING_KEY, String(nextSessionVersion));
 }
 
 function getRequestSessionRole(request: express.Request): SessionRole | null {
@@ -318,8 +327,12 @@ function getRequestSessionRole(request: express.Request): SessionRole | null {
 }
 
 export const authService = {
-  refresh(): void {
-    authConfig = loadAuthConfig();
+  async initialize(): Promise<void> {
+    authConfig = await loadAuthConfig();
+  },
+
+  async refresh(): Promise<void> {
+    authConfig = await loadAuthConfig();
   },
 
   getViewerAccessMode(): ViewerAccessMode {
@@ -407,7 +420,7 @@ export const authService = {
     return null;
   },
 
-  setAdminPassword(password: string): AuthStatus {
+  async setAdminPassword(password: string): Promise<AuthStatus> {
     if (authConfig.viewerAccessMode === 'password' && this.verifyViewerPassword(password)) {
       throw new Error('Viewer password must be different from the admin password.');
     }
@@ -416,22 +429,22 @@ export const authService = {
     const passwordHash = hashPassword(password, salt);
     const nextSessionVersion = Math.max(1, authConfig.sessionVersion + 1);
 
-    appSettingsRepository.set(AUTH_PASSWORD_HASH_SETTING_KEY, passwordHash.toString('base64url'));
-    appSettingsRepository.set(AUTH_PASSWORD_SALT_SETTING_KEY, salt.toString('base64url'));
+    await appSettingsRepository.set(AUTH_PASSWORD_HASH_SETTING_KEY, passwordHash.toString('base64url'));
+    await appSettingsRepository.set(AUTH_PASSWORD_SALT_SETTING_KEY, salt.toString('base64url'));
 
     if (!authConfig.enabled) {
-      appSettingsRepository.set(AUTH_VIEWER_ACCESS_MODE_SETTING_KEY, 'off');
-      appSettingsRepository.remove(AUTH_VIEWER_PASSWORD_HASH_SETTING_KEY);
-      appSettingsRepository.remove(AUTH_VIEWER_PASSWORD_SALT_SETTING_KEY);
+      await appSettingsRepository.set(AUTH_VIEWER_ACCESS_MODE_SETTING_KEY, 'off');
+      await appSettingsRepository.remove(AUTH_VIEWER_PASSWORD_HASH_SETTING_KEY);
+      await appSettingsRepository.remove(AUTH_VIEWER_PASSWORD_SALT_SETTING_KEY);
     }
 
-    storeSessionConfig(nextSessionVersion);
+    await storeSessionConfig(nextSessionVersion);
 
-    this.refresh();
+    await this.refresh();
     return createAuthenticatedStatus('admin');
   },
 
-  setViewerAccess(mode: ViewerAccessMode, viewerPassword: string | null = null): AuthStatus {
+  async setViewerAccess(mode: ViewerAccessMode, viewerPassword: string | null = null): Promise<AuthStatus> {
     if (!authConfig.enabled) {
       throw new Error('Enable the admin password before configuring viewer access.');
     }
@@ -447,30 +460,30 @@ export const authService = {
 
       const viewerSalt = randomBytes(16);
       const viewerHash = hashPassword(viewerPassword, viewerSalt);
-      appSettingsRepository.set(AUTH_VIEWER_PASSWORD_HASH_SETTING_KEY, viewerHash.toString('base64url'));
-      appSettingsRepository.set(AUTH_VIEWER_PASSWORD_SALT_SETTING_KEY, viewerSalt.toString('base64url'));
+      await appSettingsRepository.set(AUTH_VIEWER_PASSWORD_HASH_SETTING_KEY, viewerHash.toString('base64url'));
+      await appSettingsRepository.set(AUTH_VIEWER_PASSWORD_SALT_SETTING_KEY, viewerSalt.toString('base64url'));
     } else {
-      appSettingsRepository.remove(AUTH_VIEWER_PASSWORD_HASH_SETTING_KEY);
-      appSettingsRepository.remove(AUTH_VIEWER_PASSWORD_SALT_SETTING_KEY);
+      await appSettingsRepository.remove(AUTH_VIEWER_PASSWORD_HASH_SETTING_KEY);
+      await appSettingsRepository.remove(AUTH_VIEWER_PASSWORD_SALT_SETTING_KEY);
     }
 
-    appSettingsRepository.set(AUTH_VIEWER_ACCESS_MODE_SETTING_KEY, mode);
-    storeSessionConfig(Math.max(1, authConfig.sessionVersion + 1));
+    await appSettingsRepository.set(AUTH_VIEWER_ACCESS_MODE_SETTING_KEY, mode);
+    await storeSessionConfig(Math.max(1, authConfig.sessionVersion + 1));
 
-    this.refresh();
+    await this.refresh();
     return createAuthenticatedStatus('admin');
   },
 
-  disable(): AuthStatus {
-    appSettingsRepository.remove(AUTH_PASSWORD_HASH_SETTING_KEY);
-    appSettingsRepository.remove(AUTH_PASSWORD_SALT_SETTING_KEY);
-    appSettingsRepository.remove(AUTH_SESSION_SECRET_SETTING_KEY);
-    appSettingsRepository.remove(AUTH_SESSION_VERSION_SETTING_KEY);
-    appSettingsRepository.remove(AUTH_VIEWER_ACCESS_MODE_SETTING_KEY);
-    appSettingsRepository.remove(AUTH_VIEWER_PASSWORD_HASH_SETTING_KEY);
-    appSettingsRepository.remove(AUTH_VIEWER_PASSWORD_SALT_SETTING_KEY);
+  async disable(): Promise<AuthStatus> {
+    await appSettingsRepository.remove(AUTH_PASSWORD_HASH_SETTING_KEY);
+    await appSettingsRepository.remove(AUTH_PASSWORD_SALT_SETTING_KEY);
+    await appSettingsRepository.remove(AUTH_SESSION_SECRET_SETTING_KEY);
+    await appSettingsRepository.remove(AUTH_SESSION_VERSION_SETTING_KEY);
+    await appSettingsRepository.remove(AUTH_VIEWER_ACCESS_MODE_SETTING_KEY);
+    await appSettingsRepository.remove(AUTH_VIEWER_PASSWORD_HASH_SETTING_KEY);
+    await appSettingsRepository.remove(AUTH_VIEWER_PASSWORD_SALT_SETTING_KEY);
 
-    this.refresh();
+    await this.refresh();
     return createStatus('admin', true, false, 'off');
   },
 

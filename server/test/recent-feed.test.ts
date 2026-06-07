@@ -45,7 +45,8 @@ describe.sequential('recent feed ordering', () => {
 
     ({ appConfig } = await import('../src/config/env.js'));
     ({ galleryService } = await import('../src/services/gallery-service.js'));
-    ({ folderRepository, imageRepository } = await import('../src/db/repositories.js'));
+    ({folderRepository, imageRepository} = await import('../src/db/repositories.js'));
+    await (await import('../src/db/repositories.js')).initRepositories();
 
     await Promise.all([
       fs.mkdir(appConfig.galleryRoot, { recursive: true }),
@@ -65,14 +66,14 @@ describe.sequential('recent feed ordering', () => {
     const julyOlder = await createIndexedImage('mi-11t', 'IMG_20220710_071048.jpg', Date.UTC(2022, 6, 10, 7, 10, 48));
     const octoberOlder = await createIndexedImage('note9', 'Samsung_Note9_20211019_103000.jpg', Date.UTC(2021, 9, 19, 10, 30, 0));
 
-    const payload = galleryService.getFeed(1, 10, 'recent');
+    const payload = await galleryService.getFeed(1, 10, 'recent');
 
     expect(payload.mode).toBe('recent');
     expect(payload.items.map((item) => item.id)).toEqual([julyNewer.id, julyOlder.id, octoberOlder.id]);
   });
 
   async function createIndexedImage(folderPath: string, filename: string, timestamp: number): Promise<ImageRecord> {
-    const folder = folderRepository.upsert({
+    const folder = await folderRepository.upsert({
       slug: folderPath.replaceAll('/', '-'),
       name: path.posix.basename(folderPath),
       folderPath
@@ -84,7 +85,7 @@ describe.sequential('recent feed ordering', () => {
     const thumbnailPath = getThumbnailRelativePath(relativePath);
     const previewPath = getPreviewRelativePath(relativePath, mediaType);
 
-    return imageRepository.upsert({
+    return await imageRepository.upsert({
       folderId: folder.id,
       filename,
       extension,

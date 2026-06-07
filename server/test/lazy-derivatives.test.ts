@@ -71,7 +71,8 @@ describe.sequential('DERIVATIVE_MODE lazy behavior', () => {
     ({ authService } = await import('../src/services/auth-service.js'));
     ({ lazyThumbnailsRouter, lazyPreviewsRouter } = await import('../src/routes/lazy-derivatives.js'));
     ({ scannerService } = await import('../src/services/scanner-service.js'));
-    ({ folderRepository, imageRepository, maintenanceRepository, appSettingsRepository } = await import('../src/db/repositories.js'));
+    ({folderRepository, imageRepository, maintenanceRepository, appSettingsRepository} = await import('../src/db/repositories.js'));
+    await (await import('../src/db/repositories.js')).initRepositories();
 
     await Promise.all([
       fs.mkdir(appConfig.galleryRoot, { recursive: true }),
@@ -251,7 +252,7 @@ describe.sequential('DERIVATIVE_MODE lazy behavior', () => {
     return relativePath.split('/').map((segment) => encodeURIComponent(segment)).join('/');
   }
 
-  function createIndexedMedia(
+  async function createIndexedMedia(
     folder: FolderRecord,
     filename: string,
     mtimeMs: number,
@@ -269,7 +270,7 @@ describe.sequential('DERIVATIVE_MODE lazy behavior', () => {
     const thumbnailRelativePath = getThumbnailRelativePath(relativePath);
     const fileSize = 2_048 + mtimeMs;
 
-    return imageRepository.upsert({
+    return await imageRepository.upsert({
       folderId: folder.id,
       filename,
       extension,
@@ -323,7 +324,7 @@ describe.sequential('DERIVATIVE_MODE lazy behavior', () => {
 
     expect(generateDerivativesMock).not.toHaveBeenCalled();
     expect(generateThumbnailDerivativeMock).not.toHaveBeenCalled();
-    expect(imageRepository.countFeed()).toBe(1);
+    expect(await imageRepository.countFeed()).toBe(1);
   });
 
   it('still calls generateDerivatives for new files when DERIVATIVE_MODE=eager', async () => {
@@ -338,9 +339,9 @@ describe.sequential('DERIVATIVE_MODE lazy behavior', () => {
   it('rebuildThumbnails still generates thumbnails in lazy mode', async () => {
     await reset('lazy');
 
-    maintenanceRepository.resetLibraryIndex();
-    const folder = folderRepository.upsert({ slug: 'rb', name: 'RB', folderPath: 'rb' });
-    createIndexedMedia(folder, 'photo.jpg', 1000, 'preview');
+    await maintenanceRepository.resetLibraryIndex();
+    const folder = await folderRepository.upsert({ slug: 'rb', name: 'RB', folderPath: 'rb' });
+    await createIndexedMedia(folder, 'photo.jpg', 1000, 'preview');
 
     await scannerService.rebuildThumbnails('test');
 
@@ -353,7 +354,7 @@ describe.sequential('DERIVATIVE_MODE lazy behavior', () => {
     await createSourceFile('album3/photo.jpg');
     await scannerService.scanAll('test');
 
-    const images = imageRepository.listActive();
+    const images = await imageRepository.listActive();
     expect(images).toHaveLength(1);
     expect(images[0]!.thumbnail_path).toMatch(/^[a-f0-9]{2}\/[a-f0-9]{32}\.webp$/);
     expect(images[0]!.preview_path).toMatch(/^[a-f0-9]{2}\/[a-f0-9]{32}\.webp$/);
@@ -362,9 +363,9 @@ describe.sequential('DERIVATIVE_MODE lazy behavior', () => {
   it('generates a missing thumbnail on first request, reuses it on later requests, and preserves cache headers', async () => {
     await reset('lazy');
 
-    maintenanceRepository.resetLibraryIndex();
-    const folder = folderRepository.upsert({ slug: 'thumbs', name: 'Thumbs', folderPath: 'thumbs' });
-    const image = createIndexedMedia(folder, 'photo.jpg', 2000, 'preview');
+    await maintenanceRepository.resetLibraryIndex();
+    const folder = await folderRepository.upsert({ slug: 'thumbs', name: 'Thumbs', folderPath: 'thumbs' });
+    const image = await createIndexedMedia(folder, 'photo.jpg', 2000, 'preview');
     const requestPath = `/${encodeRelativePath(image.thumbnail_path)}`;
     const firstResponse = await dispatchRoute(lazyThumbnailsRouter, requestPath);
     expect(firstResponse.statusCode).toBe(200);
@@ -381,10 +382,10 @@ describe.sequential('DERIVATIVE_MODE lazy behavior', () => {
   it('generates a missing thumbnail from the current gallery root when the cached absolute path is stale', async () => {
     await reset('lazy');
 
-    maintenanceRepository.resetLibraryIndex();
-    const folder = folderRepository.upsert({ slug: 'relocated-thumbs', name: 'Relocated Thumbs', folderPath: 'relocated-thumbs' });
+    await maintenanceRepository.resetLibraryIndex();
+    const folder = await folderRepository.upsert({ slug: 'relocated-thumbs', name: 'Relocated Thumbs', folderPath: 'relocated-thumbs' });
     await createSourceFile('relocated-thumbs/photo.jpg');
-    const image = createIndexedMedia(folder, 'photo.jpg', 2_200, 'preview', null, {
+    const image = await createIndexedMedia(folder, 'photo.jpg', 2_200, 'preview', null, {
       storedGalleryRoot: path.join(tempRoot, 'old-gallery-root')
     });
 
@@ -402,10 +403,10 @@ describe.sequential('DERIVATIVE_MODE lazy behavior', () => {
   it('uses private browser caching headers for protected derivative responses', async () => {
     await reset('lazy');
 
-    authService.setAdminPassword('password123');
-    maintenanceRepository.resetLibraryIndex();
-    const folder = folderRepository.upsert({ slug: 'secured', name: 'Secured', folderPath: 'secured' });
-    const image = createIndexedMedia(folder, 'photo.jpg', 2500, 'preview');
+    await authService.setAdminPassword('password123');
+    await maintenanceRepository.resetLibraryIndex();
+    const folder = await folderRepository.upsert({ slug: 'secured', name: 'Secured', folderPath: 'secured' });
+    const image = await createIndexedMedia(folder, 'photo.jpg', 2500, 'preview');
 
     const response = await dispatchRoute(lazyThumbnailsRouter, `/${encodeRelativePath(image.thumbnail_path)}`);
 
@@ -417,9 +418,9 @@ describe.sequential('DERIVATIVE_MODE lazy behavior', () => {
   it('generates a missing image preview on first request', async () => {
     await reset('lazy');
 
-    maintenanceRepository.resetLibraryIndex();
-    const folder = folderRepository.upsert({ slug: 'previews', name: 'Previews', folderPath: 'previews' });
-    const image = createIndexedMedia(folder, 'photo.jpg', 3000, 'preview');
+    await maintenanceRepository.resetLibraryIndex();
+    const folder = await folderRepository.upsert({ slug: 'previews', name: 'Previews', folderPath: 'previews' });
+    const image = await createIndexedMedia(folder, 'photo.jpg', 3000, 'preview');
     const response = await dispatchRoute(lazyPreviewsRouter, `/${encodeRelativePath(image.preview_path)}`);
     expect(response.statusCode).toBe(200);
     expect(response.body).toBe('image-preview:photo.webp');
@@ -429,10 +430,10 @@ describe.sequential('DERIVATIVE_MODE lazy behavior', () => {
   it('generates a missing image preview from the current gallery root when the cached absolute path is stale', async () => {
     await reset('lazy');
 
-    maintenanceRepository.resetLibraryIndex();
-    const folder = folderRepository.upsert({ slug: 'relocated-previews', name: 'Relocated Previews', folderPath: 'relocated-previews' });
+    await maintenanceRepository.resetLibraryIndex();
+    const folder = await folderRepository.upsert({ slug: 'relocated-previews', name: 'Relocated Previews', folderPath: 'relocated-previews' });
     await createSourceFile('relocated-previews/photo.jpg');
-    const image = createIndexedMedia(folder, 'photo.jpg', 3_200, 'preview', null, {
+    const image = await createIndexedMedia(folder, 'photo.jpg', 3_200, 'preview', null, {
       storedGalleryRoot: path.join(tempRoot, 'old-gallery-root')
     });
 
@@ -450,9 +451,9 @@ describe.sequential('DERIVATIVE_MODE lazy behavior', () => {
   it('generates a missing animated AVIF preview through the AVIF-aware preview generator', async () => {
     await reset('lazy');
 
-    maintenanceRepository.resetLibraryIndex();
-    const folder = folderRepository.upsert({ slug: 'animated-avif', name: 'Animated AVIF', folderPath: 'animated-avif' });
-    const image = createIndexedMedia(folder, 'clip.avif', 3_400, 'preview', null, {
+    await maintenanceRepository.resetLibraryIndex();
+    const folder = await folderRepository.upsert({ slug: 'animated-avif', name: 'Animated AVIF', folderPath: 'animated-avif' });
+    const image = await createIndexedMedia(folder, 'clip.avif', 3_400, 'preview', null, {
       isAnimated: true
     });
 
@@ -471,9 +472,9 @@ describe.sequential('DERIVATIVE_MODE lazy behavior', () => {
   it('deduplicates concurrent requests for the same missing video preview', async () => {
     await reset('lazy');
 
-    maintenanceRepository.resetLibraryIndex();
-    const folder = folderRepository.upsert({ slug: 'videos', name: 'Videos', folderPath: 'videos' });
-    const video = createIndexedMedia(folder, 'clip.mp4', 4000, 'original', 5000);
+    await maintenanceRepository.resetLibraryIndex();
+    const folder = await folderRepository.upsert({ slug: 'videos', name: 'Videos', folderPath: 'videos' });
+    const video = await createIndexedMedia(folder, 'clip.mp4', 4000, 'original', 5000);
     let releaseGeneration: (() => void) | null = null;
     const generationStarted = new Promise<void>((resolve) => {
       generatePreviewDerivativeMock.mockImplementationOnce(async (_src: string, relativePath: string, _force = false, overrides?: { previewPath?: string }) => {
@@ -505,10 +506,10 @@ describe.sequential('DERIVATIVE_MODE lazy behavior', () => {
   it('limits concurrent generation for different missing derivatives', async () => {
     await reset('lazy', 1);
 
-    maintenanceRepository.resetLibraryIndex();
-    const folder = folderRepository.upsert({ slug: 'queue', name: 'Queue', folderPath: 'queue' });
-    const firstImage = createIndexedMedia(folder, 'photo-1.jpg', 5000, 'preview');
-    const secondImage = createIndexedMedia(folder, 'photo-2.jpg', 6000, 'preview');
+    await maintenanceRepository.resetLibraryIndex();
+    const folder = await folderRepository.upsert({ slug: 'queue', name: 'Queue', folderPath: 'queue' });
+    const firstImage = await createIndexedMedia(folder, 'photo-1.jpg', 5000, 'preview');
+    const secondImage = await createIndexedMedia(folder, 'photo-2.jpg', 6000, 'preview');
 
     let activeGenerations = 0;
     let maxActiveGenerations = 0;
@@ -563,7 +564,7 @@ describe.sequential('DERIVATIVE_MODE lazy behavior', () => {
   it('returns 404 when no indexed row matches the requested derivative path', async () => {
     await reset('lazy');
 
-    maintenanceRepository.resetLibraryIndex();
+    await maintenanceRepository.resetLibraryIndex();
     const response = await dispatchRoute(lazyPreviewsRouter, '/missing/path.webp');
     expect(response.statusCode).toBe(404);
     expect(response.body).toEqual({ message: 'Derivative not found.' });
@@ -573,10 +574,10 @@ describe.sequential('DERIVATIVE_MODE lazy behavior', () => {
   it('does not generate missing derivatives while a library rebuild is required', async () => {
     await reset('lazy');
 
-    maintenanceRepository.resetLibraryIndex();
-    const folder = folderRepository.upsert({ slug: 'blocked', name: 'Blocked', folderPath: 'blocked' });
-    const image = createIndexedMedia(folder, 'photo.jpg', 4_700, 'preview');
-    appSettingsRepository.set(LIBRARY_REBUILD_REQUIRED_SETTING_KEY, '1');
+    await maintenanceRepository.resetLibraryIndex();
+    const folder = await folderRepository.upsert({ slug: 'blocked', name: 'Blocked', folderPath: 'blocked' });
+    const image = await createIndexedMedia(folder, 'photo.jpg', 4_700, 'preview');
+    await appSettingsRepository.set(LIBRARY_REBUILD_REQUIRED_SETTING_KEY, '1');
 
     const response = await dispatchRoute(lazyThumbnailsRouter, `/${encodeRelativePath(image.thumbnail_path)}`);
 
@@ -588,9 +589,9 @@ describe.sequential('DERIVATIVE_MODE lazy behavior', () => {
   it('does not emit a JSON error after sendFile fails once headers are already sent', async () => {
     await reset('lazy');
 
-    maintenanceRepository.resetLibraryIndex();
-    const folder = folderRepository.upsert({ slug: 'abort', name: 'Abort', folderPath: 'abort' });
-    const video = createIndexedMedia(folder, 'clip.mp4', 4500, 'original', 5000);
+    await maintenanceRepository.resetLibraryIndex();
+    const folder = await folderRepository.upsert({ slug: 'abort', name: 'Abort', folderPath: 'abort' });
+    const video = await createIndexedMedia(folder, 'clip.mp4', 4500, 'original', 5000);
     const previewAbsolutePath = path.join(appConfig.previewsDir, video.preview_path);
 
     await fs.mkdir(path.dirname(previewAbsolutePath), { recursive: true });
@@ -612,7 +613,7 @@ describe.sequential('DERIVATIVE_MODE lazy behavior', () => {
   it('rejects traversal attempts with a 400 response', async () => {
     await reset('lazy');
 
-    maintenanceRepository.resetLibraryIndex();
+    await maintenanceRepository.resetLibraryIndex();
     const response = await dispatchRoute(lazyThumbnailsRouter, '/%2E%2E/outside.webp');
     expect(response.statusCode).toBe(400);
     expect(response.body).toEqual({ message: 'Invalid derivative path.' });

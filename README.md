@@ -28,7 +28,7 @@
 
 Foldergram is a self-hosted web application that turns your local folders into a beautiful, instagram-style feed and profile. It turns your local folder to app folders (profiles), and serves a lightning-fast Progressive Web App (PWA).
 
-Foldergram indexes supported media from a configured `GALLERY_ROOT`, stores metadata in SQLite, generates thumbnails and previews, and serves a fast feed-style web app for local browsing. Derivatives can be generated during scans or lazily on first request, and image detail pages can be configured to use generated previews or originals. The current app includes Home, Reels, Explore, Library, Likes, Moments or Highlights, App Folder pages, post detail views, original-media download controls, delete actions, scan controls, and rebuild tools.
+Foldergram indexes supported media from a configured `GALLERY_ROOT`, stores metadata in SQLite or PostgreSQL, generates thumbnails, and serves a fast feed-style web app for local browsing. Derivatives can be generated during scans or lazily on first request, and image detail pages can be configured to use generated previews or originals. The current app includes Home, Reels, Explore, Library, Likes, Moments or Highlights, App Folder pages, post detail views, original-media download controls, delete actions, scan controls, and rebuild tools.
 
 Generated derivatives are now stored under stable asset-key shards instead of mirroring source folders. Existing libraries stay readable during upgrade, then migrate in place on the next full scan. During that upgrade, Foldergram keeps stored paths pointed at files that already exist, repairs surviving legacy derivatives where possible, and lets later folder moves preserve the same indexed media identity and reuse existing thumbnails/previews. Scan status distinguishes discovery, derivative migration, and derivative generation so long-running maintenance work can report the right kind of progress for each phase.
 
@@ -37,11 +37,17 @@ Generated derivatives are now stored under stable asset-key shards instead of mi
 - **Instagram-Inspired UI:** Enjoy a familiar feed layout, dedicated app folders (profiles), and a media viewer.
 - Home feed with `Recent`, `Rediscover`, and `Random` modes.
 - A dedicated `/reels` route with a video-only queue. Settings can default it to `Recommended`, `Recent`, or `Random`.
+  - Playback speed selector cycling ×1 → ×2 → ×3 → ×1, persisted across videos.
+  - Save-to-collection bookmark in the action rail on both mobile and desktop.
+  - Keyboard shortcuts: `↑` / `↓` previous/next, `Space` play/pause, `=` cycle speed.
+- Post viewer keyboard shortcuts: `←` / `→` previous/next, `Space` play/pause, `=` cycle speed (videos).
 - A top rail that shows `Moments` when capture-date coverage is strong, or `Highlights` when it is not.
-- Library browsing with App Folder search, sorting, and delete actions.
+- Library browsing with fuzzy App Folder search, sorting, delete actions, and infinite scroll. Header totals reflect the full index, not just the loaded page.
 - App Folder pages with a posts grid and a folder-specific `Reels` tab when videos exist.
-- Shared likes in SQLite for signed-in admin/viewer sessions, plus browser-local favorites in public mode.
-- Image and video support with configurable eager or lazy derivative generation for fast browsing.
+- Shared likes for signed-in admin/viewer sessions, plus browser-local favorites in public mode.
+- Image and video support. Compatible MP4 originals are served directly for detail playback without transcoding; other videos transcode lazily on first request.
+- Parallel folder scan processing and derivative generation via `SCAN_DISCOVERY_CONCURRENCY` and `SCAN_DERIVATIVE_CONCURRENCY`.
+- SQLite (default) or PostgreSQL database backend, selected by `DB_DRIVER`.
 - Original-media download controls on home feed cards, post detail, and stories, alongside open-original actions.
 - Optional role-based local access with admin, viewer, and public browse modes.
 - Settings split into `General Settings` for Home/Reels defaults, language selection, stories mode, and excluded folders, plus `Scan & Library` for scan and rebuild actions.
@@ -59,7 +65,7 @@ Foldergram maps directly to your filesystem:
 3. **Nested folders stay separate:** Nested local folders are not merged into their parent App Folder. If a nested folder directly contains supported media, it becomes its own App Folder with parent folder name in the route (e.g. /folder/parent-nested).
 4. **Root files are ignored:** Files placed directly in `GALLERY_ROOT` are ignored.
 
-Runtime reads come from SQLite and generated derivatives, not from live filesystem scans on every request.
+Runtime reads come from the database and generated derivatives, not from live filesystem scans on every request. Folder post counts and global totals are stored as pre-computed columns and key-value settings, keeping status and library reads fast regardless of library size.
 
 ### Supported Formats
 
@@ -102,8 +108,7 @@ mkdir -p data/gallery/example-album
 docker compose up -d
 ```
 
-Container startup runs pending SQLite migrations automatically before the app
-opens the library database.
+Container startup runs pending migrations automatically before the app opens the library database.
 
 6. Open `http://localhost:4141`.
 
@@ -185,13 +190,9 @@ pnpm dev
 npm run dev
 ```
 
-`pnpm dev`, `pnpm dev:server`, and `pnpm start` now run versioned SQLite
-migrations automatically before the server boots. Use `pnpm migrate` if you
-want to apply pending migrations without starting the app.
+`pnpm dev`, `pnpm dev:server`, and `pnpm start` run pending migrations automatically before the server boots. Use `pnpm migrate` if you want to apply pending migrations without starting the app.
 
-On the first start after upgrading from an older supported Foldergram release,
-the app automatically baselines the existing SQLite database and then applies
-later ordered migrations on future upgrades.
+On first start after upgrading, the app applies any outstanding ordered migrations automatically. For SQLite, the existing database is baselined once on the first eligible upgrade and then maintained with versioned migrations going forward.
 
 Development ports:
 
@@ -245,25 +246,23 @@ demand and must be writable when skip mode produces scan reports.
 | `DATA_ROOT`                   | `./data`            | Root directory for app-managed storage.                                   |
 | `GALLERY_ROOT`                | `./data/gallery`    | Root directory scanned for App Folders.                                   |
 | `GALLERY_EXCLUDED_FOLDERS`    | empty               | Comma-separated folder exclusion rules such as `@eaDir,Archive/cache`.    |
-| `DB_DIR`                      | `./data/db`         | SQLite database directory. Startup migrations target `<DB_DIR>/gallery.sqlite`. |
+| `DB_DRIVER`                   | `sqlite`            | Database backend. `sqlite` or `postgres`.                                 |
+| `DATABASE_URL`                | unset               | PostgreSQL connection string. Required when `DB_DRIVER=postgres`. Example: `postgresql://user:pass@localhost:5432/foldergram?sslmode=disable`. |
+| `DB_DIR`                      | `./data/db`         | SQLite only. Database directory. Startup migrations target `<DB_DIR>/gallery.sqlite`. Ignored when `DB_DRIVER=postgres`. |
 | `THUMBNAILS_DIR`              | `./data/thumbnails` | Generated thumbnail output directory.                                     |
 | `PREVIEWS_DIR`                | `./data/previews`   | Generated preview output directory.                                       |
 | `IMAGE_DETAIL_SOURCE`         | `preview`           | For image detail pages, use generated previews or stream originals.       |
 | `DERIVATIVE_MODE`             | `eager`             | Generate derivatives during scans or lazily on first request.             |
 | `LOG_VERBOSE`                 | `0`                 | Truthy values are `1`, `true`, `yes`, and `on`.                           |
 | `SCAN_MEDIA_ERROR_MODE`       | `skip`              | Use `skip` to report supported-media failures and continue, or `fail`.    |
-| `SCAN_DISCOVERY_CONCURRENCY`  | `4`                 | Folder discovery concurrency.                                             |
-| `SCAN_DERIVATIVE_CONCURRENCY` | `4`                 | Derivative generation concurrency.                                        |
+| `SCAN_DISCOVERY_CONCURRENCY`  | `4`                 | Folder discovery concurrency, `1`–`32`.                                   |
+| `SCAN_DERIVATIVE_CONCURRENCY` | `4`                 | Derivative generation concurrency, `1`–`32`.                              |
 | `PUBLIC_DEMO_MODE`            | `0`                 | When enabled, all API mutations become read-only and return `403`.        |
 | `CSRF_TRUSTED_ORIGINS`        | empty               | Comma-separated extra browser origins allowed for mutating API requests.  |
 
-`DATA_ROOT` is the base path for the app's local storage layout. If you set
-only `DATA_ROOT`, Foldergram will default the other storage paths to
-`<DATA_ROOT>/gallery`, `<DATA_ROOT>/db`, `<DATA_ROOT>/thumbnails`, and
-`<DATA_ROOT>/previews`. Set `GALLERY_ROOT`, `DB_DIR`, `THUMBNAILS_DIR`, or
-`PREVIEWS_DIR` separately only when you need a non-standard layout.
-Per-run full scan error reports are written under `<DATA_ROOT>/scan-errors/`
-when a scan records supported-media failures.
+`DATA_ROOT` is the base path for the app's local storage layout. If you set only `DATA_ROOT`, Foldergram defaults the other storage paths to `<DATA_ROOT>/gallery`, `<DATA_ROOT>/db`, `<DATA_ROOT>/thumbnails`, and `<DATA_ROOT>/previews`. Set individual paths only when you need a non-standard layout. Per-run full scan error reports are written under `<DATA_ROOT>/scan-errors/` when a scan records supported-media failures.
+
+For PostgreSQL, set `DB_DRIVER=postgres` and `DATABASE_URL` to a standard connection string. `DB_DIR` is unused in that mode. Startup migrations run against the PostgreSQL database automatically, the same as SQLite.
 
 Docker uses the fixed internal container port `4141`, and other production
 runtimes continue to use `SERVER_PORT`, which defaults to `4141` in the Docker
@@ -333,9 +332,9 @@ only needed when the browser-visible origin differs from the upstream Node host 
 **Backend**
 
 - Node.js 22 + Express 5 + TypeScript
-- SQLite via `node:sqlite`
+- SQLite via `node:sqlite` (default) or PostgreSQL via `pg`
 - Sharp for image derivatives
-- FFmpeg and FFprobe for video processing
+- FFmpeg and FFprobe for video thumbnails and on-demand transcoding
 - Chokidar for the development watcher
 - Zod for runtime validation
 

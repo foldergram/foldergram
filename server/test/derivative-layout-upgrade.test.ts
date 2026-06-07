@@ -68,13 +68,12 @@ describe.sequential('derivative layout upgrade', () => {
     ({ appConfig } = await import('../src/config/env.js'));
     ({ scannerService } = await import('../src/services/scanner-service.js'));
     ({ derivativeMigrationService } = await import('../src/services/derivative-migration-service.js'));
-    ({
-      folderRepository,
+    ({folderRepository,
       imageRepository,
       likeRepository,
       appSettingsRepository,
-      maintenanceRepository
-    } = await import('../src/db/repositories.js'));
+      maintenanceRepository} = await import('../src/db/repositories.js'));
+      await (await import('../src/db/repositories.js')).initRepositories();
 
     await Promise.all([
       fs.mkdir(appConfig.galleryRoot, { recursive: true }),
@@ -82,7 +81,7 @@ describe.sequential('derivative layout upgrade', () => {
       fs.mkdir(appConfig.previewsDir, { recursive: true })
     ]);
 
-    maintenanceRepository.resetLibraryIndex();
+    await maintenanceRepository.resetLibraryIndex();
 
     readMediaMetadataMock.mockImplementation(async (sourcePath: string) => {
       const mediaType = getMediaTypeFromExtension(path.extname(sourcePath));
@@ -142,7 +141,7 @@ describe.sequential('derivative layout upgrade', () => {
   });
 
   it('backfills asset keys, migrates mirrored derivatives, and updates stored paths on the next full scan', async () => {
-    const folder = folderRepository.upsert({
+    const folder = await folderRepository.upsert({
       slug: 'legacy',
       name: 'legacy',
       folderPath: 'legacy'
@@ -164,7 +163,7 @@ describe.sequential('derivative layout upgrade', () => {
     await fs.writeFile(previewAbsolutePath, 'legacy-preview');
     await fs.utimes(absolutePath, mtimeMs / 1000, mtimeMs / 1000);
 
-    imageRepository.upsert({
+    await imageRepository.upsert({
       folderId: folder.id,
       filename: 'photo.jpg',
       extension: '.jpg',
@@ -191,7 +190,7 @@ describe.sequential('derivative layout upgrade', () => {
       repairUnchangedDerivatives: false
     });
 
-    const migrated = imageRepository.getByRelativePath(relativePath);
+    const migrated = await imageRepository.getByRelativePath(relativePath);
     expect(migrated?.asset_key).toMatch(/^[a-f0-9]{32}$/);
     expect(migrated?.thumbnail_path).toBe(getThumbnailPathForAssetKey(migrated!.asset_key!));
     expect(migrated?.preview_path).toBe(getPreviewPathForAssetKey(migrated!.asset_key!, 'image'));
@@ -202,7 +201,7 @@ describe.sequential('derivative layout upgrade', () => {
   });
 
   it('reruns derivative migration when the completion flags were set but legacy rows still remain', async () => {
-    const folder = folderRepository.upsert({
+    const folder = await folderRepository.upsert({
       slug: 'legacy-flags',
       name: 'legacy-flags',
       folderPath: 'legacy-flags'
@@ -224,7 +223,7 @@ describe.sequential('derivative layout upgrade', () => {
     await fs.writeFile(previewAbsolutePath, 'legacy-preview');
     await fs.utimes(absolutePath, mtimeMs / 1000, mtimeMs / 1000);
 
-    imageRepository.upsert({
+    await imageRepository.upsert({
       folderId: folder.id,
       filename: 'photo.jpg',
       extension: '.jpg',
@@ -247,16 +246,16 @@ describe.sequential('derivative layout upgrade', () => {
       previewPath
     });
 
-    appSettingsRepository.set(DERIVATIVE_STORAGE_LAYOUT_VERSION_SETTING_KEY, '3');
-    appSettingsRepository.set(DERIVATIVE_STORAGE_MIGRATION_COMPLETE_AT_SETTING_KEY, '2026-04-03T10:13:01.386Z');
+    await appSettingsRepository.set(DERIVATIVE_STORAGE_LAYOUT_VERSION_SETTING_KEY, '3');
+    await appSettingsRepository.set(DERIVATIVE_STORAGE_MIGRATION_COMPLETE_AT_SETTING_KEY, '2026-04-03T10:13:01.386Z');
 
-    expect(derivativeMigrationService.isMigrationComplete()).toBe(false);
+    expect(await derivativeMigrationService.isMigrationComplete()).toBe(false);
 
     await scannerService.scanAll('manual', {
       repairUnchangedDerivatives: false
     });
 
-    const migrated = imageRepository.getByRelativePath(relativePath);
+    const migrated = await imageRepository.getByRelativePath(relativePath);
     expect(migrated?.asset_key).toMatch(/^[a-f0-9]{32}$/);
     expect(migrated?.thumbnail_path).toBe(getThumbnailPathForAssetKey(migrated!.asset_key!));
     expect(migrated?.preview_path).toBe(getPreviewPathForAssetKey(migrated!.asset_key!, 'image'));
@@ -265,7 +264,7 @@ describe.sequential('derivative layout upgrade', () => {
   });
 
   it('reports migration progress instead of discovery while derivative storage is being migrated', async () => {
-    const folder = folderRepository.upsert({
+    const folder = await folderRepository.upsert({
       slug: 'legacy-progress',
       name: 'legacy-progress',
       folderPath: 'legacy-progress'
@@ -279,7 +278,7 @@ describe.sequential('derivative layout upgrade', () => {
     await fs.writeFile(absolutePath, sourceContents);
     await fs.utimes(absolutePath, mtimeMs / 1000, mtimeMs / 1000);
 
-    imageRepository.upsert({
+    await imageRepository.upsert({
       folderId: folder.id,
       filename: 'photo.jpg',
       extension: '.jpg',
@@ -347,7 +346,7 @@ describe.sequential('derivative layout upgrade', () => {
   });
 
   it('emits migration actions with the current relative file during derivative upgrades', async () => {
-    const folder = folderRepository.upsert({
+    const folder = await folderRepository.upsert({
       slug: 'legacy-events',
       name: 'legacy-events',
       folderPath: 'legacy-events'
@@ -375,7 +374,7 @@ describe.sequential('derivative layout upgrade', () => {
     await fs.writeFile(previewAbsolutePath, 'legacy-preview');
     await fs.utimes(absolutePath, mtimeMs / 1000, mtimeMs / 1000);
 
-    imageRepository.upsert({
+    await imageRepository.upsert({
       folderId: folder.id,
       filename: 'photo.jpg',
       extension: '.jpg',
@@ -419,7 +418,7 @@ describe.sequential('derivative layout upgrade', () => {
   });
 
   it('updates only the derivative path whose migrated target exists', async () => {
-    const folder = folderRepository.upsert({
+    const folder = await folderRepository.upsert({
       slug: 'partial-upgrade',
       name: 'partial-upgrade',
       folderPath: 'partial-upgrade'
@@ -435,7 +434,7 @@ describe.sequential('derivative layout upgrade', () => {
     await fs.mkdir(path.dirname(legacyThumbnailAbsolutePath), { recursive: true });
     await fs.writeFile(legacyThumbnailAbsolutePath, 'legacy-thumb');
 
-    imageRepository.upsert({
+    await imageRepository.upsert({
       folderId: folder.id,
       filename: 'photo.jpg',
       extension: '.jpg',
@@ -460,7 +459,7 @@ describe.sequential('derivative layout upgrade', () => {
     });
 
     const summary = await derivativeMigrationService.ensureMigrated();
-    const migrated = imageRepository.getByRelativePath(relativePath);
+    const migrated = await imageRepository.getByRelativePath(relativePath);
 
     expect(summary.missingFiles).toBe(1);
     expect(migrated?.thumbnail_path).toBe(nextThumbnailPath);
@@ -470,7 +469,7 @@ describe.sequential('derivative layout upgrade', () => {
   });
 
   it('keeps stored derivative paths unchanged when neither migrated target nor repair source exists', async () => {
-    const folder = folderRepository.upsert({
+    const folder = await folderRepository.upsert({
       slug: 'broken-upgrade',
       name: 'broken-upgrade',
       folderPath: 'broken-upgrade'
@@ -480,7 +479,7 @@ describe.sequential('derivative layout upgrade', () => {
     const legacyPreviewPath = getPreviewRelativePath(relativePath, 'image');
     const assetKey = '11223344556677889900aabbccddeeff';
 
-    imageRepository.upsert({
+    await imageRepository.upsert({
       folderId: folder.id,
       filename: 'photo.jpg',
       extension: '.jpg',
@@ -505,7 +504,7 @@ describe.sequential('derivative layout upgrade', () => {
     });
 
     const summary = await derivativeMigrationService.ensureMigrated();
-    const migrated = imageRepository.getByRelativePath(relativePath);
+    const migrated = await imageRepository.getByRelativePath(relativePath);
 
     expect(summary.missingFiles).toBe(2);
     expect(migrated?.thumbnail_path).toBe(legacyThumbnailPath);
@@ -513,7 +512,7 @@ describe.sequential('derivative layout upgrade', () => {
   });
 
   it('skips corrupt sources during derivative repair and reports the failing file', async () => {
-    const folder = folderRepository.upsert({
+    const folder = await folderRepository.upsert({
       slug: 'corrupt-repair',
       name: 'corrupt-repair',
       folderPath: 'corrupt-repair'
@@ -529,7 +528,7 @@ describe.sequential('derivative layout upgrade', () => {
     await fs.writeFile(absolutePath, sourceContents);
     await fs.utimes(absolutePath, mtimeMs / 1000, mtimeMs / 1000);
 
-    imageRepository.upsert({
+    await imageRepository.upsert({
       folderId: folder.id,
       filename: 'photo.jpg',
       extension: '.jpg',
@@ -557,7 +556,7 @@ describe.sequential('derivative layout upgrade', () => {
     const lastScan = await scannerService.scanAll('manual', {
       repairUnchangedDerivatives: false
     });
-    const migrated = imageRepository.getByRelativePath(relativePath);
+    const migrated = await imageRepository.getByRelativePath(relativePath);
 
     expect(lastScan?.status).toBe('completed_with_errors');
     expect(lastScan?.error_text).toContain(relativePath);
@@ -577,7 +576,7 @@ describe.sequential('derivative layout upgrade', () => {
   });
 
   it('repairs broken rows by moving legacy mirrored derivatives into the current asset-key layout', async () => {
-    const folder = folderRepository.upsert({
+    const folder = await folderRepository.upsert({
       slug: 'repair-upgrade',
       name: 'repair-upgrade',
       folderPath: 'repair-upgrade'
@@ -599,7 +598,7 @@ describe.sequential('derivative layout upgrade', () => {
     await fs.writeFile(path.join(appConfig.thumbnailsDir, legacyThumbnailPath), 'legacy-thumb');
     await fs.writeFile(path.join(appConfig.previewsDir, legacyPreviewPath), 'legacy-preview');
 
-    imageRepository.upsert({
+    await imageRepository.upsert({
       folderId: folder.id,
       filename: 'photo.jpg',
       extension: '.jpg',
@@ -624,7 +623,7 @@ describe.sequential('derivative layout upgrade', () => {
     });
 
     const summary = await derivativeMigrationService.ensureMigrated();
-    const repaired = imageRepository.getByRelativePath(relativePath);
+    const repaired = await imageRepository.getByRelativePath(relativePath);
 
     expect(summary.missingFiles).toBe(0);
     expect(repaired?.thumbnail_path).toBe(repairedThumbnailPath);
@@ -645,27 +644,27 @@ describe.sequential('derivative layout upgrade', () => {
       repairUnchangedDerivatives: false
     });
 
-    const original = imageRepository.getByRelativePath(initialRelativePath);
+    const original = await imageRepository.getByRelativePath(initialRelativePath);
     expect(original).toBeDefined();
-    likeRepository.upsert(original!.id);
+    await likeRepository.upsert(original!.id);
 
     await fs.mkdir(path.join(appConfig.galleryRoot, 'phones'), { recursive: true });
     await fs.copyFile(path.join(appConfig.galleryRoot, initialRelativePath), path.join(appConfig.galleryRoot, movedRelativePath));
     await fs.utimes(path.join(appConfig.galleryRoot, movedRelativePath), movedAt, movedAt);
     await fs.unlink(path.join(appConfig.galleryRoot, initialRelativePath));
-    appSettingsRepository.set(LAST_SUCCESSFUL_GALLERY_ROOT_SETTING_KEY, appConfig.galleryRoot);
+    await appSettingsRepository.set(LAST_SUCCESSFUL_GALLERY_ROOT_SETTING_KEY, appConfig.galleryRoot);
 
     await scannerService.scanAll('move', {
       repairUnchangedDerivatives: false
     });
 
-    const moved = imageRepository.getByRelativePath(movedRelativePath);
+    const moved = await imageRepository.getByRelativePath(movedRelativePath);
     expect(moved?.id).toBe(original?.id);
     expect(moved?.asset_key).toBe(original?.asset_key);
     expect(moved?.thumbnail_path).toBe(original?.thumbnail_path);
     expect(moved?.preview_path).toBe(original?.preview_path);
-    expect(imageRepository.getByRelativePath(initialRelativePath)).toBeUndefined();
-    expect(likeRepository.getByImageId(moved!.id)).toBeDefined();
+    expect(await imageRepository.getByRelativePath(initialRelativePath)).toBeUndefined();
+    expect(await likeRepository.getByImageId(moved!.id)).toBeDefined();
   });
 
   async function createSourceFile(relativePath: string, modifiedAt: Date): Promise<void> {

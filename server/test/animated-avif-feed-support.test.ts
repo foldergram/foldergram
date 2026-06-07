@@ -62,7 +62,8 @@ describe.sequential('animated AVIF feed support', () => {
     ({ appConfig } = await import('../src/config/env.js'));
     ({ scannerService } = await import('../src/services/scanner-service.js'));
     ({ galleryService } = await import('../src/services/gallery-service.js'));
-    ({ folderRepository, imageRepository, appSettingsRepository } = await import('../src/db/repositories.js'));
+    ({folderRepository, imageRepository, appSettingsRepository} = await import('../src/db/repositories.js'));
+    await (await import('../src/db/repositories.js')).initRepositories();
 
     await Promise.all([
       fs.mkdir(appConfig.galleryRoot, { recursive: true }),
@@ -129,7 +130,7 @@ describe.sequential('animated AVIF feed support', () => {
   });
 
   it('repairs legacy animated AVIF timestamps so recent feed ordering follows scan-time fallback values', async () => {
-    const folder = createFolder('albums');
+    const folder = await createFolder('albums');
     const recentRelativePath = 'albums/recent.jpg';
     const avifRelativePath = 'albums/animated.avif';
     const recentAbsolutePath = await createSourceFile(recentRelativePath, 'recent-jpg');
@@ -145,7 +146,7 @@ describe.sequential('animated AVIF feed support', () => {
     const recentStats = await fs.stat(recentAbsolutePath);
     const avifStats = await fs.stat(avifAbsolutePath);
 
-    const recentImage = imageRepository.upsert({
+    const recentImage = await imageRepository.upsert({
       folderId: folder.id,
       filename: 'recent.jpg',
       extension: '.jpg',
@@ -171,7 +172,7 @@ describe.sequential('animated AVIF feed support', () => {
       playbackStrategy: 'preview'
     });
 
-    const avifImage = imageRepository.upsert({
+    const avifImage = await imageRepository.upsert({
       folderId: folder.id,
       filename: 'animated.avif',
       extension: '.avif',
@@ -197,7 +198,7 @@ describe.sequential('animated AVIF feed support', () => {
       playbackStrategy: 'preview'
     });
 
-    expect(galleryService.getFeed(1, 10, 'recent').items.map((item) => item.id)).toEqual([recentImage.id, avifImage.id]);
+    expect((await galleryService.getFeed(1, 10, 'recent')).items.map((item) => item.id)).toEqual([recentImage.id, avifImage.id]);
 
     await scannerService.scanAll('manual');
 
@@ -206,12 +207,12 @@ describe.sequential('animated AVIF feed support', () => {
       fileSize: avifStats.size
     });
 
-    const refreshedAvif = imageRepository.getByRelativePath(avifRelativePath);
+    const refreshedAvif = await imageRepository.getByRelativePath(avifRelativePath);
     expect(refreshedAvif?.taken_at).toBe(Math.round(avifStats.mtimeMs));
     expect(refreshedAvif?.taken_at_source).toBe('mtime');
-    expect(appSettingsRepository.get(AVIF_METADATA_REPAIR_VERSION_SETTING_KEY)).toBe('1');
+    expect(await appSettingsRepository.get(AVIF_METADATA_REPAIR_VERSION_SETTING_KEY)).toBe('1');
 
-    expect(galleryService.getFeed(1, 10, 'recent').items.map((item) => item.id)).toEqual([avifImage.id, recentImage.id]);
+    expect((await galleryService.getFeed(1, 10, 'recent')).items.map((item) => item.id)).toEqual([avifImage.id, recentImage.id]);
 
     readMediaMetadataMock.mockClear();
 
@@ -221,7 +222,7 @@ describe.sequential('animated AVIF feed support', () => {
   });
 
   it('repairs stale animated AVIF flags stored as non-animated rows during the one-time AVIF metadata repair scan', async () => {
-    const folder = createFolder('legacy');
+    const folder = await createFolder('legacy');
     const relativePath = 'legacy/animated.avif';
     const absolutePath = await createSourceFile(relativePath, 'legacy-animated-avif');
     const timestamp = Date.parse('2026-05-21T16:40:00.000Z');
@@ -229,7 +230,7 @@ describe.sequential('animated AVIF feed support', () => {
     await fs.utimes(absolutePath, timestamp / 1000, timestamp / 1000);
 
     const stats = await fs.stat(absolutePath);
-    const image = imageRepository.upsert({
+    const image = await imageRepository.upsert({
       folderId: folder.id,
       filename: 'animated.avif',
       extension: '.avif',
@@ -259,7 +260,7 @@ describe.sequential('animated AVIF feed support', () => {
 
     await scannerService.scanAll('manual');
 
-    const refreshed = imageRepository.getByRelativePath(relativePath);
+    const refreshed = await imageRepository.getByRelativePath(relativePath);
     expect(refreshed?.is_animated).toBe(1);
   });
 
@@ -294,7 +295,7 @@ describe.sequential('animated AVIF feed support', () => {
       };
     });
 
-    const folder = createFolder('exif-album');
+    const folder = await createFolder('exif-album');
     const relativePath = 'exif-album/animated.avif';
     const absolutePath = await createSourceFile(relativePath, 'exif-animated-avif');
     const timestamp = Date.parse('2026-05-21T17:05:00.000Z');
@@ -302,7 +303,7 @@ describe.sequential('animated AVIF feed support', () => {
     await fs.utimes(absolutePath, timestamp / 1000, timestamp / 1000);
 
     const stats = await fs.stat(absolutePath);
-    imageRepository.upsert({
+    await imageRepository.upsert({
       folderId: folder.id,
       filename: 'animated.avif',
       extension: '.avif',
@@ -337,8 +338,8 @@ describe.sequential('animated AVIF feed support', () => {
     expect(readMediaMetadataMock).not.toHaveBeenCalled();
   });
 
-  function createFolder(folderPath: string): FolderRecord {
-    return folderRepository.upsert({
+  async function createFolder(folderPath: string): Promise<FolderRecord> {
+    return await folderRepository.upsert({
       slug: folderPath,
       name: path.posix.basename(folderPath),
       folderPath

@@ -30,7 +30,7 @@ describe('gallery root media detection', () => {
     expect(countSupportedRootMediaFiles(tempRoot)).toBe(2);
   });
 
-  it('returns zero when the gallery root does not exist', () => {
+  it('returns zero when the gallery root does not exist', async () => {
     expect(countSupportedRootMediaFiles(path.join(tempRoot, 'missing-root'))).toBe(0);
   });
 });

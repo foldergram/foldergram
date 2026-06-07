@@ -46,6 +46,8 @@ import type {
   RebuildThumbnailsResult,
   ScanProgress,
   FolderSummary,
+  LikeIdsPayload,
+  PaginatedFolders,
   TrashImageResult,
   TrashImagesPayload
 } from '../types/api';
@@ -114,9 +116,8 @@ export function fetchMomentFeed(id: string, page = 1, limit = 24) {
   return requestJson<MomentFeedPayload>(`/api/feed/moments/${encodeURIComponent(id)}?page=${page}&limit=${limit}`);
 }
 
-export async function fetchFolders() {
-  const payload = await requestJson<{ items: FolderSummary[] }>('/api/folders');
-  return payload.items;
+export function fetchFolders(page = 1, limit = 24) {
+  return requestJson<PaginatedFolders>(`/api/folders?page=${page}&limit=${limit}`);
 }
 
 export function fetchFolder(slug: string) {
@@ -203,8 +204,12 @@ export async function updateImageCaption(id: number, caption: string | null) {
   return payload.image;
 }
 
-export function fetchLikes() {
-  return requestJson<LikesPayload>('/api/likes');
+export function fetchLikeIds() {
+  return requestJson<LikeIdsPayload>('/api/likes/ids');
+}
+
+export function fetchLikes(page = 1, limit = 24) {
+  return requestJson<LikesPayload>(`/api/likes?page=${page}&limit=${limit}`);
 }
 
 export function fetchCollections() {

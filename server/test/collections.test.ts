@@ -47,7 +47,8 @@ describe.sequential('bookmark collections', () => {
     vi.resetModules();
     ({ appConfig } = await import('../src/config/env.js'));
     ({ galleryService } = await import('../src/services/gallery-service.js'));
-    ({ collectionRepository, folderRepository, imageRepository } = await import('../src/db/repositories.js'));
+    ({collectionRepository, folderRepository, imageRepository} = await import('../src/db/repositories.js'));
+    await (await import('../src/db/repositories.js')).initRepositories();
 
     await Promise.all([
       fs.mkdir(appConfig.galleryRoot, { recursive: true }),
@@ -62,10 +63,10 @@ describe.sequential('bookmark collections', () => {
     await fs.rm(tempRoot, { recursive: true, force: true });
   });
 
-  it('creates exactly one Saved default collection', () => {
-    const first = collectionRepository.ensureDefaultCollection();
-    const second = collectionRepository.ensureDefaultCollection();
-    const summaries = collectionRepository.listSummaries();
+  it('creates exactly one Saved default collection', async () => {
+    const first = await collectionRepository.ensureDefaultCollection();
+    const second = await collectionRepository.ensureDefaultCollection();
+    const summaries = await collectionRepository.listSummaries();
 
     expect(first.id).toBe(second.id);
     expect(first.slug).toBe('saved');
@@ -76,54 +77,54 @@ describe.sequential('bookmark collections', () => {
   it('adds custom collection membership through Saved', async () => {
     const image = await createIndexedMedia('trips', 'photo-a.jpg', 1_800_000_000_000);
 
-    const custom = galleryService.createCollection('Trip Picks');
+    const custom = await galleryService.createCollection('Trip Picks');
     expect(custom).toMatchObject({ slug: 'trip-picks', name: 'Trip Picks', isDefault: false });
 
-    expect(galleryService.addImageToCollection('trip-picks', image.id)).toMatchObject({
+    expect(await galleryService.addImageToCollection('trip-picks', image.id)).toMatchObject({
       imageId: image.id,
       isSaved: true
     });
 
-    const memberships = galleryService.getImageCollections(image.id);
+    const memberships = await galleryService.getImageCollections(image.id);
     expect(memberships?.isSaved).toBe(true);
     expect(memberships?.items.find((collection) => collection.slug === 'saved')?.containsImage).toBe(true);
     expect(memberships?.items.find((collection) => collection.slug === 'trip-picks')?.containsImage).toBe(true);
-    expect(galleryService.getCollectionImages('saved', 1, 20)?.items.map((item) => item.id)).toEqual([image.id]);
-    expect(galleryService.getCollectionImages('trip-picks', 1, 20)?.items.map((item) => item.id)).toEqual([image.id]);
+    expect((await galleryService.getCollectionImages('saved', 1, 20))?.items.map((item) => item.id)).toEqual([image.id]);
+    expect((await galleryService.getCollectionImages('trip-picks', 1, 20))?.items.map((item) => item.id)).toEqual([image.id]);
   });
 
   it('removes custom memberships when a post is unsaved', async () => {
     const image = await createIndexedMedia('trips-unsave', 'photo-a.jpg', 1_800_000_005_000);
-    galleryService.createCollection('Trip Picks');
+    await galleryService.createCollection('Trip Picks');
 
-    expect(galleryService.addImageToCollection('trip-picks', image.id)).toMatchObject({
+    expect(await galleryService.addImageToCollection('trip-picks', image.id)).toMatchObject({
       imageId: image.id,
       isSaved: true
     });
-    expect(galleryService.unsaveImage(image.id)).toMatchObject({
+    expect(await galleryService.unsaveImage(image.id)).toMatchObject({
       imageId: image.id,
       isSaved: false
     });
 
-    const memberships = galleryService.getImageCollections(image.id);
+    const memberships = await galleryService.getImageCollections(image.id);
     expect(memberships?.isSaved).toBe(false);
     expect(memberships?.items.find((collection) => collection.slug === 'saved')?.containsImage).toBe(false);
     expect(memberships?.items.find((collection) => collection.slug === 'trip-picks')?.containsImage).toBe(false);
-    expect(galleryService.getCollectionImages('saved', 1, 20)?.items).toHaveLength(0);
-    expect(galleryService.getCollectionImages('trip-picks', 1, 20)?.items).toHaveLength(0);
+    expect((await galleryService.getCollectionImages('saved', 1, 20))?.items).toHaveLength(0);
+    expect((await galleryService.getCollectionImages('trip-picks', 1, 20))?.items).toHaveLength(0);
   });
 
   it('removing a post from a custom collection keeps it saved', async () => {
     const image = await createIndexedMedia('trips-remove-custom', 'photo-a.jpg', 1_800_000_007_500);
-    galleryService.createCollection('Trip Picks');
-    galleryService.addImageToCollection('trip-picks', image.id);
+    await galleryService.createCollection('Trip Picks');
+    await galleryService.addImageToCollection('trip-picks', image.id);
 
-    expect(galleryService.removeImageFromCollection('trip-picks', image.id)).toMatchObject({
+    expect(await galleryService.removeImageFromCollection('trip-picks', image.id)).toMatchObject({
       imageId: image.id,
       isSaved: true
     });
 
-    const memberships = galleryService.getImageCollections(image.id);
+    const memberships = await galleryService.getImageCollections(image.id);
     expect(memberships?.isSaved).toBe(true);
     expect(memberships?.items.find((collection) => collection.slug === 'saved')?.containsImage).toBe(true);
     expect(memberships?.items.find((collection) => collection.slug === 'trip-picks')?.containsImage).toBe(false);
@@ -131,15 +132,15 @@ describe.sequential('bookmark collections', () => {
 
   it('removing the default collection membership clears every collection membership', async () => {
     const image = await createIndexedMedia('trips-remove-default', 'photo-a.jpg', 1_800_000_009_000);
-    galleryService.createCollection('Trip Picks');
-    galleryService.addImageToCollection('trip-picks', image.id);
+    await galleryService.createCollection('Trip Picks');
+    await galleryService.addImageToCollection('trip-picks', image.id);
 
-    expect(galleryService.removeImageFromCollection('saved', image.id)).toMatchObject({
+    expect(await galleryService.removeImageFromCollection('saved', image.id)).toMatchObject({
       imageId: image.id,
       isSaved: false
     });
 
-    const memberships = galleryService.getImageCollections(image.id);
+    const memberships = await galleryService.getImageCollections(image.id);
     expect(memberships?.isSaved).toBe(false);
     expect(memberships?.items.find((collection) => collection.slug === 'saved')?.containsImage).toBe(false);
     expect(memberships?.items.find((collection) => collection.slug === 'trip-picks')?.containsImage).toBe(false);
@@ -148,22 +149,22 @@ describe.sequential('bookmark collections', () => {
   it('does not save to the default collection when the target custom collection is missing', async () => {
     const image = await createIndexedMedia('missing-target', 'photo-a.jpg', 1_800_000_010_000);
 
-    expect(galleryService.addImageToCollection('does-not-exist', image.id)).toBeNull();
-    expect(collectionRepository.isImageSaved(image.id)).toBe(false);
+    expect(await galleryService.addImageToCollection('does-not-exist', image.id)).toBeNull();
+    expect(await collectionRepository.isImageSaved(image.id)).toBe(false);
   });
 
   it('repairs legacy custom-only collection memberships into Saved', async () => {
     const image = await createIndexedMedia('repair-membership', 'photo-a.jpg', 1_800_000_012_500);
-    galleryService.createCollection('Repair Picks');
-    galleryService.addImageToCollection('repair-picks', image.id);
+    await galleryService.createCollection('Repair Picks');
+    await galleryService.addImageToCollection('repair-picks', image.id);
 
-    collectionRepository.removeImage('saved', image.id);
-    expect(collectionRepository.isImageSaved(image.id)).toBe(false);
-    expect(galleryService.getImageCollections(image.id)?.items.find((collection) => collection.slug === 'repair-picks')?.containsImage).toBe(true);
+    await collectionRepository.removeImage('saved', image.id);
+    expect(await collectionRepository.isImageSaved(image.id)).toBe(false);
+    expect((await galleryService.getImageCollections(image.id))?.items.find((collection) => collection.slug === 'repair-picks')?.containsImage).toBe(true);
 
-    expect(collectionRepository.repairDefaultMemberships()).toBe(1);
+    expect(await collectionRepository.repairDefaultMemberships()).toBe(1);
 
-    const memberships = galleryService.getImageCollections(image.id);
+    const memberships = await galleryService.getImageCollections(image.id);
     expect(memberships?.isSaved).toBe(true);
     expect(memberships?.items.find((collection) => collection.slug === 'saved')?.containsImage).toBe(true);
     expect(memberships?.items.find((collection) => collection.slug === 'repair-picks')?.containsImage).toBe(true);
@@ -171,33 +172,33 @@ describe.sequential('bookmark collections', () => {
 
   it('renames and deletes custom collections while preserving saved membership', async () => {
     const image = await createIndexedMedia('collection-management', 'photo-a.jpg', 1_800_000_015_000);
-    expect(galleryService.createCollection('Rename Me')).toMatchObject({
+    expect(await galleryService.createCollection('Rename Me')).toMatchObject({
       slug: 'rename-me',
       name: 'Rename Me',
       isDefault: false
     });
 
-    expect(galleryService.updateCollection('rename-me', 'Trip Archive')).toMatchObject({
+    expect(await galleryService.updateCollection('rename-me', 'Trip Archive')).toMatchObject({
       slug: 'rename-me',
       name: 'Trip Archive',
       isDefault: false
     });
-    expect(galleryService.addImageToCollection('rename-me', image.id)).toMatchObject({
+    expect(await galleryService.addImageToCollection('rename-me', image.id)).toMatchObject({
       imageId: image.id,
       isSaved: true
     });
 
-    expect(galleryService.deleteCollection('rename-me')).toMatchObject({
+    expect(await galleryService.deleteCollection('rename-me')).toMatchObject({
       slug: 'rename-me',
       name: 'Trip Archive'
     });
-    expect(galleryService.getCollectionImages('rename-me', 1, 20)).toBeNull();
+    expect(await galleryService.getCollectionImages('rename-me', 1, 20)).toBeNull();
 
-    const memberships = galleryService.getImageCollections(image.id);
+    const memberships = await galleryService.getImageCollections(image.id);
     expect(memberships?.isSaved).toBe(true);
     expect(memberships?.items.some((collection) => collection.slug === 'rename-me')).toBe(false);
     expect(memberships?.items.find((collection) => collection.slug === 'saved')?.containsImage).toBe(true);
-    expect(galleryService.getCollectionImages('saved', 1, 20)?.items.map((item) => item.id)).toEqual([image.id]);
+    expect((await galleryService.getCollectionImages('saved', 1, 20))?.items.map((item) => item.id)).toEqual([image.id]);
   });
 
   it('filters hidden collection members while keeping membership metadata', async () => {
@@ -208,52 +209,52 @@ describe.sequential('bookmark collections', () => {
     const story = await createIndexedMedia('story-capsule', 'story.jpg', 1_800_000_024_000, 'story_capsule');
 
     for (const image of [visible, cover, deleted, trashed, story]) {
-      expect(galleryService.saveImage(image.id)).toMatchObject({ imageId: image.id, isSaved: true });
+      expect(await galleryService.saveImage(image.id)).toMatchObject({ imageId: image.id, isSaved: true });
     }
-    imageRepository.markDeleted(deleted.relative_path);
-    imageRepository.moveToTrash(trashed.id);
+    await imageRepository.markDeleted(deleted.relative_path);
+    await imageRepository.moveToTrash(trashed.id);
 
-    const saved = galleryService.getCollectionImages('saved', 1, 20);
+    const saved = await galleryService.getCollectionImages('saved', 1, 20);
     expect(saved?.total).toBe(1);
     expect(saved?.items.map((item) => item.id)).toEqual([visible.id]);
-    expect(collectionRepository.isImageSaved(deleted.id)).toBe(true);
-    expect(collectionRepository.isImageSaved(story.id)).toBe(true);
+    expect(await collectionRepository.isImageSaved(deleted.id)).toBe(true);
+    expect(await collectionRepository.isImageSaved(story.id)).toBe(true);
   });
 
   it('restores collection listing when a soft-deleted image reappears', async () => {
     const image = await createIndexedMedia('reactivated', 'photo-a.jpg', 1_800_000_030_000);
-    expect(galleryService.saveImage(image.id)).toMatchObject({ imageId: image.id, isSaved: true });
+    expect(await galleryService.saveImage(image.id)).toMatchObject({ imageId: image.id, isSaved: true });
 
-    imageRepository.markDeleted(image.relative_path);
-    expect(galleryService.getCollectionImages('saved', 1, 20)?.items).toHaveLength(0);
+    await imageRepository.markDeleted(image.relative_path);
+    expect((await galleryService.getCollectionImages('saved', 1, 20))?.items).toHaveLength(0);
 
     const reappeared = await createIndexedMedia('reactivated', 'photo-a.jpg', 1_800_000_031_000);
     expect(reappeared.id).toBe(image.id);
-    expect(galleryService.getCollectionImages('saved', 1, 20)?.items.map((item) => item.id)).toEqual([image.id]);
+    expect((await galleryService.getCollectionImages('saved', 1, 20))?.items.map((item) => item.id)).toEqual([image.id]);
   });
 
   it('cascades membership when an image row is hard-deleted', async () => {
     const image = await createIndexedMedia('hard-delete', 'photo-a.jpg', 1_800_000_040_000);
-    galleryService.createCollection('Keepers');
-    expect(galleryService.addImageToCollection('keepers', image.id)).toMatchObject({ imageId: image.id, isSaved: true });
+    await galleryService.createCollection('Keepers');
+    expect(await galleryService.addImageToCollection('keepers', image.id)).toMatchObject({ imageId: image.id, isSaved: true });
 
-    imageRepository.deleteById(image.id);
+    await imageRepository.deleteById(image.id);
 
-    expect(collectionRepository.isImageSaved(image.id)).toBe(false);
-    expect(galleryService.getCollectionImages('keepers', 1, 20)?.items).toHaveLength(0);
+    expect(await collectionRepository.isImageSaved(image.id)).toBe(false);
+    expect((await galleryService.getCollectionImages('keepers', 1, 20))?.items).toHaveLength(0);
   });
 
   it('rejects synthetic __all collection queries', async () => {
     await createIndexedMedia('all/default', 'photo-a.jpg', 1_800_000_045_000);
-    expect(galleryService.getCollectionImages('__all', 1, 20)).toBeNull();
+    expect(await galleryService.getCollectionImages('__all', 1, 20)).toBeNull();
   });
 
   it('includes isSaved on feed and detail payloads', async () => {
     const image = await createIndexedMedia('payloads', 'photo-a.jpg', 1_800_000_050_000);
-    expect(galleryService.saveImage(image.id)).toMatchObject({ imageId: image.id, isSaved: true });
+    expect(await galleryService.saveImage(image.id)).toMatchObject({ imageId: image.id, isSaved: true });
 
-    expect(galleryService.getFeed(1, 10, 'recent').items.find((item) => item.id === image.id)?.isSaved).toBe(true);
-    expect(galleryService.getImageDetail(image.id)?.isSaved).toBe(true);
+    expect((await galleryService.getFeed(1, 10, 'recent')).items.find((item) => item.id === image.id)?.isSaved).toBe(true);
+    expect((await galleryService.getImageDetail(image.id))?.isSaved).toBe(true);
   });
 
   async function createIndexedMedia(
@@ -262,7 +263,7 @@ describe.sequential('bookmark collections', () => {
     timestamp: number,
     role: FolderRole = 'normal'
   ): Promise<ImageRecord> {
-    const folder = folderRepository.upsert({
+    const folder = await folderRepository.upsert({
       slug: folderPath.replaceAll('/', '-'),
       name: path.posix.basename(folderPath),
       folderPath,
@@ -276,7 +277,7 @@ describe.sequential('bookmark collections', () => {
     await fs.mkdir(path.dirname(absolutePath), { recursive: true });
     await fs.writeFile(absolutePath, `source:${relativePath}`);
 
-    return imageRepository.upsert({
+    return await imageRepository.upsert({
       folderId: folder.id,
       filename,
       extension,

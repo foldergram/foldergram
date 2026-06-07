@@ -1690,6 +1690,18 @@
       direction = "next"
     }
 
+    if (event.key === '=') {
+      event.preventDefault()
+      appStore.toggleVideoPlaybackRate()
+      return
+    }
+
+    if (event.key === ' ') {
+      event.preventDefault()
+      void toggleVideoSurfacePlayback()
+      return
+    }
+
     if (!direction) {
       return
     }

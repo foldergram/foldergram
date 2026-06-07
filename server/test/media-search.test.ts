@@ -46,7 +46,8 @@ describe.sequential('media search', () => {
 
     ({ appConfig } = await import('../src/config/env.js'));
     ({ galleryService } = await import('../src/services/gallery-service.js'));
-    ({ folderRepository, imageRepository } = await import('../src/db/repositories.js'));
+    ({folderRepository, imageRepository} = await import('../src/db/repositories.js'));
+    await (await import('../src/db/repositories.js')).initRepositories();
 
     await Promise.all([
       fs.mkdir(appConfig.galleryRoot, { recursive: true }),
@@ -66,8 +67,8 @@ describe.sequential('media search', () => {
     const redPandaVideo = await createIndexedMedia('animals/red-pandas', 'RED_PANDA.mp4', 1_777_000_000_500);
     await createIndexedMedia('animals/alpacas', 'alpaca.jpg', 1_777_000_001_000);
 
-    const firstPage = galleryService.searchMedia('PANDA', 1, 1);
-    const secondPage = galleryService.searchMedia('PANDA', 2, 1);
+    const firstPage = await galleryService.searchMedia('PANDA', 1, 1);
+    const secondPage = await galleryService.searchMedia('PANDA', 2, 1);
 
     expect(firstPage.total).toBe(2);
     expect(firstPage.hasMore).toBe(true);
@@ -82,7 +83,7 @@ describe.sequential('media search', () => {
     const compact = await createIndexedMedia('wildlife', 'redpanda.jpg', 1_777_100_000_000);
     const underscored = await createIndexedMedia('wildlife', 'red_panda.mp4', 1_777_100_000_500);
 
-    const payload = galleryService.searchMedia('red panda', 1, 20);
+    const payload = await galleryService.searchMedia('red panda', 1, 20);
 
     expect(payload.total).toBe(2);
     expect(new Set(payload.items.map((item) => item.id))).toEqual(new Set([compact.id, underscored.id]));
@@ -90,11 +91,11 @@ describe.sequential('media search', () => {
 
   it('returns saved custom captions in search results', async () => {
     const compact = await createIndexedMedia('wildlife', 'redpanda.jpg', 1_777_100_010_000);
-    const updated = galleryService.updateImageCaption(compact.id, 'Red panda at dusk');
+    const updated = await galleryService.updateImageCaption(compact.id, 'Red panda at dusk');
 
     expect(updated?.caption).toBe('Red panda at dusk');
 
-    const payload = galleryService.searchMedia('red panda', 1, 20);
+    const payload = await galleryService.searchMedia('red panda', 1, 20);
     expect(payload.items.find((item) => item.id === compact.id)?.caption).toBe('Red panda at dusk');
   });
 
@@ -104,11 +105,11 @@ describe.sequential('media search', () => {
     const trashed = await createIndexedMedia('travel/sunrise', 'sunrise-trashed.jpg', 1_777_200_001_000);
     await createIndexedMedia('travel/sunrise', 'cover.jpg', 1_777_200_001_500);
 
-    imageRepository.markDeleted(deleted.relative_path);
-    expect(imageRepository.moveToTrash(trashed.id)).toBe(true);
+    await imageRepository.markDeleted(deleted.relative_path);
+    expect(await imageRepository.moveToTrash(trashed.id)).toBe(true);
 
-    const sunriseResults = galleryService.searchMedia('sunrise', 1, 20);
-    const coverResults = galleryService.searchMedia('cover', 1, 20);
+    const sunriseResults = await galleryService.searchMedia('sunrise', 1, 20);
+    const coverResults = await galleryService.searchMedia('cover', 1, 20);
 
     expect(sunriseResults.total).toBe(1);
     expect(sunriseResults.items.map((item) => item.id)).toEqual([visible.id]);
@@ -138,9 +139,9 @@ describe.sequential('media search', () => {
       })
     );
 
-    expect(galleryService.searchMedia('fujifilm', 1, 20).items.map((item) => item.id)).toEqual([cameraMatch.id]);
-    expect(galleryService.searchMedia('x100vi', 1, 20).items.map((item) => item.id)).toEqual([cameraMatch.id]);
-    expect(galleryService.searchMedia('summilux', 1, 20).items.map((item) => item.id)).toEqual([cameraMatch.id]);
+    expect((await galleryService.searchMedia('fujifilm', 1, 20)).items.map((item) => item.id)).toEqual([cameraMatch.id]);
+    expect((await galleryService.searchMedia('x100vi', 1, 20)).items.map((item) => item.id)).toEqual([cameraMatch.id]);
+    expect((await galleryService.searchMedia('summilux', 1, 20)).items.map((item) => item.id)).toEqual([cameraMatch.id]);
   });
 
   async function createIndexedMedia(
@@ -150,7 +151,7 @@ describe.sequential('media search', () => {
     exifJson = '{}'
   ): Promise<ImageRecord> {
     const folderName = path.posix.basename(folderPath);
-    const folder = folderRepository.upsert({
+    const folder = await folderRepository.upsert({
       slug: folderPath.replaceAll('/', '-'),
       name: folderName,
       folderPath
@@ -162,7 +163,7 @@ describe.sequential('media search', () => {
     const thumbnailPath = getThumbnailRelativePath(relativePath);
     const previewPath = getPreviewRelativePath(relativePath, mediaType);
 
-    return imageRepository.upsert({
+    return await imageRepository.upsert({
       folderId: folder.id,
       filename,
       extension,

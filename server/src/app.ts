@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { performance } from 'node:perf_hooks';
 
 import express from 'express';
 
@@ -9,6 +10,8 @@ import { requireTrustedMutationRequest } from './middleware/csrf-protection.js';
 import { blockPublicDemoMutations } from './middleware/public-demo-mode.js';
 import { apiRouter } from './routes/api.js';
 import { authService } from './services/auth-service.js';
+import { log } from './services/log-service.js';
+import { metricsService } from './services/metrics-service.js';
 import { lazyThumbnailsRouter, lazyPreviewsRouter } from './routes/lazy-derivatives.js';
 import { createProtectedStaticOptions } from './utils/media-response.js';
 
@@ -32,11 +35,29 @@ export function createApp() {
     app.use('/previews', requireMediaAuthentication, express.static(appConfig.previewsDir, createProtectedStaticOptions()));
   }
 
-  app.use('/api', (_request, response, next) => {
+  app.use('/api', (request, response, next) => {
     applyApiNoStoreHeaders(response);
+    const startedAt = performance.now();
+    response.on('finish', () => {
+      const elapsed = Math.round(performance.now() - startedAt);
+      metricsService.recordRequest(request.method, request.path, response.statusCode, elapsed);
+      const meta = { status: response.statusCode, elapsed: `${elapsed}ms` };
+      if (response.statusCode >= 500) {
+        log.error(`${request.method} ${request.path}`, meta);
+      } else {
+        log.info(`${request.method} ${request.path}`, meta);
+      }
+    });
     next();
   });
   app.use('/api', blockPublicDemoMutations, requireTrustedMutationRequest, requireApiAuthentication, apiRouter);
+  app.get('/api/metrics', requireApiAuthentication, (_request, response) => {
+    response.json(metricsService.getSummary());
+  });
+  app.post('/api/metrics/reset', requireApiAuthentication, (_request, response) => {
+    metricsService.reset();
+    response.json({ ok: true });
+  });
 
   if (appConfig.nodeEnv === 'production') {
     const clientDist = path.join(repositoryRoot, 'client', 'dist');
@@ -55,7 +76,8 @@ export function createApp() {
     }
 
     const message = error instanceof Error ? error.message : 'Unexpected server error';
-    response.status(400).json({ message });
+    log.error('Unhandled request error', error instanceof Error ? error.stack : message);
+    response.status(500).json({ message });
   });
 
   return app;

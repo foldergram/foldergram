@@ -192,6 +192,10 @@ function switchToOriginalFallback() {
   isUsingOriginalFallback.value = true;
 }
 
+function applyPlaybackRate(player: MediaPlayerElement) {
+  player.playbackRate = appStore.videoPlaybackRate;
+}
+
 function syncMuted(player: MediaPlayerElement, muted: boolean) {
   const token = ++muteSyncToken;
   player.muted = muted;
@@ -219,6 +223,7 @@ async function syncPlayback() {
     return;
   }
 
+  applyPlaybackRate(player);
   syncMuted(player, appStore.videoMuted);
 
   try {
@@ -248,6 +253,7 @@ function bindPlayerEventListeners(player: MediaPlayerElement | null) {
   }
 
   const handleReady = () => {
+    applyPlaybackRate(player);
     void syncPlayback();
   };
   const handlePlay = () => {
@@ -365,6 +371,18 @@ watch(
   }
 );
 
+watch(
+  () => appStore.videoPlaybackRate,
+  () => {
+    const player = playerElement.value;
+    if (!player) {
+      return;
+    }
+
+    applyPlaybackRate(player);
+  }
+);
+
 watch(playerElement, (player) => {
   bindPlayerEventListeners(player);
 });
@@ -395,6 +413,8 @@ onBeforeUnmount(() => {
     // Ignore pause rejections before the provider is ready.
   });
 });
+
+defineExpose({ togglePlayback: handleSurfaceClick });
 </script>
 
 <style scoped>

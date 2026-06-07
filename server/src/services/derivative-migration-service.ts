@@ -1,6 +1,8 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
+import pLimit from 'p-limit';
+
 import {
   DERIVATIVE_STORAGE_LAYOUT_VERSION_SETTING_KEY,
   DERIVATIVE_STORAGE_MIGRATION_COMPLETE_AT_SETTING_KEY,
@@ -208,19 +210,19 @@ async function listDerivativeFiles(rootDir: string, currentRelativePath = ''): P
 }
 
 class DerivativeMigrationService {
-  isMigrationComplete(): boolean {
+  async isMigrationComplete(): Promise<boolean> {
     if (
-      appSettingsRepository.get(DERIVATIVE_STORAGE_LAYOUT_VERSION_SETTING_KEY) !== DERIVATIVE_STORAGE_LAYOUT_VERSION
-      || appSettingsRepository.get(DERIVATIVE_STORAGE_MIGRATION_COMPLETE_AT_SETTING_KEY) === null
+      await appSettingsRepository.get(DERIVATIVE_STORAGE_LAYOUT_VERSION_SETTING_KEY) !== DERIVATIVE_STORAGE_LAYOUT_VERSION
+      || await appSettingsRepository.get(DERIVATIVE_STORAGE_MIGRATION_COMPLETE_AT_SETTING_KEY) === null
     ) {
       return false;
     }
 
-    return imageRepository.countPendingDerivativeMigrationRows() === 0;
+    return await imageRepository.countPendingDerivativeMigrationRows() === 0;
   }
 
   async ensureMigrated(options: EnsureMigratedOptions = {}): Promise<DerivativeMigrationSummary> {
-    if (this.isMigrationComplete()) {
+    if (await this.isMigrationComplete()) {
       return {
         totalRows: 0,
         processedRows: 0,
@@ -238,18 +240,18 @@ class DerivativeMigrationService {
       };
     }
 
-    let cursor = Number.parseInt(appSettingsRepository.get(DERIVATIVE_STORAGE_MIGRATION_CURSOR_SETTING_KEY) ?? '0', 10);
+    let cursor = Number.parseInt((await appSettingsRepository.get(DERIVATIVE_STORAGE_MIGRATION_CURSOR_SETTING_KEY)) ?? '0', 10);
     if (!Number.isFinite(cursor) || cursor < 0) {
       cursor = 0;
     }
 
-    const totalRows = imageRepository.countAll();
+    const totalRows = await imageRepository.countAll();
     let repairedRows = 0;
     let repairErrors = 0;
     let migratedRows = 0;
     const progress: DerivativeMigrationProgress = {
       totalRows,
-      processedRows: cursor > 0 ? imageRepository.countUpToId(cursor) : 0,
+      processedRows: cursor > 0 ? await imageRepository.countUpToId(cursor) : 0,
       movedFiles: 0,
       missingFiles: 0,
       repairedFiles: 0,
@@ -266,7 +268,7 @@ class DerivativeMigrationService {
     emitProgress();
 
     for (;;) {
-      const rows = imageRepository.listByIdRange(cursor, MIGRATION_BATCH_SIZE);
+      const rows = await imageRepository.listByIdRange(cursor, MIGRATION_BATCH_SIZE);
       if (rows.length === 0) {
         break;
       }
@@ -304,7 +306,7 @@ class DerivativeMigrationService {
 
         migratedRows += 1;
         cursor = row.id;
-        appSettingsRepository.set(DERIVATIVE_STORAGE_MIGRATION_CURSOR_SETTING_KEY, String(cursor));
+        await appSettingsRepository.set(DERIVATIVE_STORAGE_MIGRATION_CURSOR_SETTING_KEY, String(cursor));
         emitProgress({
           processedRows: progress.processedRows + 1,
           missingFiles: progress.missingFiles + rowSummary.missingFiles
@@ -363,9 +365,9 @@ class DerivativeMigrationService {
       repairErrors = repairSummary.repairErrors;
     }
 
-    appSettingsRepository.set(DERIVATIVE_STORAGE_LAYOUT_VERSION_SETTING_KEY, DERIVATIVE_STORAGE_LAYOUT_VERSION);
-    appSettingsRepository.set(DERIVATIVE_STORAGE_MIGRATION_COMPLETE_AT_SETTING_KEY, nowIso());
-    appSettingsRepository.remove(DERIVATIVE_STORAGE_MIGRATION_CURSOR_SETTING_KEY);
+    await appSettingsRepository.set(DERIVATIVE_STORAGE_LAYOUT_VERSION_SETTING_KEY, DERIVATIVE_STORAGE_LAYOUT_VERSION);
+    await appSettingsRepository.set(DERIVATIVE_STORAGE_MIGRATION_COMPLETE_AT_SETTING_KEY, nowIso());
+    await appSettingsRepository.remove(DERIVATIVE_STORAGE_MIGRATION_CURSOR_SETTING_KEY);
 
     if (
       migratedRows > 0 ||
@@ -391,7 +393,7 @@ class DerivativeMigrationService {
       log.table('Derivative storage migration complete', rows, repairErrors > 0 ? 'warning' : 'success');
     }
 
-    const complete = repairErrors === 0 && this.isMigrationComplete();
+    const complete = repairErrors === 0 && await this.isMigrationComplete();
 
     return {
       ...progress,
@@ -404,7 +406,7 @@ class DerivativeMigrationService {
 
   async cleanupStaleDerivatives(): Promise<DerivativeCleanupSummary> {
     const cutoffIso = new Date(Date.now() - STALE_DERIVATIVE_RETENTION_MS).toISOString();
-    const references = imageRepository.listDerivativeReferences();
+    const references = await imageRepository.listDerivativeReferences();
     const pathState = new Map<string, DerivativeReferenceState>();
 
     for (const reference of references) {
@@ -413,7 +415,7 @@ class DerivativeMigrationService {
     }
 
     let deletedFiles = 0;
-    for (const candidate of imageRepository.listSoftDeletedDerivativeCandidates(cutoffIso)) {
+    for (const candidate of await imageRepository.listSoftDeletedDerivativeCandidates(cutoffIso)) {
       deletedFiles += await this.deleteIfCollectable(appConfig.thumbnailsDir, candidate.thumbnail_path, pathState);
       deletedFiles += await this.deleteIfCollectable(appConfig.previewsDir, candidate.preview_path, pathState);
     }
@@ -435,7 +437,7 @@ class DerivativeMigrationService {
       deletedOrphans += await this.deleteAbsolutePath(appConfig.previewsDir, absolutePath);
     }
 
-    appSettingsRepository.set(STALE_DERIVATIVE_GC_LAST_RUN_AT_SETTING_KEY, nowIso());
+    await appSettingsRepository.set(STALE_DERIVATIVE_GC_LAST_RUN_AT_SETTING_KEY, nowIso());
     if (deletedFiles > 0 || deletedOrphans > 0) {
       log.table('Stale derivative cleanup complete', [
         ['Deleted referenced files', deletedFiles],
@@ -461,7 +463,7 @@ class DerivativeMigrationService {
 
     if (!assetKey) {
       assetKey = generateAssetKey();
-      imageRepository.updateAssetKey(row.id, assetKey);
+      await imageRepository.updateAssetKey(row.id, assetKey);
       callbacks.onBackfilledAssetKey?.();
     }
 
@@ -495,7 +497,7 @@ class DerivativeMigrationService {
     }
 
     if (row.thumbnail_path !== resolvedThumbnailPath || row.preview_path !== resolvedPreviewPath) {
-      imageRepository.updateDerivativePaths(row.id, resolvedThumbnailPath, resolvedPreviewPath);
+      await imageRepository.updateDerivativePaths(row.id, resolvedThumbnailPath, resolvedPreviewPath);
     }
 
     return {
@@ -516,10 +518,13 @@ class DerivativeMigrationService {
     let repairedRows = 0;
     let missingFiles = 0;
     let repairErrors = 0;
+    const fatalErrors: string[] = [];
 
-    for (const row of imageRepository.listActive()) {
+    const limit = pLimit(appConfig.scanDerivativeConcurrency);
+    const rows = await imageRepository.listActive();
+
+    await Promise.all(rows.map((row) => limit(async () => {
       const currentFile = normalizePath(row.relative_path);
-      let fatalRepairError: string | null = null;
 
       try {
         const repairSummary = await this.repairRow(row, {
@@ -529,8 +534,8 @@ class DerivativeMigrationService {
           onRepairingPreview: () => {
             callbacks.onRepairingPreview?.(currentFile);
           },
-          onRegeneratingDerivatives: (repairedFiles) => {
-            callbacks.onRegeneratingDerivatives?.(currentFile, repairedFiles);
+          onRegeneratingDerivatives: (repairedFilesCount) => {
+            callbacks.onRegeneratingDerivatives?.(currentFile, repairedFilesCount);
           }
         });
 
@@ -549,7 +554,7 @@ class DerivativeMigrationService {
           );
 
           if (appConfig.scanMediaErrorMode === 'fail') {
-            fatalRepairError = `${currentFile}: ${repairSummary.regenerationError.message}`;
+            fatalErrors.push(`${currentFile}: ${repairSummary.regenerationError.message}`);
           }
         }
 
@@ -565,13 +570,13 @@ class DerivativeMigrationService {
         logDerivativeRepairFailure(currentFile, null, message, error);
 
         if (appConfig.scanMediaErrorMode === 'fail') {
-          throw new Error(`${currentFile}: ${message}`);
+          fatalErrors.push(`${currentFile}: ${message}`);
         }
       }
+    })));
 
-      if (fatalRepairError) {
-        throw new Error(fatalRepairError);
-      }
+    if (fatalErrors.length > 0) {
+      throw new Error(fatalErrors[0]);
     }
 
     return {
@@ -596,7 +601,7 @@ class DerivativeMigrationService {
 
     if (!assetKey) {
       assetKey = generateAssetKey();
-      imageRepository.updateAssetKey(row.id, assetKey);
+      await imageRepository.updateAssetKey(row.id, assetKey);
     }
 
     const mediaType = row.media_type ?? getMediaTypeFromExtension(row.extension || path.extname(row.relative_path));
@@ -670,7 +675,7 @@ class DerivativeMigrationService {
     const resolvedPreviewPath = previewExists ? targetPreviewPath : row.preview_path;
 
     if (row.thumbnail_path !== resolvedThumbnailPath || row.preview_path !== resolvedPreviewPath) {
-      imageRepository.updateDerivativePaths(row.id, resolvedThumbnailPath, resolvedPreviewPath);
+      await imageRepository.updateDerivativePaths(row.id, resolvedThumbnailPath, resolvedPreviewPath);
     }
 
     let missingFiles = 0;

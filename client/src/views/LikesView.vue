@@ -24,7 +24,14 @@
       <div v-else-if="likesStore.loading" class="card p-8 text-center">
         <p class="text-muted">{{ likesStore.loadingLabel }}</p>
       </div>
-      <FolderGrid v-else :items="likesStore.items" />
+      <template v-else>
+        <FolderGrid :items="likesStore.items" />
+        <InfiniteLoader
+          :loading="likesStore.loadingMore"
+          :has-more="likesStore.hasMore"
+          @load-more="likesStore.loadMore()"
+        />
+      </template>
     </template>
   </section>
 </template>
@@ -36,6 +43,7 @@ import { useI18n } from 'vue-i18n';
 import EmptyState from '../components/EmptyState.vue';
 import ErrorState from '../components/ErrorState.vue';
 import FolderGrid from '../components/FolderGrid.vue';
+import InfiniteLoader from '../components/InfiniteLoader.vue';
 import { useAppStore } from '../stores/app';
 import { useLikesStore } from '../stores/likes';
 

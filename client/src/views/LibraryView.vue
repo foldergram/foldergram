@@ -20,7 +20,7 @@
       >
         <div class="text-center">
           <p class="m-0 text-[1.35rem] font-bold tracking-tight">
-            {{ formatCount(foldersStore.items.length) }}
+            {{ formatCount(appStore.stats?.folders ?? foldersStore.items.length) }}
           </p>
           <p class="m-0 text-muted text-[0.72rem] uppercase tracking-[0.08em]">
             {{ t('libraryPage.stats.folders') }}
@@ -29,7 +29,7 @@
         <div class="w-px h-8 bg-border"></div>
         <div class="text-center">
           <p class="m-0 text-[1.35rem] font-bold tracking-tight">
-            {{ formatCount(totalIndexedImages) }}
+            {{ formatCount(appStore.stats?.indexedImages ?? totalIndexedImages) }}
           </p>
           <p class="m-0 text-muted text-[0.72rem] uppercase tracking-[0.08em]">
             {{ t('libraryPage.stats.posts') }}
@@ -204,6 +204,13 @@
           </button>
         </div>
       </section>
+
+      <InfiniteLoader
+        v-if="foldersStore.items.length > 0"
+        :loading="foldersStore.loadingList"
+        :has-more="foldersStore.listHasMore"
+        @load-more="foldersStore.loadMore()"
+      />
     </template>
 
     <!-- Context menu modal -->
@@ -334,6 +341,7 @@
   import ConfirmDialog from "../components/ConfirmDialog.vue"
   import EmptyState from "../components/EmptyState.vue"
   import ErrorState from "../components/ErrorState.vue"
+  import InfiniteLoader from "../components/InfiniteLoader.vue"
   import { deleteFolder } from "../api/gallery"
   import { useAppStore } from "../stores/app"
   import { useAuthStore } from "../stores/auth"
@@ -454,18 +462,28 @@
     deleteSourceFolder.value ? t("libraryPage.delete.loadingSubtree") : t("libraryPage.delete.loadingFolder"),
   )
 
-  function matchesSearch(folder: FolderSummary, query: string) {
-    if (!query) {
-      return true
+  function fuzzyScore(target: string, query: string): number {
+    let qi = 0, score = 0, run = 0
+    for (let i = 0; i < target.length && qi < query.length; i++) {
+      if (target[i] === query[qi]) {
+        qi++
+        run++
+        score += run
+      } else {
+        run = 0
+      }
     }
+    return qi === query.length ? score : -1
+  }
 
-    return [
-      folder.slug,
-      folder.name,
-      formatDisplayFolderTitle(folder),
-      folder.breadcrumb ?? "",
-      folder.folderPath,
-    ].some(value => value.toLowerCase().includes(query))
+  function bestFuzzyScore(folder: FolderSummary, query: string): number {
+    return Math.max(
+      fuzzyScore(folder.name.toLowerCase(), query),
+      fuzzyScore(formatDisplayFolderTitle(folder).toLowerCase(), query),
+      fuzzyScore((folder.breadcrumb ?? "").toLowerCase(), query),
+      fuzzyScore(folder.folderPath.toLowerCase(), query),
+      fuzzyScore(folder.slug.toLowerCase(), query),
+    )
   }
 
   function formatDisplayFolderTitle(folder: FolderSummary) {
@@ -494,12 +512,17 @@
     }
   }
 
-  const filteredFolders = computed(() =>
-    foldersStore.items
-      .filter(folder => matchesSearch(folder, normalizedQuery.value))
-      .slice()
-      .sort(sortFolders),
-  )
+  const filteredFolders = computed(() => {
+    const query = normalizedQuery.value
+    if (!query) {
+      return foldersStore.items.slice().sort(sortFolders)
+    }
+    return foldersStore.items
+      .map(folder => ({ folder, score: bestFuzzyScore(folder, query) }))
+      .filter(({ score }) => score >= 0)
+      .sort((a, b) => b.score - a.score || sortFolders(a.folder, b.folder))
+      .map(({ folder }) => folder)
+  })
 
   function openMenu(folder: FolderSummary) {
     menuFolder.value = folder

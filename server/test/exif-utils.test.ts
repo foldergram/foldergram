@@ -10,7 +10,7 @@ describe('EXIF timestamp helpers', () => {
     expect(normalizeTakenAtValue('not-a-date')).toBeNull();
   });
 
-  it('prefers EXIF capture time and tracks source provenance', () => {
+  it('prefers EXIF capture time and tracks source provenance', async () => {
     expect(
       resolveTakenAt({
         exifTakenAt: 3600,
@@ -29,7 +29,7 @@ describe('EXIF timestamp helpers', () => {
     });
   });
 
-  it('preserves or infers stable fallback provenance when EXIF is missing', () => {
+  it('preserves or infers stable fallback provenance when EXIF is missing', async () => {
     expect(
       resolveTakenAt({
         exifTakenAt: null,
@@ -82,7 +82,7 @@ describe('EXIF timestamp helpers', () => {
     });
   });
 
-  it('serializes and deserializes curated EXIF payloads', () => {
+  it('serializes and deserializes curated EXIF payloads', async () => {
     const serialized = serializeImageExifData({
       cameraMake: 'Apple',
       cameraModel: 'iPhone 15 Pro',
@@ -111,7 +111,7 @@ describe('EXIF timestamp helpers', () => {
     });
   });
 
-  it('treats empty or invalid EXIF payloads as absent data', () => {
+  it('treats empty or invalid EXIF payloads as absent data', async () => {
     expect(serializeImageExifData(null)).toBeNull();
     expect(serializeImageExifData(null, { storeEmptyObject: true })).toBe('{}');
     expect(deserializeImageExifData('{}')).toBeNull();

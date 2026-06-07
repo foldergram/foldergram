@@ -4,7 +4,7 @@ const HIDDEN_SEGMENT_PATTERN = /^\./;
 const PATH_EDGE_SLASH_PATTERN = /^\/+|\/+$/g;
 
 export function normalizePath(value: string): string {
-  return value.replace(/\\/g, '/');
+  return (value ?? '').replace(/\\/g, '/');
 }
 
 function trimEdgeSlashes(value: string): string {

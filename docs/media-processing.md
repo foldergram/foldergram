@@ -80,7 +80,7 @@ characters of `asset_key`.
 | Source media | Thumbnail output | Preview output |
 | --- | --- | --- |
 | Image | `.webp` | `.webp` |
-| Video | `.webp` | `.mp4` or direct original playback |
+| Video | `.webp` | direct original playback (compatible MP4) or `.mp4` transcode on lazy request |
 
 Examples:
 
@@ -160,7 +160,11 @@ Video thumbnails are generated with `ffmpeg`:
 
 ## Video preview generation
 
-When a video needs a derived preview, Foldergram transcodes it with `ffmpeg` to:
+Foldergram skips MP4 preview transcoding during scans. Compatible originals are served directly for detail playback instead.
+
+If a legacy-generated preview already exists on disk, it is used as the initial playback source and the `HD` toggle is offered when the original is higher resolution. Missing previews are not regenerated.
+
+When `DERIVATIVE_MODE=lazy` and a preview is explicitly requested, it is transcoded on demand with `ffmpeg` to:
 
 - H.264 video
 - AAC audio when audio is present
@@ -172,8 +176,7 @@ When a video needs a derived preview, Foldergram transcodes it with `ffmpeg` to:
 
 ## Direct-original video playback
 
-Foldergram can mark the original video as eligible for direct playback in the
-detail player when all of these are true:
+Foldergram marks the original video as eligible for direct playback when all of these are true:
 
 - the file extension is `.mp4`
 - the container is compatible with MP4
@@ -184,9 +187,9 @@ detail player when all of these are true:
 When that happens:
 
 - `playbackStrategy` is set to `original`
-- generated previews still remain the default playback source
-- the detail player can expose an `HD` switch when the original is compatible and higher resolution than the generated preview
-- feed cards and other list surfaces continue to use generated preview media
+- the detail player uses the original as its primary playback source
+- the `HD` toggle is offered when a generated preview exists at lower resolution
+- feed cards continue to use the thumbnail poster; no preview stream is needed for cards
 
 ## GIF handling
 

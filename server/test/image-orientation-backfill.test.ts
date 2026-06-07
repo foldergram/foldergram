@@ -57,7 +57,8 @@ describe.sequential('image orientation backfill', () => {
 
     ({ appConfig } = await import('../src/config/env.js'));
     ({ scannerService } = await import('../src/services/scanner-service.js'));
-    ({ folderRepository, imageRepository } = await import('../src/db/repositories.js'));
+    ({folderRepository, imageRepository} = await import('../src/db/repositories.js'));
+    await (await import('../src/db/repositories.js')).initRepositories();
 
     await Promise.all([
       fs.mkdir(appConfig.galleryRoot, { recursive: true }),
@@ -106,7 +107,7 @@ describe.sequential('image orientation backfill', () => {
   });
 
   it('refreshes unchanged legacy rows whose display orientation has not been backfilled yet', async () => {
-    const folder = createFolder('phones');
+    const folder = await createFolder('phones');
     const relativePath = 'phones/rotated-note9.jpg';
     const absolutePath = path.join(appConfig.galleryRoot, relativePath);
     const sourceContents = 'legacy-jpeg-contents';
@@ -119,7 +120,7 @@ describe.sequential('image orientation backfill', () => {
     const thumbnailPath = getThumbnailRelativePath(relativePath);
     const previewPath = getPreviewRelativePath(relativePath, 'image');
 
-    const indexed = imageRepository.upsert({
+    const indexed = await imageRepository.upsert({
       folderId: folder.id,
       filename: 'rotated-note9.jpg',
       extension: '.jpg',
@@ -151,14 +152,14 @@ describe.sequential('image orientation backfill', () => {
     expect(readMediaMetadataMock).toHaveBeenCalledTimes(1);
     expect(generateDerivativesMock).toHaveBeenCalled();
 
-    const refreshed = imageRepository.getByRelativePath(relativePath);
+    const refreshed = await imageRepository.getByRelativePath(relativePath);
     expect(refreshed?.width).toBe(800);
     expect(refreshed?.height).toBe(1200);
     expect(refreshed?.display_orientation).toBe(6);
   });
 
-  function createFolder(folderPath: string): FolderRecord {
-    return folderRepository.upsert({
+  async function createFolder(folderPath: string): Promise<FolderRecord> {
+    return await folderRepository.upsert({
       slug: folderPath,
       name: path.posix.basename(folderPath),
       folderPath

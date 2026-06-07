@@ -11,7 +11,7 @@ type DatabaseModule = typeof import('../src/db/database.js');
 
 const testDirectory = path.dirname(fileURLToPath(import.meta.url));
 const serverRoot = path.resolve(testDirectory, '..');
-const bundledMigrationsDirectory = path.join(serverRoot, 'db', 'migrations');
+const bundledMigrationsDirectory = path.join(serverRoot, 'db', 'migrations', 'sqlite');
 
 function listAppliedVersions(database: DatabaseSync): string[] {
   if (!tableExists(database, 'schema_migrations')) {
@@ -520,6 +520,10 @@ THIS IS NOT VALID SQL;
     expect(result.databasePath).toBe(':memory:');
 
     const { databaseManager } = await importDatabaseModule();
-    expect(tableExists(databaseManager.connection, 'folders')).toBe(true);
+    const driver = await databaseManager.getConnection();
+    const { rows } = await driver.query<{ name: string }>(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'folders'"
+    );
+    expect(rows[0]?.name).toBe('folders');
   });
 });

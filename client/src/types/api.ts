@@ -249,8 +249,18 @@ export interface PlacesRebuildResult {
   skipped: number;
 }
 
-export interface LikesPayload {
-  items: FeedItem[];
+export interface LikesPayload extends PaginatedFeed {}
+
+export interface LikeIdsPayload {
+  ids: number[];
+}
+
+export interface PaginatedFolders {
+  items: FolderSummary[];
+  page: number;
+  limit: number;
+  total: number;
+  hasMore: boolean;
 }
 
 export interface CollectionSummary {

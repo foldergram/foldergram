@@ -24,6 +24,7 @@ const envSchema = z.object({
   PREVIEWS_DIR: z.string().optional(),
   LOG_VERBOSE: z.string().optional(),
   SCAN_MEDIA_ERROR_MODE: z.enum(['skip', 'fail']).default('skip'),
+  SCAN_FOLDER_CONCURRENCY: z.coerce.number().int().min(1).max(32).default(4),
   SCAN_DISCOVERY_CONCURRENCY: z.coerce.number().int().min(1).max(32).default(4),
   SCAN_DERIVATIVE_CONCURRENCY: z.coerce.number().int().min(1).max(32).default(4),
   PUBLIC_DEMO_MODE: z.string().optional(),
@@ -31,10 +32,18 @@ const envSchema = z.object({
   GALLERY_EXCLUDED_FOLDERS: z.string().optional(),
   IMAGE_DETAIL_SOURCE: z.enum(['preview', 'original']).default('preview'),
   DERIVATIVE_MODE: z.enum(['eager', 'lazy']).default('eager'),
-  NODE_ENV: z.enum(['development', 'test', 'production']).default('development')
+  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  DB_DRIVER: z.enum(['sqlite', 'postgres']).default('sqlite'),
+  DATABASE_URL: z.string().optional(),
+  LOG_SLOW_QUERY_MS: z.coerce.number().int().min(0).default(200),
+  REELS_CANDIDATE_LIMIT: z.coerce.number().int().min(100).default(2000)
 });
 
 const parsed = envSchema.parse(process.env);
+
+if (parsed.DB_DRIVER === 'postgres' && !parsed.DATABASE_URL) {
+  throw new Error('DATABASE_URL is required when DB_DRIVER=postgres');
+}
 const isProduction = parsed.NODE_ENV === 'production';
 const devClientPort = parsed.DEV_CLIENT_PORT ?? 4141;
 const serverPort = isProduction
@@ -155,11 +164,16 @@ export const appConfig = {
   scanMediaErrorMode: parsed.SCAN_MEDIA_ERROR_MODE,
   publicDemoMode,
   csrfTrustedOrigins,
+  scanFolderConcurrency: parsed.SCAN_FOLDER_CONCURRENCY,
   scanDiscoveryConcurrency: parsed.SCAN_DISCOVERY_CONCURRENCY,
   scanDerivativeConcurrency: parsed.SCAN_DERIVATIVE_CONCURRENCY,
   databasePath: path.join(dbDir, 'gallery.sqlite'),
   geodataPath: path.join(geodataDir, 'geonames-cities500.sqlite'),
   geodataMetadataPath: path.join(geodataDir, 'geonames-cities500.meta.json'),
   imageDetailSource: parsed.IMAGE_DETAIL_SOURCE,
-  derivativeMode: parsed.DERIVATIVE_MODE
+  derivativeMode: parsed.DERIVATIVE_MODE,
+  dbDriver: parsed.DB_DRIVER,
+  databaseUrl: parsed.DATABASE_URL,
+  logSlowQueryMs: parsed.LOG_SLOW_QUERY_MS,
+  reelsCandidateLimit: parsed.REELS_CANDIDATE_LIMIT
 };

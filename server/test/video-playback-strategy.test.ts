@@ -43,7 +43,8 @@ describe.sequential('video playback strategy mapping', () => {
 
     ({ appConfig } = await import('../src/config/env.js'));
     ({ galleryService } = await import('../src/services/gallery-service.js'));
-    ({ folderRepository, imageRepository, maintenanceRepository, scanRunRepository } = await import('../src/db/repositories.js'));
+    ({folderRepository, imageRepository, maintenanceRepository, scanRunRepository} = await import('../src/db/repositories.js'));
+    await (await import('../src/db/repositories.js')).initRepositories();
   });
 
   afterAll(async () => {
@@ -53,7 +54,7 @@ describe.sequential('video playback strategy mapping', () => {
   });
 
   beforeEach(async () => {
-    maintenanceRepository.resetLibraryIndex();
+    await maintenanceRepository.resetLibraryIndex();
     await Promise.all([
       fs.rm(appConfig.galleryRoot, { recursive: true, force: true }),
       fs.rm(appConfig.thumbnailsDir, { recursive: true, force: true }),
@@ -67,25 +68,25 @@ describe.sequential('video playback strategy mapping', () => {
   });
 
   it('uses generated previews by default for videos while preserving original playback eligibility', async () => {
-    const folder = folderRepository.upsert({
+    const folder = await folderRepository.upsert({
       slug: 'clips',
       name: 'Clips',
       folderPath: 'clips'
     });
 
-    const image = createIndexedMedia(folder, 'photo-1.jpg', 1_000, 'preview');
-    const compatibleVideo = createIndexedMedia(folder, 'reel-1.mp4', 2_000, 'original', 14_000);
-    const transcodedVideo = createIndexedMedia(folder, 'reel-2.webm', 3_000, 'preview', 17_000);
+    const image = await createIndexedMedia(folder, 'photo-1.jpg', 1_000, 'preview');
+    const compatibleVideo = await createIndexedMedia(folder, 'reel-1.mp4', 2_000, 'original', 14_000);
+    const transcodedVideo = await createIndexedMedia(folder, 'reel-2.webm', 3_000, 'preview', 17_000);
 
-    folderRepository.setAvatar(folder.id, image.id);
+    await folderRepository.setAvatar(folder.id, image.id);
 
-    const feedItems = new Map(galleryService.getFeed(1, 10, 'recent').items.map((item) => [item.id, item]));
+    const feedItems = new Map((await galleryService.getFeed(1, 10, 'recent')).items.map((item) => [item.id, item]));
 
     expect(feedItems.get(image.id)?.previewUrl).toBe('/previews/clips/photo-1.webp');
     expect(feedItems.get(compatibleVideo.id)?.previewUrl).toBe('/previews/clips/reel-1.mp4');
     expect(feedItems.get(transcodedVideo.id)?.previewUrl).toBe('/previews/clips/reel-2.mp4');
 
-    const compatibleVideoDetail = galleryService.getImageDetail(compatibleVideo.id, 'video');
+    const compatibleVideoDetail = await galleryService.getImageDetail(compatibleVideo.id, 'video');
     expect(compatibleVideoDetail?.previewUrl).toBe('/previews/clips/reel-1.mp4');
     expect(compatibleVideoDetail?.originalUrl).toBe(`/api/originals/${compatibleVideo.id}`);
     expect(compatibleVideoDetail?.playbackStrategy).toBe('original');
@@ -97,13 +98,13 @@ describe.sequential('video playback strategy mapping', () => {
       fs.writeFile(path.join(appConfig.previewsDir, 'clips', 'reel-2.mp4'), 'preview-video-transcoded')
     ]);
 
-    const stats = galleryService.getStats();
+    const stats = await galleryService.getStats();
     expect(stats.previewCount).toBe(3);
   });
 
-  it('reports the latest completed scan in stats even when a newer run is still in progress', () => {
-    const completedRunId = scanRunRepository.start();
-    scanRunRepository.finish(completedRunId, {
+  it('reports the latest completed scan in stats even when a newer run is still in progress', async () => {
+    const completedRunId = await scanRunRepository.start();
+    await scanRunRepository.finish(completedRunId, {
       finished_at: '2026-03-02T00:00:00.000Z',
       status: 'completed',
       scanned_files: 3,
@@ -113,15 +114,15 @@ describe.sequential('video playback strategy mapping', () => {
       error_text: null
     });
 
-    scanRunRepository.start();
+    await scanRunRepository.start();
 
-    const stats = galleryService.getStats();
+    const stats = await galleryService.getStats();
     expect(stats.lastScan?.id).toBe(completedRunId);
     expect(stats.lastScan?.status).toBe('completed');
     expect(stats.scan.lastCompletedScan?.id).toBe(completedRunId);
   });
 
-  function createIndexedMedia(
+  async function createIndexedMedia(
     folder: FolderRecord,
     filename: string,
     mtimeMs: number,
@@ -136,7 +137,7 @@ describe.sequential('video playback strategy mapping', () => {
     const thumbnailRelativePath = getThumbnailRelativePath(relativePath);
     const fileSize = 2_048 + mtimeMs;
 
-    return imageRepository.upsert({
+    return await imageRepository.upsert({
       folderId: folder.id,
       filename,
       extension,

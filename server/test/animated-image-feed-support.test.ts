@@ -35,9 +35,10 @@ describe.sequential('animated image feed support', () => {
     ({ scannerService } = await import('../src/services/scanner-service.js'));
     ({ galleryService } = await import('../src/services/gallery-service.js'));
     ({ databaseManager } = await import('../src/db/database.js'));
-    ({ maintenanceRepository } = await import('../src/db/repositories.js'));
+    ({maintenanceRepository} = await import('../src/db/repositories.js'));
+    await (await import('../src/db/repositories.js')).initRepositories();
 
-    maintenanceRepository.resetLibraryIndex();
+    await maintenanceRepository.resetLibraryIndex();
     await Promise.all([
       fs.mkdir(appConfig.galleryRoot, { recursive: true }),
       fs.mkdir(appConfig.thumbnailsDir, { recursive: true }),
@@ -60,18 +61,18 @@ describe.sequential('animated image feed support', () => {
 
     await scannerService.scanAll('manual');
 
-    const firstFeedItem = galleryService.getFeed(1, 10, 'recent').items[0];
+    const firstFeedItem = (await galleryService.getFeed(1, 10, 'recent')).items[0];
     expect(firstFeedItem?.isAnimated).toBe(true);
     expect(firstFeedItem?.previewUrl).toMatch(/^\/previews\/[a-f0-9]{2}\/[a-f0-9]{32}\.webp\?v=\d+$/);
 
-    const firstDetail = firstFeedItem ? galleryService.getImageDetail(firstFeedItem.id, 'image') : null;
+    const firstDetail = firstFeedItem ? await galleryService.getImageDetail(firstFeedItem.id, 'image') : null;
     expect(firstDetail?.isAnimated).toBe(true);
 
-    databaseManager.connection.exec('UPDATE images SET is_animated = NULL');
+    await (await databaseManager.getConnection()).exec('UPDATE images SET is_animated = NULL');
 
     await scannerService.scanAll('manual');
 
-    const refreshedFeedItem = galleryService.getFeed(1, 10, 'recent').items[0];
+    const refreshedFeedItem = (await galleryService.getFeed(1, 10, 'recent')).items[0];
     expect(refreshedFeedItem?.isAnimated).toBe(true);
   });
 });

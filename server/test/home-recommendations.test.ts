@@ -86,7 +86,7 @@ const likedCountByFolder = buildLikedCountByFolder([
 ]);
 
 describe('home recommendations', () => {
-  it('keeps the last opened folder in the top slot when it is still present', () => {
+  it('keeps the last opened folder in the top slot when it is still present', async () => {
     const recommendations = selectHomeRecommendations(
       baseFolders,
       likedCountByFolder,
@@ -97,7 +97,7 @@ describe('home recommendations', () => {
     expect(recommendations.homeSummaryFolder?.slug).toBe('alpha');
   });
 
-  it('falls back to the most recently active non-empty folder', () => {
+  it('falls back to the most recently active non-empty folder', async () => {
     const recommendations = selectHomeRecommendations(
       baseFolders,
       likedCountByFolder,
@@ -108,7 +108,7 @@ describe('home recommendations', () => {
     expect(recommendations.homeSummaryFolder?.slug).toBe('beta');
   });
 
-  it('builds a stable daily suggestion list from ranked non-empty folders', () => {
+  it('builds a stable daily suggestion list from ranked non-empty folders', async () => {
     const first = selectHomeRecommendations(
       baseFolders,
       likedCountByFolder,

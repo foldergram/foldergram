@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url';
 
 import { resolveBinary } from 'dbmate';
 
-import { repositoryRoot } from '../config/env.js';
+import { appConfig, repositoryRoot } from '../config/env.js';
 import {
   applyBaselineCompatMigrations,
   assertNoLegacySchema,
@@ -45,10 +45,15 @@ export interface StartupMigrationOptions {
   databasePath?: string;
   migrationsDirectory?: string;
   spawnSyncImpl?: typeof spawnSync;
+  dialect?: 'sqlite' | 'postgres';
 }
 
-function defaultMigrationsDirectory(): string {
-  return path.join(repositoryRoot, 'server', 'db', 'migrations');
+function defaultSqliteMigrationsDirectory(): string {
+  return path.join(repositoryRoot, 'server', 'db', 'migrations', 'sqlite');
+}
+
+function defaultPostgresMigrationsDirectory(): string {
+  return path.join(repositoryRoot, 'server', 'db', 'migrations', 'postgres');
 }
 
 function baselineMigrationPath(migrationsDirectory: string): string {
@@ -109,7 +114,7 @@ function migrationVersionExists(database: DatabaseSync, version: string): boolea
 
 export function baselineExistingDatabaseIfNeeded(databasePath: string, options: StartupMigrationOptions = {}): BaselineResult {
   const database = new DatabaseSync(databasePath);
-  const migrationsDirectory = options.migrationsDirectory ?? defaultMigrationsDirectory();
+  const migrationsDirectory = options.migrationsDirectory ?? defaultSqliteMigrationsDirectory();
 
   try {
     assertNoLegacySchema(database);
@@ -140,15 +145,15 @@ export function baselineExistingDatabaseIfNeeded(databasePath: string, options: 
   }
 }
 
-function runDbmateUp(databasePath: string, options: StartupMigrationOptions = {}): void {
+function runDbmateUp(databaseUrl: string, migrationsDirectory: string, options: StartupMigrationOptions = {}): void {
   const spawnSyncImpl = options.spawnSyncImpl ?? spawnSync;
   const result = spawnSyncImpl(
     resolveBinary(),
     [
       '--url',
-      buildSqliteDatabaseUrl(databasePath),
+      databaseUrl,
       '--migrations-dir',
-      options.migrationsDirectory ?? defaultMigrationsDirectory(),
+      migrationsDirectory,
       '--no-dump-schema',
       'up'
     ],
@@ -169,6 +174,19 @@ function runDbmateUp(databasePath: string, options: StartupMigrationOptions = {}
 }
 
 export function runStartupMigrations(options: StartupMigrationOptions = {}): StartupMigrationResult {
+  const dialect = options.dialect ?? 'sqlite';
+
+  if (dialect === 'postgres') {
+    const databaseUrl = appConfig.databaseUrl!;
+    const migrationsDirectory = options.migrationsDirectory ?? defaultPostgresMigrationsDirectory();
+    runDbmateUp(databaseUrl, migrationsDirectory, options);
+    return {
+      baselineInserted: false,
+      databasePath: databaseUrl,
+      usedInMemoryDatabase: false
+    };
+  }
+
   const databasePath = options.databasePath ?? storageService.getDatabasePath();
   if (databasePath === ':memory:') {
     log.info('Skipping Dbmate migrations because the configured database directory is unavailable');
@@ -179,8 +197,9 @@ export function runStartupMigrations(options: StartupMigrationOptions = {}): Sta
     };
   }
 
-  const baselineResult = baselineExistingDatabaseIfNeeded(databasePath, options);
-  runDbmateUp(databasePath, options);
+  const migrationsDirectory = options.migrationsDirectory ?? defaultSqliteMigrationsDirectory();
+  const baselineResult = baselineExistingDatabaseIfNeeded(databasePath, { ...options, migrationsDirectory });
+  runDbmateUp(buildSqliteDatabaseUrl(databasePath), migrationsDirectory, options);
 
   return {
     baselineInserted: baselineResult.baselineInserted,

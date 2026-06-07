@@ -442,7 +442,7 @@ export const placeResolutionService = {
   placeSummary: toPlaceSummary,
   placeDetail: toPlaceDetail,
 
-  resolveImage(image: Pick<ImageRecord, 'id' | 'exif_json'>): PlaceSummary | null {
+  async resolveImage(image: Pick<ImageRecord, 'id' | 'exif_json'>): Promise<PlaceSummary | null> {
     const exif = deserializeImageExifData(image.exif_json);
     if (
       typeof exif?.latitude !== 'number' ||
@@ -450,7 +450,7 @@ export const placeResolutionService = {
       typeof exif.longitude !== 'number' ||
       !Number.isFinite(exif.longitude)
     ) {
-      imageRepository.assignPlace(image.id, null);
+      await imageRepository.assignPlace(image.id, null);
       return null;
     }
 
@@ -470,15 +470,16 @@ export const placeResolutionService = {
     }
 
     if (!city) {
-      imageRepository.assignPlace(image.id, null);
+      await imageRepository.assignPlace(image.id, null);
       return null;
     }
 
-    const existing = placeRepository.getByGeonamesId(city.geonameId);
-    const place = placeRepository.upsertCity({
+    const existing = await placeRepository.getByGeonamesId(city.geonameId);
+    const allSlugs = await placeRepository.getAllSlugs();
+    const place = await placeRepository.upsertCity({
       geonamesId: city.geonameId,
       displayName: city.asciiName || city.name,
-      slug: existing?.slug ?? resolveUniqueSlug(city.asciiName || city.name, new Set(placeRepository.getAllSlugs()), slugifyFolderName),
+      slug: existing?.slug ?? resolveUniqueSlug(city.asciiName || city.name, new Set(allSlugs), slugifyFolderName),
       latitude: city.latitude,
       longitude: city.longitude,
       cityName: city.asciiName || city.name,
@@ -488,18 +489,18 @@ export const placeResolutionService = {
       confidence: city.distanceKm === undefined ? null : Math.max(0, 1 - city.distanceKm / MAX_CITY_DISTANCE_KM)
     });
 
-    imageRepository.assignPlace(image.id, place.id);
+    await imageRepository.assignPlace(image.id, place.id);
     return toPlaceSummary(place);
   },
 
-  rebuildAssignments(batchSize = 250) {
+  async rebuildAssignments(batchSize = 250) {
     let afterId = 0;
     let processed = 0;
     let assigned = 0;
     let skipped = 0;
 
     for (;;) {
-      const rows = imageRepository.listWithExifForPlaceRebuild(afterId, batchSize);
+      const rows = await imageRepository.listWithExifForPlaceRebuild(afterId, batchSize);
       if (rows.length === 0) {
         break;
       }
@@ -508,7 +509,7 @@ export const placeResolutionService = {
         afterId = row.id;
         processed += 1;
         try {
-          const place = this.resolveImage(row);
+          const place = await this.resolveImage(row);
           if (place) {
             assigned += 1;
           } else {

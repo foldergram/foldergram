@@ -1,13 +1,14 @@
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+import { appConfig } from '../config/env.js';
 import { log } from '../services/log-service.js';
 import { runStartupMigrations } from '../db/migration.js';
 
 export async function main(): Promise<void> {
-  const result = runStartupMigrations();
+  const result = runStartupMigrations({ dialect: appConfig.dbDriver });
 
-  if (!result.usedInMemoryDatabase && result.baselineInserted) {
+  if (appConfig.dbDriver === 'sqlite' && !result.usedInMemoryDatabase && result.baselineInserted) {
     log.info('Marked existing SQLite database as Dbmate baseline');
   }
 }

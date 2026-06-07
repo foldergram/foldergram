@@ -52,7 +52,8 @@ describe.sequential('trash flow', () => {
     ({ appConfig } = await import('../src/config/env.js'));
     ({ galleryService } = await import('../src/services/gallery-service.js'));
     ({ scannerService } = await import('../src/services/scanner-service.js'));
-    ({ imageRepository, likeRepository } = await import('../src/db/repositories.js'));
+    ({imageRepository, likeRepository} = await import('../src/db/repositories.js'));
+    await (await import('../src/db/repositories.js')).initRepositories();
 
     await Promise.all([
       fs.mkdir(appConfig.galleryRoot, { recursive: true }),
@@ -127,102 +128,102 @@ describe.sequential('trash flow', () => {
     await createSourceFile('trip/photo-b.jpg');
     await scanAll('initial');
 
-    const imageA = mustGetImage('trip/photo-a.jpg');
-    const imageB = mustGetImage('trip/photo-b.jpg');
-    expect(galleryService.likeImage(imageA.id)).toMatchObject({ id: imageA.id, liked: true });
+    const imageA = await mustGetImage('trip/photo-a.jpg');
+    const imageB = await mustGetImage('trip/photo-b.jpg');
+    expect(await galleryService.likeImage(imageA.id)).toMatchObject({ id: imageA.id, liked: true });
 
-    const trashed = galleryService.trashImage(imageA.id);
+    const trashed = await galleryService.trashImage(imageA.id);
     expect(trashed).toEqual({
       id: imageA.id,
       folderSlug: 'trip'
     });
 
-    const trashedRow = imageRepository.getById(imageA.id);
+    const trashedRow = await imageRepository.getById(imageA.id);
     expect(trashedRow?.is_trashed).toBe(1);
     expect(trashedRow?.is_deleted).toBe(0);
 
-    const feedIds = galleryService.getFeed(1, 20, 'recent').items.map((item) => item.id);
+    const feedIds = (await galleryService.getFeed(1, 20, 'recent')).items.map((item) => item.id);
     expect(feedIds).not.toContain(imageA.id);
     expect(feedIds).toContain(imageB.id);
 
-    const folderImages = galleryService.getFolderImages('trip', 1, 20);
+    const folderImages = await galleryService.getFolderImages('trip', 1, 20);
     expect(folderImages?.items.map((item) => item.id)).toEqual([imageB.id]);
 
-    expect(galleryService.getImageDetail(imageA.id)).toBeNull();
-    expect(galleryService.getLikes().items.map((item) => item.id)).not.toContain(imageA.id);
-    expect(galleryService.likeImage(imageA.id)).toBeNull();
+    expect(await galleryService.getImageDetail(imageA.id)).toBeNull();
+    expect((await galleryService.getLikes()).items.map((item) => item.id)).not.toContain(imageA.id);
+    expect(await galleryService.likeImage(imageA.id)).toBeNull();
 
-    const restored = galleryService.restoreImage(imageA.id);
+    const restored = await galleryService.restoreImage(imageA.id);
     expect(restored).toEqual({
       id: imageA.id,
       folderSlug: 'trip'
     });
 
-    const restoredRow = imageRepository.getById(imageA.id);
+    const restoredRow = await imageRepository.getById(imageA.id);
     expect(restoredRow?.is_trashed).toBe(0);
     expect(restoredRow?.trashed_at).toBeNull();
-    expect(galleryService.getImageDetail(imageA.id)).not.toBeNull();
-    expect(galleryService.getFolderImages('trip', 1, 20)?.items.map((item) => item.id)).toContain(imageA.id);
-    expect(galleryService.getFeed(1, 20, 'recent').items.map((item) => item.id)).toContain(imageA.id);
-    expect(galleryService.getLikes().items.map((item) => item.id)).toContain(imageA.id);
+    expect(await galleryService.getImageDetail(imageA.id)).not.toBeNull();
+    expect((await galleryService.getFolderImages('trip', 1, 20))?.items.map((item) => item.id)).toContain(imageA.id);
+    expect((await galleryService.getFeed(1, 20, 'recent')).items.map((item) => item.id)).toContain(imageA.id);
+    expect((await galleryService.getLikes()).items.map((item) => item.id)).toContain(imageA.id);
   });
 
   it('keeps trashed posts hidden across rescans, including missing and reappeared files', async () => {
     await createSourceFile('archive/old.jpg');
     await scanAll('initial');
 
-    const image = mustGetImage('archive/old.jpg');
-    expect(galleryService.trashImage(image.id)).toMatchObject({ id: image.id });
+    const image = await mustGetImage('archive/old.jpg');
+    expect(await galleryService.trashImage(image.id)).toMatchObject({ id: image.id });
 
     await scanAll('rescan-present');
-    expect(imageRepository.getById(image.id)?.is_trashed).toBe(1);
-    expect(imageRepository.getById(image.id)?.is_deleted).toBe(0);
+    expect((await imageRepository.getById(image.id))?.is_trashed).toBe(1);
+    expect((await imageRepository.getById(image.id))?.is_deleted).toBe(0);
 
     await fs.rm(path.join(appConfig.galleryRoot, 'archive/old.jpg'), { force: true });
     await scanAll('rescan-missing');
-    expect(imageRepository.getById(image.id)?.is_deleted).toBe(1);
-    expect(imageRepository.getById(image.id)?.is_trashed).toBe(1);
+    expect((await imageRepository.getById(image.id))?.is_deleted).toBe(1);
+    expect((await imageRepository.getById(image.id))?.is_trashed).toBe(1);
 
     await createSourceFile('archive/old.jpg', 'reappeared');
     await scanAll('rescan-reappeared');
-    expect(imageRepository.getById(image.id)?.is_deleted).toBe(0);
-    expect(imageRepository.getById(image.id)?.is_trashed).toBe(1);
-    expect(galleryService.getFeed(1, 20, 'recent').items.map((item) => item.id)).not.toContain(image.id);
+    expect((await imageRepository.getById(image.id))?.is_deleted).toBe(0);
+    expect((await imageRepository.getById(image.id))?.is_trashed).toBe(1);
+    expect((await galleryService.getFeed(1, 20, 'recent')).items.map((item) => item.id)).not.toContain(image.id);
   });
 
   it('preserves custom captions in likes and trash payloads', async () => {
     await createSourceFile('captions/photo-a.jpg');
     await scanAll('initial');
 
-    const image = mustGetImage('captions/photo-a.jpg');
-    expect(galleryService.updateImageCaption(image.id, 'Misty morning by the lake')).toMatchObject({
+    const image = await mustGetImage('captions/photo-a.jpg');
+    expect(await galleryService.updateImageCaption(image.id, 'Misty morning by the lake')).toMatchObject({
       id: image.id,
       caption: 'Misty morning by the lake'
     });
 
-    expect(galleryService.likeImage(image.id)).toMatchObject({ id: image.id, liked: true });
-    expect(galleryService.getLikes().items.find((item) => item.id === image.id)?.caption).toBe('Misty morning by the lake');
+    expect(await galleryService.likeImage(image.id)).toMatchObject({ id: image.id, liked: true });
+    expect((await galleryService.getLikes()).items.find((item) => item.id === image.id)?.caption).toBe('Misty morning by the lake');
 
-    expect(galleryService.trashImage(image.id)).toMatchObject({ id: image.id });
-    expect(galleryService.getTrashImages(1, 20).items.find((item) => item.id === image.id)?.caption).toBe('Misty morning by the lake');
+    expect(await galleryService.trashImage(image.id)).toMatchObject({ id: image.id });
+    expect((await galleryService.getTrashImages(1, 20)).items.find((item) => item.id === image.id)?.caption).toBe('Misty morning by the lake');
   });
 
   it('permanently deletes rows and derivatives and still succeeds when original files are already missing', async () => {
     await createSourceFile('cleanup/photo-a.jpg');
     await scanAll('initial');
 
-    const imageA = mustGetImage('cleanup/photo-a.jpg');
+    const imageA = await mustGetImage('cleanup/photo-a.jpg');
     const imageAThumbnailPath = path.join(appConfig.thumbnailsDir, imageA.thumbnail_path);
     const imageAPreviewPath = path.join(appConfig.previewsDir, imageA.preview_path);
-    likeRepository.upsert(imageA.id);
+    await likeRepository.upsert(imageA.id);
 
     const deletedA = await galleryService.deleteImage(imageA.id);
     expect(deletedA).toEqual({
       id: imageA.id,
       folderSlug: 'cleanup'
     });
-    expect(imageRepository.getById(imageA.id)).toBeUndefined();
-    expect(likeRepository.getByImageId(imageA.id)).toBeUndefined();
+    expect(await imageRepository.getById(imageA.id)).toBeUndefined();
+    expect(await likeRepository.getByImageId(imageA.id)).toBeUndefined();
     await expect(fs.stat(path.join(appConfig.galleryRoot, 'cleanup/photo-a.jpg'))).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(fs.stat(imageAThumbnailPath)).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(fs.stat(imageAPreviewPath)).rejects.toMatchObject({ code: 'ENOENT' });
@@ -230,7 +231,7 @@ describe.sequential('trash flow', () => {
     await createSourceFile('cleanup/photo-b.jpg');
     await scanAll('second');
 
-    const imageB = mustGetImage('cleanup/photo-b.jpg');
+    const imageB = await mustGetImage('cleanup/photo-b.jpg');
     await fs.rm(path.join(appConfig.galleryRoot, 'cleanup/photo-b.jpg'), { force: true });
 
     const deletedB = await galleryService.deleteImage(imageB.id);
@@ -238,27 +239,27 @@ describe.sequential('trash flow', () => {
       id: imageB.id,
       folderSlug: 'cleanup'
     });
-    expect(imageRepository.getById(imageB.id)).toBeUndefined();
+    expect(await imageRepository.getById(imageB.id)).toBeUndefined();
   });
 
   it('keeps scan-driven missing/reappeared is_deleted behavior intact for non-trashed files', async () => {
     await createSourceFile('reactivate/keep.jpg');
     await scanAll('initial');
 
-    const image = mustGetImage('reactivate/keep.jpg');
+    const image = await mustGetImage('reactivate/keep.jpg');
     expect(image.is_deleted).toBe(0);
     expect(image.is_trashed).toBe(0);
 
     await fs.rm(path.join(appConfig.galleryRoot, 'reactivate/keep.jpg'), { force: true });
     await scanAll('missing');
-    expect(imageRepository.getById(image.id)?.is_deleted).toBe(1);
-    expect(imageRepository.getById(image.id)?.is_trashed).toBe(0);
+    expect((await imageRepository.getById(image.id))?.is_deleted).toBe(1);
+    expect((await imageRepository.getById(image.id))?.is_trashed).toBe(0);
 
     await createSourceFile('reactivate/keep.jpg', 'back-again');
     await scanAll('reappeared');
-    expect(imageRepository.getById(image.id)?.is_deleted).toBe(0);
-    expect(imageRepository.getById(image.id)?.is_trashed).toBe(0);
-    expect(galleryService.getFeed(1, 20, 'recent').items.map((item) => item.id)).toContain(image.id);
+    expect((await imageRepository.getById(image.id))?.is_deleted).toBe(0);
+    expect((await imageRepository.getById(image.id))?.is_trashed).toBe(0);
+    expect((await galleryService.getFeed(1, 20, 'recent')).items.map((item) => item.id)).toContain(image.id);
   });
 
   async function scanAll(reason: string): Promise<void> {
@@ -275,8 +276,8 @@ describe.sequential('trash flow', () => {
     await fs.writeFile(absolutePath, `${contents}:${relativePath}`);
   }
 
-  function mustGetImage(relativePath: string) {
-    const row = imageRepository.getByRelativePath(relativePath);
+  async function mustGetImage(relativePath: string) {
+    const row = await imageRepository.getByRelativePath(relativePath);
     expect(row).toBeDefined();
     return row!;
   }

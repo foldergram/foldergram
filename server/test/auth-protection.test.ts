@@ -74,6 +74,7 @@ describe.sequential('auth protection', () => {
     await fs.mkdir(tempRoot, { recursive: true });
 
     vi.resetModules();
+    await (await import('../src/db/repositories.js')).initRepositories();
     ({ authService } = await import('../src/services/auth-service.js'));
     ({ requireApiAuthentication, requireMediaAuthentication, requireCapability, AUTH_REQUIRED_HEADER } = await import(
       '../src/middleware/auth-protection.js'
@@ -86,7 +87,7 @@ describe.sequential('auth protection', () => {
     await fs.rm(tempRoot, { recursive: true, force: true });
   });
 
-  it('allows protected routes when password protection is disabled', () => {
+  it('allows protected routes when password protection is disabled', async () => {
     const request = createRequest('GET', '/feed');
     const response = createResponse();
     const next = vi.fn();
@@ -104,8 +105,8 @@ describe.sequential('auth protection', () => {
     expect(response.status).not.toHaveBeenCalled();
   });
 
-  it('blocks protected API and media routes when password protection is enabled but the request has no session', () => {
-    authService.setAdminPassword('password123');
+  it('blocks protected API and media routes when password protection is enabled but the request has no session', async () => {
+    await authService.setAdminPassword('password123');
 
     const apiRequest = createRequest('GET', '/feed');
     const apiResponse = createResponse();
@@ -138,8 +139,8 @@ describe.sequential('auth protection', () => {
     expect(publicResponse.status).not.toHaveBeenCalled();
   });
 
-  it('accepts a valid signed session cookie on protected requests', () => {
-    authService.setAdminPassword('password123');
+  it('accepts a valid signed session cookie on protected requests', async () => {
+    await authService.setAdminPassword('password123');
 
     const loginResponse = createResponse();
     authService.setAuthenticatedSession(
@@ -167,9 +168,9 @@ describe.sequential('auth protection', () => {
     expect(authenticatedResponse.setHeader).toHaveBeenCalledWith('Vary', 'Cookie');
   });
 
-  it('accepts viewer sessions and blocks admin-only capabilities', () => {
-    authService.setAdminPassword('password123');
-    authService.setViewerAccess('password', 'viewer123');
+  it('accepts viewer sessions and blocks admin-only capabilities', async () => {
+    await authService.setAdminPassword('password123');
+    await authService.setViewerAccess('password', 'viewer123');
 
     const loginResponse = createResponse();
     authService.setAuthenticatedSession(
@@ -208,9 +209,9 @@ describe.sequential('auth protection', () => {
     });
   });
 
-  it('allows anonymous read access in public viewer mode but still blocks protected mutations', () => {
-    authService.setAdminPassword('password123');
-    authService.setViewerAccess('public');
+  it('allows anonymous read access in public viewer mode but still blocks protected mutations', async () => {
+    await authService.setAdminPassword('password123');
+    await authService.setViewerAccess('public');
 
     const publicReadRequest = createRequest('GET', '/feed');
     const publicReadResponse = createResponse();
@@ -247,9 +248,9 @@ describe.sequential('auth protection', () => {
     expect(mutationResponse.status).toHaveBeenCalledWith(401);
   });
 
-  it('keeps admin unlock reachable without an authenticated session', () => {
-    authService.setAdminPassword('password123');
-    authService.setViewerAccess('public');
+  it('keeps admin unlock reachable without an authenticated session', async () => {
+    await authService.setAdminPassword('password123');
+    await authService.setViewerAccess('public');
 
     const request = createRequest('POST', '/auth/unlock-admin');
     const response = createResponse();

@@ -63,13 +63,12 @@ describe.sequential('startup behavior', () => {
 
     ({ appConfig } = await import('../src/config/env.js'));
     ({ scannerService } = await import('../src/services/scanner-service.js'));
-    ({
-      folderRepository,
+    ({folderRepository,
       imageRepository,
       maintenanceRepository,
       scanRunRepository,
-      appSettingsRepository
-    } = await import('../src/db/repositories.js'));
+      appSettingsRepository} = await import('../src/db/repositories.js'));
+      await (await import('../src/db/repositories.js')).initRepositories();
 
     await Promise.all([
       fs.mkdir(appConfig.galleryRoot, { recursive: true }),
@@ -117,25 +116,25 @@ describe.sequential('startup behavior', () => {
   it('queues a startup scan when the library has no indexed folders yet', async () => {
     await createSourceFile('fresh/photo-1.jpg');
 
-    const action = scannerService.handleStartup('startup');
+    const action = await scannerService.handleStartup('startup');
 
     expect(action).toBe('scan');
 
-    await waitFor(() => scanRunRepository.latestCompleted()?.status === 'completed');
-    expect(imageRepository.countFeed()).toBe(1);
+    await waitFor(async () => (await scanRunRepository.latestCompleted())?.status === 'completed');
+    expect(await imageRepository.countFeed()).toBe(1);
   });
 
   it('skips the startup scan when an index already exists for the current gallery root', async () => {
     await createSourceFile('fresh/photo-1.jpg');
-    maintenanceRepository.resetLibraryIndex();
+    await maintenanceRepository.resetLibraryIndex();
     await scannerService.scanAll('manual');
-    const lastRunId = scanRunRepository.latest()?.id ?? null;
+    const lastRunId = (await scanRunRepository.latest())?.id ?? null;
 
-    const action = scannerService.handleStartup('startup');
+    const action = await scannerService.handleStartup('startup');
 
     expect(action).toBe('idle');
     await wait(50);
-    expect(scanRunRepository.latest()?.id ?? null).toBe(lastRunId);
+    expect((await scanRunRepository.latest())?.id ?? null).toBe(lastRunId);
   });
 
   it('keeps startup idle when legacy derivative migration is still pending and waits for a manual scan', async () => {
@@ -143,7 +142,7 @@ describe.sequential('startup behavior', () => {
     const absolutePath = await createSourceFile(relativePath);
     const thumbnailPath = getThumbnailRelativePath(relativePath);
     const previewPath = getPreviewRelativePath(relativePath, 'image');
-    const folder = folderRepository.upsert({
+    const folder = await folderRepository.upsert({
       slug: 'legacy',
       name: 'legacy',
       folderPath: 'legacy'
@@ -154,7 +153,7 @@ describe.sequential('startup behavior', () => {
     await fs.writeFile(path.join(appConfig.thumbnailsDir, thumbnailPath), 'legacy-thumb');
     await fs.writeFile(path.join(appConfig.previewsDir, previewPath), 'legacy-preview');
 
-    imageRepository.upsert({
+    await imageRepository.upsert({
       folderId: folder.id,
       filename: 'photo-1.jpg',
       extension: '.jpg',
@@ -177,19 +176,19 @@ describe.sequential('startup behavior', () => {
       previewPath
     });
 
-    const action = scannerService.handleStartup('startup');
+    const action = await scannerService.handleStartup('startup');
 
     expect(action).toBe('idle');
     await wait(50);
 
-    const untouched = imageRepository.getByRelativePath(relativePath);
+    const untouched = await imageRepository.getByRelativePath(relativePath);
     expect(untouched?.asset_key).toBeNull();
     expect(untouched?.thumbnail_path).toBe(thumbnailPath);
     expect(untouched?.preview_path).toBe(previewPath);
 
     await scannerService.scanAll('manual');
 
-    const migrated = imageRepository.getByRelativePath(relativePath);
+    const migrated = await imageRepository.getByRelativePath(relativePath);
     expect(migrated?.asset_key).toMatch(/^[a-f0-9]{32}$/);
     expect(migrated?.thumbnail_path).not.toBe(thumbnailPath);
     expect(migrated?.preview_path).not.toBe(previewPath);
@@ -201,16 +200,16 @@ describe.sequential('startup behavior', () => {
       relativePath: 'relocated/photo-1.jpg',
       storedGalleryRoot: oldGalleryRoot
     });
-    appSettingsRepository.set(LAST_SUCCESSFUL_GALLERY_ROOT_SETTING_KEY, oldGalleryRoot);
+    await appSettingsRepository.set(LAST_SUCCESSFUL_GALLERY_ROOT_SETTING_KEY, oldGalleryRoot);
 
-    const action = scannerService.handleStartup('startup');
+    const action = await scannerService.handleStartup('startup');
 
     expect(action).toBe('idle');
-    expect(appSettingsRepository.get(LIBRARY_REBUILD_REQUIRED_SETTING_KEY)).toBeNull();
-    expect(appSettingsRepository.get(PREVIOUS_GALLERY_ROOT_SETTING_KEY)).toBeNull();
-    expect(appSettingsRepository.get(LAST_SUCCESSFUL_GALLERY_ROOT_SETTING_KEY)).toBe(normalizePath(appConfig.galleryRoot));
+    expect(await appSettingsRepository.get(LIBRARY_REBUILD_REQUIRED_SETTING_KEY)).toBeNull();
+    expect(await appSettingsRepository.get(PREVIOUS_GALLERY_ROOT_SETTING_KEY)).toBeNull();
+    expect(await appSettingsRepository.get(LAST_SUCCESSFUL_GALLERY_ROOT_SETTING_KEY)).toBe(normalizePath(appConfig.galleryRoot));
 
-    const refreshed = imageRepository.getByRelativePath(indexed.relative_path);
+    const refreshed = await imageRepository.getByRelativePath(indexed.relative_path);
     expect(refreshed?.absolute_path).toBe(path.join(appConfig.galleryRoot, indexed.relative_path));
   });
 
@@ -221,13 +220,13 @@ describe.sequential('startup behavior', () => {
       storedGalleryRoot: oldGalleryRoot,
       skipSourceFile: true
     });
-    appSettingsRepository.set(LAST_SUCCESSFUL_GALLERY_ROOT_SETTING_KEY, oldGalleryRoot);
+    await appSettingsRepository.set(LAST_SUCCESSFUL_GALLERY_ROOT_SETTING_KEY, oldGalleryRoot);
 
-    const action = scannerService.handleStartup('startup');
+    const action = await scannerService.handleStartup('startup');
 
     expect(action).toBe('blocked');
-    expect(appSettingsRepository.get(LIBRARY_REBUILD_REQUIRED_SETTING_KEY)).toBe('1');
-    expect(appSettingsRepository.get(PREVIOUS_GALLERY_ROOT_SETTING_KEY)).toBe(normalizePath(oldGalleryRoot));
+    expect(await appSettingsRepository.get(LIBRARY_REBUILD_REQUIRED_SETTING_KEY)).toBe('1');
+    expect(await appSettingsRepository.get(PREVIOUS_GALLERY_ROOT_SETTING_KEY)).toBe(normalizePath(oldGalleryRoot));
   });
 
   it('requires a rebuild when a moved gallery root has a size mismatch', async () => {
@@ -237,12 +236,12 @@ describe.sequential('startup behavior', () => {
       storedGalleryRoot: oldGalleryRoot,
       indexedFileSizeOffset: 1
     });
-    appSettingsRepository.set(LAST_SUCCESSFUL_GALLERY_ROOT_SETTING_KEY, oldGalleryRoot);
+    await appSettingsRepository.set(LAST_SUCCESSFUL_GALLERY_ROOT_SETTING_KEY, oldGalleryRoot);
 
-    const action = scannerService.handleStartup('startup');
+    const action = await scannerService.handleStartup('startup');
 
     expect(action).toBe('blocked');
-    expect(appSettingsRepository.get(LIBRARY_REBUILD_REQUIRED_SETTING_KEY)).toBe('1');
+    expect(await appSettingsRepository.get(LIBRARY_REBUILD_REQUIRED_SETTING_KEY)).toBe('1');
   });
 
   it('requires a rebuild when a moved gallery root has an mtime mismatch', async () => {
@@ -252,12 +251,12 @@ describe.sequential('startup behavior', () => {
       storedGalleryRoot: oldGalleryRoot,
       indexedMtimeMs: Date.parse('2026-03-08T12:00:00.000Z')
     });
-    appSettingsRepository.set(LAST_SUCCESSFUL_GALLERY_ROOT_SETTING_KEY, oldGalleryRoot);
+    await appSettingsRepository.set(LAST_SUCCESSFUL_GALLERY_ROOT_SETTING_KEY, oldGalleryRoot);
 
-    const action = scannerService.handleStartup('startup');
+    const action = await scannerService.handleStartup('startup');
 
     expect(action).toBe('blocked');
-    expect(appSettingsRepository.get(LIBRARY_REBUILD_REQUIRED_SETTING_KEY)).toBe('1');
+    expect(await appSettingsRepository.get(LIBRARY_REBUILD_REQUIRED_SETTING_KEY)).toBe('1');
   });
 
   async function createSourceFile(relativePath: string): Promise<string> {
@@ -282,7 +281,7 @@ describe.sequential('startup behavior', () => {
     const contents = `source:${options.relativePath}`;
     const actualMtimeMs = Date.parse('2026-03-07T12:00:00.000Z');
     const sourcePath = path.join(appConfig.galleryRoot, options.relativePath);
-    const folder = folderRepository.upsert({
+    const folder = await folderRepository.upsert({
       slug: folderPath.replaceAll('/', '-'),
       name: path.posix.basename(folderPath),
       folderPath
@@ -294,7 +293,7 @@ describe.sequential('startup behavior', () => {
       await fs.utimes(sourcePath, new Date(actualMtimeMs), new Date(actualMtimeMs));
     }
 
-    return imageRepository.upsert({
+    return await imageRepository.upsert({
       folderId: folder.id,
       assetKey,
       filename,
@@ -325,10 +324,10 @@ async function wait(milliseconds: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-async function waitFor(check: () => boolean, timeoutMs = 2000): Promise<void> {
+async function waitFor(check: () => boolean | Promise<boolean>, timeoutMs = 2000): Promise<void> {
   const startedAt = Date.now();
 
-  while (!check()) {
+  while (!(await check())) {
     if (Date.now() - startedAt > timeoutMs) {
       throw new Error('Timed out waiting for startup scan to finish');
     }

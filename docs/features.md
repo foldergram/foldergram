@@ -43,10 +43,22 @@ It includes:
 - a full-height scroll-snap deck
 - wheel, arrow-key, and page-up/page-down navigation in addition to direct scrolling
 - infinite loading with prefetch as you approach the end of the current queue
-- a desktop action bar for like/favorite toggle, details sidebar, folder shortcut, and original-video link
+- an action rail with like/favorite toggle, save-to-collection bookmark, details sidebar, folder shortcut, and original-video link (visible on both mobile and desktop)
+- a playback speed selector cycling x1 → x2 → x3 → x1, persisted across reel navigation
+  - on desktop: button below the prev/next navigation arrows
+  - on mobile: button above the like button in the action rail
 - a bottom-edge seekable progress UI shared with the feed and post players
 - loading, empty, and error states
 - an app-wide default mode from Settings; the page itself does not expose an inline mode switch
+
+### Reels keyboard shortcuts
+
+| Key | Action |
+| --- | --- |
+| `↑` | Previous reel |
+| `↓` | Next reel |
+| `Space` | Play / pause |
+| `=` | Cycle playback speed (x1 → x2 → x3 → x1) |
 
 ### Queue behavior
 
@@ -73,10 +85,12 @@ Explore is a folder-search and serendipity surface, not a separate backend index
 
 Library lists every indexed folder and supports:
 
-- free-text search
+- fuzzy search — characters must appear in order; consecutive runs of matching characters score higher; results are ranked by match quality when a query is active
 - sorting by recent activity, post count, name, or path
 - quick navigation into folders
 - delete actions from a context menu
+- infinite scroll pagination
+- header totals (folder count and post count) sourced from server-stored stats, not the current page
 
 ### Folder deletion behavior
 
@@ -172,6 +186,15 @@ The detail view includes:
 - original-file link
 - an admin-only "Set as Cover" action to customize the folder avatar, which highlights dynamically if the image is already the cover
 - trash and permanent-delete actions with confirmation for admin sessions only
+
+### Post viewer keyboard shortcuts
+
+| Key | Action |
+| --- | --- |
+| `←` or `↑` | Previous post |
+| `→` or `↓` | Next post |
+| `Space` | Play / pause (videos) |
+| `=` | Cycle playback speed — x1 → x2 → x3 → x1 (videos) |
 
 ## Saved posts, likes, and collections
 

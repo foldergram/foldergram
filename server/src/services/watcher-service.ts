@@ -15,10 +15,10 @@ class WatcherService {
   private debounceTimer: NodeJS.Timeout | null = null;
   private fullRescanRequested = false;
 
-  private getEffectiveExcludedFolderRules(): string[] {
+  private async getEffectiveExcludedFolderRules(): Promise<string[]> {
     return getEffectiveExcludedFolderRules({
       envRules: appConfig.galleryExcludedFolders,
-      customRules: parseExcludedFolderRulesFromSetting(appSettingsRepository.get(EXCLUDED_FOLDERS_SETTING_KEY))
+      customRules: parseExcludedFolderRulesFromSetting(await appSettingsRepository.get(EXCLUDED_FOLDERS_SETTING_KEY))
     });
   }
 
@@ -49,7 +49,7 @@ class WatcherService {
         return;
       }
 
-      const excludedFolderRules = this.getEffectiveExcludedFolderRules();
+      const excludedFolderRules = await this.getEffectiveExcludedFolderRules();
       const exclusionTargetPath =
         eventName === 'addDir' || eventName === 'unlinkDir'
           ? relativePath

@@ -9,10 +9,12 @@ description: The indexing model, storage layout, scan lifecycle, and feed logic 
 
 Foldergram has two deliberate layers:
 
-1. A scanner/indexer that walks the gallery tree, updates SQLite, and generates derivatives.
-2. A runtime API and SPA that read indexed data from SQLite and serve static derivative assets.
+1. A scanner/indexer that walks the gallery tree, updates the database, and generates derivatives.
+2. A runtime API and SPA that read indexed data from the database and serve static derivative assets.
 
 That separation is the core performance decision in the project.
+
+The database backend is selected by `DB_DRIVER` and can be either SQLite (default) or PostgreSQL. Both use the same repository interface and migration set.
 
 ## Source discovery model
 
@@ -105,6 +107,20 @@ The `images` table stores:
 - playback strategy for videos
 - soft-delete state including `deleted_at`
 - trash state including `trashed_at`
+
+## Stored folder counts
+
+The `folders` table stores pre-computed aggregate columns updated after each scan and mutation:
+
+| Column | Description |
+| --- | --- |
+| `image_count` | Non-deleted, non-trashed, non-cover posts in this folder |
+| `video_count` | Same filter, videos only |
+| `latest_image_mtime_ms` | Most recent `mtime_ms` across qualifying posts |
+
+These are updated by `folderRepository.updateCounts()` — called per folder after scan processing completes, and after UI-triggered mutations (trash, restore, delete).
+
+Global totals (`stat.media_count`, `stat.video_count`, `stat.folder_count`) are stored as key-value rows in `app_settings` and refreshed by `statsRepository.refresh()` at scan completion and after folder-level mutations. The status endpoint reads these with O(1) single-key lookups — no `COUNT(*)` or `SUM()` at read time.
 
 ## Stable ordering
 

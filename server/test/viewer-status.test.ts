@@ -42,7 +42,8 @@ describe.sequential('viewer-safe status payload', () => {
     ({ appConfig } = await import('../src/config/env.js'));
     ({ galleryService } = await import('../src/services/gallery-service.js'));
     ({ scannerService } = await import('../src/services/scanner-service.js'));
-    ({ imageRepository, maintenanceRepository, appSettingsRepository, scanRunRepository } = await import('../src/db/repositories.js'));
+    ({imageRepository, maintenanceRepository, appSettingsRepository, scanRunRepository} = await import('../src/db/repositories.js'));
+    await (await import('../src/db/repositories.js')).initRepositories();
     ({ storageService } = await import('../src/services/storage-service.js'));
     ({
       APP_DEFAULT_LOCALE_SETTING_KEY,
@@ -54,12 +55,12 @@ describe.sequential('viewer-safe status payload', () => {
   });
 
   beforeEach(async () => {
-    maintenanceRepository.resetLibraryIndex();
-    appSettingsRepository.remove(APP_DEFAULT_LOCALE_SETTING_KEY);
-    appSettingsRepository.remove(HOME_FEED_DEFAULT_MODE_SETTING_KEY);
-    appSettingsRepository.remove(REELS_FEED_DEFAULT_MODE_SETTING_KEY);
-    appSettingsRepository.remove(FOLDER_IMAGE_DEFAULT_ORDER_SETTING_KEY);
-    appSettingsRepository.remove(NESTED_FOLDER_TITLE_FORMAT_SETTING_KEY);
+    await maintenanceRepository.resetLibraryIndex();
+    await appSettingsRepository.remove(APP_DEFAULT_LOCALE_SETTING_KEY);
+    await appSettingsRepository.remove(HOME_FEED_DEFAULT_MODE_SETTING_KEY);
+    await appSettingsRepository.remove(REELS_FEED_DEFAULT_MODE_SETTING_KEY);
+    await appSettingsRepository.remove(FOLDER_IMAGE_DEFAULT_ORDER_SETTING_KEY);
+    await appSettingsRepository.remove(NESTED_FOLDER_TITLE_FORMAT_SETTING_KEY);
     await Promise.all([
       fs.rm(appConfig.galleryRoot, { recursive: true, force: true }),
       fs.rm(appConfig.thumbnailsDir, { recursive: true, force: true }),
@@ -78,9 +79,9 @@ describe.sequential('viewer-safe status payload', () => {
     await fs.rm(tempRoot, { recursive: true, force: true });
   });
 
-  it('redacts admin-only scan and gallery-root details', () => {
-    const completedRunId = scanRunRepository.start();
-    scanRunRepository.finish(completedRunId, {
+  it('redacts admin-only scan and gallery-root details', async () => {
+    const completedRunId = await scanRunRepository.start();
+    await scanRunRepository.finish(completedRunId, {
       finished_at: '2026-03-20T00:00:00.000Z',
       status: 'completed_with_errors',
       scanned_files: 4,
@@ -90,7 +91,7 @@ describe.sequential('viewer-safe status payload', () => {
       error_text: '/private/gallery/trips/broken.jpg'
     });
 
-    const status = galleryService.getStatus();
+    const status = await galleryService.getStatus();
 
     expect(status.scan.lastCompletedScan).toMatchObject({
       id: completedRunId,
@@ -108,11 +109,11 @@ describe.sequential('viewer-safe status payload', () => {
     expect(status.libraryIndex).not.toHaveProperty('pendingDerivativeMigrationRows');
   });
 
-  it('keeps legacy derivative migration state in the admin-only stats payload', () => {
+  it('keeps legacy derivative migration state in the admin-only stats payload', async () => {
     const pendingSpy = vi.spyOn(imageRepository, 'countPendingDerivativeMigrationRows').mockReturnValue(14);
 
-    const status = galleryService.getStatus();
-    const adminStats = galleryService.getStats();
+    const status = await galleryService.getStatus();
+    const adminStats = await galleryService.getStats();
 
     expect(status.libraryIndex).not.toHaveProperty('legacyDerivativeMigrationPending');
     expect(status.libraryIndex).not.toHaveProperty('pendingDerivativeMigrationRows');
@@ -124,16 +125,16 @@ describe.sequential('viewer-safe status payload', () => {
     pendingSpy.mockRestore();
   });
 
-  it('includes the nested folder title format preference in viewer and admin status payloads', () => {
-    expect(galleryService.getStatus().preferences.nestedFolderTitleFormat).toBe('folder');
+  it('includes the nested folder title format preference in viewer and admin status payloads', async () => {
+    expect((await galleryService.getStatus()).preferences.nestedFolderTitleFormat).toBe('folder');
 
-    galleryService.setNestedFolderTitleFormat('parent-plus-folder');
+    await galleryService.setNestedFolderTitleFormat('parent-plus-folder');
 
-    expect(galleryService.getStatus().preferences.nestedFolderTitleFormat).toBe('parent-plus-folder');
-    expect(galleryService.getStats().preferences.nestedFolderTitleFormat).toBe('parent-plus-folder');
+    expect((await galleryService.getStatus()).preferences.nestedFolderTitleFormat).toBe('parent-plus-folder');
+    expect((await galleryService.getStats()).preferences.nestedFolderTitleFormat).toBe('parent-plus-folder');
   });
 
-  it('keeps detailed file and folder context in the admin-only scan progress payload', () => {
+  it('keeps detailed file and folder context in the admin-only scan progress payload', async () => {
     const progressSpy = vi.spyOn(scannerService, 'getProgress').mockReturnValue({
       isScanning: true,
       scanReason: 'manual',
@@ -161,12 +162,12 @@ describe.sequential('viewer-safe status payload', () => {
       lastCompletedScan: null
     });
 
-    expect(galleryService.getScanProgress()).toMatchObject({
+    expect(await galleryService.getScanProgress()).toMatchObject({
       currentFile: null,
       currentFolder: null,
       currentOperation: 'moving_preview'
     });
-    expect(galleryService.getAdminScanProgress()).toMatchObject({
+    expect(await galleryService.getAdminScanProgress()).toMatchObject({
       currentFile: 'private/album/photo.jpg',
       currentFolder: 'private/album',
       currentOperation: 'moving_preview'
@@ -175,7 +176,7 @@ describe.sequential('viewer-safe status payload', () => {
     progressSpy.mockRestore();
   });
 
-  it('replaces storage failure details with a generic viewer-safe message', () => {
+  it('replaces storage failure details with a generic viewer-safe message', async () => {
     const storageStateSpy = vi.spyOn(storageService, 'getState').mockReturnValue({
       libraryAvailable: false,
       reason: 'Gallery directory unavailable at /private/gallery: ENOENT',
@@ -183,7 +184,7 @@ describe.sequential('viewer-safe status payload', () => {
       databasePath: ':memory:'
     });
 
-    const status = galleryService.getStatus();
+    const status = await galleryService.getStatus();
 
     expect(status.storage).toEqual({
       available: false,
@@ -196,8 +197,8 @@ describe.sequential('viewer-safe status payload', () => {
     storageStateSpy.mockRestore();
   });
 
-  it('uses random as the viewer-safe home and reels defaults when nothing is configured', () => {
-    const status = galleryService.getStatus();
+  it('uses random as the viewer-safe home and reels defaults when nothing is configured', async () => {
+    const status = await galleryService.getStatus();
 
     expect(status.preferences).toEqual({
       defaultLocale: null,
@@ -209,13 +210,13 @@ describe.sequential('viewer-safe status payload', () => {
     });
   });
 
-  it('includes configured home, reels, and folder defaults in the viewer-safe status payload', () => {
-    appSettingsRepository.set(APP_DEFAULT_LOCALE_SETTING_KEY, 'zh');
-    appSettingsRepository.set(HOME_FEED_DEFAULT_MODE_SETTING_KEY, 'rediscover');
-    appSettingsRepository.set(REELS_FEED_DEFAULT_MODE_SETTING_KEY, 'recommended');
-    appSettingsRepository.set(FOLDER_IMAGE_DEFAULT_ORDER_SETTING_KEY, 'oldest');
+  it('includes configured home, reels, and folder defaults in the viewer-safe status payload', async () => {
+    await appSettingsRepository.set(APP_DEFAULT_LOCALE_SETTING_KEY, 'zh');
+    await appSettingsRepository.set(HOME_FEED_DEFAULT_MODE_SETTING_KEY, 'rediscover');
+    await appSettingsRepository.set(REELS_FEED_DEFAULT_MODE_SETTING_KEY, 'recommended');
+    await appSettingsRepository.set(FOLDER_IMAGE_DEFAULT_ORDER_SETTING_KEY, 'oldest');
 
-    const status = galleryService.getStatus();
+    const status = await galleryService.getStatus();
 
     expect(status.preferences).toEqual({
       defaultLocale: 'zh',

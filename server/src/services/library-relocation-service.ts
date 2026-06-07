@@ -13,8 +13,8 @@ export type LibraryRelocationValidationResult =
   | { status: 'validated'; checked: number; missing: number; refreshed: number }
   | { status: 'failed'; checked: number; missing: number; reason: string };
 
-function getStoredGalleryRoot(): string | null {
-  const storedGalleryRoot = appSettingsRepository.get(LAST_SUCCESSFUL_GALLERY_ROOT_SETTING_KEY);
+async function getStoredGalleryRoot(): Promise<string | null> {
+  const storedGalleryRoot = await appSettingsRepository.get(LAST_SUCCESSFUL_GALLERY_ROOT_SETTING_KEY);
   return storedGalleryRoot ? normalizePath(storedGalleryRoot) : null;
 }
 
@@ -78,18 +78,18 @@ function validateSourceFile(row: ImageRecord): { ok: true } | { ok: false; missi
 }
 
 class LibraryRelocationService {
-  validateCurrentGalleryRoot(): LibraryRelocationValidationResult {
+  async validateCurrentGalleryRoot(): Promise<LibraryRelocationValidationResult> {
     const currentGalleryRoot = normalizePath(appConfig.galleryRoot);
-    const storedGalleryRoot = getStoredGalleryRoot();
+    const storedGalleryRoot = await getStoredGalleryRoot();
 
-    if (!storedGalleryRoot || storedGalleryRoot === currentGalleryRoot || folderRepository.getAll().length === 0) {
+    if (!storedGalleryRoot || storedGalleryRoot === currentGalleryRoot || (await folderRepository.getAll()).length === 0) {
       return { status: 'not_needed' };
     }
 
     let checked = 0;
     let missing = 0;
 
-    for (const row of imageRepository.listActive()) {
+    for (const row of await imageRepository.listActive()) {
       checked += 1;
       const validation = validateSourceFile(row);
 
@@ -111,7 +111,7 @@ class LibraryRelocationService {
       status: 'validated',
       checked,
       missing,
-      refreshed: imageRepository.refreshAbsolutePathsForGalleryRoot(appConfig.galleryRoot)
+      refreshed: await imageRepository.refreshAbsolutePathsForGalleryRoot(appConfig.galleryRoot)
     };
   }
 }

@@ -47,7 +47,8 @@ describe.sequential('reels feed', () => {
 
     ({ appConfig } = await import('../src/config/env.js'));
     ({ galleryService } = await import('../src/services/gallery-service.js'));
-    ({ folderRepository, imageRepository, likeRepository } = await import('../src/db/repositories.js'));
+    ({folderRepository, imageRepository, likeRepository} = await import('../src/db/repositories.js'));
+    await (await import('../src/db/repositories.js')).initRepositories();
 
     await Promise.all([
       fs.mkdir(appConfig.galleryRoot, { recursive: true }),
@@ -68,10 +69,10 @@ describe.sequential('reels feed', () => {
     const trashedVideo = await createIndexedMedia('travel/clips', 'trashed.mp4', 1_778_000_001_000);
     await createIndexedMedia('travel/clips', 'photo.jpg', 1_778_000_001_500);
 
-    imageRepository.markDeleted(deletedVideo.relative_path);
-    expect(imageRepository.moveToTrash(trashedVideo.id)).toBe(true);
+    await imageRepository.markDeleted(deletedVideo.relative_path);
+    expect(await imageRepository.moveToTrash(trashedVideo.id)).toBe(true);
 
-    const payload = galleryService.getReels(1, 12, 'recommended', 17);
+    const payload = await galleryService.getReels(1, 12, 'recommended', 17);
 
     expect(payload.mode).toBe('recommended');
     expect(payload.total).toBe(1);
@@ -85,9 +86,9 @@ describe.sequential('reels feed', () => {
     await createIndexedMedia('seed/beta', 'beta-a.mp4', 1_778_100_000_000);
     await createIndexedMedia('seed/gamma', 'gamma-a.mp4', 1_778_100_000_000);
 
-    const first = galleryService.getReels(1, 3, 'random', 11);
-    const second = galleryService.getReels(1, 3, 'random', 11);
-    const differentSeed = galleryService.getReels(1, 3, 'random', 29);
+    const first = await galleryService.getReels(1, 3, 'random', 11);
+    const second = await galleryService.getReels(1, 3, 'random', 11);
+    const differentSeed = await galleryService.getReels(1, 3, 'random', 29);
 
     expect(first.mode).toBe('random');
     expect(first.items.map((item) => item.id)).toEqual(second.items.map((item) => item.id));
@@ -99,9 +100,9 @@ describe.sequential('reels feed', () => {
     const middle = await createIndexedMedia('recent/beta', 'beta-1.mp4', 1_778_150_002_000);
     const oldest = await createIndexedMedia('recent/gamma', 'gamma-1.mp4', 1_778_150_001_000);
 
-    likeRepository.upsert(oldest.id);
+    await likeRepository.upsert(oldest.id);
 
-    const payload = galleryService.getReels(1, 3, 'recent', 91, {
+    const payload = await galleryService.getReels(1, 3, 'recent', 91, {
       lastOpenedFolderSlug: 'recent-gamma',
       recentOpenedFolderSlugs: ['recent-gamma', 'recent-beta']
     });
@@ -122,9 +123,9 @@ describe.sequential('reels feed', () => {
       height: 720
     });
 
-    likeRepository.upsert(alphaLead.id);
+    await likeRepository.upsert(alphaLead.id);
 
-    const payload = galleryService.getReels(1, 4, 'recommended', 91);
+    const payload = await galleryService.getReels(1, 4, 'recommended', 91);
 
     expect(payload.mode).toBe('recommended');
     expect(payload.items[0]?.folderSlug).toBe('reels-alpha');
@@ -132,8 +133,8 @@ describe.sequential('reels feed', () => {
     expect(payload.items[1]?.folderSlug).not.toBe('reels-alpha');
   });
 
-  it('returns an empty payload when the indexed library has no visible videos', () => {
-    const payload = galleryService.getReels(1, 8, 'random', 13);
+  it('returns an empty payload when the indexed library has no visible videos', async () => {
+    const payload = await galleryService.getReels(1, 8, 'random', 13);
 
     expect(payload).toEqual({
       mode: 'random',
@@ -156,7 +157,7 @@ describe.sequential('reels feed', () => {
     } = {}
   ): Promise<ImageRecord> {
     const folderName = path.posix.basename(folderPath);
-    const folder = folderRepository.upsert({
+    const folder = await folderRepository.upsert({
       slug: folderPath.replaceAll('/', '-'),
       name: folderName,
       folderPath
@@ -168,7 +169,7 @@ describe.sequential('reels feed', () => {
     const thumbnailPath = getThumbnailRelativePath(relativePath);
     const previewPath = getPreviewRelativePath(relativePath, mediaType);
 
-    return imageRepository.upsert({
+    return await imageRepository.upsert({
       folderId: folder.id,
       filename,
       extension,

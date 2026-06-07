@@ -55,7 +55,8 @@ describe.sequential('library rebuild reuses existing derivatives', () => {
 
     ({ appConfig } = await import('../src/config/env.js'));
     ({ scannerService } = await import('../src/services/scanner-service.js'));
-    ({ imageRepository, appSettingsRepository } = await import('../src/db/repositories.js'));
+    ({imageRepository, appSettingsRepository} = await import('../src/db/repositories.js'));
+    await (await import('../src/db/repositories.js')).initRepositories();
 
     await Promise.all([
       fs.mkdir(appConfig.galleryRoot, { recursive: true }),
@@ -128,14 +129,14 @@ describe.sequential('library rebuild reuses existing derivatives', () => {
 
     expect(lastScan?.status).toBe('completed');
     expect(lastScan?.scanned_files).toBe(2);
-    expect(imageRepository.countFeed()).toBe(2);
+    expect(await imageRepository.countFeed()).toBe(2);
 
     expect(generateDerivativesMock).toHaveBeenCalledTimes(2);
     for (const [, , force] of generateDerivativesMock.mock.calls) {
       expect(force).toBe(false);
     }
 
-    for (const image of imageRepository.listActive()) {
+    for (const image of await imageRepository.listActive()) {
       await expect(fs.readFile(path.join(appConfig.thumbnailsDir, image.thumbnail_path), 'utf8')).resolves.toBe(`thumb:${image.relative_path}`);
       await expect(fs.readFile(path.join(appConfig.previewsDir, image.preview_path), 'utf8')).resolves.toBe(`preview:${image.relative_path}`);
     }
@@ -149,7 +150,7 @@ describe.sequential('library rebuild reuses existing derivatives', () => {
       repairUnchangedDerivatives: false
     });
 
-    const beforeRows = imageRepository.listActive();
+    const beforeRows = await imageRepository.listActive();
     expect(beforeRows).toHaveLength(2);
     const beforeByRelativePath = new Map(beforeRows.map((image) => [image.relative_path, image]));
     for (const image of beforeRows) {
@@ -158,7 +159,7 @@ describe.sequential('library rebuild reuses existing derivatives', () => {
     }
 
     generateDerivativesMock.mockClear();
-    appSettingsRepository.set(LAST_SUCCESSFUL_GALLERY_ROOT_SETTING_KEY, path.join(tempRoot, 'old-gallery-root'));
+    await appSettingsRepository.set(LAST_SUCCESSFUL_GALLERY_ROOT_SETTING_KEY, path.join(tempRoot, 'old-gallery-root'));
 
     const lastScan = await scannerService.rebuildLibraryIndex();
 
@@ -176,7 +177,7 @@ describe.sequential('library rebuild reuses existing derivatives', () => {
       });
     }
 
-    const afterRows = imageRepository.listActive();
+    const afterRows = await imageRepository.listActive();
     expect(afterRows).toHaveLength(2);
 
     for (const image of afterRows) {
@@ -199,7 +200,7 @@ describe.sequential('library rebuild reuses existing derivatives', () => {
       repairUnchangedDerivatives: false
     });
 
-    const original = imageRepository.getByRelativePath(initialRelativePath);
+    const original = await imageRepository.getByRelativePath(initialRelativePath);
     expect(original).toBeDefined();
 
     await fs.mkdir(path.join(appConfig.galleryRoot, 'phones'), { recursive: true });
@@ -207,7 +208,7 @@ describe.sequential('library rebuild reuses existing derivatives', () => {
       path.join(appConfig.galleryRoot, initialRelativePath),
       path.join(appConfig.galleryRoot, movedRelativePath)
     );
-    appSettingsRepository.set(LAST_SUCCESSFUL_GALLERY_ROOT_SETTING_KEY, appConfig.galleryRoot);
+    await appSettingsRepository.set(LAST_SUCCESSFUL_GALLERY_ROOT_SETTING_KEY, appConfig.galleryRoot);
     generateDerivativesMock.mockClear();
 
     const lastScan = await scannerService.scanAll('move', {
@@ -215,7 +216,7 @@ describe.sequential('library rebuild reuses existing derivatives', () => {
     });
 
     expect(lastScan?.status).toBe('completed');
-    const moved = imageRepository.getByRelativePath(movedRelativePath);
+    const moved = await imageRepository.getByRelativePath(movedRelativePath);
     expect(moved?.id).toBe(original?.id);
     expect(moved?.asset_key).toBe(original?.asset_key);
     expect(moved?.thumbnail_path).toBe(original?.thumbnail_path);

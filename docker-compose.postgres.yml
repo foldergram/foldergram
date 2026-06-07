@@ -1,0 +1,38 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: foldergram
+      POSTGRES_USER: foldergram
+      POSTGRES_PASSWORD: foldergram
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U foldergram"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  foldergram:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: foldergram:local
+    ports:
+      - "4141:4141"
+    environment:
+      IMAGE_DETAIL_SOURCE: preview
+      DERIVATIVE_MODE: eager
+      DB_DRIVER: postgres
+      DATABASE_URL: postgresql://foldergram:foldergram@postgres:5432/foldergram?sslmode=disable
+    volumes:
+      - ./data/gallery:/app/data/gallery
+      - ./data/thumbnails:/app/data/thumbnails
+      - ./data/previews:/app/data/previews
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

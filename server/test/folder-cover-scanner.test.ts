@@ -54,7 +54,8 @@ describe.sequential('folder cover scanner', () => {
 
     ({ appConfig } = await import('../src/config/env.js'));
     ({ scannerService } = await import('../src/services/scanner-service.js'));
-    ({ imageRepository, folderRepository, maintenanceRepository } = await import('../src/db/repositories.js'));
+    ({imageRepository, folderRepository, maintenanceRepository} = await import('../src/db/repositories.js'));
+    await (await import('../src/db/repositories.js')).initRepositories();
 
     await Promise.all([
       fs.mkdir(appConfig.galleryRoot, { recursive: true }),
@@ -94,7 +95,7 @@ describe.sequential('folder cover scanner', () => {
   });
 
   it('detects cover.jpg in a folder and prioritizes it as the avatar', async () => {
-    maintenanceRepository.resetLibraryIndex();
+    await maintenanceRepository.resetLibraryIndex();
 
     await createSourceFile('holiday/photo-1.jpg');
     await createSourceFile('holiday/photo-2.jpg');
@@ -103,37 +104,37 @@ describe.sequential('folder cover scanner', () => {
 
     await scannerService.scanAll('manual');
 
-    const folder = folderRepository.getBySlug('holiday');
+    const folder = await folderRepository.getBySlug('holiday');
     expect(folder).toBeDefined();
 
-    const avatarImage = imageRepository.getById(folder!.avatar_image_id!);
+    const avatarImage = await imageRepository.getById(folder!.avatar_image_id!);
     expect(avatarImage).toBeDefined();
     expect(avatarImage!.filename).toBe('cover.jpg');
   });
 
   it('respects cover.png when cover.jpg is not present', async () => {
-    maintenanceRepository.resetLibraryIndex();
+    await maintenanceRepository.resetLibraryIndex();
 
     await createSourceFile('party/photo-1.jpg');
     await createSourceFile('party/cover.png');
 
     await scannerService.scanAll('manual');
 
-    const folder = folderRepository.getBySlug('party');
-    const avatarImage = imageRepository.getById(folder!.avatar_image_id!);
+    const folder = await folderRepository.getBySlug('party');
+    const avatarImage = await imageRepository.getById(folder!.avatar_image_id!);
     expect(avatarImage!.filename).toBe('cover.png');
   });
 
   it('respects cover.avif when higher-priority cover files are absent', async () => {
-    maintenanceRepository.resetLibraryIndex();
+    await maintenanceRepository.resetLibraryIndex();
 
     await createSourceFile('nature/photo-1.jpg');
     await createSourceFile('nature/cover.avif');
 
     await scannerService.scanAll('manual');
 
-    const folder = folderRepository.getBySlug('nature');
-    const avatarImage = imageRepository.getById(folder!.avatar_image_id!);
+    const folder = await folderRepository.getBySlug('nature');
+    const avatarImage = await imageRepository.getById(folder!.avatar_image_id!);
     expect(avatarImage!.filename).toBe('cover.avif');
   });
 

@@ -65,7 +65,8 @@ describe.sequential('excluded folders feature', () => {
     ({ appConfig } = await import('../src/config/env.js'));
     ({ galleryService } = await import('../src/services/gallery-service.js'));
     ({ scannerService } = await import('../src/services/scanner-service.js'));
-    ({ imageRepository, maintenanceRepository } = await import('../src/db/repositories.js'));
+    ({imageRepository, maintenanceRepository} = await import('../src/db/repositories.js'));
+    await (await import('../src/db/repositories.js')).initRepositories();
 
     await Promise.all([
       fs.mkdir(appConfig.galleryRoot, { recursive: true }),
@@ -104,7 +105,7 @@ describe.sequential('excluded folders feature', () => {
       };
     });
 
-    maintenanceRepository.resetLibraryIndex();
+    await maintenanceRepository.resetLibraryIndex();
   });
 
   afterAll(async () => {
@@ -125,14 +126,15 @@ describe.sequential('excluded folders feature', () => {
     ({ appConfig } = await import('../src/config/env.js'));
     ({ galleryService } = await import('../src/services/gallery-service.js'));
     ({ scannerService } = await import('../src/services/scanner-service.js'));
-    ({ imageRepository, maintenanceRepository } = await import('../src/db/repositories.js'));
+    ({imageRepository, maintenanceRepository} = await import('../src/db/repositories.js'));
+    await (await import('../src/db/repositories.js')).initRepositories();
 
     await Promise.all([
       fs.mkdir(appConfig.galleryRoot, { recursive: true }),
       fs.mkdir(appConfig.thumbnailsDir, { recursive: true }),
       fs.mkdir(appConfig.previewsDir, { recursive: true })
     ]);
-    maintenanceRepository.resetLibraryIndex();
+    await maintenanceRepository.resetLibraryIndex();
 
     await createSourceFile('Trips/photo-1.jpg');
     await createSourceFile('Trips/@eaDir/ignored.jpg');
@@ -140,10 +142,10 @@ describe.sequential('excluded folders feature', () => {
 
     await scannerService.scanAll('manual');
 
-    expect(galleryService.listFolders().map((folder) => folder.folderPath)).toEqual(['Trips']);
-    expect(imageRepository.getByRelativePath('Trips/@eaDir/ignored.jpg')).toBeUndefined();
-    expect(imageRepository.getByRelativePath('Archive/cache/ignored-2.jpg')).toBeUndefined();
-    expect(galleryService.getStats().excludedFolders).toEqual({
+    expect((await galleryService.listFolders()).map((folder) => folder.folderPath)).toEqual(['Trips']);
+    expect(await imageRepository.getByRelativePath('Trips/@eaDir/ignored.jpg')).toBeUndefined();
+    expect(await imageRepository.getByRelativePath('Archive/cache/ignored-2.jpg')).toBeUndefined();
+    expect((await galleryService.getStats()).excludedFolders).toEqual({
       envExcludedFolders: ['@eaDir', 'Archive/cache'],
       customExcludedFolders: [],
       effectiveExcludedFolders: ['@eaDir', 'Archive/cache']
@@ -157,13 +159,13 @@ describe.sequential('excluded folders feature', () => {
 
     await scannerService.scanAll('manual');
 
-    expect(galleryService.listFolders().map((folder) => folder.folderPath).sort()).toEqual([
+    expect((await galleryService.listFolders()).map((folder) => folder.folderPath).sort()).toEqual([
       'Archive/cache',
       'Trips',
       'Trips/cache'
     ]);
 
-    expect(galleryService.setExcludedFolders(['cache'])).toEqual({
+    expect(await galleryService.setExcludedFolders(['cache'])).toEqual({
       envExcludedFolders: [],
       customExcludedFolders: ['cache'],
       effectiveExcludedFolders: ['cache'],
@@ -173,17 +175,17 @@ describe.sequential('excluded folders feature', () => {
     await createSourceFile('Trips/cache/new-3.jpg');
     await scannerService.scanChangedPaths(['Trips/cache/new-3.jpg'], 'watcher');
 
-    expect(imageRepository.getByRelativePath('Trips/cache/new-3.jpg')).toBeUndefined();
+    expect(await imageRepository.getByRelativePath('Trips/cache/new-3.jpg')).toBeUndefined();
 
     await scannerService.scanAll('manual');
 
-    expect(galleryService.listFolders().map((folder) => folder.folderPath)).toEqual(['Trips']);
-    expect(imageRepository.getByRelativePath('Trips/cache/old-1.jpg')?.is_deleted).toBe(1);
-    expect(imageRepository.getByRelativePath('Archive/cache/old-2.jpg')?.is_deleted).toBe(1);
+    expect((await galleryService.listFolders()).map((folder) => folder.folderPath)).toEqual(['Trips']);
+    expect((await imageRepository.getByRelativePath('Trips/cache/old-1.jpg'))?.is_deleted).toBe(1);
+    expect((await imageRepository.getByRelativePath('Archive/cache/old-2.jpg'))?.is_deleted).toBe(1);
   });
 
   it('prevents reserved stories folders from being indexed when the exclusion rules match them', async () => {
-    galleryService.setExcludedFolders(['stories']);
+    await galleryService.setExcludedFolders(['stories']);
 
     await createSourceFile('Albums/beach/photo-main.jpg');
     await createSourceFile('Albums/beach/stories/avatar-1.jpg');
@@ -191,11 +193,11 @@ describe.sequential('excluded folders feature', () => {
 
     await scannerService.scanAll('manual');
 
-    const folder = galleryService.listFolders()[0]!;
+    const folder = (await galleryService.listFolders())[0]!;
     expect(folder.folderPath).toBe('Albums/beach');
     expect(folder.hasAvatarStory).toBe(false);
-    expect(galleryService.getFolderStories(folder.slug)?.items).toEqual([]);
-    expect(galleryService.searchMedia('avatar-1', 1, 20).total).toBe(0);
+    expect((await galleryService.getFolderStories(folder.slug))?.items).toEqual([]);
+    expect((await galleryService.searchMedia('avatar-1', 1, 20)).total).toBe(0);
   });
 
   it('keeps managed gallery roots separate from bare-name excluded folder matching', async () => {
@@ -217,14 +219,15 @@ describe.sequential('excluded folders feature', () => {
     ({ appConfig } = await import('../src/config/env.js'));
     ({ galleryService } = await import('../src/services/gallery-service.js'));
     ({ scannerService } = await import('../src/services/scanner-service.js'));
-    ({ imageRepository, maintenanceRepository } = await import('../src/db/repositories.js'));
+    ({imageRepository, maintenanceRepository} = await import('../src/db/repositories.js'));
+    await (await import('../src/db/repositories.js')).initRepositories();
 
     await Promise.all([
       fs.mkdir(appConfig.galleryRoot, { recursive: true }),
       fs.mkdir(appConfig.thumbnailsDir, { recursive: true }),
       fs.mkdir(appConfig.previewsDir, { recursive: true })
     ]);
-    maintenanceRepository.resetLibraryIndex();
+    await maintenanceRepository.resetLibraryIndex();
 
     await createSourceFile('thumbnails/managed-1.jpg');
     await createSourceFile('Trips/photo-1.jpg');
@@ -232,14 +235,14 @@ describe.sequential('excluded folders feature', () => {
 
     await scannerService.scanAll('manual');
 
-    expect(galleryService.listFolders().map((folder) => folder.folderPath).sort()).toEqual(['Trips', 'Trips/thumbnails']);
-    expect(imageRepository.getByRelativePath('thumbnails/managed-1.jpg')).toBeUndefined();
-    expect(imageRepository.getByRelativePath('Trips/thumbnails/photo-2.jpg')?.is_deleted).toBe(0);
+    expect((await galleryService.listFolders()).map((folder) => folder.folderPath).sort()).toEqual(['Trips', 'Trips/thumbnails']);
+    expect(await imageRepository.getByRelativePath('thumbnails/managed-1.jpg')).toBeUndefined();
+    expect((await imageRepository.getByRelativePath('Trips/thumbnails/photo-2.jpg'))?.is_deleted).toBe(0);
 
     await createSourceFile('Trips/thumbnails/photo-3.jpg');
     await scannerService.scanChangedPaths(['Trips/thumbnails/photo-3.jpg'], 'watcher');
 
-    expect(imageRepository.getByRelativePath('Trips/thumbnails/photo-3.jpg')?.is_deleted).toBe(0);
+    expect((await imageRepository.getByRelativePath('Trips/thumbnails/photo-3.jpg'))?.is_deleted).toBe(0);
   });
 
   async function createSourceFile(relativePath: string): Promise<void> {

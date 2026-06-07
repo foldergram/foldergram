@@ -1,5 +1,6 @@
 <template>
   <div class="reel-action-rail" @click.stop>
+    <slot name="prepend" />
     <button
       class="reel-action-rail__button"
       :class="{ 'reel-action-rail__button--liked': isLiked }"
@@ -15,6 +16,8 @@
         aria-hidden="true"
       />
     </button>
+
+    <CollectionBookmark :item="item" placement="feed" />
 
     <div class="reel-action-rail__info-wrap">
       <button
@@ -67,6 +70,7 @@ import { useAuthStore } from '../stores/auth';
 import { useLikesStore } from '../stores/likes';
 import type { FeedItem } from '../types/api';
 import { getOriginalMediaDownloadUrl } from '../utils/original-media';
+import CollectionBookmark from './CollectionBookmark.vue';
 
 const props = defineProps<{
   item: FeedItem;

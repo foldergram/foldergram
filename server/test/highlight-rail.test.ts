@@ -41,7 +41,8 @@ describe.sequential('highlight rail selection', () => {
 
     ({ appConfig } = await import('../src/config/env.js'));
     ({ galleryService } = await import('../src/services/gallery-service.js'));
-    ({ folderRepository, imageRepository, maintenanceRepository } = await import('../src/db/repositories.js'));
+    ({folderRepository, imageRepository, maintenanceRepository} = await import('../src/db/repositories.js'));
+    await (await import('../src/db/repositories.js')).initRepositories();
   });
 
   afterAll(async () => {
@@ -51,7 +52,7 @@ describe.sequential('highlight rail selection', () => {
   });
 
   beforeEach(async () => {
-    maintenanceRepository.resetLibraryIndex();
+    await maintenanceRepository.resetLibraryIndex();
     await Promise.all([
       fs.mkdir(appConfig.galleryRoot, { recursive: true }),
       fs.mkdir(appConfig.thumbnailsDir, { recursive: true }),
@@ -64,8 +65,8 @@ describe.sequential('highlight rail selection', () => {
     await createIndexedFolder('bravo', 1_776_000_000_000, 12);
     await createIndexedFolder('charlie', 1_775_000_000_000, 12);
 
-    const recentFeedIds = new Set(galleryService.getFeed(1, 18, 'recent').items.map((item) => item.id));
-    const rail = galleryService.listMoments();
+    const recentFeedIds = new Set((await galleryService.getFeed(1, 18, 'recent')).items.map((item) => item.id));
+    const rail = await galleryService.listMoments();
 
     expect(rail.railKind).toBe('highlights');
     expect(rail.items.length).toBeGreaterThan(0);
@@ -77,7 +78,7 @@ describe.sequential('highlight rail selection', () => {
     const recentBatches = rail.items.find((capsule) => capsule.id === 'highlight-recent-batches');
     expect(recentBatches).toBeDefined();
 
-    const recentBatchFeed = galleryService.getMomentFeed('highlight-recent-batches', 1, 30);
+    const recentBatchFeed = await galleryService.getMomentFeed('highlight-recent-batches', 1, 30);
     expect(recentBatchFeed).not.toBeNull();
     expect(recentBatchFeed?.items.length).toBeGreaterThanOrEqual(2);
 
@@ -91,7 +92,7 @@ describe.sequential('highlight rail selection', () => {
   }> {
     const slug = relativeFolderPath.replaceAll('/', '-');
     const folderName = path.posix.basename(relativeFolderPath);
-    const folder = folderRepository.upsert({
+    const folder = await folderRepository.upsert({
       slug,
       name: folderName,
       folderPath: relativeFolderPath
@@ -108,7 +109,7 @@ describe.sequential('highlight rail selection', () => {
       const capturedAt = startTimestamp - index * 60_000;
       const fileSize = 1_000 + index;
 
-      const image = imageRepository.upsert({
+      const image = await imageRepository.upsert({
         folderId: folder.id,
         filename,
         extension,
@@ -132,7 +133,7 @@ describe.sequential('highlight rail selection', () => {
       });
 
       if (index === 0) {
-        folderRepository.setAvatar(folder.id, image.id);
+        await folderRepository.setAvatar(folder.id, image.id);
       }
     }
 

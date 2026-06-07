@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { countFeedBursts, diversifyFeedCandidates, listMonthDayKeysAroundDate } from '../src/utils/feed-utils.js';
 
 describe('feed diversification', () => {
-  it('spreads bursty runs from the same folder across the feed', () => {
+  it('spreads bursty runs from the same folder across the feed', async () => {
     const items = [
       { id: 1, folderId: 10, sortTimestamp: 600_000, takenAt: 600_000 },
       { id: 2, folderId: 10, sortTimestamp: 590_000, takenAt: 590_000 },
@@ -16,7 +16,7 @@ describe('feed diversification', () => {
     expect(diversifyFeedCandidates(items).map((item) => item.id)).toEqual([1, 5, 6, 2, 3, 4]);
   });
 
-  it('treats large time gaps in one folder as separate bursts', () => {
+  it('treats large time gaps in one folder as separate bursts', async () => {
     const items = [
       { id: 1, folderId: 10, sortTimestamp: 3_000_000, takenAt: 3_000_000 },
       { id: 2, folderId: 10, sortTimestamp: 2_400_000, takenAt: 2_400_000 },
@@ -31,7 +31,7 @@ describe('feed diversification', () => {
 });
 
 describe('moment date helpers', () => {
-  it('builds week keys across calendar boundaries', () => {
+  it('builds week keys across calendar boundaries', async () => {
     expect(listMonthDayKeysAroundDate(new Date('2026-01-01T12:00:00.000Z'), 3, 3)).toEqual([
       '12-29',
       '12-30',

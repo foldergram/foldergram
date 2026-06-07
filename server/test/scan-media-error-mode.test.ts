@@ -48,14 +48,15 @@ describe.sequential('scan media error mode', () => {
 
     ({ appConfig } = await import('../src/config/env.js'));
     ({ scannerService } = await import('../src/services/scanner-service.js'));
-    ({ maintenanceRepository } = await import('../src/db/repositories.js'));
+    ({maintenanceRepository} = await import('../src/db/repositories.js'));
+    await (await import('../src/db/repositories.js')).initRepositories();
 
     await Promise.all([
       fs.mkdir(appConfig.galleryRoot, { recursive: true }),
       fs.mkdir(appConfig.thumbnailsDir, { recursive: true }),
       fs.mkdir(appConfig.previewsDir, { recursive: true })
     ]);
-    maintenanceRepository.resetLibraryIndex();
+    await maintenanceRepository.resetLibraryIndex();
   });
 
   afterAll(async () => {

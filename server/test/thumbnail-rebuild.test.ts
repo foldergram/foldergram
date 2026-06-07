@@ -74,13 +74,12 @@ describe.sequential('thumbnail-only rebuild', () => {
     ({ scannerService, LIBRARY_REBUILD_REQUIRED_MESSAGE: libraryRebuildRequiredMessage } = await import(
       '../src/services/scanner-service.js'
     ));
-    ({
-      folderRepository,
+    ({folderRepository,
       imageRepository,
       likeRepository,
       appSettingsRepository,
-      scanRunRepository
-    } = await import('../src/db/repositories.js'));
+      scanRunRepository} = await import('../src/db/repositories.js'));
+      await (await import('../src/db/repositories.js')).initRepositories();
     ({ databaseManager } = await import('../src/db/database.js'));
     ({ LIBRARY_REBUILD_REQUIRED_SETTING_KEY: libraryRebuildRequiredSettingKey } = await import(
       '../src/constants/app-setting-keys.js'
@@ -124,7 +123,7 @@ describe.sequential('thumbnail-only rebuild', () => {
   });
 
   it('rebuilds thumbnails from indexed media without touching previews or indexed state', async () => {
-    const previousScan = createCompletedScanRun({
+    const previousScan = await createCompletedScanRun({
       scanned_files: 2,
       new_files: 0,
       updated_files: 0,
@@ -135,13 +134,12 @@ describe.sequential('thumbnail-only rebuild', () => {
       { filename: 'clip-1.mp4' }
     ]);
 
-    const previousThumbnailUrl = galleryService
-      .getFeed(1, 10, 'recent')
+    const previousThumbnailUrl = (await galleryService.getFeed(1, 10, 'recent'))
       .items.find((item) => item.id === indexed.images[0]?.id)?.thumbnailUrl;
     expect(previousThumbnailUrl).toContain(`?v=${previousScan.id}`);
 
     const previewContentsBefore = await Promise.all(indexed.previewPaths.map((previewPath) => fs.readFile(previewPath, 'utf8')));
-    const scanRunCountBefore = getScanRunCount();
+    const scanRunCountBefore = await getScanRunCount();
 
     const lastScan = await scannerService.rebuildThumbnails();
 
@@ -163,13 +161,13 @@ describe.sequential('thumbnail-only rebuild', () => {
       await expect(fs.readFile(previewPath, 'utf8')).resolves.toBe(previewContentsBefore[index]);
     }
 
-    expect(folderRepository.getBySlug(indexed.folder.slug)).toBeDefined();
-    expect(imageRepository.countByFolder(indexed.folder.id)).toBe(2);
-    expect(likeRepository.getByImageId(indexed.images[0]!.id)).toBeDefined();
-    expect(getScanRunCount()).toBe(scanRunCountBefore + 1);
+    expect(await folderRepository.getBySlug(indexed.folder.slug)).toBeDefined();
+    expect(await imageRepository.countByFolder(indexed.folder.id)).toBe(2);
+    expect(await likeRepository.getByImageId(indexed.images[0]!.id)).toBeDefined();
+    expect(await getScanRunCount()).toBe(scanRunCountBefore + 1);
 
-    const refreshedFeedItem = galleryService
-      .getFeed(1, 10, 'recent')
+    const refreshedFeedItem = (await galleryService
+      .getFeed(1, 10, 'recent'))
       .items.find((item) => item.id === indexed.images[0]?.id);
     expect(refreshedFeedItem?.thumbnailUrl).toContain(`?v=${lastScan?.id}`);
     expect(refreshedFeedItem?.previewUrl).toContain(`?v=${lastScan?.id}`);
@@ -204,7 +202,7 @@ describe.sequential('thumbnail-only rebuild', () => {
       await expect(fs.readFile(previewPath, 'utf8')).resolves.toBe(previewContentsBefore[index]);
     }
 
-    expect(imageRepository.getByRelativePath('broken/clip-missing.mp4')?.is_deleted).toBe(0);
+    expect((await imageRepository.getByRelativePath('broken/clip-missing.mp4'))?.is_deleted).toBe(0);
   });
 
   it('rebuilds thumbnails from the current gallery root when cached absolute paths are stale', async () => {
@@ -231,12 +229,12 @@ describe.sequential('thumbnail-only rebuild', () => {
   });
 
   it('refuses thumbnail rebuilds when a full library rebuild is required', async () => {
-    appSettingsRepository.set(libraryRebuildRequiredSettingKey, '1');
+    await appSettingsRepository.set(libraryRebuildRequiredSettingKey, '1');
 
     await expect(scannerService.rebuildThumbnails()).rejects.toThrow(libraryRebuildRequiredMessage);
 
     expect(generateThumbnailDerivativeMock).not.toHaveBeenCalled();
-    expect(getScanRunCount()).toBe(0);
+    expect(await getScanRunCount()).toBe(0);
   });
 
   async function createIndexedFolder(
@@ -250,7 +248,7 @@ describe.sequential('thumbnail-only rebuild', () => {
   }> {
     const slug = relativeFolderPath.replaceAll('/', '-');
     const folderName = path.posix.basename(relativeFolderPath);
-    const folder = folderRepository.upsert({
+    const folder = await folderRepository.upsert({
       slug,
       name: folderName,
       folderPath: relativeFolderPath
@@ -285,7 +283,7 @@ describe.sequential('thumbnail-only rebuild', () => {
       await fs.writeFile(thumbnailPath, `stale-thumb:${relativePath}`);
       await fs.writeFile(previewPath, `preview:${relativePath}`);
 
-      const image = imageRepository.upsert({
+      const image = await imageRepository.upsert({
         folderId: folder.id,
         filename: entry.filename,
         extension,
@@ -309,7 +307,7 @@ describe.sequential('thumbnail-only rebuild', () => {
       });
 
       if (entry.like) {
-        likeRepository.upsert(image.id);
+        await likeRepository.upsert(image.id);
       }
 
       images.push(image);
@@ -317,7 +315,7 @@ describe.sequential('thumbnail-only rebuild', () => {
       previewPaths.push(previewPath);
     }
 
-    folderRepository.setAvatar(folder.id, images[0]?.id ?? null);
+    await folderRepository.setAvatar(folder.id, images[0]?.id ?? null);
 
     return {
       folder,
@@ -327,12 +325,12 @@ describe.sequential('thumbnail-only rebuild', () => {
     };
   }
 
-  function createCompletedScanRun(
+  async function createCompletedScanRun(
     summary: Pick<ModelsModule['ScanRunRecord'], 'scanned_files' | 'new_files' | 'updated_files' | 'removed_files'>,
     status = 'completed'
   ) {
-    const runId = scanRunRepository.start();
-    scanRunRepository.finish(runId, {
+    const runId = await scanRunRepository.start();
+    await scanRunRepository.finish(runId, {
       finished_at: '2026-03-12T12:00:00.000Z',
       status,
       scanned_files: summary.scanned_files,
@@ -342,12 +340,12 @@ describe.sequential('thumbnail-only rebuild', () => {
       error_text: null
     });
 
-    return scanRunRepository.latestCompleted()!;
+    return await scanRunRepository.latestCompleted()!;
   }
 
-  function getScanRunCount(): number {
-    return Number(
-      (databaseManager.connection.prepare('SELECT COUNT(*) AS count FROM scan_runs').get() as { count: number }).count
-    );
+  async function getScanRunCount(): Promise<number> {
+    const driver = await databaseManager.getConnection();
+    const { rows } = await driver.query<{ count: number }>('SELECT COUNT(*) AS count FROM scan_runs');
+    return Number(rows[0]?.count ?? 0);
   }
 });

@@ -32,14 +32,14 @@ function createResponse() {
 }
 
 describe('isAllowedLocalOrigin', () => {
-  it('allows loopback origins for the app port and the dev-client port range', () => {
+  it('allows loopback origins for the app port and the dev-client port range', async () => {
     expect(isAllowedLocalOrigin(`http://localhost:${appConfig.port}`)).toBe(true);
     expect(isAllowedLocalOrigin(`http://127.0.0.1:${appConfig.devClientPort}`)).toBe(true);
     expect(isAllowedLocalOrigin(`http://localhost:${appConfig.devClientPorts.at(-1)}`)).toBe(true);
     expect(isAllowedLocalOrigin(`http://[::1]:${appConfig.port}`)).toBe(true);
   });
 
-  it('rejects non-loopback or unexpected ports', () => {
+  it('rejects non-loopback or unexpected ports', async () => {
     expect(isAllowedLocalOrigin('http://example.com:4141')).toBe(false);
     expect(isAllowedLocalOrigin(`http://localhost:${appConfig.devClientPorts.at(-1)! + 1}`)).toBe(false);
     expect(isAllowedLocalOrigin('http://localhost:9999')).toBe(false);
@@ -48,7 +48,7 @@ describe('isAllowedLocalOrigin', () => {
 });
 
 describe('requireTrustedMutationRequest', () => {
-  it('allows safe methods without the CSRF header', () => {
+  it('allows safe methods without the CSRF header', async () => {
     const request = createRequest('GET');
     const response = createResponse();
     const next = vi.fn();
@@ -59,7 +59,7 @@ describe('requireTrustedMutationRequest', () => {
     expect(response.status).not.toHaveBeenCalled();
   });
 
-  it('blocks mutating requests without the intent header', () => {
+  it('blocks mutating requests without the intent header', async () => {
     const request = createRequest('POST');
     const response = createResponse();
     const next = vi.fn();
@@ -70,7 +70,7 @@ describe('requireTrustedMutationRequest', () => {
     expect(response.status).toHaveBeenCalledWith(403);
   });
 
-  it('allows mutating requests with the intent header and an allowed origin', () => {
+  it('allows mutating requests with the intent header and an allowed origin', async () => {
     const request = createRequest('DELETE', {
       [CSRF_INTENT_HEADER]: CSRF_INTENT_VALUE,
       origin: `http://localhost:${appConfig.devClientPort}`
@@ -84,7 +84,7 @@ describe('requireTrustedMutationRequest', () => {
     expect(response.status).not.toHaveBeenCalled();
   });
 
-  it('allows mutating requests with the intent header and no browser origin metadata', () => {
+  it('allows mutating requests with the intent header and no browser origin metadata', async () => {
     const request = createRequest('POST', {
       [CSRF_INTENT_HEADER]: CSRF_INTENT_VALUE
     });
@@ -97,7 +97,7 @@ describe('requireTrustedMutationRequest', () => {
     expect(response.status).not.toHaveBeenCalled();
   });
 
-  it('blocks mutating requests when the origin is not trusted', () => {
+  it('blocks mutating requests when the origin is not trusted', async () => {
     const request = createRequest('POST', {
       [CSRF_INTENT_HEADER]: CSRF_INTENT_VALUE,
       origin: 'http://evil.example:4142'
@@ -111,7 +111,7 @@ describe('requireTrustedMutationRequest', () => {
     expect(response.status).toHaveBeenCalledWith(403);
   });
 
-  it('blocks mutating requests when only an untrusted referer is present', () => {
+  it('blocks mutating requests when only an untrusted referer is present', async () => {
     const request = createRequest('POST', {
       [CSRF_INTENT_HEADER]: CSRF_INTENT_VALUE,
       referer: 'http://evil.example:4142/path'

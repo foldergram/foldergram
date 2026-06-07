@@ -1,13 +1,17 @@
 import express from 'express';
 import { z } from 'zod';
 
+import { performance } from 'node:perf_hooks';
+
 import { AUTH_PASSWORD_MAX_LENGTH, AUTH_PASSWORD_MIN_LENGTH, authService } from '../services/auth-service.js';
 import { galleryService } from '../services/gallery-service.js';
 import { requireCapability } from '../middleware/auth-protection.js';
 import { createRateLimiter } from '../middleware/rate-limit.js';
+import { metricsService } from '../services/metrics-service.js';
 import { LIBRARY_REBUILD_REQUIRED_MESSAGE, scannerService } from '../services/scanner-service.js';
 import { storageService } from '../services/storage-service.js';
 import { watcherService } from '../services/watcher-service.js';
+import { databaseManager } from '../db/database.js';
 
 const router = express.Router();
 
@@ -209,6 +213,33 @@ router.get('/health', (_request, response) => {
   });
 });
 
+router.get('/db', requireCapability('canAccessSettings', 'Admin access required'), async (_request, response) => {
+  const driver = await databaseManager.getConnection();
+  const t = performance.now();
+  let ok = false;
+  let error: string | null = null;
+  try {
+    await driver.queryOne('SELECT 1');
+    ok = true;
+  } catch (err) {
+    error = err instanceof Error ? err.message : String(err);
+  }
+  const latency_ms = Math.round(performance.now() - t);
+  const stats = metricsService.getAllQueryStats();
+  response.json({
+    ok,
+    dialect: driver.dialect,
+    latency_ms,
+    error,
+    total_queries: stats.reduce((sum, s) => sum + s.count, 0),
+    distinct_queries: stats.length
+  });
+});
+
+router.get('/db/time', requireCapability('canAccessSettings', 'Admin access required'), (_request, response) => {
+  response.json(metricsService.getAllQueryStats());
+});
+
 router.get('/auth/status', (request, response) => {
   authService.setNoStoreHeaders(response);
   response.json(authService.getStatus(request));
@@ -266,12 +297,12 @@ router.post('/auth/logout', (request, response) => {
   });
 });
 
-router.put('/auth/password', authRateLimiter, (request, response) => {
+router.put('/auth/password', authRateLimiter, async (request, response) => {
   authService.setNoStoreHeaders(response);
 
   if (!authService.isEnabled()) {
     const body = configurePasswordBodySchema.parse(request.body);
-    const auth = authService.setAdminPassword(body.password);
+    const auth = await authService.setAdminPassword(body.password);
     authService.setAuthenticatedSession(response, request, 'admin');
     response.json({
       ok: true,
@@ -291,7 +322,7 @@ router.put('/auth/password', authRateLimiter, (request, response) => {
     return;
   }
 
-  const auth = authService.setAdminPassword(body.password);
+  const auth = await authService.setAdminPassword(body.password);
   authService.setAuthenticatedSession(response, request, 'admin');
   response.json({
     ok: true,
@@ -299,7 +330,7 @@ router.put('/auth/password', authRateLimiter, (request, response) => {
   });
 });
 
-router.delete('/auth/password', authRateLimiter, (request, response) => {
+router.delete('/auth/password', authRateLimiter, async (request, response) => {
   authService.setNoStoreHeaders(response);
 
   if (!authService.isEnabled()) {
@@ -318,7 +349,7 @@ router.delete('/auth/password', authRateLimiter, (request, response) => {
     return;
   }
 
-  const auth = authService.disable();
+  const auth = await authService.disable();
   authService.clearAuthenticatedSession(response, request);
   response.json({
     ok: true,
@@ -326,7 +357,7 @@ router.delete('/auth/password', authRateLimiter, (request, response) => {
   });
 });
 
-router.put('/auth/viewer-access', authRateLimiter, (request, response) => {
+router.put('/auth/viewer-access', authRateLimiter, async (request, response) => {
   authService.setNoStoreHeaders(response);
 
   if (!authService.isEnabled()) {
@@ -340,7 +371,7 @@ router.put('/auth/viewer-access', authRateLimiter, (request, response) => {
   }
 
   const body = viewerAccessBodySchema.parse(request.body);
-  const auth = authService.setViewerAccess(body.mode, body.viewerPassword ?? null);
+  const auth = await authService.setViewerAccess(body.mode, body.viewerPassword ?? null);
   authService.setAuthenticatedSession(response, request, 'admin');
   response.json({
     ok: true,
@@ -348,12 +379,12 @@ router.put('/auth/viewer-access', authRateLimiter, (request, response) => {
   });
 });
 
-router.get('/feed', (request, response) => {
+router.get('/feed', async (request, response) => {
   const query = feedQuerySchema.parse(request.query);
-  response.json(galleryService.getFeed(query.page, query.limit, query.mode, query.seed));
+  response.json(await galleryService.getFeed(query.page, query.limit, query.mode, query.seed));
 });
 
-router.get('/reels', (request, response) => {
+router.get('/reels', async (request, response) => {
   const query = reelsQuerySchema.parse(request.query);
   const recentOpenedFolderSlugs = query.recentFolders
     ? query.recentFolders
@@ -363,101 +394,101 @@ router.get('/reels', (request, response) => {
     : [];
 
   response.json(
-    galleryService.getReels(query.page, query.limit, query.mode, query.seed, {
+    await galleryService.getReels(query.page, query.limit, query.mode, query.seed, {
       lastOpenedFolderSlug: query.lastFolder ?? null,
       recentOpenedFolderSlugs
     })
   );
 });
 
-router.get('/feed/search', (request, response) => {
+router.get('/feed/search', async (request, response) => {
   const query = mediaSearchQuerySchema.parse(request.query);
-  response.json(galleryService.searchMedia(query.q, query.page, query.limit));
+  response.json(await galleryService.searchMedia(query.q, query.page, query.limit));
 });
 
-router.get('/status', (_request, response) => {
-  response.json(galleryService.getStatus());
+router.get('/status', async (_request, response) => {
+  response.json(await galleryService.getStatus());
 });
 
-router.get('/scan-progress', (_request, response) => {
-  response.json(galleryService.getScanProgress());
+router.get('/scan-progress', async (_request, response) => {
+  response.json(await galleryService.getScanProgress());
 });
 
-router.get('/admin/scan-progress', requireCapability('canAccessSettings', 'Admin access is required.'), (_request, response) => {
-  response.json(galleryService.getAdminScanProgress());
+router.get('/admin/scan-progress', requireCapability('canAccessSettings', 'Admin access is required.'), async (_request, response) => {
+  response.json(await galleryService.getAdminScanProgress());
 });
 
 router.put(
   '/admin/settings/app-locale',
   requireCapability('canAccessSettings', 'Admin access is required.'),
-  (request, response) => {
+  async (request, response) => {
     const body = appLocaleBodySchema.parse(request.body);
-    response.json(galleryService.setDefaultLocale(body.defaultLocale));
+    response.json(await galleryService.setDefaultLocale(body.defaultLocale));
   }
 );
 
 router.put(
   '/admin/settings/home-feed-default',
   requireCapability('canAccessSettings', 'Admin access is required.'),
-  (request, response) => {
+  async (request, response) => {
     const body = homeFeedDefaultBodySchema.parse(request.body);
-    response.json(galleryService.setDefaultHomeFeedMode(body.defaultMode));
+    response.json(await galleryService.setDefaultHomeFeedMode(body.defaultMode));
   }
 );
 
 router.put(
   '/admin/settings/reels-feed-default',
   requireCapability('canAccessSettings', 'Admin access is required.'),
-  (request, response) => {
+  async (request, response) => {
     const body = reelsFeedDefaultBodySchema.parse(request.body);
-    response.json(galleryService.setDefaultReelsFeedMode(body.defaultMode));
+    response.json(await galleryService.setDefaultReelsFeedMode(body.defaultMode));
   }
 );
 
 router.put(
   '/admin/settings/folder-image-order-default',
   requireCapability('canAccessSettings', 'Admin access is required.'),
-  (request, response) => {
+  async (request, response) => {
     const body = folderImageOrderDefaultBodySchema.parse(request.body);
-    response.json(galleryService.setDefaultFolderImageOrder(body.defaultOrder));
+    response.json(await galleryService.setDefaultFolderImageOrder(body.defaultOrder));
   }
 );
 
 router.put(
   '/admin/settings/nested-folder-title-format',
   requireCapability('canAccessSettings', 'Admin access is required.'),
-  (request, response) => {
+  async (request, response) => {
     const body = nestedFolderTitleFormatBodySchema.parse(request.body);
-    response.json(galleryService.setNestedFolderTitleFormat(body.titleFormat));
+    response.json(await galleryService.setNestedFolderTitleFormat(body.titleFormat));
   }
 );
 
 router.put(
   '/admin/settings/stories-mode',
   requireCapability('canAccessSettings', 'Admin access is required.'),
-  (request, response) => {
+  async (request, response) => {
     const body = storiesModeBodySchema.parse(request.body);
-    response.json(galleryService.setTreatStoriesAsFolders(body.treatStoriesAsFolders));
+    response.json(await galleryService.setTreatStoriesAsFolders(body.treatStoriesAsFolders));
   }
 );
 
 router.put(
   '/admin/settings/excluded-folders',
   requireCapability('canAccessSettings', 'Admin access is required.'),
-  (request, response) => {
+  async (request, response) => {
     const body = excludedFoldersBodySchema.parse(request.body);
-    response.json(galleryService.setExcludedFolders(body.rules));
+    response.json(await galleryService.setExcludedFolders(body.rules));
   }
 );
 
-router.get('/feed/moments', (_request, response) => {
-  response.json(galleryService.listMoments());
+router.get('/feed/moments', async (_request, response) => {
+  response.json(await galleryService.listMoments());
 });
 
-router.get('/feed/moments/:id', (request, response) => {
+router.get('/feed/moments/:id', async (request, response) => {
   const params = momentIdSchema.parse(request.params);
   const query = paginationQuerySchema.parse(request.query);
-  const payload = galleryService.getMomentFeed(params.id, query.page, query.limit);
+  const payload = await galleryService.getMomentFeed(params.id, query.page, query.limit);
 
   if (!payload) {
     response.status(404).json({ message: 'Feed capsule not found' });
@@ -467,15 +498,14 @@ router.get('/feed/moments/:id', (request, response) => {
   response.json(payload);
 });
 
-router.get('/folders', (_request, response) => {
-  response.json({
-    items: galleryService.listFolders()
-  });
+router.get('/folders', async (request, response) => {
+  const query = paginationQuerySchema.parse(request.query);
+  response.json(await galleryService.listFolders(query.page, query.limit));
 });
 
-router.get('/folders/:slug', (request, response) => {
+router.get('/folders/:slug', async (request, response) => {
   const params = slugSchema.parse(request.params);
-  const folder = galleryService.getFolderBySlug(params.slug);
+  const folder = await galleryService.getFolderBySlug(params.slug);
 
   if (!folder) {
     response.status(404).json({ message: 'Folder not found' });
@@ -485,10 +515,10 @@ router.get('/folders/:slug', (request, response) => {
   response.json(folder);
 });
 
-router.patch('/folders/:slug', requireCapability('canManageLibrary', 'Admin access is required.'), (request, response) => {
+router.patch('/folders/:slug', requireCapability('canManageLibrary', 'Admin access is required.'), async (request, response) => {
   const params = slugSchema.parse(request.params);
   const body = patchFolderBodySchema.parse(request.body);
-  const updated = galleryService.updateFolderMetadata(params.slug, body.name, body.description ?? null);
+  const updated = await galleryService.updateFolderMetadata(params.slug, body.name, body.description ?? null);
 
   if (!updated) {
     response.status(404).json({ message: 'Folder not found' });
@@ -498,10 +528,10 @@ router.patch('/folders/:slug', requireCapability('canManageLibrary', 'Admin acce
   response.json(updated);
 });
 
-router.post('/folders/:slug/cover', requireCapability('canManageLibrary', 'Admin access is required.'), (request, response) => {
+router.post('/folders/:slug/cover', requireCapability('canManageLibrary', 'Admin access is required.'), async (request, response) => {
   const params = slugSchema.parse(request.params);
   const body = folderCoverBodySchema.parse(request.body);
-  const success = galleryService.setFolderAvatar(params.slug, body.imageId);
+  const success = await galleryService.setFolderAvatar(params.slug, body.imageId);
 
   if (!success) {
     response.status(404).json({ message: 'Folder or image not found' });
@@ -529,10 +559,10 @@ router.delete('/folders/:slug', requireCapability('canDeleteMedia', 'Admin acces
   });
 });
 
-router.get('/folders/:slug/images', (request, response) => {
+router.get('/folders/:slug/images', async (request, response) => {
   const params = slugSchema.parse(request.params);
   const query = paginationQuerySchema.merge(mediaTypeQuerySchema).parse(request.query);
-  const payload = galleryService.getFolderImages(params.slug, query.page, query.limit, query.mediaType);
+  const payload = await galleryService.getFolderImages(params.slug, query.page, query.limit, query.mediaType);
 
   if (!payload) {
     response.status(404).json({ message: 'Folder not found' });
@@ -542,15 +572,15 @@ router.get('/folders/:slug/images', (request, response) => {
   response.json(payload);
 });
 
-router.get('/places', (_request, response) => {
+router.get('/places', async (_request, response) => {
   response.json({
-    items: galleryService.listPlaces()
+    items: await galleryService.listPlaces()
   });
 });
 
-router.get('/places/:slug', (request, response) => {
+router.get('/places/:slug', async (request, response) => {
   const params = slugSchema.parse(request.params);
-  const place = galleryService.getPlaceBySlug(params.slug);
+  const place = await galleryService.getPlaceBySlug(params.slug);
 
   if (!place) {
     response.status(404).json({ message: 'Place not found' });
@@ -560,10 +590,10 @@ router.get('/places/:slug', (request, response) => {
   response.json(place);
 });
 
-router.get('/places/:slug/images', (request, response) => {
+router.get('/places/:slug/images', async (request, response) => {
   const params = slugSchema.parse(request.params);
   const query = paginationQuerySchema.merge(mediaTypeQuerySchema).parse(request.query);
-  const payload = galleryService.getPlaceImages(params.slug, query.page, query.limit, query.mediaType);
+  const payload = await galleryService.getPlaceImages(params.slug, query.page, query.limit, query.mediaType);
 
   if (!payload) {
     response.status(404).json({ message: 'Place not found' });
@@ -573,9 +603,9 @@ router.get('/places/:slug/images', (request, response) => {
   response.json(payload);
 });
 
-router.get('/folders/:slug/stories', (request, response) => {
+router.get('/folders/:slug/stories', async (request, response) => {
   const params = slugSchema.parse(request.params);
-  const payload = galleryService.getFolderStories(params.slug);
+  const payload = await galleryService.getFolderStories(params.slug);
 
   if (!payload) {
     response.status(404).json({ message: 'Folder not found' });
@@ -585,10 +615,10 @@ router.get('/folders/:slug/stories', (request, response) => {
   response.json(payload);
 });
 
-router.get('/folders/:slug/stories/:id', (request, response) => {
+router.get('/folders/:slug/stories/:id', async (request, response) => {
   const params = slugSchema.merge(storyIdSchema).parse(request.params);
   const query = paginationQuerySchema.parse(request.query);
-  const payload = galleryService.getFolderStoryFeed(params.slug, params.id, query.page, query.limit);
+  const payload = await galleryService.getFolderStoryFeed(params.slug, params.id, query.page, query.limit);
 
   if (!payload) {
     response.status(404).json({ message: 'Story capsule not found' });
@@ -598,17 +628,22 @@ router.get('/folders/:slug/stories/:id', (request, response) => {
   response.json(payload);
 });
 
-router.get('/likes', requireCapability('canUseSharedLikes', 'Authentication required.'), (_request, response) => {
-  response.json(galleryService.getLikes());
+router.get('/likes/ids', requireCapability('canUseSharedLikes', 'Authentication required.'), async (_request, response) => {
+  response.json(await galleryService.getLikeIds());
 });
 
-router.get('/collections', requireCapability('canUseSharedCollections', 'Authentication required.'), (_request, response) => {
-  response.json(galleryService.getCollections());
+router.get('/likes', requireCapability('canUseSharedLikes', 'Authentication required.'), async (request, response) => {
+  const query = paginationQuerySchema.parse(request.query);
+  response.json(await galleryService.getLikes(query.page, query.limit));
 });
 
-router.post('/collections', requireCapability('canUseSharedCollections', 'Authentication required.'), (request, response) => {
+router.get('/collections', requireCapability('canUseSharedCollections', 'Authentication required.'), async (_request, response) => {
+  response.json(await galleryService.getCollections());
+});
+
+router.post('/collections', requireCapability('canUseSharedCollections', 'Authentication required.'), async (request, response) => {
   const body = collectionBodySchema.parse(request.body);
-  const collection = galleryService.createCollection(body.name);
+  const collection = await galleryService.createCollection(body.name);
 
   if (!collection) {
     response.status(404).json({ message: 'Collection could not be created' });
@@ -621,10 +656,10 @@ router.post('/collections', requireCapability('canUseSharedCollections', 'Authen
   });
 });
 
-router.patch('/collections/:slug', requireCapability('canUseSharedCollections', 'Authentication required.'), (request, response) => {
+router.patch('/collections/:slug', requireCapability('canUseSharedCollections', 'Authentication required.'), async (request, response) => {
   const params = slugSchema.parse(request.params);
   const body = collectionBodySchema.parse(request.body);
-  const collection = galleryService.updateCollection(params.slug, body.name);
+  const collection = await galleryService.updateCollection(params.slug, body.name);
 
   if (!collection) {
     response.status(404).json({ message: 'Collection not found' });
@@ -637,9 +672,9 @@ router.patch('/collections/:slug', requireCapability('canUseSharedCollections', 
   });
 });
 
-router.delete('/collections/:slug', requireCapability('canUseSharedCollections', 'Authentication required.'), (request, response) => {
+router.delete('/collections/:slug', requireCapability('canUseSharedCollections', 'Authentication required.'), async (request, response) => {
   const params = slugSchema.parse(request.params);
-  const collection = galleryService.deleteCollection(params.slug);
+  const collection = await galleryService.deleteCollection(params.slug);
 
   if (!collection) {
     response.status(404).json({ message: 'Collection not found' });
@@ -652,10 +687,10 @@ router.delete('/collections/:slug', requireCapability('canUseSharedCollections',
   });
 });
 
-router.get('/collections/:slug/images', requireCapability('canUseSharedCollections', 'Authentication required.'), (request, response) => {
+router.get('/collections/:slug/images', requireCapability('canUseSharedCollections', 'Authentication required.'), async (request, response) => {
   const params = slugSchema.parse(request.params);
   const query = paginationQuerySchema.parse(request.query);
-  const payload = galleryService.getCollectionImages(params.slug, query.page, query.limit);
+  const payload = await galleryService.getCollectionImages(params.slug, query.page, query.limit);
 
   if (!payload) {
     response.status(404).json({ message: 'Collection not found' });
@@ -665,9 +700,9 @@ router.get('/collections/:slug/images', requireCapability('canUseSharedCollectio
   response.json(payload);
 });
 
-router.post('/collections/:slug/images/:id', requireCapability('canUseSharedCollections', 'Authentication required.'), (request, response) => {
+router.post('/collections/:slug/images/:id', requireCapability('canUseSharedCollections', 'Authentication required.'), async (request, response) => {
   const params = slugSchema.merge(imageIdSchema).parse(request.params);
-  const payload = galleryService.addImageToCollection(params.slug, params.id);
+  const payload = await galleryService.addImageToCollection(params.slug, params.id);
 
   if (!payload) {
     response.status(404).json({ message: 'Collection or image not found' });
@@ -680,9 +715,9 @@ router.post('/collections/:slug/images/:id', requireCapability('canUseSharedColl
   });
 });
 
-router.delete('/collections/:slug/images/:id', requireCapability('canUseSharedCollections', 'Authentication required.'), (request, response) => {
+router.delete('/collections/:slug/images/:id', requireCapability('canUseSharedCollections', 'Authentication required.'), async (request, response) => {
   const params = slugSchema.merge(imageIdSchema).parse(request.params);
-  const payload = galleryService.removeImageFromCollection(params.slug, params.id);
+  const payload = await galleryService.removeImageFromCollection(params.slug, params.id);
 
   if (!payload) {
     response.status(404).json({ message: 'Collection or image not found' });
@@ -695,15 +730,15 @@ router.delete('/collections/:slug/images/:id', requireCapability('canUseSharedCo
   });
 });
 
-router.get('/trash/images', requireCapability('canDeleteMedia', 'Admin access is required.'), (request, response) => {
+router.get('/trash/images', requireCapability('canDeleteMedia', 'Admin access is required.'), async (request, response) => {
   const query = paginationQuerySchema.parse(request.query);
-  response.json(galleryService.getTrashImages(query.page, query.limit));
+  response.json(await galleryService.getTrashImages(query.page, query.limit));
 });
 
-router.get('/images/:id', (request, response) => {
+router.get('/images/:id', async (request, response) => {
   const params = imageIdSchema.parse(request.params);
   const query = mediaTypeQuerySchema.parse(request.query);
-  const image = galleryService.getImageDetail(params.id, query.mediaType);
+  const image = await galleryService.getImageDetail(params.id, query.mediaType);
 
   if (!image) {
     response.status(404).json({ message: 'Post not found' });
@@ -713,10 +748,10 @@ router.get('/images/:id', (request, response) => {
   response.json(image);
 });
 
-router.patch('/images/:id/caption', requireCapability('canManageLibrary', 'Admin access is required.'), (request, response) => {
+router.patch('/images/:id/caption', requireCapability('canManageLibrary', 'Admin access is required.'), async (request, response) => {
   const params = imageIdSchema.parse(request.params);
   const body = patchImageCaptionBodySchema.parse(request.body);
-  const image = galleryService.updateImageCaption(params.id, body.caption);
+  const image = await galleryService.updateImageCaption(params.id, body.caption);
 
   if (!image) {
     response.status(404).json({ message: 'Post not found' });
@@ -729,9 +764,9 @@ router.patch('/images/:id/caption', requireCapability('canManageLibrary', 'Admin
   });
 });
 
-router.get('/images/:id/collections', requireCapability('canUseSharedCollections', 'Authentication required.'), (request, response) => {
+router.get('/images/:id/collections', requireCapability('canUseSharedCollections', 'Authentication required.'), async (request, response) => {
   const params = imageIdSchema.parse(request.params);
-  const payload = galleryService.getImageCollections(params.id);
+  const payload = await galleryService.getImageCollections(params.id);
 
   if (!payload) {
     response.status(404).json({ message: 'Post not found' });
@@ -741,9 +776,9 @@ router.get('/images/:id/collections', requireCapability('canUseSharedCollections
   response.json(payload);
 });
 
-router.post('/images/:id/save', requireCapability('canUseSharedCollections', 'Authentication required.'), (request, response) => {
+router.post('/images/:id/save', requireCapability('canUseSharedCollections', 'Authentication required.'), async (request, response) => {
   const params = imageIdSchema.parse(request.params);
-  const payload = galleryService.saveImage(params.id);
+  const payload = await galleryService.saveImage(params.id);
 
   if (!payload) {
     response.status(404).json({ message: 'Image not found' });
@@ -756,9 +791,9 @@ router.post('/images/:id/save', requireCapability('canUseSharedCollections', 'Au
   });
 });
 
-router.delete('/images/:id/save', requireCapability('canUseSharedCollections', 'Authentication required.'), (request, response) => {
+router.delete('/images/:id/save', requireCapability('canUseSharedCollections', 'Authentication required.'), async (request, response) => {
   const params = imageIdSchema.parse(request.params);
-  const payload = galleryService.unsaveImage(params.id);
+  const payload = await galleryService.unsaveImage(params.id);
 
   if (!payload) {
     response.status(404).json({ message: 'Image not found' });
@@ -771,9 +806,9 @@ router.delete('/images/:id/save', requireCapability('canUseSharedCollections', '
   });
 });
 
-router.post('/images/:id/like', requireCapability('canUseSharedLikes', 'Authentication required.'), (request, response) => {
+router.post('/images/:id/like', requireCapability('canUseSharedLikes', 'Authentication required.'), async (request, response) => {
   const params = imageIdSchema.parse(request.params);
-  const payload = galleryService.likeImage(params.id);
+  const payload = await galleryService.likeImage(params.id);
 
   if (!payload) {
     response.status(404).json({ message: 'Image not found' });
@@ -786,9 +821,9 @@ router.post('/images/:id/like', requireCapability('canUseSharedLikes', 'Authenti
   });
 });
 
-router.delete('/images/:id/like', requireCapability('canUseSharedLikes', 'Authentication required.'), (request, response) => {
+router.delete('/images/:id/like', requireCapability('canUseSharedLikes', 'Authentication required.'), async (request, response) => {
   const params = imageIdSchema.parse(request.params);
-  const payload = galleryService.unlikeImage(params.id);
+  const payload = await galleryService.unlikeImage(params.id);
 
   if (!payload) {
     response.status(404).json({ message: 'Image not found' });
@@ -801,9 +836,9 @@ router.delete('/images/:id/like', requireCapability('canUseSharedLikes', 'Authen
   });
 });
 
-router.post('/images/:id/trash', requireCapability('canDeleteMedia', 'Admin access is required.'), (request, response) => {
+router.post('/images/:id/trash', requireCapability('canDeleteMedia', 'Admin access is required.'), async (request, response) => {
   const params = imageIdSchema.parse(request.params);
-  const payload = galleryService.trashImage(params.id);
+  const payload = await galleryService.trashImage(params.id);
 
   if (!payload) {
     response.status(404).json({ message: 'Post not found' });
@@ -816,9 +851,9 @@ router.post('/images/:id/trash', requireCapability('canDeleteMedia', 'Admin acce
   });
 });
 
-router.post('/images/:id/restore', requireCapability('canDeleteMedia', 'Admin access is required.'), (request, response) => {
+router.post('/images/:id/restore', requireCapability('canDeleteMedia', 'Admin access is required.'), async (request, response) => {
   const params = imageIdSchema.parse(request.params);
-  const payload = galleryService.restoreImage(params.id);
+  const payload = await galleryService.restoreImage(params.id);
 
   if (!payload) {
     response.status(404).json({ message: 'Post not found' });
@@ -846,10 +881,10 @@ router.delete('/images/:id', requireCapability('canDeleteMedia', 'Admin access i
   });
 });
 
-router.get('/originals/:id', (request, response) => {
+router.get('/originals/:id', async (request, response) => {
   const params = imageIdSchema.parse(request.params);
   const query = originalMediaQuerySchema.parse(request.query);
-  const originalMedia = galleryService.getOriginalMediaFile(params.id);
+  const originalMedia = await galleryService.getOriginalMediaFile(params.id);
 
   if (!originalMedia) {
     response.status(404).json({ message: 'Original media not found' });
@@ -887,7 +922,7 @@ router.post(
   requireNoScanInProgress,
   async (_request, response) => {
   try {
-    if (scannerService.isLibraryRebuildRequired()) {
+    if (await scannerService.isLibraryRebuildRequired()) {
       response.status(409).json({
         message: LIBRARY_REBUILD_REQUIRED_MESSAGE
       });
@@ -932,7 +967,7 @@ router.post(
   adminMutationRateLimiter,
   requireNoScanInProgress,
   async (_request, response) => {
-  if (scannerService.isLibraryRebuildRequired()) {
+  if (await scannerService.isLibraryRebuildRequired()) {
     response.status(409).json({
       message: LIBRARY_REBUILD_REQUIRED_MESSAGE
     });
@@ -988,8 +1023,8 @@ router.post(
   });
 });
 
-router.get('/admin/stats', requireCapability('canAccessSettings', 'Admin access is required.'), (_request, response) => {
-  response.json(galleryService.getStats());
+router.get('/admin/stats', requireCapability('canAccessSettings', 'Admin access is required.'), async (_request, response) => {
+  response.json(await galleryService.getStats());
 });
 
 export { router as apiRouter };

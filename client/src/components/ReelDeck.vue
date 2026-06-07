@@ -12,6 +12,7 @@
       class="reel-deck__panel"
     >
       <ReelPlayerCard
+        :ref="setCardRef(item.id)"
         :item="item"
         :folder="folderLookup.get(item.folderSlug) ?? null"
         :active="item.id === activeReelId"
@@ -53,6 +54,7 @@ const emit = defineEmits<{
 
 const scrollerElement = ref<HTMLElement | null>(null);
 const panelElements = new Map<number, HTMLElement>();
+const cardComponents = new Map<number, InstanceType<typeof ReelPlayerCard>>();
 const folderLookup = computed(() => new Map(props.folders.map((folder) => [folder.slug, folder])));
 
 let resizeObserver: ResizeObserver | null = null;
@@ -75,6 +77,24 @@ function setPanelRef(id: number) {
 
     panelElements.delete(id);
   };
+}
+
+function setCardRef(id: number) {
+  return (instance: Element | ComponentPublicInstance | null) => {
+    if (instance && !(instance instanceof Element)) {
+      cardComponents.set(id, instance as InstanceType<typeof ReelPlayerCard>);
+    } else {
+      cardComponents.delete(id);
+    }
+  };
+}
+
+function toggleActivePlayback() {
+  if (props.activeReelId === null) {
+    return;
+  }
+
+  cardComponents.get(props.activeReelId)?.togglePlayback();
 }
 
 function updateActiveReel() {
@@ -322,7 +342,8 @@ onBeforeUnmount(() => {
 defineExpose({
   goToPrevious,
   goToNext,
-  navigateByWheel
+  navigateByWheel,
+  toggleActivePlayback
 });
 </script>
 

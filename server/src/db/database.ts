@@ -1,34 +1,42 @@
 import { DatabaseSync } from 'node:sqlite';
 
+import { appConfig } from '../config/env.js';
+import { SqliteDriver } from './driver/sqlite-driver.js';
+import { PostgresDriver } from './driver/postgres-driver.js';
+import type { IDbDriver } from './driver/types.js';
 import { runStartupMigrations } from './migration.js';
 import { assertNoLegacySchema } from './schema-compat.js';
 import { schemaSql } from './schema.js';
 import { storageService } from '../services/storage-service.js';
 
-function initializeTransientDatabase(database: DatabaseSync): DatabaseSync {
-  database.exec(schemaSql);
-  return database;
-}
-
 class DatabaseManager {
-  private database: DatabaseSync | null = null;
+  private driverPromise: Promise<IDbDriver> | null = null;
 
-  get connection(): DatabaseSync {
-    if (this.database) {
-      return this.database;
+  getConnection(): Promise<IDbDriver> {
+    if (!this.driverPromise) {
+      this.driverPromise = this.initialize();
+    }
+    return this.driverPromise;
+  }
+
+  private async initialize(): Promise<IDbDriver> {
+    if (appConfig.dbDriver === 'postgres') {
+      runStartupMigrations({ dialect: 'postgres' });
+      return new PostgresDriver(appConfig.databaseUrl!);
     }
 
     const databasePath = storageService.getDatabasePath();
 
     if (databasePath === ':memory:') {
-      this.database = initializeTransientDatabase(new DatabaseSync(databasePath));
-      return this.database;
+      const db = new DatabaseSync(':memory:');
+      db.exec(schemaSql);
+      return new SqliteDriver(db);
     }
 
-    runStartupMigrations({ databasePath });
-    this.database = new DatabaseSync(databasePath);
-    assertNoLegacySchema(this.database);
-    return this.database;
+    runStartupMigrations({ databasePath, dialect: 'sqlite' });
+    const db = new DatabaseSync(databasePath);
+    assertNoLegacySchema(db);
+    return new SqliteDriver(db);
   }
 }
 

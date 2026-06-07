@@ -31,6 +31,9 @@ export interface FolderRecord {
   description: string | null;
   avatar_image_id: number | null;
   avatar_source: FolderAvatarSource;
+  image_count: number;
+  video_count: number;
+  latest_image_mtime_ms: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -59,9 +62,6 @@ export interface PlaceRecord {
 }
 
 export interface FolderSummaryRecord extends FolderRecord {
-  image_count: number;
-  video_count: number;
-  latest_image_mtime_ms: number | null;
   has_avatar_story?: number | null;
   summary_avatar_image_id?: number | null;
   summary_avatar_thumbnail_path?: string | null;
