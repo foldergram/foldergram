@@ -106,13 +106,18 @@ export function toPlayerSrc(source: ResolvedVideoSource): PlayerSrc {
 
 let hlsModulePromise: Promise<{ default: unknown }> | null = null;
 
-function loadBundledHls(): Promise<{ default: any }> {
+/**
+ * Must stay an arrow function. Vidstack decides whether `library` is already a
+ * constructor by checking for a `prototype`, and a plain function declaration has
+ * one, so it would hand the loader itself to hls.js instead of awaiting it.
+ */
+const loadBundledHls = (): Promise<{ default: any }> => {
   if (!hlsModulePromise) {
     hlsModulePromise = import('hls.js');
   }
 
   return hlsModulePromise as Promise<{ default: any }>;
-}
+};
 
 /**
  * Vidstack loads hls.js from a CDN by default, which never resolves on a LAN-only
