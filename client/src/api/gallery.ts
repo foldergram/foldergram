@@ -21,6 +21,7 @@ import type {
   UpdateCollectionResult,
   UpdateExcludedFoldersSettingResult,
   NestedFolderTitleFormatSetting,
+  VideoPlaybackQualitySetting,
   ReelsFeedDefaultSetting,
   SharedFolderImagesPayload,
   SharedFolderSummary,
@@ -33,6 +34,7 @@ import type {
   FolderImageOrder,
   FolderImageOrderDefaultSetting,
   NestedFolderTitleFormat,
+  VideoPlaybackQuality,
   ImageCaptionMutationResult,
   ImageDetail,
   ImageCollectionsPayload,
@@ -562,6 +564,14 @@ export function updateFolderImageOrderDefault(defaultOrder: FolderImageOrder) {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ defaultOrder })
+  });
+}
+
+export function updateVideoPlaybackQuality(videoPlaybackQuality: VideoPlaybackQuality) {
+  return requestJson<VideoPlaybackQualitySetting>('/api/admin/settings/video-playback-quality', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ videoPlaybackQuality })
   });
 }
 

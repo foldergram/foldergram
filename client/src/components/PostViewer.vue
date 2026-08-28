@@ -606,13 +606,20 @@
   import { resolveDisplayCaption } from "../utils/caption"
   import { formatFolderTitle } from "../utils/folder-titles"
   import { getOriginalMediaDownloadUrl, getOriginalMediaUrl } from "../utils/original-media"
+  import {
+    resolveVideoFallbackSource,
+    resolveVideoSource,
+    toPlayerSrc,
+    useBundledHlsLibrary,
+    type ResolvedVideoSource,
+  } from "../utils/video-playback"
   import Avatar from "./Avatar.vue"
   import CarouselMediaStage from "./CarouselMediaStage.vue"
   import CollectionBookmark from "./CollectionBookmark.vue"
   import PostCaptionModal from "./PostCaptionModal.vue"
   import ResilientImage from "./ResilientImage.vue"
   import VideoProgressFooter from "./VideoProgressFooter.vue"
-  import { formatMediaDuration, formatVideoTimestamp, videoPreviewWouldDownscale } from "../utils/media"
+  import { formatMediaDuration, formatVideoTimestamp } from "../utils/media"
 
   const props = defineProps<{
     image: ImageDetail | null
@@ -710,11 +717,13 @@
     return `${megabytes.toFixed(2)} MB`
   })
 
+  // Only worth offering when the default source is a transcoded stream; there is
+  // nothing to upgrade to when the browser is already playing the original file.
   const showHdButton = computed(
     () =>
       props.image?.mediaType === 'video' &&
-      props.image?.playbackStrategy === 'original' &&
-      videoPreviewWouldDownscale(props.image.width, props.image.height),
+      Boolean(props.image?.streamUrl) &&
+      (isPlayingHd.value || preferredVideoSource.value?.isStream === true),
   )
   const showVideoPausedIndicator = computed(
     () => props.image?.mediaType === 'video' && isVideoPaused.value,
@@ -726,26 +735,27 @@
     ),
   )
 
-  const videoSrc = computed(() => {
+  const videoFallbackSource = ref<ResolvedVideoSource | null>(null)
+  const preferredVideoSource = computed<ResolvedVideoSource | null>(() => {
     if (!props.image || props.image.mediaType !== 'video') {
-      return props.image?.previewUrl ?? ''
+      return null
     }
 
-    if (isPlayingHd.value && props.image.originalUrl) {
-      return props.image.originalUrl
-    }
-
-    return props.image.previewUrl
+    // The HD toggle is a per-playback override that forces the untouched file.
+    const quality = isPlayingHd.value ? 'original' : appStore.videoPlaybackQuality
+    return resolveVideoSource(props.image, quality)
   })
+  const activeVideoSource = computed<ResolvedVideoSource | null>(
+    () => videoFallbackSource.value ?? preferredVideoSource.value,
+  )
+  const videoSrc = computed(() => activeVideoSource.value?.src ?? '')
   const videoSource = computed<PlayerSrc>(() => {
-    if (!props.image || props.image.mediaType !== "video") {
-      return { src: props.image?.previewUrl ?? "", type: "video/mp4" }
+    const source = activeVideoSource.value
+    if (!source) {
+      return { src: "", type: "video/mp4" }
     }
 
-    return {
-      src: videoSrc.value,
-      type: "video/mp4",
-    }
+    return toPlayerSrc(source)
   })
   const mediaShellStyle = computed(() => {
     if (!props.image) {
@@ -1512,7 +1522,23 @@
       currentTime: savedTime,
       wasPaused: player.paused
     }
+    videoFallbackSource.value = null
     isPlayingHd.value = !isPlayingHd.value
+  }
+
+  function switchVideoToFallbackSource() {
+    const image = props.image
+    const failed = activeVideoSource.value
+    if (!image || !failed || videoFallbackSource.value) {
+      return
+    }
+
+    const fallback = resolveVideoFallbackSource(image, failed)
+    if (!fallback) {
+      return
+    }
+
+    videoFallbackSource.value = fallback
   }
 
   async function handlePlayerReadyForPlayback(): Promise<void> {
@@ -1582,6 +1608,11 @@
     const handleEnded = () => {
       videoCurrentTimeMs.value = videoDurationMs.value
     }
+    const handleError = () => {
+      switchVideoToFallbackSource()
+    }
+
+    const removeHlsLibraryBinding = useBundledHlsLibrary(player)
 
     player.addEventListener("loaded-metadata", handleReady)
     player.addEventListener("can-play", handleReady)
@@ -1591,8 +1622,10 @@
     player.addEventListener("duration-change", handleDuration)
     player.addEventListener("time-update", handleTimeUpdate)
     player.addEventListener("ended", handleEnded)
+    player.addEventListener("error", handleError)
 
     removePlayerEventListeners = () => {
+      removeHlsLibraryBinding()
       player.removeEventListener("loaded-metadata", handleReady)
       player.removeEventListener("can-play", handleReady)
       player.removeEventListener("play", handlePlay)
@@ -1601,6 +1634,7 @@
       player.removeEventListener("duration-change", handleDuration)
       player.removeEventListener("time-update", handleTimeUpdate)
       player.removeEventListener("ended", handleEnded)
+      player.removeEventListener("error", handleError)
     }
 
     if (player.hasAttribute("data-can-play")) {
@@ -1619,8 +1653,16 @@
       isVideoPaused.value = false
       videoDurationMs.value = props.image?.durationMs ?? 0
       videoCurrentTimeMs.value = 0
+      videoFallbackSource.value = null
       pendingVideoRestore = null
       void attemptVideoPlayback()
+    },
+  )
+
+  watch(
+    () => appStore.videoPlaybackQuality,
+    () => {
+      videoFallbackSource.value = null
     },
   )
 

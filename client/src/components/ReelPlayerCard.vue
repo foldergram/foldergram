@@ -122,7 +122,13 @@ import type { MediaPlayerElement } from 'vidstack/elements';
 import { useAppStore } from '../stores/app';
 import type { FeedItem, FolderSummary } from '../types/api';
 import { formatFolderTitle } from '../utils/folder-titles';
-import { getOriginalMediaUrl } from '../utils/original-media';
+import {
+  resolveVideoFallbackSource,
+  resolveVideoSource,
+  toPlayerSrc,
+  useBundledHlsLibrary,
+  type ResolvedVideoSource
+} from '../utils/video-playback';
 import Avatar from './Avatar.vue';
 
 const props = defineProps<{
@@ -134,13 +140,14 @@ const props = defineProps<{
 const appStore = useAppStore();
 const playerElement = ref<MediaPlayerElement | null>(null);
 const isPaused = ref(false);
-const isUsingOriginalFallback = ref(false);
+const fallbackSource = ref<ResolvedVideoSource | null>(null);
 const playerLoadMode = computed(() => (props.active ? 'eager' : 'visible'));
-const currentVideoSrc = computed(() => (isUsingOriginalFallback.value ? getOriginalMediaUrl(props.item.id) : props.item.previewUrl));
-const videoSource = computed<PlayerSrc>(() => ({
-  src: currentVideoSrc.value,
-  type: 'video/mp4'
-}));
+const preferredSource = computed<ResolvedVideoSource>(() =>
+  resolveVideoSource(props.item, appStore.videoPlaybackQuality)
+);
+const activeSource = computed<ResolvedVideoSource>(() => fallbackSource.value ?? preferredSource.value);
+const currentVideoSrc = computed(() => activeSource.value.src);
+const videoSource = computed<PlayerSrc>(() => toPlayerSrc(activeSource.value));
 const showPausedIndicator = computed(() => props.active && isPaused.value);
 const displayFolderTitle = computed(() => formatFolderTitle(props.folder ?? props.item, appStore.nestedFolderTitleFormat));
 const folderDescription = computed(() => {
@@ -183,13 +190,18 @@ function scheduleAutoplayRetry() {
   }, AUTOPLAY_RETRY_DELAY_MS * autoplayRetryAttempts);
 }
 
-function switchToOriginalFallback() {
-  if (isUsingOriginalFallback.value) {
+function switchToFallbackSource() {
+  if (fallbackSource.value) {
+    return;
+  }
+
+  const fallback = resolveVideoFallbackSource(props.item, activeSource.value);
+  if (!fallback) {
     return;
   }
 
   resetAutoplayRetry();
-  isUsingOriginalFallback.value = true;
+  fallbackSource.value = fallback;
 }
 
 function syncMuted(player: MediaPlayerElement, muted: boolean) {
@@ -228,8 +240,8 @@ async function syncPlayback() {
     return;
   } catch {
     if (appStore.videoMuted) {
-      if (!isUsingOriginalFallback.value && autoplayRetryAttempts >= MAX_AUTOPLAY_RETRIES) {
-        switchToOriginalFallback();
+      if (!fallbackSource.value && autoplayRetryAttempts >= MAX_AUTOPLAY_RETRIES) {
+        switchToFallbackSource();
         return;
       }
 
@@ -250,6 +262,9 @@ function bindPlayerEventListeners(player: MediaPlayerElement | null) {
   const handleReady = () => {
     void syncPlayback();
   };
+  const handleError = () => {
+    switchToFallbackSource();
+  };
   const handlePlay = () => {
     isPaused.value = false;
     if (!props.active) {
@@ -262,16 +277,21 @@ function bindPlayerEventListeners(player: MediaPlayerElement | null) {
     isPaused.value = props.active;
   };
 
+  const removeHlsLibraryBinding = useBundledHlsLibrary(player);
+
   player.addEventListener('loaded-metadata', handleReady);
   player.addEventListener('can-play', handleReady);
   player.addEventListener('play', handlePlay);
   player.addEventListener('pause', handlePause);
+  player.addEventListener('error', handleError);
 
   removePlayerEventListeners = () => {
+    removeHlsLibraryBinding();
     player.removeEventListener('loaded-metadata', handleReady);
     player.removeEventListener('can-play', handleReady);
     player.removeEventListener('play', handlePlay);
     player.removeEventListener('pause', handlePause);
+    player.removeEventListener('error', handleError);
   };
 
   if (player.hasAttribute('data-can-play')) {
@@ -348,8 +368,15 @@ watch(
   () => props.item.id,
   () => {
     resetAutoplayRetry();
-    isUsingOriginalFallback.value = false;
+    fallbackSource.value = null;
     isPaused.value = false;
+  }
+);
+
+watch(
+  () => appStore.videoPlaybackQuality,
+  () => {
+    fallbackSource.value = null;
   }
 );
 

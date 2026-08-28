@@ -257,6 +257,31 @@
           }
         }
       },
+      "videoPlaybackQuality": {
+        "label": "视频播放画质",
+        "description": "选择动态流和帖子中的视频以什么画质播放。非“原片”的选项会在 NAS 上按需转码。",
+        "closeMenuAria": "关闭视频播放画质菜单",
+        "deviceOverride": "本设备已单独设置为 {value}。",
+        "useLibraryDefault": "跟随图库默认",
+        "options": {
+          "auto": {
+            "label": "自动",
+            "description": "浏览器能直接播的视频播原片，其余按需转码。"
+          },
+          "original": {
+            "label": "原片",
+            "description": "始终播放原始文件，不做任何转码。"
+          },
+          "1080p": {
+            "label": "1080p",
+            "description": "按需转码到 1080p，画质与流量的平衡点。"
+          },
+          "720p": {
+            "label": "720p",
+            "description": "按需转码到 720p，最省流量、启动最快。"
+          }
+        }
+      },
       "storiesMode": {
         "label": "将 stories 文件夹视为普通应用文件夹",
         "scanRequired": "需要扫描",
@@ -322,6 +347,7 @@
         "reelsSaved": "短片现在会以 {label} 打开。",
         "folderOrderSaved": "应用文件夹现在会以 {label} 打开。",
         "nestedFolderTitleSaved": "嵌套应用文件夹现在使用 {label}。",
+        "videoPlaybackQualitySaved": "视频现在以 {label} 播放。",
         "parts": {
           "appLanguage": "应用语言",
           "excludedFolders": "排除文件夹",
@@ -330,7 +356,8 @@
           "homeFeedDefault": "首页动态默认项",
           "reelsFeedDefault": "短片默认项",
           "appFolderOrder": "应用文件夹顺序",
-          "nestedFolderTitles": "嵌套文件夹标题"
+          "nestedFolderTitles": "嵌套文件夹标题",
+          "videoPlaybackQuality": "视频播放画质"
         }
       },
       "errors": {

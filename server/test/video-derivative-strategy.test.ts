@@ -56,7 +56,7 @@ describe.sequential('video derivative strategy', () => {
     ]);
   });
 
-  it('keeps preview transcoding for large high-resolution browser-safe MP4 originals while preserving original playback eligibility', async () => {
+  it('only writes a poster frame for large browser-safe MP4 originals and keeps them playable directly', async () => {
     execFileAsyncMock.mockImplementation(createExecFileAsyncMock({
       format: {
         duration: '4.0',
@@ -78,16 +78,16 @@ describe.sequential('video derivative strategy', () => {
     const result = await generateDerivatives(sourcePath, 'clips/reel-1.mp4');
 
     expect(result.playbackStrategy).toBe('original');
-    expect(result.generatedPreview).toBe(true);
+    expect(result.generatedPreview).toBe(false);
 
+    // A single ffmpeg call: the poster frame. No full-length preview transcode.
     const ffmpegCalls = execFileAsyncMock.mock.calls.filter(([command]) => command === 'ffmpeg');
-    expect(ffmpegCalls).toHaveLength(2);
+    expect(ffmpegCalls).toHaveLength(1);
     expect(ffmpegCalls[0]?.[1]).toContain('libwebp');
-    expect(ffmpegCalls[1]?.[1]).toContain('libx264');
-    expect(ffmpegCalls[1]?.[1]).toContain(expectedVideoScaleFilter());
+    expect(ffmpegCalls.some(([, args]) => (args as string[]).includes('libx264'))).toBe(false);
   });
 
-  it('keeps preview transcoding for incompatible MP4 files', async () => {
+  it('flags incompatible MP4 files for streaming without transcoding a preview file', async () => {
     execFileAsyncMock.mockImplementation(createExecFileAsyncMock({
       format: {
         duration: '4.0',
@@ -107,13 +107,12 @@ describe.sequential('video derivative strategy', () => {
     const result = await generateDerivatives(sourcePath, 'clips/reel-2.mp4', true);
 
     expect(result.playbackStrategy).toBe('preview');
-    expect(result.generatedPreview).toBe(true);
+    expect(result.generatedPreview).toBe(false);
 
     const ffmpegCalls = execFileAsyncMock.mock.calls.filter(([command]) => command === 'ffmpeg');
-    expect(ffmpegCalls).toHaveLength(2);
+    expect(ffmpegCalls).toHaveLength(1);
     expect(ffmpegCalls[0]?.[1]).toContain('libwebp');
-    expect(ffmpegCalls[1]?.[1]).toContain('libx264');
-    expect(ffmpegCalls[1]?.[1]).toContain(expectedVideoScaleFilter());
+    expect(ffmpegCalls.some(([, args]) => (args as string[]).includes('libx264'))).toBe(false);
   });
 
   it('normalizes rotated source dimensions to display dimensions before returning metadata', async () => {
@@ -150,10 +149,6 @@ describe.sequential('video derivative strategy', () => {
     expect(result.height).toBe(1920);
   });
 });
-
-function expectedVideoScaleFilter(): string {
-  return "scale='trunc(if(gt(iw,ih),min(1280,iw),min(720,iw))/2)*2':'trunc(if(gt(iw,ih),min(1280,iw)*ih/iw,min(720,iw)*ih/iw)/2)*2':flags=lanczos";
-}
 
 function createExecFileAsyncMock(payload: unknown) {
   return async (command: string) => {

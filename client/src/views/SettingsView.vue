@@ -939,6 +939,82 @@
 
               <div class="grid gap-3 px-6 py-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
                 <div class="min-w-0">
+                  <p class="m-0 text-[0.96rem] font-semibold text-text">{{ t('settings.general.videoPlaybackQuality.label') }}</p>
+                  <p class="m-0 mt-[0.25rem] text-[0.84rem] text-muted">{{ t('settings.general.videoPlaybackQuality.description') }}</p>
+                  <p
+                    v-if="videoPlaybackQualityDeviceOverride"
+                    class="m-0 mt-[0.35rem] flex flex-wrap items-center gap-2 text-[0.8rem] text-muted"
+                  >
+                    <span>
+                      {{ t('settings.general.videoPlaybackQuality.deviceOverride', { value: videoPlaybackQualityOverrideLabel }) }}
+                    </span>
+                    <button
+                      class="inline-flex items-center rounded-full border-0 bg-surface-alt px-2 py-[0.2rem] text-[0.76rem] font-semibold text-accent-strong cursor-pointer transition-colors duration-150 hover:bg-surface-hover"
+                      type="button"
+                      @click="clearVideoPlaybackQualityOverride"
+                    >
+                      {{ t('settings.general.videoPlaybackQuality.useLibraryDefault') }}
+                    </button>
+                  </p>
+                </div>
+
+                <div class="relative w-full md:w-[18rem] md:justify-self-end" @keydown.escape.stop.prevent="closeGeneralSettingsMenu">
+                  <button
+                    class="inline-flex w-full items-center justify-between gap-3 rounded-[0.9rem] border border-border bg-[color-mix(in_srgb,var(--surface-alt)_80%,transparent_20%)] px-3 py-[0.85rem] text-left transition-[border-color,box-shadow] duration-180 hover:border-[color-mix(in_srgb,var(--accent)_22%,var(--border)_78%)] hover:bg-surface-hover focus-visible:border-[color-mix(in_srgb,var(--accent)_35%,var(--border)_65%)] focus-visible:shadow-[0_0_0_4px_color-mix(in_srgb,var(--accent-soft)_76%,transparent_24%)]"
+                    type="button"
+                    :aria-expanded="activeGeneralSettingsMenu === 'videoQuality'"
+                    :disabled="savingGeneralSettings || waitingForInitialStatus"
+                    @click="toggleGeneralSettingsMenu('videoQuality')"
+                  >
+                    <span class="min-w-0 truncate text-[0.9rem] font-semibold text-text">
+                      {{ selectedVideoPlaybackQualityOption.label }}
+                    </span>
+                    <span
+                      class="i-fluent-chevron-down-20-regular h-5 w-5 shrink-0 text-muted transition-transform duration-180"
+                      :class="activeGeneralSettingsMenu === 'videoQuality' ? 'rotate-180 text-text' : ''"
+                      aria-hidden="true"
+                    />
+                  </button>
+
+                  <button
+                    v-if="activeGeneralSettingsMenu === 'videoQuality'"
+                    class="fixed inset-0 z-40 border-0 bg-transparent"
+                    type="button"
+                    :aria-label="t('settings.general.videoPlaybackQuality.closeMenuAria')"
+                    @click="closeGeneralSettingsMenu"
+                  />
+
+                  <div
+                    v-if="activeGeneralSettingsMenu === 'videoQuality'"
+                    class="absolute right-0 top-[calc(100%+0.45rem)] z-50 w-full overflow-hidden rounded-[1rem] border border-border bg-[color-mix(in_srgb,var(--surface)_97%,var(--bg)_3%)] shadow-[0_28px_70px_rgba(0,0,0,0.16)]"
+                  >
+                    <div class="border-b border-border px-4 py-3">
+                      <p class="m-0 text-[0.83rem] font-semibold text-text">{{ t('settings.general.videoPlaybackQuality.label') }}</p>
+                    </div>
+                    <div class="grid gap-1 p-2">
+                      <button
+                        v-for="option in videoPlaybackQualityOptions"
+                        :key="option.id"
+                        class="flex items-start gap-3 rounded-[0.85rem] border-0 px-3 py-3 text-left cursor-pointer transition-colors duration-150 hover:bg-surface-hover"
+                        :class="videoPlaybackQuality === option.id ? 'bg-[color-mix(in_srgb,var(--accent-soft)_72%,transparent_28%)]' : 'bg-transparent'"
+                        type="button"
+                        @click="selectVideoPlaybackQuality(option.id)"
+                      >
+                        <span class="mt-[0.05rem] inline-flex h-5 w-5 items-center justify-center shrink-0 text-accent-strong">
+                          <span v-if="videoPlaybackQuality === option.id" class="i-fluent-checkmark-20-filled h-4 w-4" aria-hidden="true" />
+                        </span>
+                        <span class="grid min-w-0 gap-[0.08rem]">
+                          <span class="text-[0.9rem] font-semibold text-text">{{ option.label }}</span>
+                          <span class="text-[0.78rem] text-muted">{{ option.description }}</span>
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="grid gap-3 px-6 py-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+                <div class="min-w-0">
                   <div class="flex flex-wrap items-center gap-2">
                     <p class="m-0 text-[0.96rem] font-semibold text-text">{{ t('settings.general.storiesMode.label') }}</p>
                     <span class="inline-flex items-center rounded-full bg-surface-alt px-2 py-[0.2rem] text-[0.72rem] font-semibold uppercase tracking-[0.08em] text-muted">
@@ -1365,6 +1441,7 @@ import {
   updateHomeFeedDefault,
   updateNestedFolderTitleFormat,
   updateReelsFeedDefault,
+  updateVideoPlaybackQuality,
   updateStoriesMode,
   updateCarouselsMode
 } from '../api/gallery';
@@ -1377,7 +1454,15 @@ import { useLikesStore } from '../stores/likes';
 import { useMomentsStore } from '../stores/moments';
 import { usePlacesStore } from '../stores/places';
 import { useViewerStore } from '../stores/viewer';
-import type { AppStats, FeedMode, FolderImageOrder, NestedFolderTitleFormat, ReelsFeedMode, ViewerAccessMode } from '../types/api';
+import type {
+  AppStats,
+  FeedMode,
+  FolderImageOrder,
+  NestedFolderTitleFormat,
+  ReelsFeedMode,
+  VideoPlaybackQuality,
+  ViewerAccessMode
+} from '../types/api';
 
 const { t, locale } = useI18n();
 const appStore = useAppStore();
@@ -1415,6 +1500,7 @@ const homeFeedDefaultMode = ref<FeedMode>('random');
 const reelsFeedDefaultMode = ref<ReelsFeedMode>('random');
 const folderImageOrderDefault = ref<FolderImageOrder>('newest');
 const nestedFolderTitleFormat = ref<NestedFolderTitleFormat>('folder');
+const videoPlaybackQuality = ref<VideoPlaybackQuality>('auto');
 const savedLocaleSelection = ref<SupportedLocale | null>(appStore.savedDefaultLocale);
 const localeSelectionHydrated = ref(false);
 const storiesMode = ref(false);
@@ -1422,7 +1508,7 @@ const carouselsMode = ref(false);
 const feedDefaultsHydrated = ref(false);
 const storiesModeHydrated = ref(false);
 const carouselsModeHydrated = ref(false);
-const activeGeneralSettingsMenu = ref<'home' | 'reels' | 'folder' | 'nestedTitle' | null>(null);
+const activeGeneralSettingsMenu = ref<'home' | 'reels' | 'folder' | 'nestedTitle' | 'videoQuality' | null>(null);
 const showStoriesAnnouncementStructure = ref(false);
 const showCarouselsAnnouncementStructure = ref(false);
 const generalSettingsSaveArea = ref<HTMLElement | null>(null);
@@ -1654,6 +1740,7 @@ function syncFeedDefaultsFromSaved() {
   reelsFeedDefaultMode.value = appStore.defaultReelsFeedMode;
   folderImageOrderDefault.value = appStore.defaultFolderImageOrder;
   nestedFolderTitleFormat.value = appStore.nestedFolderTitleFormat;
+  videoPlaybackQuality.value = appStore.savedVideoPlaybackQuality;
   feedDefaultsHydrated.value = true;
 }
 
@@ -1744,6 +1831,28 @@ const nestedFolderTitleOptions = computed<Array<{ id: NestedFolderTitleFormat; l
     description: t('settings.general.nestedFolderTitle.options.parentPlusFolder.description')
   }
 ]);
+const videoPlaybackQualityOptions = computed<Array<{ id: VideoPlaybackQuality; label: string; description: string }>>(() => [
+  {
+    id: 'auto',
+    label: t('settings.general.videoPlaybackQuality.options.auto.label'),
+    description: t('settings.general.videoPlaybackQuality.options.auto.description')
+  },
+  {
+    id: 'original',
+    label: t('settings.general.videoPlaybackQuality.options.original.label'),
+    description: t('settings.general.videoPlaybackQuality.options.original.description')
+  },
+  {
+    id: '1080p',
+    label: t('settings.general.videoPlaybackQuality.options.1080p.label'),
+    description: t('settings.general.videoPlaybackQuality.options.1080p.description')
+  },
+  {
+    id: '720p',
+    label: t('settings.general.videoPlaybackQuality.options.720p.label'),
+    description: t('settings.general.videoPlaybackQuality.options.720p.description')
+  }
+]);
 const isLibraryRebuildActive = computed(
   () => rebuilding.value || (appStore.isScanning && activeScanReason.value === 'rebuild')
 );
@@ -1758,6 +1867,13 @@ const savedHomeFeedDefaultMode = computed(() => appStore.defaultHomeFeedMode);
 const savedReelsFeedDefaultMode = computed(() => appStore.defaultReelsFeedMode);
 const savedFolderImageOrderDefault = computed(() => appStore.defaultFolderImageOrder);
 const savedNestedFolderTitleFormat = computed(() => appStore.nestedFolderTitleFormat);
+const savedVideoPlaybackQuality = computed(() => appStore.savedVideoPlaybackQuality);
+const videoPlaybackQualityDeviceOverride = computed(() => appStore.videoPlaybackQualityOverride);
+const videoPlaybackQualityOverrideLabel = computed(
+  () =>
+    videoPlaybackQualityOptions.value.find((option) => option.id === videoPlaybackQualityDeviceOverride.value)?.label ??
+    t('settings.general.videoPlaybackQuality.options.auto.label')
+);
 const savedStoriesMode = computed(() => appStore.treatStoriesAsFolders);
 const savedCarouselsMode = computed(() => appStore.treatCarouselsAsFolders);
 const savedCustomExcludedFolders = computed(() => adminStats.value?.excludedFolders.customExcludedFolders ?? []);
@@ -1798,6 +1914,11 @@ const selectedFolderImageOrderOption = computed(
 const selectedNestedFolderTitleOption = computed(
   () => nestedFolderTitleOptions.value.find((option) => option.id === nestedFolderTitleFormat.value) ?? nestedFolderTitleOptions.value[0]
 );
+const selectedVideoPlaybackQualityOption = computed(
+  () =>
+    videoPlaybackQualityOptions.value.find((option) => option.id === videoPlaybackQuality.value) ??
+    videoPlaybackQualityOptions.value[0]
+);
 const localeDirty = computed(
   () => localeSelectionHydrated.value && (savedLocaleSelection.value === null || appStore.locale !== savedLocaleSelection.value)
 );
@@ -1813,6 +1934,9 @@ const folderImageOrderDirty = computed(
 const nestedFolderTitleDirty = computed(
   () => feedDefaultsHydrated.value && nestedFolderTitleFormat.value !== savedNestedFolderTitleFormat.value
 );
+const videoPlaybackQualityDirty = computed(
+  () => feedDefaultsHydrated.value && videoPlaybackQuality.value !== savedVideoPlaybackQuality.value
+);
 const defaultSettingsDirtyCount = computed(
   () =>
     [
@@ -1820,11 +1944,17 @@ const defaultSettingsDirtyCount = computed(
       homeFeedDefaultDirty.value,
       reelsFeedDefaultDirty.value,
       folderImageOrderDirty.value,
-      nestedFolderTitleDirty.value
+      nestedFolderTitleDirty.value,
+      videoPlaybackQualityDirty.value
     ].filter(Boolean).length
 );
 const feedDefaultsDirty = computed(
-  () => homeFeedDefaultDirty.value || reelsFeedDefaultDirty.value || folderImageOrderDirty.value || nestedFolderTitleDirty.value
+  () =>
+    homeFeedDefaultDirty.value ||
+    reelsFeedDefaultDirty.value ||
+    folderImageOrderDirty.value ||
+    nestedFolderTitleDirty.value ||
+    videoPlaybackQualityDirty.value
 );
 const storiesModeDirty = computed(() => storiesModeHydrated.value && storiesMode.value !== savedStoriesMode.value);
 const carouselsModeDirty = computed(() => carouselsModeHydrated.value && carouselsMode.value !== savedCarouselsMode.value);
@@ -2653,7 +2783,7 @@ function closeGeneralSettingsMenu() {
   activeGeneralSettingsMenu.value = null;
 }
 
-function toggleGeneralSettingsMenu(menu: 'home' | 'reels' | 'folder' | 'nestedTitle') {
+function toggleGeneralSettingsMenu(menu: 'home' | 'reels' | 'folder' | 'nestedTitle' | 'videoQuality') {
   clearGeneralSettingsFeedback();
   activeGeneralSettingsMenu.value = activeGeneralSettingsMenu.value === menu ? null : menu;
 }
@@ -2729,6 +2859,17 @@ function selectNestedFolderTitleFormat(value: NestedFolderTitleFormat) {
   closeGeneralSettingsMenu();
 }
 
+function selectVideoPlaybackQuality(value: VideoPlaybackQuality) {
+  clearGeneralSettingsFeedback();
+  videoPlaybackQuality.value = value;
+  closeGeneralSettingsMenu();
+}
+
+function clearVideoPlaybackQualityOverride() {
+  clearGeneralSettingsFeedback();
+  appStore.setVideoPlaybackQualityOverride(null);
+}
+
 async function saveGeneralSettings() {
   if (generalSettingsSaveDisabled.value) {
     return;
@@ -2742,14 +2883,21 @@ async function saveGeneralSettings() {
   const shouldSaveReels = reelsFeedDefaultDirty.value;
   const shouldSaveFolderOrder = folderImageOrderDirty.value;
   const shouldSaveNestedFolderTitle = nestedFolderTitleDirty.value;
+  const shouldSaveVideoPlaybackQuality = videoPlaybackQualityDirty.value;
   const shouldSaveAnyDefault =
-    shouldSaveLocale || shouldSaveHome || shouldSaveReels || shouldSaveFolderOrder || shouldSaveNestedFolderTitle;
+    shouldSaveLocale ||
+    shouldSaveHome ||
+    shouldSaveReels ||
+    shouldSaveFolderOrder ||
+    shouldSaveNestedFolderTitle ||
+    shouldSaveVideoPlaybackQuality;
   const savedDefaultCount = [
     shouldSaveLocale,
     shouldSaveHome,
     shouldSaveReels,
     shouldSaveFolderOrder,
-    shouldSaveNestedFolderTitle
+    shouldSaveNestedFolderTitle,
+    shouldSaveVideoPlaybackQuality
   ].filter(Boolean).length;
   const savedParts: string[] = [];
   const savedFolderRuleCount = [shouldSaveExcludedFolders, shouldSaveStories, shouldSaveCarousels].filter(Boolean).length;
@@ -2858,6 +3006,18 @@ async function saveGeneralSettings() {
       nestedFolderTitleFormat.value = payload.titleFormat;
     }
 
+    if (shouldSaveVideoPlaybackQuality) {
+      const payload = await updateVideoPlaybackQuality(videoPlaybackQuality.value);
+      savedParts.push(t('settings.general.feedback.parts.videoPlaybackQuality'));
+      if (appStore.stats) {
+        appStore.stats.preferences.videoPlaybackQuality = payload.videoPlaybackQuality;
+      }
+      videoPlaybackQuality.value = payload.videoPlaybackQuality;
+      // Saving the library default is an explicit choice, so a stale per-device
+      // override must not keep shadowing it.
+      appStore.setVideoPlaybackQualityOverride(null);
+    }
+
     await appStore.fetchStats({ background: true });
 
     if (shouldSaveStories || shouldSaveCarousels || shouldSaveExcludedFolders) {
@@ -2904,6 +3064,11 @@ async function saveGeneralSettings() {
       setGeneralSettingsFeedback(
         'success',
         t('settings.general.feedback.nestedFolderTitleSaved', { label: selectedNestedFolderTitleOption.value.label })
+      );
+    } else if (shouldSaveVideoPlaybackQuality) {
+      setGeneralSettingsFeedback(
+        'success',
+        t('settings.general.feedback.videoPlaybackQualitySaved', { label: selectedVideoPlaybackQualityOption.value.label })
       );
     }
   } catch (error) {

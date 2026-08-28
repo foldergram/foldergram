@@ -257,6 +257,31 @@
           }
         }
       },
+      "videoPlaybackQuality": {
+        "label": "Video playback quality",
+        "description": "Choose the quality videos play at in reels and posts. Anything other than Original is transcoded on demand by the NAS.",
+        "closeMenuAria": "Close video playback quality menu",
+        "deviceOverride": "This device is set to {value} on its own.",
+        "useLibraryDefault": "Follow library default",
+        "options": {
+          "auto": {
+            "label": "Auto",
+            "description": "Plays the original when the browser can decode it, transcodes on demand otherwise."
+          },
+          "original": {
+            "label": "Original",
+            "description": "Always plays the original file with no transcoding."
+          },
+          "1080p": {
+            "label": "1080p",
+            "description": "Transcodes on demand to 1080p, balancing detail and bandwidth."
+          },
+          "720p": {
+            "label": "720p",
+            "description": "Transcodes on demand to 720p for the lowest bandwidth and fastest start."
+          }
+        }
+      },
       "storiesMode": {
         "label": "Treat stories folders as normal app folders",
         "scanRequired": "Scan required",
@@ -322,6 +347,7 @@
         "reelsSaved": "Reels now opens with {label}.",
         "folderOrderSaved": "App folders now open with {label}.",
         "nestedFolderTitleSaved": "Nested app folders now use {label}.",
+        "videoPlaybackQualitySaved": "Videos now play at {label}.",
         "parts": {
           "appLanguage": "app language",
           "excludedFolders": "excluded folders",
@@ -330,7 +356,8 @@
           "homeFeedDefault": "Home feed default",
           "reelsFeedDefault": "Reels feed default",
           "appFolderOrder": "app folder order",
-          "nestedFolderTitles": "nested folder titles"
+          "nestedFolderTitles": "nested folder titles",
+          "videoPlaybackQuality": "video playback quality"
         }
       },
       "errors": {

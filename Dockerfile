@@ -3,8 +3,13 @@ FROM node:22-bookworm-slim
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
 
+# va-driver-all brings the Intel iHD/i965 VA-API drivers so ffmpeg can reach the
+# iGPU when /dev/dri is mapped into the container; vainfo is kept for diagnosis.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ffmpeg \
+  && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    va-driver-all \
+    vainfo \
   && rm -rf /var/lib/apt/lists/*
 
 RUN corepack enable

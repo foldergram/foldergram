@@ -632,26 +632,25 @@ function requireAnimatedAvifVideoStreamIndex(descriptor: AvifSourceDescriptor): 
   return descriptor.animatedVideoStreamIndex;
 }
 
+// Videos are played from the original file or from on-demand HLS segments, so
+// the scan only needs a poster frame. Full-length preview transcodes used to
+// dominate scan time (hundreds of hours on a large library) and produced files
+// nothing reads anymore.
 async function generateVideoDerivatives(
   sourcePath: string,
   thumbnailAbsolutePath: string,
-  previewAbsolutePath: string,
+  _previewAbsolutePath: string,
   force: boolean
 ): Promise<Pick<DerivativeResult, 'generatedThumbnail' | 'generatedPreview'>> {
   const shouldWriteThumbnail = force || !(await fileExists(thumbnailAbsolutePath));
-  const shouldWritePreview = force || !(await fileExists(previewAbsolutePath));
 
   if (shouldWriteThumbnail) {
     await writeVideoThumbnail(sourcePath, thumbnailAbsolutePath);
   }
 
-  if (shouldWritePreview) {
-    await writeVideoPreview(sourcePath, previewAbsolutePath);
-  }
-
   return {
     generatedThumbnail: shouldWriteThumbnail,
-    generatedPreview: shouldWritePreview
+    generatedPreview: false
   };
 }
 
@@ -709,7 +708,11 @@ export async function generatePreviewDerivative(
 
   if (shouldWritePreview) {
     if (mediaType === 'video') {
-      await writeVideoPreview(sourcePath, previewAbsolutePath);
+      // Video playback never reads a preview file; see generateVideoDerivatives.
+      return {
+        previewPath,
+        generatedPreview: false
+      };
     } else if (isAvif) {
       const avifSource = await inspectAvifSource(sourcePath, {
         requireAnimatedVideoStreamIndex: true

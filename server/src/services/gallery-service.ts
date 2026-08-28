@@ -16,7 +16,8 @@ import {
   REELS_FEED_DEFAULT_MODE_SETTING_KEY,
   STORIES_MIGRATION_DECISION_SETTING_KEY,
   TREAT_CAROUSELS_AS_FOLDERS_SETTING_KEY,
-  TREAT_STORIES_AS_FOLDERS_SETTING_KEY
+  TREAT_STORIES_AS_FOLDERS_SETTING_KEY,
+  VIDEO_PLAYBACK_QUALITY_SETTING_KEY
 } from '../constants/app-setting-keys.js';
 import { appConfig } from '../config/env.js';
 import {
@@ -50,7 +51,8 @@ import type {
   SharedFeedItem,
   SharedFolderSummary,
   SharedImageDetail,
-  TrashImage
+  TrashImage,
+  VideoPlaybackQuality
 } from '../types/models.js';
 import {
   getEffectiveExcludedFolderRules,
@@ -223,6 +225,15 @@ function getDefaultFolderImageOrder(): FolderImageOrder {
   return parseFolderImageOrder(appSettingsRepository.get(FOLDER_IMAGE_DEFAULT_ORDER_SETTING_KEY));
 }
 
+const VIDEO_PLAYBACK_QUALITIES: VideoPlaybackQuality[] = ['auto', 'original', '1080p', '720p'];
+
+function getVideoPlaybackQuality(): VideoPlaybackQuality {
+  const stored = appSettingsRepository.get(VIDEO_PLAYBACK_QUALITY_SETTING_KEY);
+  return VIDEO_PLAYBACK_QUALITIES.includes(stored as VideoPlaybackQuality)
+    ? (stored as VideoPlaybackQuality)
+    : 'auto';
+}
+
 function getNestedFolderTitleFormat(): NestedFolderTitleFormat {
   return parseNestedFolderTitleFormatSetting(appSettingsRepository.get(NESTED_FOLDER_TITLE_FORMAT_SETTING_KEY));
 }
@@ -290,6 +301,39 @@ function buildOriginalUrl(id: number): string {
   return `/api/originals/${id}`;
 }
 
+function buildStreamUrl(id: number): string {
+  return `/api/videos/${id}/hls/master.m3u8`;
+}
+
+interface VideoPlaybackSource {
+  previewUrl: string;
+  streamUrl: string | null;
+}
+
+/**
+ * Videos are never served from a pre-rendered preview file. Sources the browser
+ * can decode as-is play straight from the original, and everything else is
+ * transcoded on demand into HLS segments so playback starts immediately and
+ * seeking only pays for the segment being watched.
+ */
+function resolveVideoPlaybackSource(
+  id: number,
+  playbackStrategy: PlaybackStrategy | null | undefined
+): VideoPlaybackSource {
+  if (playbackStrategy === 'original') {
+    return {
+      previewUrl: buildOriginalUrl(id),
+      streamUrl: null
+    };
+  }
+
+  const streamUrl = buildStreamUrl(id);
+  return {
+    previewUrl: streamUrl,
+    streamUrl
+  };
+}
+
 function appendVersion(url: string, version?: string | null): string {
   if (!version) {
     return url;
@@ -311,10 +355,15 @@ function buildPreviewUrl(
     id: number;
     mediaType: MediaType;
     previewUrl: string;
+    playbackStrategy?: PlaybackStrategy | null;
   },
   useOriginalForImages = false,
   version?: string | null
 ): string {
+  if (image.mediaType === 'video') {
+    return resolveVideoPlaybackSource(image.id, image.playbackStrategy).previewUrl;
+  }
+
   if (useOriginalForImages && image.mediaType === 'image') {
     return buildOriginalUrl(image.id);
   }
@@ -523,8 +572,14 @@ function mapFeedImage(image: IndexedFeedImage, derivativeVersion = getDerivative
     previewUrl: buildPreviewUrl({
       id: rest.id,
       mediaType: rest.mediaType,
-      previewUrl: rest.previewUrl
+      previewUrl: rest.previewUrl,
+      playbackStrategy
     }, false, derivativeVersion),
+    playbackStrategy: rest.mediaType === 'video' ? (playbackStrategy ?? 'preview') : null,
+    streamUrl: rest.mediaType === 'video'
+      ? resolveVideoPlaybackSource(rest.id, playbackStrategy).streamUrl
+      : null,
+    originalUrl: buildOriginalUrl(rest.id),
     place: mapPlaceSummaryFromRow({ placeId, placeSlug, placeName, placeKind, placeIsApproximate }),
     mediaItems: (mediaItems ?? []).map((item: any) => ({
       imageId: item.imageId,
@@ -539,10 +594,14 @@ function mapFeedImage(image: IndexedFeedImage, derivativeVersion = getDerivative
       previewUrl: buildPreviewUrl({
         id: item.imageId,
         mediaType: item.mediaType,
-        previewUrl: item.previewUrl
+        previewUrl: item.previewUrl,
+        playbackStrategy: item.playbackStrategy
       }, false, derivativeVersion),
       originalUrl: buildOriginalUrl(item.imageId),
       playbackStrategy: item.playbackStrategy ?? 'preview',
+      streamUrl: item.mediaType === 'video'
+        ? resolveVideoPlaybackSource(item.imageId, item.playbackStrategy).streamUrl
+        : null,
       mimeType: item.mimeType,
       fileSize: item.fileSize,
       relativePath: item.relativePath,
@@ -623,10 +682,14 @@ function mapImageDetail(image: IndexedImageDetail, derivativeVersion = getDeriva
     previewUrl: buildPreviewUrl({
       id: representativeImageId,
       mediaType: rest.mediaType,
-      previewUrl: rest.previewUrl
+      previewUrl: rest.previewUrl,
+      playbackStrategy
     }, useOriginalForImages, derivativeVersion),
     originalUrl: buildOriginalUrl(representativeImageId),
     playbackStrategy,
+    streamUrl: rest.mediaType === 'video'
+      ? resolveVideoPlaybackSource(representativeImageId, playbackStrategy).streamUrl
+      : null,
     place: mapPlaceSummaryFromRow({ placeId, placeSlug, placeName, placeKind, placeIsApproximate }),
     mediaItems: (mediaItems ?? []).map((item: any) => ({
       imageId: item.imageId,
@@ -641,10 +704,14 @@ function mapImageDetail(image: IndexedImageDetail, derivativeVersion = getDeriva
       previewUrl: buildPreviewUrl({
         id: item.imageId,
         mediaType: item.mediaType,
-        previewUrl: item.previewUrl
+        previewUrl: item.previewUrl,
+        playbackStrategy: item.playbackStrategy
       }, false, derivativeVersion),
       originalUrl: buildOriginalUrl(item.imageId),
       playbackStrategy: item.playbackStrategy ?? 'preview',
+      streamUrl: item.mediaType === 'video'
+        ? resolveVideoPlaybackSource(item.imageId, item.playbackStrategy).streamUrl
+        : null,
       mimeType: item.mimeType,
       fileSize: item.fileSize,
       relativePath: item.relativePath,
@@ -2135,6 +2202,7 @@ export const galleryService = {
     const defaultReelsFeedMode = getDefaultReelsFeedMode();
     const defaultFolderImageOrder = getDefaultFolderImageOrder();
     const nestedFolderTitleFormat = getNestedFolderTitleFormat();
+    const videoPlaybackQuality = getVideoPlaybackQuality();
     const treatStoriesAsFolders = getTreatStoriesAsFolders();
     const storiesMigration = getStoriesMigrationStatus();
     const treatCarouselsAsFolders = getTreatCarouselsAsFolders();
@@ -2165,7 +2233,8 @@ export const galleryService = {
         defaultFolderImageOrder,
         nestedFolderTitleFormat,
         treatStoriesAsFolders,
-        treatCarouselsAsFolders
+        treatCarouselsAsFolders,
+        videoPlaybackQuality
       },
       storiesMigration,
       carouselsMigration
@@ -2207,6 +2276,7 @@ export const galleryService = {
     const defaultReelsFeedMode = getDefaultReelsFeedMode();
     const defaultFolderImageOrder = getDefaultFolderImageOrder();
     const nestedFolderTitleFormat = getNestedFolderTitleFormat();
+    const videoPlaybackQuality = getVideoPlaybackQuality();
     const treatStoriesAsFolders = getTreatStoriesAsFolders();
     const storiesMigration = getStoriesMigrationStatus();
     const treatCarouselsAsFolders = getTreatCarouselsAsFolders();
@@ -2247,7 +2317,8 @@ export const galleryService = {
         defaultFolderImageOrder,
         nestedFolderTitleFormat,
         treatStoriesAsFolders,
-        treatCarouselsAsFolders
+        treatCarouselsAsFolders,
+        videoPlaybackQuality
       },
       storiesMigration,
       carouselsMigration,
@@ -2284,6 +2355,14 @@ export const galleryService = {
 
     return {
       defaultOrder: order
+    };
+  },
+
+  setVideoPlaybackQuality(videoPlaybackQuality: VideoPlaybackQuality) {
+    appSettingsRepository.set(VIDEO_PLAYBACK_QUALITY_SETTING_KEY, videoPlaybackQuality);
+
+    return {
+      videoPlaybackQuality
     };
   },
 

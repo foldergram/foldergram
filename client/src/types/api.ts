@@ -4,6 +4,7 @@ export type FeedMode = 'recent' | 'rediscover' | 'random';
 export type ReelsFeedMode = 'recommended' | 'recent' | 'random';
 export type FolderImageOrder = 'newest' | 'oldest';
 export type NestedFolderTitleFormat = 'folder' | 'parent-plus-folder';
+export type VideoPlaybackQuality = 'auto' | 'original' | '1080p' | '720p';
 export type FeedRailKind = 'moments' | 'highlights';
 export type StoryCapsulePresentation = 'avatar' | 'highlight';
 export type MediaType = 'image' | 'video';
@@ -45,6 +46,10 @@ export interface StoriesModeSetting {
   treatStoriesAsFolders: boolean;
 }
 
+export interface VideoPlaybackQualitySetting {
+  videoPlaybackQuality: VideoPlaybackQuality;
+}
+
 export interface ExcludedFoldersSettings {
   envExcludedFolders: string[];
   customExcludedFolders: string[];
@@ -69,6 +74,7 @@ export interface PostMediaItem {
   thumbnailUrl: string;
   previewUrl: string;
   playbackStrategy?: 'preview' | 'original' | null;
+  streamUrl?: string | null;
   originalUrl?: string;
   mimeType?: string;
   fileSize?: number;
@@ -96,6 +102,9 @@ export interface FeedItem {
   isAnimated?: boolean | null;
   thumbnailUrl: string;
   previewUrl: string;
+  playbackStrategy?: 'preview' | 'original' | null;
+  streamUrl?: string | null;
+  originalUrl?: string;
   sortTimestamp: number;
   takenAt: number | null;
   isSaved?: boolean;
@@ -583,6 +592,7 @@ export interface AppStatus {
     defaultReelsFeedMode: ReelsFeedMode;
     defaultFolderImageOrder?: FolderImageOrder;
     nestedFolderTitleFormat?: NestedFolderTitleFormat;
+    videoPlaybackQuality?: VideoPlaybackQuality;
     treatStoriesAsFolders: boolean;
     treatCarouselsAsFolders: boolean;
   };

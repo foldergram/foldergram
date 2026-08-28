@@ -257,6 +257,31 @@
           }
         }
       },
+      "videoPlaybackQuality": {
+        "label": "Calidad de reproduccion de video",
+        "description": "Elige la calidad con la que se reproducen los videos en reels y publicaciones. Cualquier opcion distinta de Original se transcodifica a demanda en el NAS.",
+        "closeMenuAria": "Cerrar el menu de calidad de reproduccion de video",
+        "deviceOverride": "Este dispositivo esta configurado en {value} por separado.",
+        "useLibraryDefault": "Seguir el valor por defecto de la biblioteca",
+        "options": {
+          "auto": {
+            "label": "Automatica",
+            "description": "Reproduce el original cuando el navegador puede decodificarlo y transcodifica a demanda en los demas casos."
+          },
+          "original": {
+            "label": "Original",
+            "description": "Siempre reproduce el archivo original sin transcodificar."
+          },
+          "1080p": {
+            "label": "1080p",
+            "description": "Transcodifica a demanda a 1080p, equilibrando detalle y ancho de banda."
+          },
+          "720p": {
+            "label": "720p",
+            "description": "Transcodifica a demanda a 720p para el menor ancho de banda y el arranque mas rapido."
+          }
+        }
+      },
       "storiesMode": {
         "label": "Tratar las carpetas stories como carpetas normales de la app",
         "scanRequired": "Requiere escaneo",
@@ -322,6 +347,7 @@
         "reelsSaved": "Reels ahora se abre con {label}.",
         "folderOrderSaved": "Las carpetas de la app ahora se abren con {label}.",
         "nestedFolderTitleSaved": "Las carpetas anidadas de la app ahora usan {label}.",
+        "videoPlaybackQualitySaved": "Los videos ahora se reproducen en {label}.",
         "parts": {
           "appLanguage": "idioma de la app",
           "excludedFolders": "carpetas excluidas",
@@ -330,7 +356,8 @@
           "homeFeedDefault": "predeterminado del feed de Inicio",
           "reelsFeedDefault": "predeterminado de Reels",
           "appFolderOrder": "orden de las carpetas de la app",
-          "nestedFolderTitles": "títulos de carpetas anidadas"
+          "nestedFolderTitles": "títulos de carpetas anidadas",
+          "videoPlaybackQuality": "calidad de reproduccion de video"
         }
       },
       "errors": {

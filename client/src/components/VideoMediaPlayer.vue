@@ -125,12 +125,27 @@ import { useI18n } from 'vue-i18n';
 import type { MediaPlayerElement } from 'vidstack/elements';
 import type { MediaFullscreenChangeEvent, MediaLoadingStrategy, PlayerSrc } from 'vidstack';
 
+import { useAppStore } from '../stores/app';
 import { videoPreviewWouldDownscale } from '../utils/media';
+import {
+  resolveVideoFallbackSource,
+  resolveVideoSource,
+  toPlayerSrc,
+  useBundledHlsLibrary,
+  type ResolvedVideoSource,
+  type VideoPlaybackMedia
+} from '../utils/video-playback';
 import VideoProgressFooter from './VideoProgressFooter.vue';
 
 const props = withDefaults(
   defineProps<{
     src: string | PlayerSrc;
+    /**
+     * When present the component owns source selection: it honours the global
+     * playback quality setting, streams through HLS when the file needs
+     * transcoding, and falls back to the other mode on a playback error.
+     */
+    media?: VideoPlaybackMedia | null;
     originalUrl?: string;
     playbackStrategy?: 'preview' | 'original' | null;
     width?: number | null;
@@ -149,6 +164,7 @@ const props = withDefaults(
     timeLabel?: string;
   }>(),
   {
+    media: null,
     originalUrl: '',
     playbackStrategy: null,
     width: null,
@@ -179,7 +195,9 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useI18n();
+const appStore = useAppStore();
 const playerElement = ref<MediaPlayerElement | null>(null);
+const fallbackSource = ref<ResolvedVideoSource | null>(null);
 const durationSec = ref(0);
 const currentTimeSec = ref(0);
 const isPaused = ref(false);
@@ -190,6 +208,11 @@ let hidePausedTimer: NodeJS.Timeout | null = null;
 let removeEventListeners: (() => void) | null = null;
 
 const hasHdOption = computed(() => {
+  if (props.media) {
+    // Upgrading only means something when the default source is a transcoded stream.
+    return Boolean(props.media.streamUrl) && (isHd.value || managedPreferredSource.value?.isStream === true);
+  }
+
   return (
     props.playbackStrategy === 'original' &&
     Boolean(props.originalUrl) &&
@@ -212,7 +235,22 @@ const basePreviewUrl = computed<string>(() => {
   return '';
 });
 
+const managedPreferredSource = computed<ResolvedVideoSource | null>(() => {
+  if (!props.media) {
+    return null;
+  }
+
+  return resolveVideoSource(props.media, isHd.value ? 'original' : appStore.videoPlaybackQuality);
+});
+
+const managedActiveSource = computed<ResolvedVideoSource | null>(
+  () => fallbackSource.value ?? managedPreferredSource.value
+);
+
 const activeVideoUrl = computed<string>(() => {
+  if (managedActiveSource.value) {
+    return managedActiveSource.value.src;
+  }
   if (isHd.value && props.originalUrl) {
     return props.originalUrl;
   }
@@ -220,11 +258,30 @@ const activeVideoUrl = computed<string>(() => {
 });
 
 const computedSource = computed<PlayerSrc>(() => {
+  if (managedActiveSource.value) {
+    return toPlayerSrc(managedActiveSource.value);
+  }
+
   return {
     src: activeVideoUrl.value,
     type: 'video/mp4'
   };
 });
+
+function switchToFallbackSource() {
+  const media = props.media;
+  const failed = managedActiveSource.value;
+  if (!media || !failed || fallbackSource.value) {
+    return;
+  }
+
+  const fallback = resolveVideoFallbackSource(media, failed);
+  if (!fallback) {
+    return;
+  }
+
+  fallbackSource.value = fallback;
+}
 
 function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
@@ -264,6 +321,7 @@ async function toggleHd() {
   const current = player?.currentTime ?? 0;
   const wasPaused = player?.paused ?? true;
 
+  fallbackSource.value = null;
   isHd.value = !isHd.value;
   pendingRestoreState = { currentTime: current, wasPaused };
   emit('toggle-hd', isHd.value);
@@ -360,16 +418,25 @@ function setupListeners() {
     isPaused.value = true;
   };
 
+  const onError = () => {
+    switchToFallbackSource();
+  };
+
+  const removeHlsLibraryBinding = useBundledHlsLibrary(player);
+
   player.addEventListener('loaded-metadata', onLoadedMetadata);
   player.addEventListener('time-update', onTimeUpdate);
   player.addEventListener('play', onPlay);
   player.addEventListener('pause', onPause);
+  player.addEventListener('error', onError);
 
   removeEventListeners = () => {
+    removeHlsLibraryBinding();
     player.removeEventListener('loaded-metadata', onLoadedMetadata);
     player.removeEventListener('time-update', onTimeUpdate);
     player.removeEventListener('play', onPlay);
     player.removeEventListener('pause', onPause);
+    player.removeEventListener('error', onError);
   };
 }
 
@@ -387,10 +454,18 @@ onBeforeUnmount(() => {
   if (hidePausedTimer) clearTimeout(hidePausedTimer);
 });
 
-watch(basePreviewUrl, () => {
+watch([basePreviewUrl, () => props.media?.id ?? null], () => {
   isHd.value = false;
+  fallbackSource.value = null;
   pendingRestoreState = null;
 });
+
+watch(
+  () => appStore.videoPlaybackQuality,
+  () => {
+    fallbackSource.value = null;
+  }
+);
 
 watch(playerElement, () => {
   if (removeEventListeners) removeEventListeners();

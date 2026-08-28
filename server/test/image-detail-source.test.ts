@@ -87,7 +87,7 @@ describe.sequential('IMAGE_DETAIL_SOURCE config', () => {
     expect(detail?.previewUrl).toBe(`/api/originals/${image.id}`);
   });
 
-  it('keeps preview URL for videos with playbackStrategy=preview regardless of IMAGE_DETAIL_SOURCE', async () => {
+  it('streams videos with playbackStrategy=preview over HLS regardless of IMAGE_DETAIL_SOURCE', async () => {
     await setup('original');
 
     maintenanceRepository.resetLibraryIndex();
@@ -95,11 +95,12 @@ describe.sequential('IMAGE_DETAIL_SOURCE config', () => {
     const video = createIndexedMedia(folder, 'clip.webm', 2000, 'preview', 8000);
 
     const detail = galleryService.getImageDetail(video.id);
-    expect(detail?.previewUrl).toMatch(/^\/previews\//);
+    expect(detail?.previewUrl).toBe(`/api/videos/${video.id}/hls/master.m3u8`);
+    expect(detail?.streamUrl).toBe(`/api/videos/${video.id}/hls/master.m3u8`);
     expect(detail?.playbackStrategy).toBe('preview');
   });
 
-  it('keeps preview URLs for compatible videos while exposing playbackStrategy=original', async () => {
+  it('plays browser-decodable videos straight from the original file with no stream URL', async () => {
     await setup('preview');
 
     maintenanceRepository.resetLibraryIndex();
@@ -107,7 +108,8 @@ describe.sequential('IMAGE_DETAIL_SOURCE config', () => {
     const compatibleMp4 = createIndexedMedia(folder, 'compatible.mp4', 3000, 'original', 5000);
 
     const detail = galleryService.getImageDetail(compatibleMp4.id);
-    expect(detail?.previewUrl).toBe('/previews/vids2/compatible.mp4');
+    expect(detail?.previewUrl).toBe(`/api/originals/${compatibleMp4.id}`);
+    expect(detail?.streamUrl).toBeNull();
     expect(detail?.originalUrl).toBe(`/api/originals/${compatibleMp4.id}`);
     expect(detail?.playbackStrategy).toBe('original');
   });

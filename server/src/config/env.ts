@@ -31,6 +31,8 @@ const envSchema = z.object({
   GALLERY_EXCLUDED_FOLDERS: z.string().optional(),
   IMAGE_DETAIL_SOURCE: z.enum(['preview', 'original']).default('preview'),
   DERIVATIVE_MODE: z.enum(['eager', 'lazy']).default('eager'),
+  VIDEO_HWACCEL: z.enum(['auto', 'vaapi', 'qsv', 'none']).default('auto'),
+  VIDEO_HWACCEL_DEVICE: z.string().default('/dev/dri/renderD128'),
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development')
 });
 
@@ -99,6 +101,7 @@ const geodataDir = path.join(dataRoot, 'geodata');
 const thumbnailsDir = resolveConfiguredPath(parsed.THUMBNAILS_DIR, path.join(dataRoot, 'thumbnails'));
 const previewsDir = resolveConfiguredPath(parsed.PREVIEWS_DIR, path.join(dataRoot, 'previews'));
 const scanErrorReportDir = path.join(dataRoot, 'scan-errors');
+const hlsCacheDir = path.join(dataRoot, 'hls-cache');
 const logVerbose = parseBooleanFlag(parsed.LOG_VERBOSE);
 const publicDemoMode = parseBooleanFlag(parsed.PUBLIC_DEMO_MODE);
 const csrfTrustedOrigins = parseConfiguredOrigins(parsed.CSRF_TRUSTED_ORIGINS);
@@ -130,7 +133,7 @@ if (isSameOrWithinPath(previewsDir, galleryRoot)) {
 }
 
 const managedGalleryRelativeIgnores = uniq(
-  [dbDir, thumbnailsDir, previewsDir, scanErrorReportDir]
+  [dbDir, thumbnailsDir, previewsDir, scanErrorReportDir, hlsCacheDir]
     .map((directoryPath) => getRelativePathWithinRoot(galleryRoot, directoryPath))
     .filter((value): value is string => typeof value === 'string' && value.length > 0)
     .map((value) => normalizePath(value))
@@ -149,6 +152,7 @@ export const appConfig = {
   thumbnailsDir,
   previewsDir,
   scanErrorReportDir,
+  hlsCacheDir,
   managedGalleryRelativeIgnores,
   galleryExcludedFolders,
   logVerbose,
@@ -161,5 +165,7 @@ export const appConfig = {
   geodataPath: path.join(geodataDir, 'geonames-cities500.sqlite'),
   geodataMetadataPath: path.join(geodataDir, 'geonames-cities500.meta.json'),
   imageDetailSource: parsed.IMAGE_DETAIL_SOURCE,
-  derivativeMode: parsed.DERIVATIVE_MODE
+  derivativeMode: parsed.DERIVATIVE_MODE,
+  videoHwaccel: parsed.VIDEO_HWACCEL,
+  videoHwaccelDevice: parsed.VIDEO_HWACCEL_DEVICE
 };

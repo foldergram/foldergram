@@ -14,8 +14,12 @@ import { LIBRARY_REBUILD_REQUIRED_MESSAGE, scannerService } from '../services/sc
 import { storageService } from '../services/storage-service.js';
 import { watcherService } from '../services/watcher-service.js';
 import { serveDerivativeForImage } from './lazy-derivatives.js';
+import { applyNoStoreMediaHeaders } from '../utils/media-response.js';
+import { videoStreamRouter } from './video-stream.js';
 
 const router = express.Router();
+
+router.use('/videos', videoStreamRouter);
 
 const paginationQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
@@ -85,6 +89,9 @@ const folderImageOrderDefaultBodySchema = z.object({
 });
 const nestedFolderTitleFormatBodySchema = z.object({
   titleFormat: z.enum(['folder', 'parent-plus-folder'])
+});
+const videoPlaybackQualityBodySchema = z.object({
+  videoPlaybackQuality: z.enum(['auto', 'original', '1080p', '720p'])
 });
 const storiesModeBodySchema = z.object({
   treatStoriesAsFolders: z.boolean()
@@ -233,6 +240,7 @@ export const settingsRequestBodySchemas = {
   folderImageOrderDefault: folderImageOrderDefaultBodySchema,
   nestedFolderTitleFormat: nestedFolderTitleFormatBodySchema,
   storiesMode: storiesModeBodySchema,
+  videoPlaybackQuality: videoPlaybackQualityBodySchema,
   excludedFolders: excludedFoldersBodySchema
 };
 
@@ -565,6 +573,15 @@ router.put(
   (request, response) => {
     const body = nestedFolderTitleFormatBodySchema.parse(request.body);
     response.json(galleryService.setNestedFolderTitleFormat(body.titleFormat));
+  }
+);
+
+router.put(
+  '/admin/settings/video-playback-quality',
+  requireCapability('canAccessSettings', 'Admin access is required.'),
+  (request, response) => {
+    const body = videoPlaybackQualityBodySchema.parse(request.body);
+    response.json(galleryService.setVideoPlaybackQuality(body.videoPlaybackQuality));
   }
 );
 
@@ -924,6 +941,21 @@ router.get('/share/images/:id/preview', async (request, response) => {
   }
 
   if (!ensureShareFolderAccess(request, response, image.folder_id)) {
+    return;
+  }
+
+  if (image.media_type === 'video') {
+    // Videos have no preview derivative; shared links stream the original file,
+    // which Express serves with range support so seeking still works.
+    const originalMedia = galleryService.getOriginalMediaFile(image.id);
+
+    if (!originalMedia) {
+      response.status(404).json({ message: 'Preview not found' });
+      return;
+    }
+
+    applyNoStoreMediaHeaders(response);
+    response.sendFile(originalMedia.path);
     return;
   }
 

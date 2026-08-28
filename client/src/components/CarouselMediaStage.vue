@@ -17,6 +17,7 @@
         v-if="item.mediaType === 'video' && index === activeIndex"
         class="h-full w-full object-contain bg-black"
         :src="item.previewUrl"
+        :media="toVideoPlaybackMedia(item)"
         :original-url="item.originalUrl"
         :playback-strategy="item.playbackStrategy"
         :width="item.width"
@@ -92,6 +93,7 @@ import { useI18n } from 'vue-i18n';
 
 import type { PostMediaItem } from '../types/api';
 import { useAppStore } from '../stores/app';
+import type { VideoPlaybackMedia } from '../utils/video-playback';
 import ResilientImage from './ResilientImage.vue';
 import VideoMediaPlayer from './VideoMediaPlayer.vue';
 
@@ -131,6 +133,16 @@ const aspectRatio = computed(() =>
     ? `${Math.max(frameItem.value.width, 1)} / ${Math.max(frameItem.value.height, 1)}`
     : '1 / 1'
 );
+
+function toVideoPlaybackMedia(item: PostMediaItem): VideoPlaybackMedia {
+  return {
+    id: item.imageId,
+    playbackStrategy: item.playbackStrategy,
+    streamUrl: item.streamUrl,
+    originalUrl: item.originalUrl,
+    previewUrl: item.previewUrl
+  };
+}
 
 function isGestureIgnored(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false;

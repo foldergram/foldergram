@@ -61,6 +61,10 @@ async function bootstrap() {
     appStore.initializeVideoMuted();
   }
 
+  if (typeof appStore.initializeVideoPlaybackQuality === 'function') {
+    appStore.initializeVideoPlaybackQuality();
+  }
+
   appStore.initializeLastOpenedFolder();
 
   window.addEventListener(AUTH_REQUIRED_EVENT, () => {

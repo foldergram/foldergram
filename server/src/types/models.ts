@@ -3,6 +3,7 @@ export type FolderImageOrder = 'newest' | 'oldest';
 export type NestedFolderTitleFormat = 'folder' | 'parent-plus-folder';
 export type TakenAtSource = 'exif' | 'mtime' | 'first_seen' | 'sort_timestamp';
 export type PlaybackStrategy = 'preview' | 'original';
+export type VideoPlaybackQuality = 'auto' | 'original' | '1080p' | '720p';
 export type FolderAvatarSource = 'auto' | 'manual' | 'cover';
 export type FolderRole = 'normal' | 'story_root' | 'story_capsule' | 'carousel_source';
 export type PlaceKind = 'city' | 'approximate_spot' | 'manual';
@@ -228,6 +229,7 @@ export interface PostMediaItem {
   previewUrl: string;
   originalUrl?: string;
   playbackStrategy?: PlaybackStrategy | null;
+  streamUrl?: string | null;
   exif?: ImageExifData | null;
   mimeType?: string;
   fileSize?: number;
@@ -253,6 +255,9 @@ export interface FeedImage {
   isAnimated?: boolean | null;
   thumbnailUrl: string;
   previewUrl: string;
+  playbackStrategy?: PlaybackStrategy | null;
+  streamUrl?: string | null;
+  originalUrl?: string;
   sortTimestamp: number;
   takenAt: number | null;
   isSaved: boolean;

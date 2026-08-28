@@ -14,7 +14,14 @@ import {
   syncDocumentLanguage,
   type SupportedLocale
 } from '../locales';
-import type { AppStatus, FeedMode, FolderImageOrder, ReelsFeedMode, ScanProgress } from '../types/api';
+import type {
+  AppStatus,
+  FeedMode,
+  FolderImageOrder,
+  ReelsFeedMode,
+  ScanProgress,
+  VideoPlaybackQuality
+} from '../types/api';
 import { useAuthStore } from './auth';
 
 interface AppState {
@@ -24,6 +31,7 @@ interface AppState {
   theme: 'light' | 'dark';
   locale: SupportedLocale;
   videoMuted: boolean;
+  videoPlaybackQualityOverride: VideoPlaybackQuality | null;
   lastOpenedFolderSlug: string | null;
   recentOpenedFolderSlugs: string[];
   imageModalBackgroundPath: string | null;
@@ -35,6 +43,14 @@ interface AppState {
 const THEME_STORAGE_KEY = 'foldergram-theme';
 const LOCALE_STORAGE_KEY = 'foldergram-locale';
 const VIDEO_MUTED_STORAGE_KEY = 'foldergram-video-muted';
+const VIDEO_PLAYBACK_QUALITY_STORAGE_KEY = 'foldergram-video-playback-quality';
+const VIDEO_PLAYBACK_QUALITIES: VideoPlaybackQuality[] = ['auto', 'original', '1080p', '720p'];
+
+function parseStoredVideoPlaybackQuality(value: string | null): VideoPlaybackQuality | null {
+  return VIDEO_PLAYBACK_QUALITIES.includes(value as VideoPlaybackQuality)
+    ? (value as VideoPlaybackQuality)
+    : null;
+}
 const LAST_OPENED_FOLDER_STORAGE_KEY = 'foldergram-last-opened-folder';
 const RECENT_OPENED_FOLDERS_STORAGE_KEY = 'foldergram-recent-opened-folders';
 const RECENT_OPENED_FOLDERS_LIMIT = 24;
@@ -89,6 +105,7 @@ export const useAppStore = defineStore('app', {
     theme: 'light',
     locale: DEFAULT_LOCALE,
     videoMuted: true,
+    videoPlaybackQualityOverride: null,
     lastOpenedFolderSlug: null,
     recentOpenedFolderSlugs: [],
     imageModalBackgroundPath: null,
@@ -109,6 +126,12 @@ export const useAppStore = defineStore('app', {
     defaultReelsFeedMode: (state): ReelsFeedMode => state.stats?.preferences.defaultReelsFeedMode ?? 'random',
     defaultFolderImageOrder: (state): FolderImageOrder => state.stats?.preferences.defaultFolderImageOrder ?? 'newest',
     nestedFolderTitleFormat: (state) => state.stats?.preferences.nestedFolderTitleFormat ?? 'folder',
+    savedVideoPlaybackQuality: (state): VideoPlaybackQuality =>
+      state.stats?.preferences.videoPlaybackQuality ?? 'auto',
+    // A per-device override wins over the library default so one phone on a weak
+    // connection can drop to 720p without changing playback for everyone.
+    videoPlaybackQuality: (state): VideoPlaybackQuality =>
+      state.videoPlaybackQualityOverride ?? state.stats?.preferences.videoPlaybackQuality ?? 'auto',
     treatStoriesAsFolders: (state) => state.stats?.preferences.treatStoriesAsFolders === true,
     treatCarouselsAsFolders: (state) => state.stats?.preferences.treatCarouselsAsFolders === true,
     isCarouselsReconciliationPending: (state) => state.stats?.carouselsMigration?.reconciliationPending === true
@@ -219,6 +242,22 @@ export const useAppStore = defineStore('app', {
     initializeVideoMuted() {
       const savedPreference = window.localStorage.getItem(VIDEO_MUTED_STORAGE_KEY);
       this.videoMuted = savedPreference === 'false' ? false : true;
+    },
+
+    initializeVideoPlaybackQuality() {
+      this.videoPlaybackQualityOverride = parseStoredVideoPlaybackQuality(
+        window.localStorage.getItem(VIDEO_PLAYBACK_QUALITY_STORAGE_KEY)
+      );
+    },
+
+    setVideoPlaybackQualityOverride(quality: VideoPlaybackQuality | null) {
+      this.videoPlaybackQualityOverride = quality;
+
+      if (quality) {
+        window.localStorage.setItem(VIDEO_PLAYBACK_QUALITY_STORAGE_KEY, quality);
+      } else {
+        window.localStorage.removeItem(VIDEO_PLAYBACK_QUALITY_STORAGE_KEY);
+      }
     },
 
     setVideoMuted(videoMuted: boolean) {

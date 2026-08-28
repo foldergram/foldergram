@@ -161,10 +161,15 @@ function createVideoDetail(id: number): ImageDetail {
   };
 }
 
+/**
+ * A clip the browser cannot decode directly, so the default source is the HLS
+ * stream and the HD control can offer the untouched file as an upgrade.
+ */
 function createHdVideoDetail(id: number): ImageDetail {
   return {
     ...createVideoDetail(id),
-    playbackStrategy: 'original'
+    playbackStrategy: 'preview',
+    streamUrl: `/api/videos/${id}/hls/master.m3u8`
   };
 }
 
@@ -340,7 +345,7 @@ describe('PostViewer', () => {
     expect(wrapper.get('.video-progress-footer__time').text()).toBe('0:09 / 0:09');
   });
 
-  it('preserves the playback position when switching between preview and HD sources', async () => {
+  it('preserves the playback position when switching between the stream and the HD original', async () => {
     const wrapper = mount(PostViewer, {
       props: {
         image: createHdVideoDetail(25),

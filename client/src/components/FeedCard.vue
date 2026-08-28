@@ -449,6 +449,13 @@ import { formatFolderTitle } from '../utils/folder-titles';
 import { formatMediaDuration, formatVideoTimestamp } from '../utils/media';
 import { resolveFeedAspectRatio } from '../utils/media-layout';
 import { getOriginalMediaDownloadUrl, getOriginalMediaUrl } from '../utils/original-media';
+import {
+  resolveVideoFallbackSource,
+  resolveVideoSource,
+  toPlayerSrc,
+  useBundledHlsLibrary,
+  type ResolvedVideoSource
+} from '../utils/video-playback';
 import Avatar from './Avatar.vue';
 import CarouselMediaStage from './CarouselMediaStage.vue';
 import CollectionBookmark from './CollectionBookmark.vue';
@@ -556,10 +563,14 @@ const activeMediaImageId = computed(() =>
 );
 const originalMediaUrl = computed(() => getOriginalMediaUrl(activeMediaImageId.value));
 const downloadOriginalMediaUrl = computed(() => getOriginalMediaDownloadUrl(activeMediaImageId.value));
-const homeVideoSource = computed<PlayerSrc>(() => ({
-  src: props.item.previewUrl,
-  type: 'video/mp4'
-}));
+const homeVideoFallbackSource = ref<ResolvedVideoSource | null>(null);
+const homePreferredVideoSource = computed<ResolvedVideoSource>(() =>
+  resolveVideoSource(props.item, appStore.videoPlaybackQuality)
+);
+const homeActiveVideoSource = computed<ResolvedVideoSource>(
+  () => homeVideoFallbackSource.value ?? homePreferredVideoSource.value
+);
+const homeVideoSource = computed<PlayerSrc>(() => toPlayerSrc(homeActiveVideoSource.value));
 const homeVideoTimeLabel = computed(() =>
   formatVideoTimestamp(
     homeVideoDurationMs.value > 0 ? homeVideoDurationMs.value : props.item.durationMs,
@@ -900,6 +911,19 @@ function handleHomeVideoVolumeChange() {
   }
 }
 
+function switchHomeVideoToFallbackSource() {
+  if (homeVideoFallbackSource.value) {
+    return;
+  }
+
+  const fallback = resolveVideoFallbackSource(props.item, homeActiveVideoSource.value);
+  if (!fallback) {
+    return;
+  }
+
+  homeVideoFallbackSource.value = fallback;
+}
+
 function bindHomePlayerEventListeners(player: MediaPlayerElement | null) {
   removeHomePlayerEventListeners?.();
   removeHomePlayerEventListeners = null;
@@ -932,6 +956,11 @@ function bindHomePlayerEventListeners(player: MediaPlayerElement | null) {
   const handleEnded = () => {
     handleHomeVideoEnded();
   };
+  const handleError = () => {
+    switchHomeVideoToFallbackSource();
+  };
+
+  const removeHlsLibraryBinding = useBundledHlsLibrary(player);
 
   player.addEventListener('loaded-metadata', handleReady);
   player.addEventListener('can-play', handleReady);
@@ -941,8 +970,10 @@ function bindHomePlayerEventListeners(player: MediaPlayerElement | null) {
   player.addEventListener('duration-change', handleDuration);
   player.addEventListener('time-update', handleTimeUpdate);
   player.addEventListener('ended', handleEnded);
+  player.addEventListener('error', handleError);
 
   removeHomePlayerEventListeners = () => {
+    removeHlsLibraryBinding();
     player.removeEventListener('loaded-metadata', handleReady);
     player.removeEventListener('can-play', handleReady);
     player.removeEventListener('volume-change', handleVolume);
@@ -951,6 +982,7 @@ function bindHomePlayerEventListeners(player: MediaPlayerElement | null) {
     player.removeEventListener('duration-change', handleDuration);
     player.removeEventListener('time-update', handleTimeUpdate);
     player.removeEventListener('ended', handleEnded);
+    player.removeEventListener('error', handleError);
   };
 
   if (player.hasAttribute('data-can-play')) {
@@ -1043,6 +1075,14 @@ watch(
     isHomeVideoPaused.value = false;
     homeVideoDurationMs.value = props.item.durationMs ?? 0;
     homeVideoCurrentTimeMs.value = 0;
+    homeVideoFallbackSource.value = null;
+  }
+);
+
+watch(
+  () => appStore.videoPlaybackQuality,
+  () => {
+    homeVideoFallbackSource.value = null;
   }
 );
 
