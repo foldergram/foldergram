@@ -315,21 +315,18 @@ interface VideoPlaybackSource {
  * can decode as-is play straight from the original, and everything else is
  * transcoded on demand into HLS segments so playback starts immediately and
  * seeking only pays for the segment being watched.
+ *
+ * Every video still advertises a stream URL even when the original is directly
+ * playable, because that is what lets a viewer pick a lower quality by hand.
  */
 function resolveVideoPlaybackSource(
   id: number,
   playbackStrategy: PlaybackStrategy | null | undefined
 ): VideoPlaybackSource {
-  if (playbackStrategy === 'original') {
-    return {
-      previewUrl: buildOriginalUrl(id),
-      streamUrl: null
-    };
-  }
-
   const streamUrl = buildStreamUrl(id);
+
   return {
-    previewUrl: streamUrl,
+    previewUrl: playbackStrategy === 'original' ? buildOriginalUrl(id) : streamUrl,
     streamUrl
   };
 }

@@ -83,7 +83,11 @@ describe.sequential('video playback strategy mapping', () => {
 
     expect(feedItems.get(image.id)?.previewUrl).toBe('/previews/clips/photo-1.webp');
     expect(feedItems.get(compatibleVideo.id)?.previewUrl).toBe(`/api/originals/${compatibleVideo.id}`);
-    expect(feedItems.get(compatibleVideo.id)?.streamUrl).toBeNull();
+    // Directly playable videos still expose a stream so a viewer can pick a
+    // lower quality by hand.
+    expect(feedItems.get(compatibleVideo.id)?.streamUrl).toBe(
+      `/api/videos/${compatibleVideo.id}/hls/master.m3u8`
+    );
     expect(feedItems.get(transcodedVideo.id)?.previewUrl).toBe(
       `/api/videos/${transcodedVideo.id}/hls/master.m3u8`
     );

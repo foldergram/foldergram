@@ -109,7 +109,7 @@ describe.sequential('IMAGE_DETAIL_SOURCE config', () => {
 
     const detail = galleryService.getImageDetail(compatibleMp4.id);
     expect(detail?.previewUrl).toBe(`/api/originals/${compatibleMp4.id}`);
-    expect(detail?.streamUrl).toBeNull();
+    expect(detail?.streamUrl).toBe(`/api/videos/${compatibleMp4.id}/hls/master.m3u8`);
     expect(detail?.originalUrl).toBe(`/api/originals/${compatibleMp4.id}`);
     expect(detail?.playbackStrategy).toBe('original');
   });
