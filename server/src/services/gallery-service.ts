@@ -1390,7 +1390,9 @@ export const galleryService = {
     }
 
     if (mode === 'random') {
-      const total = imageRepository.countFeed();
+      // Counting only what the feed will actually return keeps `hasMore` honest while a
+      // scan is still producing thumbnails.
+      const total = imageRepository.countRenderableFeed();
       const seed = Number.isFinite(randomSeed)
         ? Number(randomSeed)
         : Number(new Date().toISOString().slice(0, 10).replaceAll('-', ''));
@@ -1414,7 +1416,7 @@ export const galleryService = {
       };
     }
 
-    const total = imageRepository.countFeed();
+    const total = imageRepository.countRenderableFeed();
     const offset = (page - 1) * limit;
     const items = imageRepository.listRecentCandidates(offset, limit);
 

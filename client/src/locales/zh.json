@@ -24,6 +24,10 @@
     }
   },
   "app": {
+    "scanBanner": {
+      "collapse": "收起扫描进度",
+      "expand": "展开扫描进度"
+    },
     "authLoading": {
       "eyebrow": "访问保护",
       "title": "正在检查访问权限",

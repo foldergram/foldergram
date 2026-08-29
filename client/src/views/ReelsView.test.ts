@@ -123,11 +123,15 @@ vi.mock('../components/ReelInfoSidebar.vue', async () => {
         anchor: {
           type: String,
           default: 'left'
+        },
+        variant: {
+          type: String,
+          default: 'panel'
         }
       },
       emits: ['close'],
       template:
-        '<aside data-test="info-sidebar" :data-anchor="anchor">{{ item.id }}<button data-test="close-info" @click="$emit(\'close\')">close</button></aside>'
+        '<aside data-test="info-sidebar" :data-anchor="anchor" :data-variant="variant">{{ item.id }}<button data-test="close-info" @click="$emit(\'close\')">close</button></aside>'
     })
   };
 });
@@ -345,7 +349,11 @@ describe('ReelsView', () => {
     await flushPromises();
 
     expect(wrapper.get('.reels-view__action-rail--mobile').attributes('data-open')).toBe('true');
-    expect(wrapper.find('[data-test="info-shell"]').exists()).toBe(true);
+    // The phone sheet is teleported to the body: a rotated reel card is transformed, so
+    // a fixed sheet inside it would position against the card instead of the viewport.
+    const sheetShell = document.body.querySelector('[data-test="info-shell"]');
+    expect(sheetShell).not.toBeNull();
+    expect(sheetShell?.querySelector('[data-test="info-sidebar"]')?.getAttribute('data-variant')).toBe('sheet');
   });
 
   it('delegates deck prefetch and fixed navigation controls', async () => {

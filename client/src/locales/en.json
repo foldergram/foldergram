@@ -24,6 +24,10 @@
     }
   },
   "app": {
+    "scanBanner": {
+      "collapse": "Hide scan progress",
+      "expand": "Show scan progress"
+    },
     "authLoading": {
       "eyebrow": "Access Protection",
       "title": "Checking access",

@@ -75,6 +75,14 @@ const VISIBLE_POST_WHERE_SQL =
 const VISIBLE_POST_WHERE_UNSCOPED_SQL =
   `is_deleted = 0 AND is_trashed = 0 AND folder_id IN (${NORMAL_FOLDER_ID_SUBQUERY_SQL}) AND ${NOT_EXPLICIT_FOLDER_COVER_SQL}`;
 
+/**
+ * A post whose cover image has no thumbnail yet cannot be drawn: the feed would show a
+ * blank card and, for a video, a player pointed at a derivative that does not exist.
+ * Scanning fills thumbnails in gradually, so the feed filters on this instead of going
+ * empty-looking while a scan runs.
+ */
+const RENDERABLE_COVER_WHERE_SQL = "images.thumbnail_path IS NOT NULL AND images.thumbnail_path != ''";
+
 const STORY_IMAGE_WHERE_SQL = 'images.is_deleted = 0 AND images.is_trashed = 0';
 const STORY_IMAGE_WHERE_UNSCOPED_SQL = 'is_deleted = 0 AND is_trashed = 0';
 
@@ -1437,7 +1445,7 @@ export const postRepository = {
     const posts = database.prepare(
       `
       ${BASE_POST_SELECT_SQL}
-      WHERE ${VISIBLE_POST_WHERE_SQL}
+      WHERE ${VISIBLE_POST_WHERE_SQL} AND ${RENDERABLE_COVER_WHERE_SQL}
       ORDER BY posts.sort_timestamp DESC, posts.id DESC
       LIMIT ? OFFSET ?
       `
@@ -1449,6 +1457,27 @@ export const postRepository = {
   countFeed(): number {
     return Number(
       (database.prepare(`SELECT COUNT(*) AS count FROM posts WHERE ${VISIBLE_POST_WHERE_UNSCOPED_SQL}`).get() as { count: number }).count
+    );
+  },
+
+  /**
+   * Feed pagination total. Kept separate from `countFeed` so the library statistics keep
+   * reporting everything that is indexed while the feed only promises what it can draw.
+   */
+  countRenderableFeed(): number {
+    return Number(
+      (
+        database
+          .prepare(
+            `SELECT COUNT(*) AS count
+             FROM posts
+             INNER JOIN folders ON folders.id = posts.folder_id
+             JOIN post_items ON post_items.post_id = posts.id AND post_items.position = 1
+             JOIN images ON images.id = post_items.image_id
+             WHERE ${VISIBLE_POST_WHERE_SQL} AND ${RENDERABLE_COVER_WHERE_SQL}`
+          )
+          .get() as { count: number }
+      ).count
     );
   },
 
@@ -1529,7 +1558,7 @@ export const postRepository = {
     const posts = database.prepare(
       `
       ${BASE_POST_SELECT_SQL}
-      WHERE ${VISIBLE_POST_WHERE_SQL}
+      WHERE ${VISIBLE_POST_WHERE_SQL} AND ${RENDERABLE_COVER_WHERE_SQL}
       ORDER BY ${EFFECTIVE_FEED_TIME_SQL} DESC, posts.sort_timestamp DESC, posts.id DESC
       LIMIT ? OFFSET ?
       `
@@ -1542,7 +1571,14 @@ export const postRepository = {
     return Number(
       (
         database
-          .prepare(`SELECT COUNT(*) AS count FROM posts WHERE ${VISIBLE_POST_WHERE_UNSCOPED_SQL} AND ${EFFECTIVE_FEED_TIME_SQL} <= ?`)
+          .prepare(
+            `SELECT COUNT(*) AS count
+             FROM posts
+             INNER JOIN folders ON folders.id = posts.folder_id
+             JOIN post_items ON post_items.post_id = posts.id AND post_items.position = 1
+             JOIN images ON images.id = post_items.image_id
+             WHERE ${VISIBLE_POST_WHERE_SQL} AND ${RENDERABLE_COVER_WHERE_SQL} AND ${EFFECTIVE_FEED_TIME_SQL} <= ?`
+          )
           .get(cutoffTimestamp) as { count: number }
       ).count
     );
@@ -1553,7 +1589,7 @@ export const postRepository = {
       `
       ${BASE_POST_SELECT_SQL}
       LEFT JOIN likes ON likes.post_id = posts.id
-      WHERE ${VISIBLE_POST_WHERE_SQL} AND ${EFFECTIVE_FEED_TIME_SQL} <= ?
+      WHERE ${VISIBLE_POST_WHERE_SQL} AND ${RENDERABLE_COVER_WHERE_SQL} AND ${EFFECTIVE_FEED_TIME_SQL} <= ?
       ORDER BY
         CASE WHEN likes.post_id IS NULL THEN 0 ELSE 1 END DESC,
         ${EFFECTIVE_FEED_TIME_SQL} DESC,
@@ -1571,7 +1607,7 @@ export const postRepository = {
     const posts = database.prepare(
       `
       ${BASE_POST_SELECT_SQL}
-      WHERE ${VISIBLE_POST_WHERE_SQL}
+      WHERE ${VISIBLE_POST_WHERE_SQL} AND ${RENDERABLE_COVER_WHERE_SQL}
       ORDER BY ABS(((posts.id * 1103515245) + (? * 1013904223)) % 2147483647), posts.id DESC
       LIMIT ? OFFSET ?
       `
@@ -1617,6 +1653,7 @@ export const postRepository = {
       LEFT JOIN places ON places.id = posts.place_id
       LEFT JOIN likes ON likes.post_id = posts.id
       WHERE ${VISIBLE_POST_WHERE_SQL}
+        AND ${RENDERABLE_COVER_WHERE_SQL}
         AND posts.post_type = 'single'
         AND images.media_type = 'video'
         AND LOWER(images.filename) NOT IN (${COVER_FILENAME_SQL})
@@ -2511,6 +2548,10 @@ export const imageRepository = {
 
   listRecentCandidates(offset: number, limit: number): FeedImage[] {
     return postRepository.listRecentCandidates(offset, limit);
+  },
+
+  countRenderableFeed(): number {
+    return postRepository.countRenderableFeed();
   },
 
   countRediscover(cutoffTimestamp: number): number {

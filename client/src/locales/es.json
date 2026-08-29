@@ -24,6 +24,10 @@
     }
   },
   "app": {
+    "scanBanner": {
+      "collapse": "Ocultar el progreso del escaneo",
+      "expand": "Mostrar el progreso del escaneo"
+    },
     "authLoading": {
       "eyebrow": "Protección de acceso",
       "title": "Verificando acceso",

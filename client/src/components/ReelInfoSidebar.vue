@@ -1,9 +1,19 @@
 <template>
   <aside
     class="reels-info-sidebar sidebar"
-    :class="{ 'reels-info-sidebar--anchor-right': anchor === 'right' }"
+    :class="{
+      'reels-info-sidebar--anchor-right': anchor === 'right',
+      'reels-info-sidebar--sheet': variant === 'sheet'
+    }"
     :aria-label="t('reels.info.ariaLabel')"
+    :style="sheetStyle"
+    @pointercancel="dismiss.onPointercancel"
+    @pointerdown="onSheetPointerdown"
+    @pointermove="dismiss.onPointermove"
+    @pointerup="dismiss.onPointerup"
   >
+    <div v-if="variant === 'sheet'" class="reels-info-sidebar__grabber" aria-hidden="true" />
+
     <div class="reels-info-sidebar__header">
       <p class="reels-info-sidebar__eyebrow">{{ t('reels.info.eyebrow') }}</p>
 
@@ -121,6 +131,7 @@ import { RouterLink } from 'vue-router';
 
 import { fetchImage } from '../api/gallery';
 import { usePostDeletion } from '../composables/usePostDeletion';
+import { useVerticalDismiss } from '../composables/useVerticalDismiss';
 import { useAppStore } from '../stores/app';
 import type { FeedItem, FolderSummary, ImageDetail } from '../types/api';
 import { resolveDisplayCaption } from '../utils/caption';
@@ -133,8 +144,11 @@ const props = withDefaults(defineProps<{
   folder: FolderSummary | null;
   open: boolean;
   anchor?: 'left' | 'right';
+  /** `sheet` is the phone presentation: a bottom sheet with a grabber and swipe-to-close. */
+  variant?: 'panel' | 'sheet';
 }>(), {
-  anchor: 'left'
+  anchor: 'left',
+  variant: 'panel'
 });
 
 const emit = defineEmits<{
@@ -150,6 +164,37 @@ const error = ref<string | null>(null);
 const detailCache = new Map<number, ImageDetail>();
 const deletion = usePostDeletion();
 let requestToken = 0;
+
+// Swipe-down to close, so the sheet behaves the way a phone sheet is expected to.
+const dismiss = useVerticalDismiss({
+  canStart: (event) =>
+    props.variant === 'sheet' &&
+    !(event.target instanceof Element && event.target.closest('button, a, input, label')),
+  minDistance: 72,
+  onDismiss: (direction) => {
+    if (direction === 'down') {
+      emit('close');
+    }
+  }
+});
+
+function onSheetPointerdown(event: PointerEvent) {
+  if (props.variant !== 'sheet') {
+    return;
+  }
+
+  dismiss.onPointerdown(event);
+}
+
+const sheetStyle = computed(() => {
+  if (props.variant !== 'sheet' || !dismiss.isDragging.value || dismiss.dragOffset.value <= 0) {
+    return undefined;
+  }
+
+  // Only downward travel follows the finger; dragging up must not lift the sheet off
+  // the bottom edge.
+  return { transform: `translateY(${Math.min(dismiss.dragOffset.value, 420)}px)` };
+});
 
 // Straight to the Trash, no dialog: the Trash view is the undo, and permanent
 // deletion still asks first from the feed card.
@@ -286,6 +331,36 @@ watch(
   left: auto;
   border-right: 1px solid color-mix(in srgb, var(--border) 86%, transparent 14%);
   border-left: 0;
+}
+
+/* Phone presentation: a bottom sheet anchored to the safe area, so the delete button
+   is always inside the sheet instead of being covered by the action rail. */
+.reels-info-sidebar--sheet {
+  position: fixed;
+  inset-inline: 0;
+  bottom: 0;
+  z-index: 80;
+  width: auto;
+  max-height: 78dvh;
+  padding: 0.4rem 1.1rem calc(1.1rem + env(safe-area-inset-bottom));
+  border: 0;
+  border-top: 1px solid color-mix(in srgb, var(--border) 86%, transparent 14%);
+  border-radius: 1.35rem 1.35rem 0 0;
+  box-shadow: 0 -18px 48px rgba(15, 20, 25, 0.32);
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+}
+
+.reels-info-sidebar--sheet::before {
+  content: none;
+}
+
+.reels-info-sidebar__grabber {
+  width: 2.6rem;
+  height: 0.25rem;
+  margin: 0.15rem auto 0.6rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--border) 70%, transparent 30%);
 }
 
 .reels-info-sidebar__delete {

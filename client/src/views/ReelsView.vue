@@ -44,17 +44,28 @@
               @toggle-info="handleInfoToggle"
             >
               <template #info-panel>
-                <Transition name="reels-info-popup">
-                  <div v-if="isInfoSidebarOpen" data-test="info-shell" class="reels-view__info-shell">
-                    <ReelInfoSidebar
-                      :item="item"
-                      :folder="activeFolder"
-                      anchor="right"
-                      :open="isInfoSidebarOpen"
-                      @close="closeInfoSidebar"
-                    />
-                  </div>
-                </Transition>
+                <!-- Teleported out of the rail: the reel card is transformed when rotated,
+                     which would make a fixed sheet inside it position against the card
+                     instead of the viewport. -->
+                <Teleport to="body">
+                  <Transition name="reels-info-sheet">
+                    <div
+                      v-if="isInfoSidebarOpen"
+                      data-test="info-shell"
+                      class="reels-view__info-sheet-shell"
+                    >
+                      <div class="reels-view__info-sheet-backdrop" @click="closeInfoSidebar" />
+                      <ReelInfoSidebar
+                        :item="item"
+                        :folder="activeFolder"
+                        anchor="right"
+                        variant="sheet"
+                        :open="isInfoSidebarOpen"
+                        @close="closeInfoSidebar"
+                      />
+                    </div>
+                  </Transition>
+                </Teleport>
               </template>
             </ReelActionRail>
           </template>
@@ -464,5 +475,32 @@ watch(activeItem, (item) => {
 .reels-info-popup-enter-from,
 .reels-info-popup-leave-to {
   opacity: 0;
+}
+
+.reels-view__info-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 79;
+  background: rgba(0, 0, 0, 0.42);
+}
+
+.reels-info-sheet-enter-active,
+.reels-info-sheet-leave-active {
+  transition: opacity 0.2s ease;
+}
+
+.reels-info-sheet-enter-active :deep(.reels-info-sidebar--sheet),
+.reels-info-sheet-leave-active :deep(.reels-info-sidebar--sheet) {
+  transition: transform 0.24s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.reels-info-sheet-enter-from,
+.reels-info-sheet-leave-to {
+  opacity: 0;
+}
+
+.reels-info-sheet-enter-from :deep(.reels-info-sidebar--sheet),
+.reels-info-sheet-leave-to :deep(.reels-info-sidebar--sheet) {
+  transform: translateY(100%);
 }
 </style>
