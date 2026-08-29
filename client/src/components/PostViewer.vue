@@ -147,18 +147,21 @@
           <div
             class="viewer__media-shell viewer__media-shell--video viewer__media-shell--video-interactive"
             :style="mediaShellStyle"
-            :aria-label="t('post.viewer.togglePlayback')"
+            :aria-label="t('post.immersive.open')"
             role="button"
             tabindex="0"
             @click="handleVideoSurfaceClick"
             @keydown="handleVideoSurfaceKeydown"
+            @pointercancel="holdSeek.onPointercancel"
+            @pointerdown="holdSeek.onPointerdown"
+            @pointerup="holdSeek.onPointerup"
           >
             <media-player
               ref="playerElement"
               class="viewer__player"
               :src.prop="videoSource"
               :title.prop="image.filename"
-              :fullscreenOrientation.prop="'none'"
+              :fullscreenOrientation.prop="'landscape'"
               :playsInline.prop="true"
               :muted.prop="appStore.videoMuted"
               :loop.prop="true"
@@ -257,6 +260,17 @@
             >
               <span class="viewer__pause-icon i-fluent-play-20-filled" />
             </div>
+            <div
+              v-if="holdSeek.direction.value"
+              class="viewer__hold-indicator"
+              aria-hidden="true"
+            >
+              <span
+                class="viewer__hold-icon"
+                :class="holdSeek.direction.value === 'forward' ? 'i-fluent-fast-forward-20-filled' : 'i-fluent-rewind-20-filled'"
+              />
+              <span>{{ holdSeek.direction.value === 'forward' ? '+3s' : '-3s' }}</span>
+            </div>
           </div>
         </template>
         <div
@@ -265,7 +279,7 @@
           :style="mediaShellStyle"
         >
           <ResilientImage
-            class="viewer__media-image"
+            class="viewer__media-image viewer__media-image--zoomable"
             :src="image.previewUrl"
             :fallback-src="image.originalUrl"
             :alt="image.filename"
@@ -273,6 +287,7 @@
             :height="image.height"
             loading="eager"
             :retry-while="appStore.isScanning"
+            @click="openImmersiveImage"
           />
         </div>
       </div>
@@ -596,6 +611,7 @@
   import type { PlayerSrc } from "vidstack"
   import type { MediaPlayerElement } from "vidstack/elements"
 
+  import { useHoldToSeek } from "../composables/useHoldToSeek"
   import { useHorizontalSwipe } from "../composables/useHorizontalSwipe"
   import { useImageCaptionEditor } from "../composables/useImageCaptionEditor"
   import type { ImageDetail, FolderSummary } from "../types/api"
@@ -603,6 +619,8 @@
   import { useAuthStore } from "../stores/auth"
   import { useLikesStore } from "../stores/likes"
   import { useFoldersStore } from "../stores/folders"
+  import { useImmersiveImageStore } from "../stores/immersive-image"
+  import { useImmersiveVideoStore } from "../stores/immersive-video"
   import { resolveDisplayCaption } from "../utils/caption"
   import { formatFolderTitle } from "../utils/folder-titles"
   import { getOriginalMediaDownloadUrl, getOriginalMediaUrl } from "../utils/original-media"
@@ -637,6 +655,8 @@
   const appStore = useAppStore()
   const authStore = useAuthStore()
   const foldersStore = useFoldersStore()
+  const immersiveImageStore = useImmersiveImageStore()
+  const immersiveVideoStore = useImmersiveVideoStore()
   const route = useRoute()
   const router = useRouter()
   const { locale, t } = useI18n()
@@ -1796,12 +1816,84 @@
     })
   }
 
-  async function handleVideoSurfaceClick(event: MouseEvent) {
+  const holdSeek = useHoldToSeek({
+    canStart: event => !isPlayerInteractiveTarget(event.target),
+    getCurrentTime: () => playerElement.value?.currentTime ?? 0,
+    getDuration: () => playerElement.value?.duration ?? 0,
+    seekTo: seconds => {
+      const player = playerElement.value
+      if (!player) {
+        return
+      }
+
+      try {
+        player.currentTime = seconds
+      } catch {
+        // Seeking before the provider is attached is a no-op.
+      }
+    },
+  })
+
+  function openImmersiveImage() {
+    const image = props.image
+    if (!image || image.mediaType !== "image") {
+      return
+    }
+
+    immersiveImageStore.open({
+      id: image.id,
+      filename: image.filename,
+      thumbnailUrl: image.thumbnailUrl,
+      fullUrl: image.originalUrl ?? getOriginalMediaUrl(image.id),
+      width: image.width,
+      height: image.height,
+      caption: caption.value,
+      folderSlug: image.folderSlug,
+    })
+  }
+
+  function openImmersiveVideo() {
+    const image = props.image
+    if (!image || image.mediaType !== "video") {
+      return
+    }
+
+    const player = playerElement.value
+    const currentTime = Number.isFinite(player?.currentTime) ? player?.currentTime ?? 0 : 0
+
+    void player?.pause().catch(() => {
+      // Ignore pause rejections before the provider is ready.
+    })
+
+    immersiveVideoStore.open(
+      {
+        id: image.id,
+        filename: image.filename,
+        thumbnailUrl: image.thumbnailUrl,
+        previewUrl: image.previewUrl,
+        originalUrl: image.originalUrl,
+        streamUrl: image.streamUrl,
+        playbackStrategy: image.playbackStrategy,
+        width: image.width,
+        height: image.height,
+        durationMs: image.durationMs,
+      },
+      { startTime: currentTime },
+    )
+  }
+
+  function handleVideoSurfaceClick(event: MouseEvent) {
     if (!isPrimaryPlainClick(event) || isPlayerInteractiveTarget(event.target)) {
       return
     }
 
-    await toggleVideoSurfacePlayback()
+    if (holdSeek.shouldSuppressClick()) {
+      return
+    }
+
+    // Tapping the frame opens the immersive layer, matching how social apps behave.
+    // The footer play button keeps the pause/resume role.
+    openImmersiveVideo()
   }
 
   function handleVideoSurfaceKeydown(event: KeyboardEvent) {
@@ -1838,6 +1930,7 @@
   })
 
   onUnmounted(() => {
+    holdSeek.stop()
     resetSidebarSheetGesture()
     resetMediaSheetRevealGesture()
     window.removeEventListener("resize", updateSidebarLayout)
@@ -1855,6 +1948,43 @@
       }
 
       closeCaptionEditor()
+    },
+  )
+
+  watch(
+    () => immersiveVideoStore.isOpen,
+    async isOpen => {
+      const image = props.image
+      if (!image || image.mediaType !== "video") {
+        return
+      }
+
+      // Only one decoder should run at a time, so the inline player waits while the
+      // immersive layer is up and then resumes where that layer stopped.
+      if (isOpen) {
+        isVideoPaused.value = true
+        void playerElement.value?.pause().catch(() => {
+          // Ignore pause rejections before the provider is ready.
+        })
+        return
+      }
+
+      const exitState = immersiveVideoStore.consumeExitState(image.id)
+      const player = playerElement.value
+      if (exitState && player) {
+        try {
+          player.currentTime = exitState.currentTime
+        } catch {
+          // Seeking before the provider is attached is a no-op.
+        }
+
+        if (exitState.paused) {
+          isVideoPaused.value = true
+          return
+        }
+      }
+
+      await resumeVideoPlayback()
     },
   )
 </script>

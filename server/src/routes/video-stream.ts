@@ -27,6 +27,10 @@ const segmentParamSchema = imageIdParamSchema.extend({
   index: z.coerce.number().int().min(0)
 });
 
+const warmQuerySchema = z.object({
+  segments: z.coerce.number().int().min(1).max(4).default(2)
+});
+
 interface StreamableVideo {
   id: number;
   sourcePath: string;
@@ -157,6 +161,61 @@ videoStreamRouter.get('/:id/hls/:quality/segment-:index.ts', async (request, res
       message: error instanceof Error ? error.message : 'Failed to produce video segment.'
     });
   }
+});
+
+/**
+ * Fire-and-forget segment warm-up. The reels deck calls this for the clip the user
+ * is about to swipe to, so the first segments are already transcoded and cached by
+ * the time the player asks for them. The response returns immediately: waiting
+ * here would just move the stall from the player to this request.
+ */
+videoStreamRouter.post('/:id/hls/:quality/warm', (request, response) => {
+  const params = segmentParamSchema.omit({ index: true }).parse(request.params);
+
+  if (!isStreamQuality(params.quality)) {
+    response.status(404).json({ message: 'Unknown stream quality' });
+    return;
+  }
+
+  // Captured before the async closure so the narrowed type survives.
+  const quality = params.quality;
+
+  const video = resolveStreamableVideo(params.id);
+  if (!video) {
+    response.status(404).json({ message: 'Video not found' });
+    return;
+  }
+
+  const segmentCount = getSegmentCount(video.durationMs);
+  if (segmentCount === 0) {
+    response.status(409).json({ message: 'Video duration is unknown, streaming is unavailable.' });
+    return;
+  }
+
+  const requestedSegments = warmQuerySchema.parse(request.query).segments;
+  const indexes = Array.from({ length: Math.min(requestedSegments, segmentCount) }, (_, index) => index);
+
+  void (async () => {
+    for (const index of indexes) {
+      try {
+        await getSegment({
+          imageId: video.id,
+          sourcePath: video.sourcePath,
+          sourceCodec: await getSourceVideoCodec(video.sourcePath),
+          durationMs: video.durationMs,
+          width: video.width,
+          height: video.height,
+          quality,
+          index
+        });
+      } catch {
+        // A warm-up failure is not user visible; the player will retry the segment.
+        return;
+      }
+    }
+  })();
+
+  response.status(202).json({ warming: indexes.length });
 });
 
 export { videoStreamRouter };

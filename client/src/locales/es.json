@@ -890,6 +890,16 @@
       "nextItem": "Elemento siguiente del carrusel",
       "open": "Abrir carrusel con {count} elementos"
     },
+    "immersive": {
+      "label": "Reproductor de video inmersivo",
+      "close": "Volver",
+      "rotate": "Girar a horizontal",
+      "fullscreen": "Alternar pantalla completa",
+      "open": "Abrir reproductor inmersivo",
+      "exitHint": "Desliza hacia abajo para cerrar",
+      "imageLabel": "Visor de fotos inmersivo",
+      "zoom": "Alternar zoom"
+    },
     "captionModal": {
       "title": "Editar descripción",
       "captionLabel": "Descripción",

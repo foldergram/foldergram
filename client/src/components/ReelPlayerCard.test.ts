@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 
 import { useAppStore } from '../stores/app';
+import { useImmersiveVideoStore } from '../stores/immersive-video';
 import type { FeedItem, FolderSummary } from '../types/api';
 import ReelPlayerCard from './ReelPlayerCard.vue';
 
@@ -180,7 +181,7 @@ describe('ReelPlayerCard', () => {
     expect(wrapper.get('.reel-player-card__folder-description').text()).toBe('Videos/filename.mp4');
   });
 
-  it('toggles playback when the active reel surface is clicked', async () => {
+  it('opens the immersive layer when the active reel surface is clicked', async () => {
     const wrapper = mount(ReelPlayerCard, {
       props: {
         item: createFeedItem(2),
@@ -194,6 +195,7 @@ describe('ReelPlayerCard', () => {
 
     await flushPromises();
 
+    const immersiveVideoStore = useImmersiveVideoStore();
     const player = getPlayerElement(wrapper);
     expect(wrapper.get('media-player').attributes('load')).toBe('eager');
     expect(player.playCallCount).toBeGreaterThanOrEqual(1);
@@ -203,14 +205,44 @@ describe('ReelPlayerCard', () => {
     await wrapper.get('.reel-player-card__surface').trigger('click');
     await flushPromises();
 
+    expect(immersiveVideoStore.isOpen).toBe(true);
+    expect(immersiveVideoStore.target?.id).toBe(2);
+    expect(player.paused).toBe(true);
+
+    immersiveVideoStore.close({ id: 2, currentTime: 8, paused: false });
+    await flushPromises();
+
+    expect(player.playCallCount).toBeGreaterThanOrEqual(2);
+    expect(player.paused).toBe(false);
+  });
+
+  it('toggles playback from the dedicated play button', async () => {
+    const wrapper = mount(ReelPlayerCard, {
+      props: {
+        item: createFeedItem(22),
+        folder: createFolder(),
+        active: true
+      },
+      global: {
+        stubs: globalStubs
+      }
+    });
+
+    await flushPromises();
+
+    const player = getPlayerElement(wrapper);
+    expect(player.paused).toBe(false);
+
+    await wrapper.get('.reel-player-card__playback-button').trigger('click');
+    await flushPromises();
+
     expect(player.pauseCallCount).toBe(1);
     expect(player.paused).toBe(true);
     expect(wrapper.find('.reel-player-card__pause-indicator').exists()).toBe(true);
 
-    await wrapper.get('.reel-player-card__surface').trigger('click');
+    await wrapper.get('.reel-player-card__playback-button').trigger('click');
     await flushPromises();
 
-    expect(player.playCallCount).toBeGreaterThanOrEqual(2);
     expect(player.paused).toBe(false);
     expect(wrapper.find('.reel-player-card__pause-indicator').exists()).toBe(false);
   });

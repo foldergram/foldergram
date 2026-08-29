@@ -6,7 +6,7 @@
     @scroll="handleScroll"
   >
     <div
-      v-for="item in items"
+      v-for="(item, index) in items"
       :key="item.id"
       :ref="setPanelRef(item.id)"
       class="reel-deck__panel"
@@ -15,6 +15,7 @@
         :item="item"
         :folder="folderLookup.get(item.folderSlug) ?? null"
         :active="item.id === activeReelId"
+        :prefetch="prefetchIndexes.has(index)"
       >
         <template v-if="item.id === activeReelId" #mobile-action-rail>
           <slot
@@ -54,6 +55,15 @@ const emit = defineEmits<{
 const scrollerElement = ref<HTMLElement | null>(null);
 const panelElements = new Map<number, HTMLElement>();
 const folderLookup = computed(() => new Map(props.folders.map((folder) => [folder.slug, folder])));
+// Warming the neighbours is what removes the stall on the first frame after a swipe.
+const prefetchIndexes = computed(() => {
+  const activeIndex = props.items.findIndex((item) => item.id === props.activeReelId);
+  if (activeIndex < 0) {
+    return new Set<number>();
+  }
+
+  return new Set([activeIndex + 1, activeIndex + 2].filter((index) => index < props.items.length));
+});
 
 let resizeObserver: ResizeObserver | null = null;
 let scrollFrame = 0;

@@ -698,6 +698,10 @@ img[data-loaded="true"] {
   object-fit: contain;
 }
 
+.viewer__media-image--zoomable {
+  cursor: zoom-in;
+}
+
 .viewer__player {
   position: relative;
   display: block;
@@ -740,6 +744,28 @@ img[data-loaded="true"] {
 .viewer__pause-icon {
   width: 1.45rem;
   height: 1.45rem;
+}
+
+.viewer__hold-indicator {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.62);
+  color: #fff;
+  font-size: 0.82rem;
+  font-weight: 600;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+}
+
+.viewer__hold-icon {
+  width: 1.1rem;
+  height: 1.1rem;
 }
 
 /* ── TikTok-style bottom progress bar ─────────────────────── */

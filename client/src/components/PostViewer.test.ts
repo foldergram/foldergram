@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FeedItem, ImageDetail } from '../types/api';
 import { useAppStore } from '../stores/app';
 import { useFoldersStore } from '../stores/folders';
+import { useImmersiveVideoStore } from '../stores/immersive-video';
 import { useLikesStore } from '../stores/likes';
 import PostViewer from './PostViewer.vue';
 
@@ -274,7 +275,7 @@ describe('PostViewer', () => {
     expect(originalLink.attributes('title')).toBe('Open original file');
   });
 
-  it('toggles video playback from stage clicks and shows the paused indicator', async () => {
+  it('opens the immersive layer from stage clicks and pauses the inline player', async () => {
     const wrapper = mount(PostViewer, {
       props: {
         image: createVideoDetail(22),
@@ -287,24 +288,27 @@ describe('PostViewer', () => {
 
     await flushPromises();
 
+    const immersiveVideoStore = useImmersiveVideoStore();
     const player = wrapper.get('media-player').element as unknown as FakeMediaPlayerElement;
     expect(player.playCallCount).toBeGreaterThanOrEqual(1);
     expect(player.paused).toBe(false);
     expect(wrapper.find('.viewer__pause-indicator').exists()).toBe(false);
 
+    player.currentTime = 6.5;
     await wrapper.get('.viewer__media-shell--video').trigger('click');
     await flushPromises();
 
-    expect(player.pauseCallCount).toBe(1);
+    expect(immersiveVideoStore.isOpen).toBe(true);
+    expect(immersiveVideoStore.target?.id).toBe(22);
+    expect(immersiveVideoStore.startTime).toBe(6.5);
     expect(player.paused).toBe(true);
-    expect(wrapper.find('.viewer__pause-indicator').exists()).toBe(true);
 
-    await wrapper.get('.viewer__media-shell--video').trigger('click');
+    immersiveVideoStore.close({ id: 22, currentTime: 11, paused: false });
     await flushPromises();
 
+    expect(player.currentTime).toBe(11);
     expect(player.playCallCount).toBeGreaterThanOrEqual(2);
     expect(player.paused).toBe(false);
-    expect(wrapper.find('.viewer__pause-indicator').exists()).toBe(false);
   });
 
   it('renders the bottom progress UI and keeps slider clicks from toggling viewer playback', async () => {

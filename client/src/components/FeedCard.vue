@@ -114,12 +114,11 @@
     <div
       v-else
       ref="homeVideoTarget"
-      class="feed-card__video-shell relative block overflow-hidden rounded-[0.5rem] border border-border bg-surface-alt"
-      :class="{ 'feed-card__video-shell--interactive': showHomeVideoSurfaceControls }"
+      class="feed-card__video-shell feed-card__video-shell--interactive relative block overflow-hidden rounded-[0.5rem] border border-border bg-surface-alt"
       :style="{ aspectRatio: homeVideoAspectRatio }"
-      :aria-label="showHomeVideoSurfaceControls ? 'Toggle playback' : undefined"
-      :role="showHomeVideoSurfaceControls ? 'button' : undefined"
-      :tabindex="showHomeVideoSurfaceControls ? 0 : -1"
+      :aria-label="t('post.immersive.open')"
+      role="button"
+      tabindex="0"
       @click="handleHomeVideoSurfaceClick"
       @keydown="handleHomeVideoSurfaceKeydown"
     >
@@ -128,7 +127,7 @@
         class="feed-card__player"
         :src.prop="homeVideoSource"
         :title.prop="item.filename"
-        :fullscreenOrientation.prop="'none'"
+        :fullscreenOrientation.prop="'landscape'"
         :playsInline.prop="true"
         :muted.prop="appStore.videoMuted"
         :loop.prop="true"
@@ -230,7 +229,7 @@
               class="inline-flex items-center justify-center w-8 h-8 border-0 bg-transparent cursor-pointer color-inherit transition-[opacity,transform] duration-180 hover:opacity-72 hover:-translate-y-px"
               :aria-label="openMediaLabel"
               :title="openMediaLabel"
-              @click="handleImageNavigation($event, navigate)"
+              @click="handleMediaButtonClick($event, navigate)"
             >
               <svg class="w-[1.45rem] h-[1.45rem]" viewBox="0 0 24 24" role="presentation">
                 <path
@@ -442,6 +441,8 @@ import { useAuthStore } from '../stores/auth';
 import { useFeedStore } from '../stores/feed';
 import { useFoldersStore } from '../stores/folders';
 import { useLikesStore } from '../stores/likes';
+import { useImmersiveImageStore } from '../stores/immersive-image';
+import { useImmersiveVideoStore } from '../stores/immersive-video';
 import { useMomentsStore } from '../stores/moments';
 import type { FeedItem } from '../types/api';
 import { resolveDisplayCaption } from '../utils/caption';
@@ -499,6 +500,8 @@ const feedStore = useFeedStore();
 const likesStore = useLikesStore();
 const foldersStore = useFoldersStore();
 const momentsStore = useMomentsStore();
+const immersiveImageStore = useImmersiveImageStore();
+const immersiveVideoStore = useImmersiveVideoStore();
 const route = useRoute();
 const { t, locale } = useI18n();
 const menuOpen = ref(false);
@@ -519,6 +522,7 @@ const heartBurstEl = ref<HTMLElement | null>(null);
 const carouselIndex = ref(0);
 
 let homeImageTapResetTimer: ReturnType<typeof setTimeout> | null = null;
+let homeImageOpenTimer: ReturnType<typeof setTimeout> | null = null;
 let homeVideoObserver: IntersectionObserver | null = null;
 let homeVideoMuteSyncToken = 0;
 let homePlayerReady = false;
@@ -606,6 +610,11 @@ function clearHomeImageTapResetTimer() {
     clearTimeout(homeImageTapResetTimer);
     homeImageTapResetTimer = null;
   }
+
+  if (homeImageOpenTimer) {
+    clearTimeout(homeImageOpenTimer);
+    homeImageOpenTimer = null;
+  }
 }
 
 function queueHomeImageTapReset() {
@@ -648,6 +657,64 @@ function handleImageNavigation(event: MouseEvent, navigate: () => void) {
   navigate();
 }
 
+function openImmersiveImage(mediaIndex = carouselIndex.value) {
+  const carouselItem = isCarousel.value ? props.item.mediaItems?.[mediaIndex] : null;
+
+  if (carouselItem) {
+    immersiveImageStore.open({
+      id: carouselItem.imageId,
+      filename: carouselItem.filename,
+      thumbnailUrl: carouselItem.thumbnailUrl,
+      fullUrl: carouselItem.originalUrl ?? getOriginalMediaUrl(carouselItem.imageId),
+      width: carouselItem.width,
+      height: carouselItem.height,
+      caption: caption.value,
+      folderSlug: props.item.folderSlug
+    });
+    return;
+  }
+
+  immersiveImageStore.open({
+    id: props.item.id,
+    filename: props.item.filename,
+    thumbnailUrl: props.item.thumbnailUrl,
+    fullUrl: props.item.originalUrl ?? getOriginalMediaUrl(props.item.id),
+    width: props.item.width,
+    height: props.item.height,
+    caption: caption.value,
+    folderSlug: props.item.folderSlug
+  });
+}
+
+/**
+ * The rail button next to the heart opens media in place. Images and carousels go to
+ * the zoomable layer, videos to the immersive player; anything else falls back to
+ * the post route so deep links keep working.
+ */
+function handleMediaButtonClick(event: MouseEvent, navigate: () => void) {
+  if (!isPrimaryPlainClick(event)) {
+    return;
+  }
+
+  const activeMediaType = isCarousel.value
+    ? props.item.mediaItems?.[carouselIndex.value]?.mediaType ?? props.item.mediaType
+    : props.item.mediaType;
+
+  if (activeMediaType === 'image') {
+    event.preventDefault();
+    openImmersiveImage();
+    return;
+  }
+
+  if (activeMediaType === 'video' && !isCarousel.value) {
+    event.preventDefault();
+    openImmersiveVideo();
+    return;
+  }
+
+  handleImageNavigation(event, navigate);
+}
+
 function handleHomeImageClick(event: MouseEvent) {
   if (!isHomeContext.value || props.item.mediaType !== 'image' || !isPrimaryPlainClick(event)) {
     return;
@@ -664,6 +731,17 @@ function handleHomeImageClick(event: MouseEvent) {
 
   lastHomeImageTapAt.value = now;
   queueHomeImageTapReset();
+
+  // A single tap opens the zoomable viewer; a second tap within the window still
+  // lands as a double-tap like because the layer is dismissed by the burst path.
+  homeImageOpenTimer = setTimeout(() => {
+    homeImageOpenTimer = null;
+    if (lastHomeImageTapAt.value === 0) {
+      return;
+    }
+
+    openImmersiveImage();
+  }, HOME_IMAGE_DOUBLE_TAP_WINDOW_MS);
 }
 
 function emitHomeVideoVisibility(ratio: number, centerOffset = Number.POSITIVE_INFINITY) {
@@ -770,7 +848,9 @@ async function syncHomeVideoPlayback() {
     return;
   }
 
-  if (!props.isActiveVideo && !isHomeVideoFullscreen.value) {
+  // The immersive layer owns playback while it is open, so the inline copy stays
+  // paused instead of decoding the same clip twice.
+  if ((!props.isActiveVideo && !isHomeVideoFullscreen.value) || immersiveVideoStore.isOpen) {
     isHomeVideoPaused.value = false;
     void player.pause().catch(() => {
       // Ignore pause rejections before the provider is ready.
@@ -844,25 +924,45 @@ function handleHomeVideoEnded() {
   homeVideoCurrentTimeMs.value = homeVideoDurationMs.value;
 }
 
-async function handleHomeVideoSurfaceClick(event: MouseEvent) {
-  if (!showHomeVideoSurfaceControls.value || !isPrimaryPlainClick(event) || isInteractiveTarget(event.target)) {
-    return;
-  }
-
+function openImmersiveVideo() {
   const player = homePlayerElement.value;
-  if (!player) {
-    return;
-  }
+  const currentTime = Number.isFinite(player?.currentTime) ? player?.currentTime ?? 0 : 0;
 
-  if (player.paused) {
-    await syncHomeVideoPlayback();
-    return;
-  }
-
-  isHomeVideoPaused.value = true;
-  void player.pause().catch(() => {
+  // Hand the clip to the fullscreen layer and stop the inline copy so only one
+  // decoder is running at a time.
+  void player?.pause().catch(() => {
     // Ignore pause rejections before the provider is ready.
   });
+
+  immersiveVideoStore.open(
+    {
+      id: props.item.id,
+      filename: props.item.filename,
+      thumbnailUrl: props.item.thumbnailUrl,
+      previewUrl: props.item.previewUrl,
+      originalUrl: props.item.originalUrl,
+      streamUrl: props.item.streamUrl,
+      playbackStrategy: props.item.playbackStrategy,
+      width: props.item.width,
+      height: props.item.height,
+      durationMs: props.item.durationMs
+    },
+    { startTime: currentTime }
+  );
+}
+
+async function handleHomeVideoSurfaceClick(event: MouseEvent) {
+  if (!isPrimaryPlainClick(event) || isInteractiveTarget(event.target)) {
+    return;
+  }
+
+  if (props.item.mediaType !== 'video') {
+    return;
+  }
+
+  // Tapping the picture behaves like a social app: it opens the immersive layer.
+  // Pausing stays on the dedicated play button in the footer.
+  openImmersiveVideo();
 }
 
 function handleHomeVideoSurfaceKeydown(event: KeyboardEvent) {
@@ -1096,6 +1196,28 @@ watch(
 watch(isHomeVideoFullscreen, () => {
   void syncHomeVideoPlayback();
 });
+
+watch(
+  () => immersiveVideoStore.isOpen,
+  async (isOpen) => {
+    if (isOpen) {
+      await syncHomeVideoPlayback();
+      return;
+    }
+
+    const exitState = immersiveVideoStore.consumeExitState(props.item.id);
+    const player = homePlayerElement.value;
+    if (exitState && player) {
+      try {
+        player.currentTime = exitState.currentTime;
+      } catch {
+        // Seeking before the provider is attached is a no-op.
+      }
+    }
+
+    await syncHomeVideoPlayback();
+  }
+);
 
 watch(
   () => appStore.videoMuted,

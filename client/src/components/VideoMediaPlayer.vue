@@ -5,6 +5,9 @@
     tabindex="0"
     @click="handleSurfaceClick"
     @keydown="handleSurfaceKeydown"
+    @pointercancel="handleHoldPointercancel"
+    @pointerdown="handleHoldPointerdown"
+    @pointerup="handleHoldPointerup"
   >
     <media-player
       ref="playerElement"
@@ -12,7 +15,7 @@
       :class="`video-media-player__player--${variant}`"
       :src.prop="computedSource"
       :title.prop="title || alt || ''"
-      :fullscreenOrientation.prop="'none'"
+      :fullscreenOrientation.prop="fullscreenOrientation"
       :playsInline.prop="playsinline"
       :muted.prop="muted"
       :autoPlay.prop="autoplay"
@@ -116,6 +119,18 @@
     >
       <span class="i-fluent-play-20-filled h-8 w-8" />
     </div>
+
+    <div
+      v-if="holdDirection"
+      class="video-media-player__hold-indicator"
+      aria-hidden="true"
+    >
+      <span
+        class="h-5 w-5"
+        :class="holdDirection === 'forward' ? 'i-fluent-fast-forward-20-filled' : 'i-fluent-rewind-20-filled'"
+      />
+      <span>{{ holdDirection === 'forward' ? '+3s' : '-3s' }}</span>
+    </div>
   </div>
 </template>
 
@@ -135,6 +150,7 @@ import {
   type ResolvedVideoSource,
   type VideoPlaybackMedia
 } from '../utils/video-playback';
+import { useHoldToSeek } from '../composables/useHoldToSeek';
 import VideoProgressFooter from './VideoProgressFooter.vue';
 
 const props = withDefaults(
@@ -162,6 +178,16 @@ const props = withDefaults(
     variant?: 'feed' | 'viewer';
     showControls?: boolean;
     timeLabel?: string;
+    /**
+     * `toggle` pauses on tap (classic player). `immersive` leaves the decision to
+     * the host, which is how feed surfaces open the fullscreen layer instead.
+     */
+    surfaceMode?: 'toggle' | 'immersive';
+    fullscreenOrientation?: 'none' | 'landscape' | 'portrait';
+    /** Seconds to resume from once metadata is ready. */
+    startTime?: number;
+    /** Enables press-and-hold seeking on the left and right thirds. */
+    holdToSeek?: boolean;
   }>(),
   {
     media: null,
@@ -180,7 +206,11 @@ const props = withDefaults(
     preload: 'metadata',
     variant: 'viewer',
     showControls: true,
-    timeLabel: ''
+    timeLabel: '',
+    surfaceMode: 'toggle',
+    fullscreenOrientation: 'none',
+    startTime: 0,
+    holdToSeek: false
   }
 );
 
@@ -189,6 +219,7 @@ const emit = defineEmits<{
   'autoplay-muted': [];
   'toggle-hd': [isHd: boolean];
   'toggle-playback': [];
+  'surface-click': [];
   'fullscreen-change': [isFullscreen: boolean];
   'loaded-metadata': [payload: { naturalWidth: number; naturalHeight: number; duration: number }];
   'time-update': [payload: { currentTime: number; duration: number }];
@@ -206,6 +237,23 @@ const isHd = ref(false);
 let pendingRestoreState: { currentTime: number; wasPaused: boolean } | null = null;
 let hidePausedTimer: NodeJS.Timeout | null = null;
 let removeEventListeners: (() => void) | null = null;
+let appliedStartTime = false;
+
+const holdSeek = useHoldToSeek({
+  canStart: (event) => !isInteractiveTarget(event.target),
+  getCurrentTime: () => playerElement.value?.currentTime ?? 0,
+  getDuration: () => playerElement.value?.duration ?? 0,
+  seekTo: (seconds) => {
+    const player = playerElement.value;
+    if (!player) return;
+    try {
+      player.currentTime = seconds;
+    } catch {
+      // Seeking before the provider is attached is a no-op.
+    }
+  }
+});
+const holdDirection = holdSeek.direction;
 
 const hasHdOption = computed(() => {
   if (props.media) {
@@ -337,7 +385,41 @@ function isInteractiveTarget(target: EventTarget | null): boolean {
 
 function handleSurfaceClick(event: MouseEvent) {
   if (isInteractiveTarget(event.target)) return;
+  if (holdSeek.shouldSuppressClick()) return;
+
+  if (props.surfaceMode === 'immersive') {
+    emit('surface-click');
+    return;
+  }
+
   togglePlayback();
+}
+
+function handleHoldPointerdown(event: PointerEvent) {
+  if (!props.holdToSeek) return;
+  holdSeek.onPointerdown(event);
+}
+
+function handleHoldPointerup(event: PointerEvent) {
+  holdSeek.onPointerup(event);
+}
+
+function handleHoldPointercancel() {
+  holdSeek.onPointercancel();
+}
+
+function seekBy(deltaSeconds: number) {
+  const player = playerElement.value;
+  if (!player) return;
+
+  const duration = player.duration;
+  const next = (player.currentTime || 0) + deltaSeconds;
+  const upperBound = Number.isFinite(duration) && duration > 0 ? duration - 0.25 : next;
+  try {
+    player.currentTime = Math.min(Math.max(next, 0), Math.max(upperBound, 0));
+  } catch {
+    // Seeking before the provider is attached is a no-op.
+  }
 }
 
 function handleSurfaceKeydown(event: KeyboardEvent) {
@@ -397,6 +479,15 @@ function setupListeners() {
           await player.play().catch(() => {});
         }
       } catch {}
+      return;
+    }
+
+    // Handing over from another surface should continue the clip, not restart it.
+    if (!appliedStartTime && props.startTime > 0) {
+      appliedStartTime = true;
+      try {
+        player.currentTime = props.startTime;
+      } catch {}
     }
   };
 
@@ -452,12 +543,14 @@ onBeforeUnmount(() => {
   }
   if (removeEventListeners) removeEventListeners();
   if (hidePausedTimer) clearTimeout(hidePausedTimer);
+  holdSeek.stop();
 });
 
 watch([basePreviewUrl, () => props.media?.id ?? null], () => {
   isHd.value = false;
   fallbackSource.value = null;
   pendingRestoreState = null;
+  appliedStartTime = false;
 });
 
 watch(
@@ -478,6 +571,9 @@ defineExpose({
   toggleHd,
   isHd,
   hasHdOption,
+  seekBy,
+  currentTime: () => playerElement.value?.currentTime ?? 0,
+  paused: () => playerElement.value?.paused ?? true,
   play: () => playerElement.value?.play(),
   pause: () => playerElement.value?.pause()
 });
@@ -539,6 +635,24 @@ defineExpose({
   border: 0;
   pointer-events: none;
   user-select: none;
+}
+
+.video-media-player__hold-indicator {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.7rem;
+  transform: translate(-50%, -50%);
+  border-radius: 9999px;
+  background: rgba(0, 0, 0, 0.62);
+  color: white;
+  font-size: 0.82rem;
+  font-weight: 600;
+  pointer-events: none;
 }
 
 .video-media-player__controls-group {

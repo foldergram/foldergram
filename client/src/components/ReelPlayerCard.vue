@@ -3,23 +3,26 @@
     <div class="reel-player-card__stage">
       <div
         class="reel-player-card__surface"
-        :aria-label="active ? 'Toggle playback' : undefined"
+        :aria-label="active ? t('post.immersive.open') : undefined"
         :role="active ? 'button' : undefined"
         :tabindex="active ? 0 : -1"
         @click="handleSurfaceClick"
         @keydown="handleSurfaceKeydown"
+        @pointercancel="holdSeek.onPointercancel"
+        @pointerdown="holdSeek.onPointerdown"
+        @pointerup="holdSeek.onPointerup"
       >
         <media-player
           ref="playerElement"
           class="reel-player-card__player"
           :src.prop="videoSource"
           :title.prop="item.filename"
-          :fullscreenOrientation.prop="'none'"
+          :fullscreenOrientation.prop="'landscape'"
           :playsInline.prop="true"
           :muted.prop="appStore.videoMuted"
           :loop.prop="true"
           :load="playerLoadMode"
-          preload="metadata"
+          :preload="playerPreloadMode"
         >
           <media-provider />
           <media-poster
@@ -49,6 +52,18 @@
           aria-hidden="true"
         >
           <span class="reel-player-card__pause-icon i-fluent-play-20-filled" />
+        </div>
+
+        <div
+          v-if="holdSeek.direction.value"
+          class="reel-player-card__hold-indicator"
+          aria-hidden="true"
+        >
+          <span
+            class="reel-player-card__hold-icon"
+            :class="holdSeek.direction.value === 'forward' ? 'i-fluent-fast-forward-20-filled' : 'i-fluent-rewind-20-filled'"
+          />
+          <span>{{ holdSeek.direction.value === 'forward' ? '+3s' : '-3s' }}</span>
         </div>
 
         <div class="reel-player-card__bottom-fade" aria-hidden="true" />
@@ -89,6 +104,20 @@
             </div>
 
             <button
+              class="reel-player-card__playback-button"
+              type="button"
+              :aria-label="t('post.viewer.togglePlayback')"
+              :title="t('post.viewer.togglePlayback')"
+              @click.stop="togglePlayback"
+            >
+              <span
+                class="reel-player-card__sound-icon"
+                :class="isPaused ? 'i-fluent-play-16-filled' : 'i-fluent-pause-16-filled'"
+                aria-hidden="true"
+              />
+            </button>
+
+            <button
               class="reel-player-card__sound-button"
               type="button"
               :aria-label="appStore.videoMuted ? 'Enable sound' : 'Mute sound'"
@@ -115,11 +144,14 @@
 import 'vidstack/bundle';
 
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { RouterLink } from 'vue-router';
 import type { PlayerSrc } from 'vidstack';
 import type { MediaPlayerElement } from 'vidstack/elements';
 
+import { useHoldToSeek } from '../composables/useHoldToSeek';
 import { useAppStore } from '../stores/app';
+import { useImmersiveVideoStore } from '../stores/immersive-video';
 import type { FeedItem, FolderSummary } from '../types/api';
 import { formatFolderTitle } from '../utils/folder-titles';
 import {
@@ -127,21 +159,33 @@ import {
   resolveVideoSource,
   toPlayerSrc,
   useBundledHlsLibrary,
+  warmVideoStream,
   type ResolvedVideoSource
 } from '../utils/video-playback';
 import Avatar from './Avatar.vue';
 
-const props = defineProps<{
-  item: FeedItem;
-  folder: FolderSummary | null;
-  active: boolean;
-}>();
+const props = withDefaults(
+  defineProps<{
+    item: FeedItem;
+    folder: FolderSummary | null;
+    active: boolean;
+    /** The next card warms its buffer so swiping starts playing immediately. */
+    prefetch?: boolean;
+  }>(),
+  {
+    prefetch: false
+  }
+);
 
+const { t } = useI18n();
 const appStore = useAppStore();
+const immersiveVideoStore = useImmersiveVideoStore();
 const playerElement = ref<MediaPlayerElement | null>(null);
 const isPaused = ref(false);
 const fallbackSource = ref<ResolvedVideoSource | null>(null);
-const playerLoadMode = computed(() => (props.active ? 'eager' : 'visible'));
+const playerLoadMode = computed(() => (props.active || props.prefetch ? 'eager' : 'visible'));
+// Buffering the neighbour is what removes the stall on the first frame after a swipe.
+const playerPreloadMode = computed(() => (props.active || props.prefetch ? 'auto' : 'metadata'));
 const preferredSource = computed<ResolvedVideoSource>(() =>
   resolveVideoSource(props.item, appStore.videoPlaybackQuality)
 );
@@ -221,7 +265,9 @@ async function syncPlayback() {
     return;
   }
 
-  if (!props.active) {
+  // The immersive layer plays the same clip, so the deck copy stays paused while
+  // it is open instead of decoding twice.
+  if (!props.active || immersiveVideoStore.isOpen) {
     resetAutoplayRetry();
     isPaused.value = false;
     void player.pause().catch(() => {
@@ -315,11 +361,25 @@ async function toggleSound() {
   }
 }
 
-async function handleSurfaceClick(event?: MouseEvent) {
-  if (event && isInteractiveTarget(event.target)) {
-    return;
-  }
+const holdSeek = useHoldToSeek({
+  canStart: (event) => props.active && !isInteractiveTarget(event.target),
+  getCurrentTime: () => playerElement.value?.currentTime ?? 0,
+  getDuration: () => playerElement.value?.duration ?? 0,
+  seekTo: (seconds) => {
+    const player = playerElement.value;
+    if (!player) {
+      return;
+    }
 
+    try {
+      player.currentTime = seconds;
+    } catch {
+      // Seeking before the provider is attached is a no-op.
+    }
+  }
+});
+
+async function togglePlayback() {
   const player = playerElement.value;
   if (!player || !props.active) {
     return;
@@ -336,6 +396,44 @@ async function handleSurfaceClick(event?: MouseEvent) {
   });
 }
 
+function openImmersiveVideo() {
+  const player = playerElement.value;
+  const currentTime = Number.isFinite(player?.currentTime) ? player?.currentTime ?? 0 : 0;
+
+  void player?.pause().catch(() => {
+    // Ignore pause rejections before the provider is ready.
+  });
+
+  immersiveVideoStore.open(
+    {
+      id: props.item.id,
+      filename: props.item.filename,
+      thumbnailUrl: props.item.thumbnailUrl,
+      previewUrl: props.item.previewUrl,
+      originalUrl: props.item.originalUrl,
+      streamUrl: props.item.streamUrl,
+      playbackStrategy: props.item.playbackStrategy,
+      width: props.item.width,
+      height: props.item.height,
+      durationMs: props.item.durationMs
+    },
+    { startTime: currentTime }
+  );
+}
+
+function handleSurfaceClick(event?: MouseEvent) {
+  if (event && isInteractiveTarget(event.target)) {
+    return;
+  }
+
+  if (holdSeek.shouldSuppressClick() || !props.active) {
+    return;
+  }
+
+  // Tapping the frame opens the immersive layer; pausing lives on its own button.
+  openImmersiveVideo();
+}
+
 function isInteractiveTarget(target: EventTarget | null): boolean {
   return target instanceof HTMLElement && Boolean(target.closest('a, button, media-time-slider'));
 }
@@ -350,7 +448,7 @@ function handleSurfaceKeydown(event: KeyboardEvent) {
   }
 
   event.preventDefault();
-  void handleSurfaceClick();
+  void togglePlayback();
 }
 
 watch(
@@ -397,6 +495,32 @@ watch(playerElement, (player) => {
 });
 
 watch(
+  () => immersiveVideoStore.isOpen,
+  async (isOpen) => {
+    if (!props.active) {
+      return;
+    }
+
+    if (isOpen) {
+      await syncPlayback();
+      return;
+    }
+
+    const exitState = immersiveVideoStore.consumeExitState(props.item.id);
+    const player = playerElement.value;
+    if (exitState && player) {
+      try {
+        player.currentTime = exitState.currentTime;
+      } catch {
+        // Seeking before the provider is attached is a no-op.
+      }
+    }
+
+    await syncPlayback();
+  }
+);
+
+watch(
   currentVideoSrc,
   () => {
     if (!props.active) {
@@ -407,6 +531,16 @@ watch(
   }
 );
 
+watch(
+  () => props.prefetch,
+  (prefetch) => {
+    if (prefetch) {
+      warmVideoStream(props.item, appStore.videoPlaybackQuality);
+    }
+  },
+  { immediate: true }
+);
+
 onMounted(() => {
   void syncPlayback();
   if (props.active) {
@@ -415,6 +549,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  holdSeek.stop();
   clearAutoplayRetry();
   removePlayerEventListeners?.();
   removePlayerEventListeners = null;
@@ -613,7 +748,31 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-.reel-player-card__sound-button {
+.reel-player-card__hold-indicator {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.7rem;
+  transform: translate(-50%, -50%);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.62);
+  color: #fff;
+  font-size: 0.82rem;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.reel-player-card__hold-icon {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+.reel-player-card__sound-button,
+.reel-player-card__playback-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -632,7 +791,8 @@ onBeforeUnmount(() => {
     transform 0.15s ease;
 }
 
-.reel-player-card__sound-button:hover {
+.reel-player-card__sound-button:hover,
+.reel-player-card__playback-button:hover {
   color: #fff;
   background: rgba(230, 233, 239, 0.3);
   opacity: 0.9;
@@ -691,7 +851,8 @@ onBeforeUnmount(() => {
     height: 2.15rem;
   }
 
-  .reel-player-card__sound-button {
+  .reel-player-card__sound-button,
+  .reel-player-card__playback-button {
     width: 1.9rem;
     height: 1.9rem;
   }

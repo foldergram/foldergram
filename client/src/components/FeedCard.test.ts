@@ -3,6 +3,7 @@ import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useAuthStore } from '../stores/auth';
+import { useImmersiveVideoStore } from '../stores/immersive-video';
 import type { FeedItem } from '../types/api';
 import FeedCard from './FeedCard.vue';
 
@@ -196,7 +197,8 @@ describe('FeedCard', () => {
     expect(container.style.aspectRatio).toBe('1080 / 1920');
   });
 
-  it('toggles playback from home-feed video clicks and shows the paused indicator', async () => {
+  it('opens the immersive layer from home-feed video clicks and pauses the inline copy', async () => {
+    const immersiveVideoStore = useImmersiveVideoStore();
     const wrapper = mount(FeedCard, {
       props: {
         item: createVideoItem(805),
@@ -214,21 +216,21 @@ describe('FeedCard', () => {
     const player = wrapper.get('media-player').element as unknown as FakeMediaPlayerElement;
     expect(player.playCallCount).toBeGreaterThanOrEqual(1);
     expect(player.paused).toBe(false);
-    expect(wrapper.find('.feed-card__pause-indicator').exists()).toBe(false);
+    player.currentTime = 12.5;
 
     await wrapper.get('.feed-card__video-shell').trigger('click');
     await flushPromises();
 
-    expect(player.pauseCallCount).toBe(1);
+    expect(immersiveVideoStore.isOpen).toBe(true);
+    expect(immersiveVideoStore.target?.id).toBe(805);
+    expect(immersiveVideoStore.startTime).toBe(12.5);
     expect(player.paused).toBe(true);
-    expect(wrapper.find('.feed-card__pause-indicator').exists()).toBe(true);
 
-    await wrapper.get('.feed-card__video-shell').trigger('click');
+    immersiveVideoStore.close({ id: 805, currentTime: 20, paused: false });
     await flushPromises();
 
-    expect(player.playCallCount).toBeGreaterThanOrEqual(2);
+    expect(player.currentTime).toBe(20);
     expect(player.paused).toBe(false);
-    expect(wrapper.find('.feed-card__pause-indicator').exists()).toBe(false);
   });
 
   it('renders the bottom progress UI and keeps slider clicks from pausing the home video', async () => {

@@ -890,6 +890,16 @@
       "nextItem": "Next carousel item",
       "open": "Open carousel with {count} items"
     },
+    "immersive": {
+      "label": "Immersive video player",
+      "close": "Back",
+      "rotate": "Rotate to landscape",
+      "fullscreen": "Toggle fullscreen",
+      "open": "Open immersive player",
+      "exitHint": "Swipe down to close",
+      "imageLabel": "Immersive photo viewer",
+      "zoom": "Toggle zoom"
+    },
     "captionModal": {
       "title": "Edit caption",
       "captionLabel": "Caption",

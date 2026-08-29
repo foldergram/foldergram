@@ -104,6 +104,40 @@ export function toPlayerSrc(source: ResolvedVideoSource): PlayerSrc {
   };
 }
 
+const warmedStreams = new Set<string>();
+
+/**
+ * Asks the NAS to transcode the first segments of a clip before the player needs
+ * them. Only streamed sources benefit: a directly playable file is already served
+ * straight from disk. Failures are ignored because this is pure optimisation.
+ */
+export function warmVideoStream(media: VideoPlaybackMedia, quality: VideoPlaybackQuality): void {
+  const source = resolveVideoSource(media, quality);
+  if (!source.isStream) {
+    return;
+  }
+
+  const match = /\/api\/videos\/(\d+)\/hls\/(?:([^/]+)\/index\.m3u8|master\.m3u8)$/.exec(source.src);
+  if (!match) {
+    return;
+  }
+
+  const streamQuality = match[2] ?? '720p';
+  const key = `${match[1]}:${streamQuality}`;
+  if (warmedStreams.has(key)) {
+    return;
+  }
+
+  warmedStreams.add(key);
+  void fetch(`/api/videos/${match[1]}/hls/${streamQuality}/warm?segments=2`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'x-foldergram-intent': '1' }
+  }).catch(() => {
+    warmedStreams.delete(key);
+  });
+}
+
 let hlsModulePromise: Promise<{ default: unknown }> | null = null;
 
 /**

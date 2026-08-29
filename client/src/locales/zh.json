@@ -890,6 +890,16 @@
       "nextItem": "下一个轮播项目",
       "open": "打开包含 {count} 项的轮播帖子"
     },
+    "immersive": {
+      "label": "沉浸式视频播放器",
+      "close": "返回",
+      "rotate": "切换横屏",
+      "fullscreen": "切换全屏",
+      "open": "打开沉浸式播放器",
+      "exitHint": "下滑关闭",
+      "imageLabel": "沉浸式图片查看器",
+      "zoom": "切换缩放"
+    },
     "captionModal": {
       "title": "编辑说明",
       "captionLabel": "说明",
