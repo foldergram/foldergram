@@ -121,6 +121,56 @@ describe('reels store', () => {
     expect(reelsStore.items.map((item) => item.id)).toEqual([7]);
   });
 
+  it('advances to the clip in the removed position when the active reel is deleted', () => {
+    const reelsStore = useReelsStore();
+    reelsStore.$patch({
+      items: [createFeedItem(1), createFeedItem(2), createFeedItem(3)],
+      activeReelId: 2
+    });
+
+    reelsStore.removeImage(2);
+
+    expect(reelsStore.items.map((item) => item.id)).toEqual([1, 3]);
+    expect(reelsStore.activeReelId).toBe(3);
+  });
+
+  it('falls back to the last clip when the deleted reel was at the end of the queue', () => {
+    const reelsStore = useReelsStore();
+    reelsStore.$patch({
+      items: [createFeedItem(1), createFeedItem(2)],
+      activeReelId: 2
+    });
+
+    reelsStore.removeImage(2);
+
+    expect(reelsStore.activeReelId).toBe(1);
+  });
+
+  it('keeps the active reel when another one is deleted', () => {
+    const reelsStore = useReelsStore();
+    reelsStore.$patch({
+      items: [createFeedItem(1), createFeedItem(2)],
+      activeReelId: 2
+    });
+
+    reelsStore.removeImage(1);
+
+    expect(reelsStore.activeReelId).toBe(2);
+  });
+
+  it('clears the active reel when the queue empties', () => {
+    const reelsStore = useReelsStore();
+    reelsStore.$patch({
+      items: [createFeedItem(1)],
+      activeReelId: 1
+    });
+
+    reelsStore.removeImage(1);
+
+    expect(reelsStore.items).toEqual([]);
+    expect(reelsStore.activeReelId).toBeNull();
+  });
+
   it('reloads initialized reels when the cached queue was not loaded with the active mode', async () => {
     const appStore = useAppStore();
     appStore.$patch({

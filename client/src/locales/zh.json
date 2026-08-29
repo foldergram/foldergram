@@ -879,7 +879,8 @@
       "format": "格式",
       "loading": "正在加载短片详情...",
       "folderPath": "文件夹路径",
-      "mimeType": "MIME 类型"
+      "mimeType": "MIME 类型",
+      "deleteVideo": "删除到回收站"
     }
   },
   "post": {
@@ -898,7 +899,10 @@
       "open": "打开沉浸式播放器",
       "exitHint": "下滑关闭",
       "imageLabel": "沉浸式图片查看器",
-      "zoom": "切换缩放"
+      "zoom": "切换缩放",
+      "details": "详情",
+      "hideDetails": "隐藏详情",
+      "deleteVideo": "删除到回收站"
     },
     "captionModal": {
       "title": "编辑说明",

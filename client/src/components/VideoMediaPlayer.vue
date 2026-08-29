@@ -7,6 +7,7 @@
     @keydown="handleSurfaceKeydown"
     @pointercancel="handleHoldPointercancel"
     @pointerdown="handleHoldPointerdown"
+    @pointermove="handleHoldPointermove"
     @pointerup="handleHoldPointerup"
   >
     <media-player
@@ -93,6 +94,7 @@
             </button>
 
             <media-fullscreen-button
+              v-if="showFullscreenControl"
               class="video-media-player__control"
               :aria-label="t('post.viewer.toggleFullscreen')"
               target="media"
@@ -121,15 +123,20 @@
     </div>
 
     <div
-      v-if="holdDirection"
+      v-if="holdSpeed.isFastForwarding.value"
       class="video-media-player__hold-indicator"
       aria-hidden="true"
     >
-      <span
-        class="h-5 w-5"
-        :class="holdDirection === 'forward' ? 'i-fluent-fast-forward-20-filled' : 'i-fluent-rewind-20-filled'"
-      />
-      <span>{{ holdDirection === 'forward' ? '+3s' : '-3s' }}</span>
+      <span class="h-5 w-5 i-fluent-fast-forward-20-filled" />
+      <span>{{ holdSpeed.rate }}x</span>
+    </div>
+
+    <div
+      v-else-if="holdSpeed.isScrubbing.value"
+      class="video-media-player__hold-indicator"
+      aria-hidden="true"
+    >
+      <span>{{ scrubLabel }}</span>
     </div>
   </div>
 </template>
@@ -150,7 +157,7 @@ import {
   type ResolvedVideoSource,
   type VideoPlaybackMedia
 } from '../utils/video-playback';
-import { useHoldToSeek } from '../composables/useHoldToSeek';
+import { useHoldToSpeed } from '../composables/useHoldToSpeed';
 import VideoProgressFooter from './VideoProgressFooter.vue';
 
 const props = withDefaults(
@@ -177,6 +184,8 @@ const props = withDefaults(
     preload?: 'none' | 'metadata' | 'auto';
     variant?: 'feed' | 'viewer';
     showControls?: boolean;
+    /** Hosts that own a fullscreen affordance hide the footer's duplicate. */
+    showFullscreenControl?: boolean;
     timeLabel?: string;
     /**
      * `toggle` pauses on tap (classic player). `immersive` leaves the decision to
@@ -186,7 +195,7 @@ const props = withDefaults(
     fullscreenOrientation?: 'none' | 'landscape' | 'portrait';
     /** Seconds to resume from once metadata is ready. */
     startTime?: number;
-    /** Enables press-and-hold seeking on the left and right thirds. */
+    /** Enables press-and-hold fast playback and drag scrubbing on the frame. */
     holdToSeek?: boolean;
   }>(),
   {
@@ -206,6 +215,7 @@ const props = withDefaults(
     preload: 'metadata',
     variant: 'viewer',
     showControls: true,
+    showFullscreenControl: true,
     timeLabel: '',
     surfaceMode: 'toggle',
     fullscreenOrientation: 'none',
@@ -239,7 +249,7 @@ let hidePausedTimer: NodeJS.Timeout | null = null;
 let removeEventListeners: (() => void) | null = null;
 let appliedStartTime = false;
 
-const holdSeek = useHoldToSeek({
+const holdSpeed = useHoldToSpeed({
   canStart: (event) => !isInteractiveTarget(event.target),
   getCurrentTime: () => playerElement.value?.currentTime ?? 0,
   getDuration: () => playerElement.value?.duration ?? 0,
@@ -251,9 +261,27 @@ const holdSeek = useHoldToSeek({
     } catch {
       // Seeking before the provider is attached is a no-op.
     }
+  },
+  getPlaybackRate: () => playerElement.value?.playbackRate ?? 1,
+  setPlaybackRate: (rate) => {
+    const player = playerElement.value;
+    if (!player) return;
+    try {
+      player.playbackRate = rate;
+    } catch {
+      // Rate changes before the provider is attached are a no-op.
+    }
+  },
+  play: () => {
+    void playerElement.value?.play().catch(() => {});
   }
 });
-const holdDirection = holdSeek.direction;
+
+const scrubLabel = computed(() => {
+  const seconds = holdSpeed.scrubSeconds.value;
+  if (seconds === null) return '';
+  return `${formatTime(seconds)} / ${formatTime(durationSec.value)}`;
+});
 
 const hasHdOption = computed(() => {
   if (props.media) {
@@ -385,7 +413,7 @@ function isInteractiveTarget(target: EventTarget | null): boolean {
 
 function handleSurfaceClick(event: MouseEvent) {
   if (isInteractiveTarget(event.target)) return;
-  if (holdSeek.shouldSuppressClick()) return;
+  if (holdSpeed.shouldSuppressClick()) return;
 
   if (props.surfaceMode === 'immersive') {
     emit('surface-click');
@@ -397,15 +425,20 @@ function handleSurfaceClick(event: MouseEvent) {
 
 function handleHoldPointerdown(event: PointerEvent) {
   if (!props.holdToSeek) return;
-  holdSeek.onPointerdown(event);
+  holdSpeed.onPointerdown(event);
+}
+
+function handleHoldPointermove(event: PointerEvent) {
+  if (!props.holdToSeek) return;
+  holdSpeed.onPointermove(event);
 }
 
 function handleHoldPointerup(event: PointerEvent) {
-  holdSeek.onPointerup(event);
+  holdSpeed.onPointerup(event);
 }
 
 function handleHoldPointercancel() {
-  holdSeek.onPointercancel();
+  holdSpeed.onPointercancel();
 }
 
 function seekBy(deltaSeconds: number) {
@@ -543,7 +576,7 @@ onBeforeUnmount(() => {
   }
   if (removeEventListeners) removeEventListeners();
   if (hidePausedTimer) clearTimeout(hidePausedTimer);
-  holdSeek.stop();
+  holdSpeed.stop();
 });
 
 watch([basePreviewUrl, () => props.media?.id ?? null], () => {
@@ -580,6 +613,15 @@ defineExpose({
 </script>
 
 <style scoped>
+/* iOS shows a text-selection loupe on a long press unless the callout is refused,
+   and the hold gesture must not turn into a native drag or selection. */
+.video-media-player {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: pan-y;
+}
+
 .video-media-player__player {
   position: relative;
   display: block;

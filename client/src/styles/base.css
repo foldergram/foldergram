@@ -1082,6 +1082,14 @@ img[data-loaded="true"] {
   cursor: pointer;
 }
 
+/* iOS pops a text-selection loupe on a long press unless the callout is refused. */
+.feed-card__video-shell,
+.viewer__media-shell--video-interactive {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 .feed-card__pause-indicator {
   position: absolute;
   inset: 50% auto auto 50%;

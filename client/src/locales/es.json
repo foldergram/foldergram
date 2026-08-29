@@ -879,7 +879,8 @@
       "format": "Formato",
       "loading": "Cargando detalles del reel...",
       "folderPath": "Ruta de la carpeta",
-      "mimeType": "Tipo MIME"
+      "mimeType": "Tipo MIME",
+      "deleteVideo": "Mover a la Papelera"
     }
   },
   "post": {
@@ -898,7 +899,10 @@
       "open": "Abrir reproductor inmersivo",
       "exitHint": "Desliza hacia abajo para cerrar",
       "imageLabel": "Visor de fotos inmersivo",
-      "zoom": "Alternar zoom"
+      "zoom": "Alternar zoom",
+      "details": "Detalles",
+      "hideDetails": "Ocultar detalles",
+      "deleteVideo": "Mover a la Papelera"
     },
     "captionModal": {
       "title": "Editar descripción",

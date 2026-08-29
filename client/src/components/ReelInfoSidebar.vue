@@ -96,6 +96,41 @@
       </div>
     </dl>
 
+    <button
+      v-if="deletion.canDelete.value"
+      class="reels-info-sidebar__delete"
+      type="button"
+      :disabled="deletion.isDeleting.value"
+      @click="deletion.requestDelete()"
+    >
+      <span class="reels-info-sidebar__delete-icon i-fluent-delete-20-regular" aria-hidden="true" />
+      <span>{{ t('reels.info.deleteVideo') }}</span>
+    </button>
+
+    <ConfirmDialog
+      v-if="deletion.isConfirmOpen.value"
+      :title="t('post.feedCard.delete.title')"
+      :message="deletion.dialogMessage.value"
+      :confirm-label="deletion.dialogConfirmLabel.value"
+      :loading="deletion.isDeleting.value"
+      @cancel="deletion.cancelDelete()"
+      @confirm="handleDeleteConfirm"
+    >
+      <template #details>
+        <label class="reels-info-sidebar__delete-option">
+          <input
+            v-model="deletion.deleteOriginalFromDisk.value"
+            type="checkbox"
+            :disabled="deletion.isDeleting.value"
+          />
+          <span>
+            <span class="reels-info-sidebar__delete-option-title">{{ t('post.feedCard.delete.deleteOriginalLabel') }}</span>
+            <span class="reels-info-sidebar__delete-option-hint">{{ t('post.feedCard.delete.deleteOriginalDescription') }}</span>
+          </span>
+        </label>
+        <p v-if="deletion.error.value" class="reels-info-sidebar__delete-error">{{ deletion.error.value }}</p>
+      </template>
+    </ConfirmDialog>
   </aside>
 </template>
 
@@ -105,12 +140,14 @@ import { useI18n } from 'vue-i18n';
 import { RouterLink } from 'vue-router';
 
 import { fetchImage } from '../api/gallery';
+import { usePostDeletion } from '../composables/usePostDeletion';
 import { useAppStore } from '../stores/app';
 import type { FeedItem, FolderSummary, ImageDetail } from '../types/api';
 import { resolveDisplayCaption } from '../utils/caption';
 import { formatFolderTitle } from '../utils/folder-titles';
 import { formatMediaDuration } from '../utils/media';
 import Avatar from './Avatar.vue';
+import ConfirmDialog from './ConfirmDialog.vue';
 
 const props = withDefaults(defineProps<{
   item: FeedItem;
@@ -121,7 +158,7 @@ const props = withDefaults(defineProps<{
   anchor: 'left'
 });
 
-defineEmits<{
+const emit = defineEmits<{
   close: [];
 }>();
 
@@ -132,7 +169,16 @@ const loading = ref(false);
 const error = ref<string | null>(null);
 
 const detailCache = new Map<number, ImageDetail>();
+const deletion = usePostDeletion();
 let requestToken = 0;
+
+async function handleDeleteConfirm() {
+  const deleted = await deletion.confirmDelete(props.item);
+  if (deleted) {
+    // The reel is gone, so the panel that described it has nothing left to show.
+    emit('close');
+  }
+}
 
 const hasExplicitItemCaption = computed(() => Object.hasOwn(props.item, 'caption'));
 const caption = computed(() =>
@@ -259,6 +305,67 @@ watch(
   left: auto;
   border-right: 1px solid color-mix(in srgb, var(--border) 86%, transparent 14%);
   border-left: 0;
+}
+
+.reels-info-sidebar__delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  width: 100%;
+  min-height: 2.5rem;
+  margin-top: 0.9rem;
+  padding: 0 0.9rem;
+  border: 1px solid rgba(217, 48, 37, 0.28);
+  border-radius: 0.85rem;
+  background: rgba(217, 48, 37, 0.08);
+  color: #d93025;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.reels-info-sidebar__delete:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.reels-info-sidebar__delete-icon {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+.reels-info-sidebar__delete-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.reels-info-sidebar__delete-option-title {
+  display: block;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.reels-info-sidebar__delete-option-hint {
+  display: block;
+  margin-top: 0.18rem;
+  font-size: 0.84rem;
+  color: var(--muted);
+}
+
+.reels-info-sidebar__delete-error {
+  margin: 0.75rem 0 0;
+  padding: 0.8rem 0.75rem;
+  border: 1px solid rgba(217, 48, 37, 0.24);
+  border-radius: 0.9rem;
+  background: rgba(217, 48, 37, 0.08);
+  font-size: 0.84rem;
+  color: #b42318;
 }
 
 .reels-info-sidebar__header {

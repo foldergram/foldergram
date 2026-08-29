@@ -2,12 +2,16 @@ import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises, mount } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { fetchImage } from '../api/gallery';
+import { fetchImage, trashImage } from '../api/gallery';
+import { useAuthStore } from '../stores/auth';
+import { useReelsStore } from '../stores/reels';
 import type { FeedItem, FolderSummary, ImageDetail } from '../types/api';
 import ReelInfoSidebar from './ReelInfoSidebar.vue';
 
 vi.mock('../api/gallery', () => ({
-  fetchImage: vi.fn()
+  fetchImage: vi.fn(),
+  trashImage: vi.fn(),
+  deleteImage: vi.fn()
 }));
 
 function createFeedItem(id: number): FeedItem {
@@ -63,12 +67,90 @@ function createImageDetail(id: number): ImageDetail {
   };
 }
 
+function revokeDeletePermission() {
+  const authStore = useAuthStore();
+  authStore.capabilities = {
+    canManageLibrary: false,
+    canDeleteMedia: false,
+    canAccessSettings: false,
+    canUseSharedLikes: true,
+    canUseLocalFavorites: false,
+    canUseSharedCollections: true,
+    canUseLocalCollections: false
+  };
+}
+
 describe('ReelInfoSidebar', () => {
   const fetchImageMock = vi.mocked(fetchImage);
+  const trashImageMock = vi.mocked(trashImage);
 
   beforeEach(() => {
     setActivePinia(createPinia());
     fetchImageMock.mockReset();
+    trashImageMock.mockReset();
+  });
+
+  it('hides the trash action from viewers who cannot delete media', async () => {
+    revokeDeletePermission();
+    fetchImageMock.mockResolvedValue(createImageDetail(31));
+
+    const wrapper = mount(ReelInfoSidebar, {
+      props: {
+        item: createFeedItem(31),
+        folder: createFolder(),
+        open: true
+      },
+      global: {
+        stubs: {
+          Avatar: { template: '<div data-test="avatar" />' },
+          RouterLink: { template: '<a><slot /></a>' }
+        }
+      }
+    });
+
+    await flushPromises();
+
+    expect(wrapper.find('.reels-info-sidebar__delete').exists()).toBe(false);
+  });
+
+  it('trashes the reel and closes the panel once the confirmation is accepted', async () => {
+    fetchImageMock.mockResolvedValue(createImageDetail(32));
+    trashImageMock.mockResolvedValue({ id: 32, folderSlug: 'animal-planet' });
+
+    const reelsStore = useReelsStore();
+    reelsStore.$patch({
+      items: [createFeedItem(32), createFeedItem(33)],
+      activeReelId: 32
+    });
+
+    const wrapper = mount(ReelInfoSidebar, {
+      props: {
+        item: createFeedItem(32),
+        folder: createFolder(),
+        open: true
+      },
+      global: {
+        stubs: {
+          Avatar: { template: '<div data-test="avatar" />' },
+          RouterLink: { template: '<a><slot /></a>' }
+        }
+      }
+    });
+
+    await flushPromises();
+    await wrapper.get('.reels-info-sidebar__delete').trigger('click');
+    await flushPromises();
+
+    const confirmButtons = wrapper.findAll('button').filter((button) => button.text() === 'Delete');
+    expect(confirmButtons).toHaveLength(1);
+
+    await confirmButtons[0]!.trigger('click');
+    await flushPromises();
+
+    expect(trashImageMock).toHaveBeenCalledWith(32);
+    expect(reelsStore.items.map((item) => item.id)).toEqual([33]);
+    expect(reelsStore.activeReelId).toBe(33);
+    expect(wrapper.emitted('close')).toBeTruthy();
   });
 
   it('loads reel details only when the sidebar is open', async () => {

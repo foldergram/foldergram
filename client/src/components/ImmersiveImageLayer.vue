@@ -44,8 +44,37 @@
           >
             <span class="i-fluent-arrow-download-20-regular h-5 w-5" aria-hidden="true" />
           </a>
+          <button
+            class="immersive-image__button"
+            :class="{ 'immersive-image__button--active': detailsOpen }"
+            type="button"
+            :aria-label="t('post.immersive.details')"
+            :title="t('post.immersive.details')"
+            :aria-pressed="detailsOpen"
+            @click.stop="detailsOpen = !detailsOpen"
+          >
+            <span
+              class="h-5 w-5"
+              :class="detailsOpen ? 'i-fluent-info-16-filled' : 'i-fluent-info-16-regular'"
+              aria-hidden="true"
+            />
+          </button>
         </div>
       </div>
+
+      <Transition name="immersive-image-details">
+        <div v-if="detailsOpen" class="immersive-image__details">
+          <ImmersiveDetailsPanel
+            :id="target.id"
+            media-type="image"
+            :filename="target.filename"
+            :width="target.width"
+            :height="target.height"
+            @close="detailsOpen = false"
+            @deleted="handleDeleted"
+          />
+        </div>
+      </Transition>
 
       <div
         class="immersive-image__stage"
@@ -83,10 +112,17 @@ import { useI18n } from 'vue-i18n';
 import { useImmersiveImageStore } from '../stores/immersive-image';
 import { usePinchZoom } from '../composables/usePinchZoom';
 import { getOriginalMediaDownloadUrl } from '../utils/original-media';
+import ImmersiveDetailsPanel from './ImmersiveDetailsPanel.vue';
 
 const { t } = useI18n();
 const store = useImmersiveImageStore();
 const fullImageReady = ref(false);
+const detailsOpen = ref(false);
+
+function handleDeleted() {
+  detailsOpen.value = false;
+  store.close();
+}
 
 const target = computed(() => store.target);
 const downloadUrl = computed(() => (target.value ? getOriginalMediaDownloadUrl(target.value.id) : '#'));
@@ -162,6 +198,7 @@ watch(
   (isOpen) => {
     if (isOpen) {
       zoom.reset();
+      detailsOpen.value = false;
       lockScroll();
       document.addEventListener('keydown', handleKeydown);
       return;
@@ -227,6 +264,24 @@ onBeforeUnmount(() => {
 
 .immersive-image__button--active {
   color: #38bdf8;
+}
+
+.immersive-image__details {
+  position: absolute;
+  top: max(3.6rem, calc(env(safe-area-inset-top) + 3.2rem));
+  right: 0.85rem;
+  z-index: 3;
+}
+
+.immersive-image-details-enter-active,
+.immersive-image-details-leave-active {
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+.immersive-image-details-enter-from,
+.immersive-image-details-leave-to {
+  opacity: 0;
+  transform: translateY(-0.4rem);
 }
 
 .immersive-image__stage {

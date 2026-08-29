@@ -152,9 +152,10 @@
             tabindex="0"
             @click="handleVideoSurfaceClick"
             @keydown="handleVideoSurfaceKeydown"
-            @pointercancel="holdSeek.onPointercancel"
-            @pointerdown="holdSeek.onPointerdown"
-            @pointerup="holdSeek.onPointerup"
+            @pointercancel="holdSpeed.onPointercancel"
+            @pointerdown="holdSpeed.onPointerdown"
+            @pointermove="holdSpeed.onPointermove"
+            @pointerup="holdSpeed.onPointerup"
           >
             <media-player
               ref="playerElement"
@@ -261,15 +262,19 @@
               <span class="viewer__pause-icon i-fluent-play-20-filled" />
             </div>
             <div
-              v-if="holdSeek.direction.value"
+              v-if="holdSpeed.isFastForwarding.value"
               class="viewer__hold-indicator"
               aria-hidden="true"
             >
-              <span
-                class="viewer__hold-icon"
-                :class="holdSeek.direction.value === 'forward' ? 'i-fluent-fast-forward-20-filled' : 'i-fluent-rewind-20-filled'"
-              />
-              <span>{{ holdSeek.direction.value === 'forward' ? '+3s' : '-3s' }}</span>
+              <span class="viewer__hold-icon i-fluent-fast-forward-20-filled" />
+              <span>{{ holdSpeed.rate }}x</span>
+            </div>
+            <div
+              v-else-if="holdSpeed.isScrubbing.value"
+              class="viewer__hold-indicator"
+              aria-hidden="true"
+            >
+              <span>{{ videoScrubLabel }}</span>
             </div>
           </div>
         </template>
@@ -611,7 +616,7 @@
   import type { PlayerSrc } from "vidstack"
   import type { MediaPlayerElement } from "vidstack/elements"
 
-  import { useHoldToSeek } from "../composables/useHoldToSeek"
+  import { useHoldToSpeed } from "../composables/useHoldToSpeed"
   import { useHorizontalSwipe } from "../composables/useHorizontalSwipe"
   import { useImageCaptionEditor } from "../composables/useImageCaptionEditor"
   import type { ImageDetail, FolderSummary } from "../types/api"
@@ -1816,7 +1821,7 @@
     })
   }
 
-  const holdSeek = useHoldToSeek({
+  const holdSpeed = useHoldToSpeed({
     canStart: event => !isPlayerInteractiveTarget(event.target),
     getCurrentTime: () => playerElement.value?.currentTime ?? 0,
     getDuration: () => playerElement.value?.duration ?? 0,
@@ -1832,6 +1837,36 @@
         // Seeking before the provider is attached is a no-op.
       }
     },
+    getPlaybackRate: () => playerElement.value?.playbackRate ?? 1,
+    setPlaybackRate: rate => {
+      const player = playerElement.value
+      if (!player) {
+        return
+      }
+
+      try {
+        player.playbackRate = rate
+      } catch {
+        // Rate changes before the provider is attached are a no-op.
+      }
+    },
+    play: () => {
+      void playerElement.value?.play().catch(() => {
+        // Ignore play rejections before the provider is ready.
+      })
+    },
+  })
+
+  const videoScrubLabel = computed(() => {
+    const seconds = holdSpeed.scrubSeconds.value
+    if (seconds === null) {
+      return ""
+    }
+
+    return formatVideoTimestamp(
+      videoDurationMs.value > 0 ? videoDurationMs.value : props.image?.durationMs,
+      seconds * 1000,
+    )
   })
 
   function openImmersiveImage() {
@@ -1887,7 +1922,7 @@
       return
     }
 
-    if (holdSeek.shouldSuppressClick()) {
+    if (holdSpeed.shouldSuppressClick()) {
       return
     }
 
@@ -1930,7 +1965,7 @@
   })
 
   onUnmounted(() => {
-    holdSeek.stop()
+    holdSpeed.stop()
     resetSidebarSheetGesture()
     resetMediaSheetRevealGesture()
     window.removeEventListener("resize", updateSidebarLayout)

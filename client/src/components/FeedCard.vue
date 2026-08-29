@@ -732,14 +732,11 @@ function handleHomeImageClick(event: MouseEvent) {
   lastHomeImageTapAt.value = now;
   queueHomeImageTapReset();
 
-  // A single tap opens the zoomable viewer; a second tap within the window still
-  // lands as a double-tap like because the layer is dismissed by the burst path.
+  // A single tap opens the zoomable viewer. The double-tap branch above clears this
+  // timer, so it must not also test `lastHomeImageTapAt`: the reset timer shares the
+  // same delay and is registered first, which would swallow every single tap.
   homeImageOpenTimer = setTimeout(() => {
     homeImageOpenTimer = null;
-    if (lastHomeImageTapAt.value === 0) {
-      return;
-    }
-
     openImmersiveImage();
   }, HOME_IMAGE_DOUBLE_TAP_WINDOW_MS);
 }

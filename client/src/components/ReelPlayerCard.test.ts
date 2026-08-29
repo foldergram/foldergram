@@ -181,7 +181,7 @@ describe('ReelPlayerCard', () => {
     expect(wrapper.get('.reel-player-card__folder-description').text()).toBe('Videos/filename.mp4');
   });
 
-  it('opens the immersive layer when the active reel surface is clicked', async () => {
+  it('pauses in place instead of opening the immersive layer when the reel surface is tapped', async () => {
     const wrapper = mount(ReelPlayerCard, {
       props: {
         item: createFeedItem(2),
@@ -205,15 +205,38 @@ describe('ReelPlayerCard', () => {
     await wrapper.get('.reel-player-card__surface').trigger('click');
     await flushPromises();
 
-    expect(immersiveVideoStore.isOpen).toBe(true);
-    expect(immersiveVideoStore.target?.id).toBe(2);
+    // The deck already fills the screen, so there is nothing to escalate to.
+    expect(immersiveVideoStore.isOpen).toBe(false);
     expect(player.paused).toBe(true);
+    expect(wrapper.find('.reel-player-card__pause-indicator').exists()).toBe(true);
 
-    immersiveVideoStore.close({ id: 2, currentTime: 8, paused: false });
+    await wrapper.get('.reel-player-card__surface').trigger('click');
     await flushPromises();
 
-    expect(player.playCallCount).toBeGreaterThanOrEqual(2);
     expect(player.paused).toBe(false);
+    expect(wrapper.find('.reel-player-card__pause-indicator').exists()).toBe(false);
+  });
+
+  it('offers a landscape toggle on the active reel', async () => {
+    const wrapper = mount(ReelPlayerCard, {
+      props: {
+        item: createFeedItem(31),
+        folder: createFolder(),
+        active: true
+      },
+      global: {
+        stubs: globalStubs
+      }
+    });
+
+    await flushPromises();
+
+    const rotateButton = wrapper
+      .findAll('.reel-player-card__playback-button')
+      .find((button) => button.attributes('aria-label') === 'Rotate to landscape');
+
+    expect(rotateButton).toBeDefined();
+    expect(rotateButton?.attributes('aria-pressed')).toBe('false');
   });
 
   it('toggles playback from the dedicated play button', async () => {

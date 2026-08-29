@@ -11,7 +11,7 @@
       aria-modal="true"
       :aria-label="t('post.immersive.label')"
       :style="layerStyle"
-      @click.self="requestClose"
+      @click.self="void requestClose()"
       @pointercancel="onPointercancel"
       @pointerdown="onPointerdown"
       @pointermove="onPointermove"
@@ -23,7 +23,7 @@
           type="button"
           :aria-label="t('post.immersive.close')"
           :title="t('post.immersive.close')"
-          @click.stop="requestClose"
+          @click.stop="void requestClose()"
         >
           <span class="i-fluent-arrow-left-20-filled h-5 w-5" aria-hidden="true" />
         </button>
@@ -55,8 +55,38 @@
               aria-hidden="true"
             />
           </button>
+          <button
+            class="immersive-video__button"
+            :class="{ 'immersive-video__button--active': detailsOpen }"
+            type="button"
+            :aria-label="t('post.immersive.details')"
+            :title="t('post.immersive.details')"
+            :aria-pressed="detailsOpen"
+            @click.stop="detailsOpen = !detailsOpen"
+          >
+            <span
+              class="h-5 w-5"
+              :class="detailsOpen ? 'i-fluent-info-16-filled' : 'i-fluent-info-16-regular'"
+              aria-hidden="true"
+            />
+          </button>
         </div>
       </div>
+
+      <Transition name="immersive-video-details">
+        <div v-if="detailsOpen" class="immersive-video__details" data-swipe-ignore="true">
+          <ImmersiveDetailsPanel
+            :id="target.id"
+            media-type="video"
+            :filename="target.filename"
+            :width="target.width"
+            :height="target.height"
+            :duration-ms="target.durationMs"
+            @close="detailsOpen = false"
+            @deleted="handleDeleted"
+          />
+        </div>
+      </Transition>
 
       <div ref="stageElement" class="immersive-video__stage">
         <VideoMediaPlayer
@@ -76,6 +106,7 @@
           :start-time="store.startTime"
           fullscreen-orientation="landscape"
           hold-to-seek
+          :show-fullscreen-control="false"
           variant="viewer"
           @autoplay-muted="appStore.setVideoMuted(true)"
           @toggle-mute="appStore.setVideoMuted(!appStore.videoMuted)"
@@ -99,6 +130,7 @@ import {
   requestElementFullscreen,
   unlockScreenOrientation
 } from '../utils/fullscreen';
+import ImmersiveDetailsPanel from './ImmersiveDetailsPanel.vue';
 import VideoMediaPlayer from './VideoMediaPlayer.vue';
 
 const { t } = useI18n();
@@ -108,6 +140,7 @@ const stageElement = ref<HTMLElement | null>(null);
 const playerComponent = ref<InstanceType<typeof VideoMediaPlayer> | null>(null);
 const isRotated = ref(false);
 const isNativeFullscreen = ref(false);
+const detailsOpen = ref(false);
 
 const target = computed(() => store.target);
 
@@ -115,7 +148,7 @@ const { dragOffset, isDragging, onPointercancel, onPointerdown, onPointermove, o
   useVerticalDismiss({
     canStart: (event) => !isInteractiveTarget(event.target),
     onDismiss: () => {
-      requestClose();
+      void requestClose();
     }
   });
 
@@ -188,7 +221,13 @@ async function toggleFullscreen() {
   }
 }
 
-function requestClose() {
+function handleDeleted() {
+  detailsOpen.value = false;
+  // The clip no longer exists, so there is nothing to resume behind the layer.
+  store.close(null);
+}
+
+async function requestClose() {
   const exitState = target.value
     ? {
         id: target.value.id,
@@ -196,6 +235,21 @@ function requestClose() {
         paused: playerComponent.value?.paused() ?? true
       }
     : null;
+
+  // Tearing down a decoding video while the browser is still leaving fullscreen is
+  // what made the return to the feed stutter. Stopping playback and releasing
+  // fullscreen first leaves only a detach for the frame that unmounts the layer.
+  void Promise.resolve(playerComponent.value?.pause()).catch(() => {
+    // Pausing before the provider is attached is a no-op.
+  });
+
+  unlockScreenOrientation();
+  isRotated.value = false;
+
+  if (isNativeFullscreen.value || isDocumentFullscreen()) {
+    await exitDocumentFullscreen();
+    isNativeFullscreen.value = false;
+  }
 
   store.close(exitState);
 }
@@ -207,7 +261,7 @@ function handleFullscreenChange() {
 function handleKeydown(event: KeyboardEvent) {
   if (event.key === 'Escape' && !isDocumentFullscreen()) {
     event.preventDefault();
-    requestClose();
+    void requestClose();
   }
 }
 
@@ -227,6 +281,7 @@ watch(
     if (isOpen) {
       isRotated.value = false;
       isNativeFullscreen.value = false;
+      detailsOpen.value = false;
       lockScroll();
       document.addEventListener('keydown', handleKeydown);
       document.addEventListener('fullscreenchange', handleFullscreenChange);
@@ -303,6 +358,24 @@ onBeforeUnmount(() => {
 
 .immersive-video__button--active {
   color: #38bdf8;
+}
+
+.immersive-video__details {
+  position: absolute;
+  top: max(3.6rem, calc(env(safe-area-inset-top) + 3.2rem));
+  right: 0.85rem;
+  z-index: 3;
+}
+
+.immersive-video-details-enter-active,
+.immersive-video-details-leave-active {
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+.immersive-video-details-enter-from,
+.immersive-video-details-leave-to {
+  opacity: 0;
+  transform: translateY(-0.4rem);
 }
 
 .immersive-video__stage {

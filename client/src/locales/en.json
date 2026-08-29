@@ -879,7 +879,8 @@
       "format": "Format",
       "loading": "Loading reel details...",
       "folderPath": "Folder Path",
-      "mimeType": "MIME Type"
+      "mimeType": "MIME Type",
+      "deleteVideo": "Move to Trash"
     }
   },
   "post": {
@@ -898,7 +899,10 @@
       "open": "Open immersive player",
       "exitHint": "Swipe down to close",
       "imageLabel": "Immersive photo viewer",
-      "zoom": "Toggle zoom"
+      "zoom": "Toggle zoom",
+      "details": "Details",
+      "hideDetails": "Hide details",
+      "deleteVideo": "Move to Trash"
     },
     "captionModal": {
       "title": "Edit caption",
