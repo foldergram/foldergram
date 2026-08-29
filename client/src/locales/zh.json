@@ -32,6 +32,11 @@
       "eyebrow": "访问保护",
       "title": "正在检查访问权限",
       "description": "正在加载当前密码保护状态。"
+    },
+    "pullToRefresh": {
+      "pull": "下拉刷新",
+      "release": "松开刷新",
+      "refreshing": "正在载入新内容..."
     }
   },
   "auth": {
@@ -286,6 +291,12 @@
           }
         }
       },
+      "sharePublicBaseUrl": {
+        "label": "外网分享地址",
+        "description": "从外网访问时生成的分享链接使用这个地址。局域网访问时始终使用当前的局域网地址。",
+        "fieldLabel": "公网基础地址",
+        "helper": "留空则外网链接回落到当前访问地址。填写完整地址，例如 https://gallery.example.com。"
+      },
       "storiesMode": {
         "label": "将 stories 文件夹视为普通应用文件夹",
         "scanRequired": "需要扫描",
@@ -324,6 +335,7 @@
         "reelsOnly": "这会更新此应用打开短片时使用的队列样式。访问者无法从短片页面切换模式。",
         "folderOnly": "这会更新应用文件夹网格使用的默认照片顺序。",
         "nestedFolderTitleOnly": "这会更新整个应用中嵌套应用文件夹的标签显示方式。",
+        "sharePublicBaseUrlOnly": "这会更新从外网访问时分享链接使用的地址前缀。",
         "carouselReconciliation": "轮播文件夹模式已保存。请完成上方提示的图库操作，将其应用到索引。",
         "idle": "这些是当前适用于语言、首页、短片、应用文件夹、嵌套文件夹标题、stories 文件夹、轮播文件夹和排除文件夹的全局默认项。"
       },
@@ -361,8 +373,10 @@
           "reelsFeedDefault": "短片默认项",
           "appFolderOrder": "应用文件夹顺序",
           "nestedFolderTitles": "嵌套文件夹标题",
-          "videoPlaybackQuality": "视频播放画质"
-        }
+          "videoPlaybackQuality": "视频播放画质",
+          "sharePublicBaseUrl": "外网分享地址"
+        },
+        "sharePublicBaseUrlSaved": "外网分享地址已保存。"
       },
       "errors": {
         "validateExcludedFolders": "无法验证已排除文件夹规则。",
@@ -848,7 +862,18 @@
     "errorTitle": "无法打开文件夹共享",
     "errorDescription": "无法加载此文件夹共享。",
     "backToFolder": "返回共享文件夹",
-    "postErrorTitle": "无法加载共享帖子"
+    "postErrorTitle": "无法加载共享帖子",
+    "post": {
+      "action": "分享这条内容",
+      "copied": "链接已复制",
+      "creating": "正在生成链接...",
+      "createError": "无法生成分享链接。",
+      "copyManually": "手动复制这个链接：",
+      "notFoundTitle": "分享链接不可用",
+      "notFoundDescription": "这个链接可能已过期、已撤销或无效。",
+      "loadingTitle": "正在打开分享内容",
+      "badge": "分享内容"
+    }
   },
   "reels": {
     "view": {

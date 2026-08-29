@@ -128,6 +128,8 @@ export const useAppStore = defineStore('app', {
     nestedFolderTitleFormat: (state) => state.stats?.preferences.nestedFolderTitleFormat ?? 'folder',
     savedVideoPlaybackQuality: (state): VideoPlaybackQuality =>
       state.stats?.preferences.videoPlaybackQuality ?? 'auto',
+    /** Origin stamped on share links created from outside the LAN. */
+    sharePublicBaseUrl: (state): string | null => state.stats?.preferences.sharePublicBaseUrl ?? null,
     // A per-device override wins over the library default so one phone on a weak
     // connection can drop to 720p without changing playback for everyone.
     videoPlaybackQuality: (state): VideoPlaybackQuality =>

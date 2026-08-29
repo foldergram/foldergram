@@ -13,6 +13,24 @@
         : { left: 'calc(var(--desktop-content-compensation) * -1)' }
     "
   >
+    <!-- Pull-to-refresh indicator: only ever visible while the gesture is active. -->
+    <div
+      v-if="pullToRefresh.isPulling.value || pullToRefresh.isRefreshing.value"
+      class="pointer-events-none fixed inset-x-0 top-0 z-40 flex justify-center"
+      :style="{ transform: `translateY(${pullIndicatorOffset}px)` }"
+      data-test="pull-to-refresh"
+      role="status"
+    >
+      <span class="mt-2 inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1.5 text-[0.78rem] font-semibold text-muted shadow-[var(--shadow)]">
+        <span
+          class="h-4 w-4"
+          :class="pullToRefresh.isRefreshing.value ? 'i-fluent-arrow-sync-16-regular animate-spin' : 'i-fluent-arrow-down-16-regular'"
+          aria-hidden="true"
+        />
+        {{ pullToRefreshLabel }}
+      </span>
+    </div>
+
     <!-- Main feed column -->
     <div class="min-w-0">
       <section
@@ -293,6 +311,7 @@ import { useMomentsStore } from '../stores/moments';
 import type { FeedMode } from '../types/api';
 import { formatFolderTitle } from '../utils/folder-titles';
 import { buildLikedCountByFolder, selectHomeRecommendations } from '../utils/home-recommendations';
+import { usePullToRefresh } from '../composables/usePullToRefresh';
 import { getInitialScanStats, getScanActionLine, getScanPhaseLabel, getScanSummary } from '../utils/scan-progress';
 
 const appStore = useAppStore();
@@ -317,6 +336,31 @@ const isCompactHomeLayout = ref(false);
 const requestingHomeScan = ref(false);
 const homeScanError = ref<string | null>(null);
 const feedStoryError = ref<string | null>(null);
+
+/**
+ * Pull-to-refresh swaps in content the viewer has not seen instead of re-rendering the
+ * same rows, which is what the feed did before when a page was reloaded.
+ */
+const pullToRefresh = usePullToRefresh({
+  isEnabled: () =>
+    !appStore.isLibraryUnavailable && activeRailViewerId.value === null && activeFeedStoryId.value === null,
+  onRefresh: async () => {
+    await feedStore.refreshWithNewSeed();
+    await momentsStore.fetchMoments(true).catch(() => {});
+  }
+});
+const pullIndicatorOffset = computed(() =>
+  pullToRefresh.isRefreshing.value ? pullToRefresh.threshold : pullToRefresh.pullDistance.value
+);
+const pullToRefreshLabel = computed(() => {
+  if (pullToRefresh.isRefreshing.value) {
+    return t('app.pullToRefresh.refreshing');
+  }
+
+  return pullToRefresh.pullDistance.value >= pullToRefresh.threshold
+    ? t('app.pullToRefresh.release')
+    : t('app.pullToRefresh.pull');
+});
 
 function formatDisplayFolderTitle(folder: NonNullable<typeof homeSummaryFolder.value> | (typeof recommendedFolders.value)[number]) {
   return formatFolderTitle(folder, appStore.nestedFolderTitleFormat);

@@ -32,6 +32,11 @@
       "eyebrow": "Protección de acceso",
       "title": "Verificando acceso",
       "description": "Cargando el estado actual de la protección con contraseña."
+    },
+    "pullToRefresh": {
+      "pull": "Desliza para actualizar",
+      "release": "Suelta para actualizar",
+      "refreshing": "Cargando publicaciones nuevas..."
     }
   },
   "auth": {
@@ -286,6 +291,12 @@
           }
         }
       },
+      "sharePublicBaseUrl": {
+        "label": "Direccion publica para compartir",
+        "description": "Los enlaces creados desde fuera de la red local usan esta direccion. Dentro de la red local siempre se usa la direccion local.",
+        "fieldLabel": "URL base publica",
+        "helper": "Dejalo vacio para usar la direccion actual. Escribe una URL completa, por ejemplo https://gallery.example.com."
+      },
       "storiesMode": {
         "label": "Tratar las carpetas stories como carpetas normales de la app",
         "scanRequired": "Requiere escaneo",
@@ -324,6 +335,7 @@
         "reelsOnly": "Esto actualiza el estilo de cola usado cuando se abre Reels para esta app. Los visitantes no pueden cambiar de modo desde la página de Reels.",
         "folderOnly": "Esto actualiza el orden de fotos predeterminado usado por las cuadrículas de carpetas de la app.",
         "nestedFolderTitleOnly": "Esto actualiza cómo se etiquetan las carpetas anidadas de la app en toda la aplicación.",
+        "sharePublicBaseUrlOnly": "Esto actualiza el prefijo de direccion que usan los enlaces creados desde fuera de la red local.",
         "carouselReconciliation": "El modo de las carpetas de carrusel está guardado. Completa la acción de biblioteca indicada arriba para aplicarlo al índice.",
         "idle": "Estos son los valores actuales de toda la app para idioma, Inicio, Reels, carpetas de la app, títulos de carpetas anidadas, carpetas stories, carpetas de carrusel y carpetas excluidas."
       },
@@ -361,8 +373,10 @@
           "reelsFeedDefault": "predeterminado de Reels",
           "appFolderOrder": "orden de las carpetas de la app",
           "nestedFolderTitles": "títulos de carpetas anidadas",
-          "videoPlaybackQuality": "calidad de reproduccion de video"
-        }
+          "videoPlaybackQuality": "calidad de reproduccion de video",
+          "sharePublicBaseUrl": "direccion publica para compartir"
+        },
+        "sharePublicBaseUrlSaved": "Direccion publica para compartir guardada."
       },
       "errors": {
         "validateExcludedFolders": "No se pudieron validar las reglas de carpetas excluidas.",
@@ -848,7 +862,18 @@
     "errorTitle": "No se pudo abrir la carpeta compartida",
     "errorDescription": "No se pudo cargar esta carpeta compartida.",
     "backToFolder": "Volver a la carpeta compartida",
-    "postErrorTitle": "No se pudo cargar la publicación compartida"
+    "postErrorTitle": "No se pudo cargar la publicación compartida",
+    "post": {
+      "action": "Compartir esta publicacion",
+      "copied": "Enlace copiado",
+      "creating": "Creando enlace...",
+      "createError": "No se pudo crear el enlace para compartir.",
+      "copyManually": "Copia este enlace manualmente:",
+      "notFoundTitle": "Este enlace no esta disponible",
+      "notFoundDescription": "El enlace puede estar vencido, revocado o no ser valido.",
+      "loadingTitle": "Abriendo publicacion compartida",
+      "badge": "Publicacion compartida"
+    }
   },
   "reels": {
     "view": {

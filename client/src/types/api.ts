@@ -297,6 +297,34 @@ export interface CreateFolderShareLinkResult {
   link: FolderShareLink;
 }
 
+export interface PostShareLink {
+  id: number;
+  postId: number;
+  tokenPrefix: string | null;
+  expiresAt: string | null;
+  revokedAt: string | null;
+  createdAt: string;
+  lastUsedAt: string | null;
+  status: FolderShareLinkStatus;
+}
+
+export interface PostShareLinksPayload {
+  links: PostShareLink[];
+  publicBaseUrl: string | null;
+}
+
+export interface CreatePostShareLinkResult {
+  ok: boolean;
+  link: PostShareLink;
+  /** Absolute when the server could resolve an origin, otherwise a bare path. */
+  shareUrl: string;
+  sharePath: string;
+}
+
+export interface SharePublicBaseUrlSetting {
+  sharePublicBaseUrl: string | null;
+}
+
 export interface FolderSharePasswordMutationResult {
   ok: boolean;
   password: FolderSharePasswordStatus;
@@ -358,6 +386,9 @@ export interface SharedImageDetail {
   isAnimated?: boolean | null;
   thumbnailUrl: string;
   previewUrl: string;
+  /** Only present on token-scoped post shares, and only for videos. */
+  streamUrl?: string | null;
+  playbackStrategy?: 'preview' | 'original' | null;
   sortTimestamp: number;
   nextImageId: number | null;
   previousImageId: number | null;
@@ -593,6 +624,7 @@ export interface AppStatus {
     defaultFolderImageOrder?: FolderImageOrder;
     nestedFolderTitleFormat?: NestedFolderTitleFormat;
     videoPlaybackQuality?: VideoPlaybackQuality;
+    sharePublicBaseUrl?: string | null;
     treatStoriesAsFolders: boolean;
     treatCarouselsAsFolders: boolean;
   };

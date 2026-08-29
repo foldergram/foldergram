@@ -107,6 +107,26 @@
     </dl>
 
     <button
+      class="reels-info-sidebar__share"
+      type="button"
+      data-test="reel-share"
+      :disabled="postShare.sharing.value"
+      @click="handleShare"
+    >
+      <span class="reels-info-sidebar__share-icon i-fluent-share-20-regular" aria-hidden="true" />
+      <span>{{ postShare.sharing.value ? t('share.post.creating') : postShare.copied.value ? t('share.post.copied') : t('share.post.action') }}</span>
+    </button>
+
+    <p v-if="postShare.error.value" class="reels-info-sidebar__delete-error" role="status">
+      {{ postShare.error.value }}
+    </p>
+
+    <p v-else-if="postShare.shareUrl.value && !postShare.copied.value" class="reels-info-sidebar__share-url">
+      {{ t('share.post.copyManually') }}
+      <span class="reels-info-sidebar__share-url-value">{{ postShare.shareUrl.value }}</span>
+    </p>
+
+    <button
       v-if="deletion.canDelete.value"
       class="reels-info-sidebar__delete"
       type="button"
@@ -131,6 +151,7 @@ import { RouterLink } from 'vue-router';
 
 import { fetchImage } from '../api/gallery';
 import { usePostDeletion } from '../composables/usePostDeletion';
+import { usePostShare } from '../composables/usePostShare';
 import { useVerticalDismiss } from '../composables/useVerticalDismiss';
 import { useAppStore } from '../stores/app';
 import type { FeedItem, FolderSummary, ImageDetail } from '../types/api';
@@ -163,6 +184,7 @@ const error = ref<string | null>(null);
 
 const detailCache = new Map<number, ImageDetail>();
 const deletion = usePostDeletion();
+const postShare = usePostShare();
 let requestToken = 0;
 
 // Swipe-down to close, so the sheet behaves the way a phone sheet is expected to.
@@ -195,6 +217,10 @@ const sheetStyle = computed(() => {
   // the bottom edge.
   return { transform: `translateY(${Math.min(dismiss.dragOffset.value, 420)}px)` };
 });
+
+async function handleShare() {
+  await postShare.share(props.item.id);
+}
 
 // Straight to the Trash, no dialog: the Trash view is the undo, and permanent
 // deletion still asks first from the feed card.
@@ -253,6 +279,7 @@ watch(
   ([open, itemId]) => {
     requestToken += 1;
     const currentToken = requestToken;
+    postShare.reset();
 
     if (!open) {
       detail.value = detailCache.get(itemId) ?? null;
@@ -361,6 +388,48 @@ watch(
   margin: 0.15rem auto 0.6rem;
   border-radius: 999px;
   background: color-mix(in srgb, var(--border) 70%, transparent 30%);
+}
+
+.reels-info-sidebar__share {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  width: 100%;
+  min-height: 2.5rem;
+  margin-top: 0.9rem;
+  padding: 0 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 0.85rem;
+  background: var(--surface-alt);
+  color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.reels-info-sidebar__share:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.reels-info-sidebar__share-icon {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+.reels-info-sidebar__share-url {
+  margin: 0.5rem 0 0;
+  overflow-wrap: anywhere;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.reels-info-sidebar__share-url-value {
+  display: block;
+  margin-top: 0.15rem;
+  font-weight: 600;
+  color: var(--text);
 }
 
 .reels-info-sidebar__delete {

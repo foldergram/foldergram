@@ -159,11 +159,16 @@ export function buildMediaPlaylist(durationMs: number | null): string {
   return `${lines.join('\n')}\n`;
 }
 
+function defaultMediaPlaylistPath(imageId: number, quality: string): string {
+  return `/api/videos/${imageId}/hls/${quality}/index.m3u8`;
+}
+
 export function buildMasterPlaylist(
   imageId: number,
   width: number,
   height: number,
-  qualities: VideoStreamQuality[]
+  qualities: VideoStreamQuality[],
+  buildPlaylistPath: (imageId: number, quality: string) => string = defaultMediaPlaylistPath
 ): string {
   const lines = ['#EXTM3U', '#EXT-X-VERSION:3'];
 
@@ -172,7 +177,7 @@ export function buildMasterPlaylist(
     lines.push(
       `#EXT-X-STREAM-INF:BANDWIDTH=${QUALITY_PROFILES[quality].bandwidth},RESOLUTION=${dimensions.width}x${dimensions.height}`
     );
-    lines.push(`/api/videos/${imageId}/hls/${quality}/index.m3u8`);
+    lines.push(buildPlaylistPath(imageId, quality));
   }
 
   return `${lines.join('\n')}\n`;

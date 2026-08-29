@@ -124,12 +124,16 @@ export function warmVideoStream(
     return;
   }
 
-  const match = /\/api\/videos\/(\d+)\/hls\/(?:([^/]+)\/index\.m3u8|master\.m3u8)$/.exec(source.src);
+  // The prefix is captured rather than assumed: a share link streams from
+  // /api/share/post-links/<token>/videos/... and must warm through that same path.
+  const match = /^(.*)\/(\d+)\/hls\/(?:([^/]+)\/index\.m3u8|master\.m3u8)$/.exec(source.src);
   if (!match) {
     return;
   }
 
-  const streamQuality = match[2] ?? '720p';
+  const basePath = match[1];
+  const streamId = match[2];
+  const streamQuality = match[3] ?? '720p';
   const fromSeconds = Math.max(0, options.fromSeconds ?? 0);
   // Segments are two seconds each, so three of them is the same amount of video the
   // old four-second default covered.
@@ -137,14 +141,14 @@ export function warmVideoStream(
   // Keyed by segment index so resuming at 0:10 still warms segment 2 even though
   // the head of the same clip was warmed earlier.
   const segmentIndex = Math.floor(fromSeconds / WARM_SEGMENT_SECONDS);
-  const key = `${match[1]}:${streamQuality}:${segmentIndex}`;
+  const key = `${basePath}:${streamId}:${streamQuality}:${segmentIndex}`;
   if (warmedStreams.has(key)) {
     return;
   }
 
   warmedStreams.add(key);
   const query = `segments=${segments}&from=${fromSeconds.toFixed(3)}`;
-  void fetch(`/api/videos/${match[1]}/hls/${streamQuality}/warm?${query}`, {
+  void fetch(`${basePath}/${streamId}/hls/${streamQuality}/warm?${query}`, {
     method: 'POST',
     credentials: 'same-origin',
     headers: { 'x-foldergram-intent': '1' }

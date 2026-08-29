@@ -17,7 +17,8 @@ import {
   STORIES_MIGRATION_DECISION_SETTING_KEY,
   TREAT_CAROUSELS_AS_FOLDERS_SETTING_KEY,
   TREAT_STORIES_AS_FOLDERS_SETTING_KEY,
-  VIDEO_PLAYBACK_QUALITY_SETTING_KEY
+  VIDEO_PLAYBACK_QUALITY_SETTING_KEY,
+  SHARE_PUBLIC_BASE_URL_SETTING_KEY
 } from '../constants/app-setting-keys.js';
 import { appConfig } from '../config/env.js';
 import {
@@ -65,6 +66,7 @@ import { shouldPreferMomentRail, type FeedRailKind } from '../utils/feed-rail-ut
 import { parseNestedFolderTitleFormatSetting, serializeNestedFolderTitleFormatSetting } from '../utils/folder-title-format.js';
 import { countSupportedRootMediaFiles } from '../utils/gallery-root-utils.js';
 import { resolveOriginalPath } from '../utils/media-paths.js';
+import { normalizePublicBaseUrl } from '../utils/share-url.js';
 import { getLeafPathName, getParentRelativePath, getPathBreadcrumb } from '../utils/path-utils.js';
 import { buildReelQueue, shuffleReelCandidates, type ReelAffinitySignals } from '../utils/reels-utils.js';
 import { parseTreatStoriesAsFoldersSetting, serializeTreatStoriesAsFoldersSetting } from '../utils/stories-utils.js';
@@ -339,12 +341,22 @@ function appendVersion(url: string, version?: string | null): string {
   return `${url}?v=${encodeURIComponent(version)}`;
 }
 
-function buildShareThumbnailUrl(id: number, version?: string | null): string {
-  return appendVersion(`/api/share/images/${id}/thumbnail`, version);
+const FOLDER_SHARE_ASSET_BASE_PATH = '/api/share/images';
+
+function buildShareThumbnailUrl(
+  id: number,
+  version?: string | null,
+  assetBasePath: string = FOLDER_SHARE_ASSET_BASE_PATH
+): string {
+  return appendVersion(`${assetBasePath}/${id}/thumbnail`, version);
 }
 
-function buildSharePreviewUrl(id: number, version?: string | null): string {
-  return appendVersion(`/api/share/images/${id}/preview`, version);
+function buildSharePreviewUrl(
+  id: number,
+  version?: string | null,
+  assetBasePath: string = FOLDER_SHARE_ASSET_BASE_PATH
+): string {
+  return appendVersion(`${assetBasePath}/${id}/preview`, version);
 }
 
 function buildPreviewUrl(
@@ -625,7 +637,28 @@ function isCoverPost(postId: number): boolean {
   return postRepository.isExplicitFolderCover(postId);
 }
 
-function mapSharedMediaItem(item: PostMediaItem, derivativeVersion: string | null): PostMediaItem {
+/**
+ * Where a share response should point its media. Folder shares use the shared
+ * `/api/share/images` routes; a single-post token gets its own prefix so the token
+ * itself carries the authorization and nothing else in the library is reachable.
+ */
+interface ShareAssetContext {
+  assetBasePath: string;
+  /** Set only for token shares, which can also stream HLS. */
+  streamBasePath?: string;
+}
+
+const FOLDER_SHARE_ASSET_CONTEXT: ShareAssetContext = { assetBasePath: FOLDER_SHARE_ASSET_BASE_PATH };
+
+function buildShareStreamUrl(context: ShareAssetContext, imageId: number): string | null {
+  return context.streamBasePath ? `${context.streamBasePath}/${imageId}/hls/master.m3u8` : null;
+}
+
+function mapSharedMediaItem(
+  item: PostMediaItem,
+  derivativeVersion: string | null,
+  context: ShareAssetContext = FOLDER_SHARE_ASSET_CONTEXT
+): PostMediaItem {
   return {
     imageId: item.imageId,
     position: item.position,
@@ -635,8 +668,9 @@ function mapSharedMediaItem(item: PostMediaItem, derivativeVersion: string | nul
     height: item.height,
     durationMs: item.durationMs,
     isAnimated: Boolean(item.isAnimated),
-    thumbnailUrl: buildShareThumbnailUrl(item.imageId, derivativeVersion),
-    previewUrl: buildSharePreviewUrl(item.imageId, derivativeVersion),
+    thumbnailUrl: buildShareThumbnailUrl(item.imageId, derivativeVersion, context.assetBasePath),
+    previewUrl: buildSharePreviewUrl(item.imageId, derivativeVersion, context.assetBasePath),
+    streamUrl: item.mediaType === 'video' ? buildShareStreamUrl(context, item.imageId) : null,
     playbackStrategy: item.playbackStrategy ?? 'preview',
     mimeType: item.mimeType,
     fileSize: item.fileSize
@@ -724,7 +758,11 @@ function mapImageDetail(image: IndexedImageDetail, derivativeVersion = getDeriva
   };
 }
 
-function mapSharedImageDetail(image: IndexedImageDetail, derivativeVersion = getDerivativeAssetVersion()): SharedImageDetail {
+function mapSharedImageDetail(
+  image: IndexedImageDetail,
+  derivativeVersion = getDerivativeAssetVersion(),
+  context: ShareAssetContext = FOLDER_SHARE_ASSET_CONTEXT
+): SharedImageDetail {
   const mediaItems = image.mediaItems ?? [];
   const representativeImageId = mediaItems[0]?.imageId ?? image.id;
   return {
@@ -741,14 +779,16 @@ function mapSharedImageDetail(image: IndexedImageDetail, derivativeVersion = get
     height: image.height,
     durationMs: image.durationMs,
     isAnimated: Boolean(image.isAnimated),
-    thumbnailUrl: buildShareThumbnailUrl(representativeImageId, derivativeVersion),
-    previewUrl: buildSharePreviewUrl(representativeImageId, derivativeVersion),
+    thumbnailUrl: buildShareThumbnailUrl(representativeImageId, derivativeVersion, context.assetBasePath),
+    previewUrl: buildSharePreviewUrl(representativeImageId, derivativeVersion, context.assetBasePath),
+    streamUrl: image.mediaType === 'video' ? buildShareStreamUrl(context, representativeImageId) : null,
+    playbackStrategy: (image as { playbackStrategy?: PlaybackStrategy | null }).playbackStrategy ?? null,
     sortTimestamp: image.sortTimestamp,
     nextImageId: image.nextImageId,
     previousImageId: image.previousImageId,
     postType: image.postType ?? 'single',
     itemCount: image.itemCount ?? (mediaItems.length || 1),
-    mediaItems: mediaItems.map((item) => mapSharedMediaItem(item, derivativeVersion))
+    mediaItems: mediaItems.map((item) => mapSharedMediaItem(item, derivativeVersion, context))
   };
 }
 
@@ -1377,7 +1417,11 @@ function listFallbackAvatarStoryItems(
 }
 
 export const galleryService = {
-  getFeed(page: number, limit: number, mode: FeedMode = 'random', randomSeed?: number) {
+  /**
+   * `excludePostIds` backs pull-to-refresh: the client hands back what it has already
+   * shown so the next batch is genuinely new instead of the same rows in a new order.
+   */
+  getFeed(page: number, limit: number, mode: FeedMode = 'random', randomSeed?: number, excludePostIds?: number[]) {
     if (!storageService.getState().libraryAvailable) {
       return {
         mode,
@@ -1399,7 +1443,12 @@ export const galleryService = {
 
       return {
         mode,
-        ...buildPaginatedPayload(mapFeedItems(imageRepository.listRandom(page, limit, seed)), page, limit, total)
+        ...buildPaginatedPayload(
+          mapFeedItems(imageRepository.listRandom(page, limit, seed, excludePostIds)),
+          page,
+          limit,
+          total
+        )
       };
     }
 
@@ -1418,7 +1467,7 @@ export const galleryService = {
 
     const total = imageRepository.countRenderableFeed();
     const offset = (page - 1) * limit;
-    const items = imageRepository.listRecentCandidates(offset, limit);
+    const items = imageRepository.listRecentCandidates(offset, limit, excludePostIds);
 
     return {
       mode,
@@ -1859,6 +1908,39 @@ export const galleryService = {
     }
 
     return mapSharedImageDetail(detail, getDerivativeAssetVersion());
+  },
+
+  /**
+   * Detail payload for a single-post share token. Media URLs are rewritten onto the
+   * token's own prefix, and videos additionally get an HLS master so a phone on a slow
+   * link is not forced to pull the untouched original.
+   */
+  getTokenSharedPostDetail(postId: number, assetBasePath: string, streamBasePath: string) {
+    if (!storageService.getState().libraryAvailable) {
+      return null;
+    }
+
+    const post = resolvePostRecord(postId);
+    if (!post || post.is_deleted || post.is_trashed) {
+      return null;
+    }
+
+    const detail = imageRepository.getImageDetail(post.id, undefined, false, getDefaultFolderImageOrder());
+    if (!detail) {
+      return null;
+    }
+
+    const mapped = mapSharedImageDetail(detail, getDerivativeAssetVersion(), {
+      assetBasePath,
+      streamBasePath
+    });
+
+    // A token unlocks exactly one post, so neighbour navigation must not leak ids.
+    return {
+      ...mapped,
+      nextImageId: null,
+      previousImageId: null
+    };
   },
 
   getShareDerivativeImage(id: number): ImageRecord | null {
@@ -2307,6 +2389,7 @@ export const galleryService = {
     const treatCarouselsAsFolders = getTreatCarouselsAsFolders();
     const carouselsMigration = getCarouselsMigrationStatus();
     const excludedFolders = getExcludedFolderSettings();
+    const sharePublicBaseUrl = normalizePublicBaseUrl(appSettingsRepository.get(SHARE_PUBLIC_BASE_URL_SETTING_KEY));
 
     return {
       folders: storageState.libraryAvailable ? folderRepository.count() : 0,
@@ -2343,7 +2426,8 @@ export const galleryService = {
         nestedFolderTitleFormat,
         treatStoriesAsFolders,
         treatCarouselsAsFolders,
-        videoPlaybackQuality
+        videoPlaybackQuality,
+        sharePublicBaseUrl
       },
       storiesMigration,
       carouselsMigration,
@@ -2380,6 +2464,15 @@ export const galleryService = {
 
     return {
       defaultOrder: order
+    };
+  },
+
+  setSharePublicBaseUrl(publicBaseUrl: string | null) {
+    const normalized = normalizePublicBaseUrl(publicBaseUrl);
+    appSettingsRepository.set(SHARE_PUBLIC_BASE_URL_SETTING_KEY, normalized ?? '');
+
+    return {
+      sharePublicBaseUrl: normalized
     };
   },
 

@@ -14,12 +14,17 @@ function isPublicApiRoute(request: express.Request): boolean {
     method === 'POST' &&
     path.startsWith('/share/folders/') &&
     (path.endsWith('/unlock-link') || path.endsWith('/unlock-password'));
+  // Segment warm-up is shaped like a mutation but only ever primes the transcode cache
+  // for the one post a share token already unlocks, so a token holder may call it.
+  const isPostShareWarmRoute =
+    method === 'POST' && path.startsWith('/share/post-links/') && path.endsWith('/warm');
 
   return (
     (method === 'GET' && (path === '/health' || path === '/auth/status')) ||
     (method === 'POST' && (path === '/auth/login' || path === '/auth/logout' || path === '/auth/unlock-admin')) ||
     isShareReadRoute ||
-    isShareUnlockRoute
+    isShareUnlockRoute ||
+    isPostShareWarmRoute
   );
 }
 

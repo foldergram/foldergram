@@ -37,6 +37,24 @@
     <p v-if="error" class="immersive-details__error" role="status">{{ error }}</p>
 
     <button
+      class="immersive-details__share"
+      type="button"
+      data-test="immersive-share"
+      :disabled="postShare.sharing.value"
+      @click="handleShare"
+    >
+      <span class="i-fluent-share-20-regular immersive-details__share-icon" aria-hidden="true" />
+      <span>{{ postShare.sharing.value ? t('share.post.creating') : postShare.copied.value ? t('share.post.copied') : t('share.post.action') }}</span>
+    </button>
+
+    <p v-if="postShare.error.value" class="immersive-details__error" role="status">{{ postShare.error.value }}</p>
+
+    <p v-else-if="postShare.shareUrl.value && !postShare.copied.value" class="immersive-details__share-url">
+      {{ t('share.post.copyManually') }}
+      <span class="immersive-details__share-url-value">{{ postShare.shareUrl.value }}</span>
+    </p>
+
+    <button
       v-if="deletion.canDelete.value"
       class="immersive-details__delete"
       type="button"
@@ -60,6 +78,7 @@ import { useI18n } from 'vue-i18n';
 
 import { fetchImage } from '../api/gallery';
 import { usePostDeletion } from '../composables/usePostDeletion';
+import { usePostShare } from '../composables/usePostShare';
 import type { ImageDetail } from '../types/api';
 import { formatMediaDuration } from '../utils/media';
 
@@ -82,6 +101,7 @@ const detail = ref<ImageDetail | null>(null);
 const loading = ref(false);
 const error = ref<string | null>(null);
 const deletion = usePostDeletion();
+const postShare = usePostShare();
 
 let requestToken = 0;
 
@@ -109,6 +129,10 @@ const formatLabel = computed(() => {
   return mimeType.replace(/^(video|image)\//, '').toUpperCase();
 });
 
+async function handleShare() {
+  await postShare.share(props.id);
+}
+
 // Straight to the Trash: it is recoverable there, so a confirmation would only add a
 // tap. Erasing from disk stays behind the feed card's dialog.
 async function handleDelete() {
@@ -126,6 +150,7 @@ watch(
     detail.value = null;
     loading.value = true;
     error.value = null;
+    postShare.reset();
 
     void (async () => {
       try {
@@ -222,6 +247,48 @@ watch(
   margin: 0.75rem 0 0;
   font-size: 0.82rem;
   color: #ff8a80;
+}
+
+.immersive-details__share {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  width: 100%;
+  min-height: 2.5rem;
+  margin-top: 0.9rem;
+  padding: 0 0.9rem;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 0.85rem;
+  background: rgba(255, 255, 255, 0.1);
+  color: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.immersive-details__share:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.immersive-details__share-icon {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+.immersive-details__share-url {
+  margin: 0.55rem 0 0;
+  overflow-wrap: anywhere;
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.66);
+}
+
+.immersive-details__share-url-value {
+  display: block;
+  margin-top: 0.15rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
 }
 
 .immersive-details__delete {

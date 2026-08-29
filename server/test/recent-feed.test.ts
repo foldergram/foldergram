@@ -71,6 +71,25 @@ describe.sequential('recent feed ordering', () => {
     expect(payload.items.map((item) => item.id)).toEqual([julyNewer.id, julyOlder.id, octoberOlder.id]);
   });
 
+  // Pull-to-refresh sends the ids already on screen so the next batch is new content
+  // rather than a reshuffle of the same rows.
+  it('skips excluded post ids in both recent and random mode', async () => {
+    const newest = await createIndexedImage('mi-11t', 'IMG_20220710_071100.jpg', Date.UTC(2022, 6, 10, 7, 11, 0));
+    const middle = await createIndexedImage('mi-11t', 'IMG_20220710_071048.jpg', Date.UTC(2022, 6, 10, 7, 10, 48));
+    const oldest = await createIndexedImage('note9', 'Samsung_Note9_20211019_103000.jpg', Date.UTC(2021, 9, 19, 10, 30, 0));
+
+    const recent = galleryService.getFeed(1, 10, 'recent', undefined, [newest.id, middle.id]);
+    expect(recent.items.map((item) => item.id)).toEqual([oldest.id]);
+
+    const random = galleryService.getFeed(1, 10, 'random', 42, [newest.id, oldest.id]);
+    expect(random.items.map((item) => item.id)).toEqual([middle.id]);
+
+    // Excluding nothing has to stay the plain query, otherwise refreshing a small
+    // library would come back empty.
+    const unfiltered = galleryService.getFeed(1, 10, 'recent', undefined, []);
+    expect(unfiltered.items).toHaveLength(3);
+  });
+
   async function createIndexedImage(folderPath: string, filename: string, timestamp: number): Promise<ImageRecord> {
     const folder = folderRepository.upsert({
       slug: folderPath.replaceAll('/', '-'),

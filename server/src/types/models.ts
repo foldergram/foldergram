@@ -208,6 +208,17 @@ export interface FolderShareLinkRecord {
   last_used_at: string | null;
 }
 
+export interface PostShareLinkRecord {
+  id: number;
+  post_id: number;
+  token_hash: string;
+  token_prefix: string | null;
+  expires_at: string | null;
+  revoked_at: string | null;
+  created_at: string;
+  last_used_at: string | null;
+}
+
 export interface FolderSharePasswordRecord {
   folder_id: number;
   password_hash: string;
@@ -370,6 +381,10 @@ export interface SharedImageDetail {
   isAnimated?: boolean | null;
   thumbnailUrl: string;
   previewUrl: string;
+  /** Only set for videos, and only on token-scoped share links. */
+  streamUrl?: string | null;
+  originalUrl?: string;
+  playbackStrategy?: PlaybackStrategy | null;
   sortTimestamp: number;
   nextImageId: number | null;
   previousImageId: number | null;

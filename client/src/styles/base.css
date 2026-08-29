@@ -82,6 +82,8 @@ body {
   margin: 0;
   color: var(--text);
   background: var(--bg);
+  /* The feed owns pull-to-refresh, so the browser must not also bounce the page. */
+  overscroll-behavior-y: contain;
   transition:
     background-color 0.2s ease,
     color 0.2s ease;

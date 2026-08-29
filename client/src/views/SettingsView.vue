@@ -1013,6 +1013,31 @@
                 </div>
               </div>
 
+              <div class="grid gap-3 border-t border-border px-6 py-4">
+                <div class="min-w-0">
+                  <p class="m-0 text-[0.96rem] font-semibold text-text">{{ t('settings.general.sharePublicBaseUrl.label') }}</p>
+                  <p class="m-0 mt-[0.25rem] text-[0.84rem] text-muted">{{ t('settings.general.sharePublicBaseUrl.description') }}</p>
+                </div>
+
+                <label class="grid gap-[0.45rem]">
+                  <span class="text-[0.76rem] font-bold uppercase tracking-[0.08em] text-muted">{{ t('settings.general.sharePublicBaseUrl.fieldLabel') }}</span>
+                  <input
+                    v-model="sharePublicBaseUrlDraft"
+                    class="min-h-11 rounded-[0.95rem] border border-border bg-[color-mix(in_srgb,var(--surface-alt)_84%,transparent_16%)] px-4 text-[0.95rem] text-text outline-none transition-[border-color,box-shadow] duration-180 placeholder:text-muted focus:border-[color-mix(in_srgb,var(--accent)_48%,var(--border)_52%)] focus:shadow-[0_0_0_4px_color-mix(in_srgb,var(--accent-soft)_76%,transparent_24%)]"
+                    data-test="share-public-base-url"
+                    type="url"
+                    inputmode="url"
+                    autocomplete="off"
+                    spellcheck="false"
+                    placeholder="https://gallery.example.com"
+                    :disabled="savingGeneralSettings || waitingForInitialStatus"
+                    @input="clearGeneralSettingsFeedback"
+                  />
+                </label>
+
+                <p class="m-0 text-[0.82rem] text-muted">{{ t('settings.general.sharePublicBaseUrl.helper') }}</p>
+              </div>
+
               <div class="grid gap-3 px-6 py-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
                 <div class="min-w-0">
                   <div class="flex flex-wrap items-center gap-2">
@@ -1441,6 +1466,7 @@ import {
   updateHomeFeedDefault,
   updateNestedFolderTitleFormat,
   updateReelsFeedDefault,
+  updateSharePublicBaseUrl,
   updateVideoPlaybackQuality,
   updateStoriesMode,
   updateCarouselsMode
@@ -1501,6 +1527,7 @@ const reelsFeedDefaultMode = ref<ReelsFeedMode>('random');
 const folderImageOrderDefault = ref<FolderImageOrder>('newest');
 const nestedFolderTitleFormat = ref<NestedFolderTitleFormat>('folder');
 const videoPlaybackQuality = ref<VideoPlaybackQuality>('auto');
+const sharePublicBaseUrlDraft = ref('');
 const savedLocaleSelection = ref<SupportedLocale | null>(appStore.savedDefaultLocale);
 const localeSelectionHydrated = ref(false);
 const storiesMode = ref(false);
@@ -1741,6 +1768,7 @@ function syncFeedDefaultsFromSaved() {
   folderImageOrderDefault.value = appStore.defaultFolderImageOrder;
   nestedFolderTitleFormat.value = appStore.nestedFolderTitleFormat;
   videoPlaybackQuality.value = appStore.savedVideoPlaybackQuality;
+  sharePublicBaseUrlDraft.value = appStore.sharePublicBaseUrl ?? '';
   feedDefaultsHydrated.value = true;
 }
 
@@ -1868,6 +1896,7 @@ const savedReelsFeedDefaultMode = computed(() => appStore.defaultReelsFeedMode);
 const savedFolderImageOrderDefault = computed(() => appStore.defaultFolderImageOrder);
 const savedNestedFolderTitleFormat = computed(() => appStore.nestedFolderTitleFormat);
 const savedVideoPlaybackQuality = computed(() => appStore.savedVideoPlaybackQuality);
+const savedSharePublicBaseUrl = computed(() => appStore.sharePublicBaseUrl ?? '');
 const videoPlaybackQualityDeviceOverride = computed(() => appStore.videoPlaybackQualityOverride);
 const videoPlaybackQualityOverrideLabel = computed(
   () =>
@@ -1937,6 +1966,9 @@ const nestedFolderTitleDirty = computed(
 const videoPlaybackQualityDirty = computed(
   () => feedDefaultsHydrated.value && videoPlaybackQuality.value !== savedVideoPlaybackQuality.value
 );
+const sharePublicBaseUrlDirty = computed(
+  () => feedDefaultsHydrated.value && sharePublicBaseUrlDraft.value.trim() !== savedSharePublicBaseUrl.value
+);
 const defaultSettingsDirtyCount = computed(
   () =>
     [
@@ -1945,7 +1977,8 @@ const defaultSettingsDirtyCount = computed(
       reelsFeedDefaultDirty.value,
       folderImageOrderDirty.value,
       nestedFolderTitleDirty.value,
-      videoPlaybackQualityDirty.value
+      videoPlaybackQualityDirty.value,
+      sharePublicBaseUrlDirty.value
     ].filter(Boolean).length
 );
 const feedDefaultsDirty = computed(
@@ -1954,7 +1987,8 @@ const feedDefaultsDirty = computed(
     reelsFeedDefaultDirty.value ||
     folderImageOrderDirty.value ||
     nestedFolderTitleDirty.value ||
-    videoPlaybackQualityDirty.value
+    videoPlaybackQualityDirty.value ||
+    sharePublicBaseUrlDirty.value
 );
 const storiesModeDirty = computed(() => storiesModeHydrated.value && storiesMode.value !== savedStoriesMode.value);
 const carouselsModeDirty = computed(() => carouselsModeHydrated.value && carouselsMode.value !== savedCarouselsMode.value);
@@ -2045,6 +2079,10 @@ const generalSettingsActionNote = computed(() => {
 
   if (nestedFolderTitleDirty.value) {
     return t('settings.general.actionNote.nestedFolderTitleOnly');
+  }
+
+  if (sharePublicBaseUrlDirty.value) {
+    return t('settings.general.actionNote.sharePublicBaseUrlOnly');
   }
 
   if (appStore.isCarouselsReconciliationPending) {
@@ -2884,20 +2922,23 @@ async function saveGeneralSettings() {
   const shouldSaveFolderOrder = folderImageOrderDirty.value;
   const shouldSaveNestedFolderTitle = nestedFolderTitleDirty.value;
   const shouldSaveVideoPlaybackQuality = videoPlaybackQualityDirty.value;
+  const shouldSaveSharePublicBaseUrl = sharePublicBaseUrlDirty.value;
   const shouldSaveAnyDefault =
     shouldSaveLocale ||
     shouldSaveHome ||
     shouldSaveReels ||
     shouldSaveFolderOrder ||
     shouldSaveNestedFolderTitle ||
-    shouldSaveVideoPlaybackQuality;
+    shouldSaveVideoPlaybackQuality ||
+    shouldSaveSharePublicBaseUrl;
   const savedDefaultCount = [
     shouldSaveLocale,
     shouldSaveHome,
     shouldSaveReels,
     shouldSaveFolderOrder,
     shouldSaveNestedFolderTitle,
-    shouldSaveVideoPlaybackQuality
+    shouldSaveVideoPlaybackQuality,
+    shouldSaveSharePublicBaseUrl
   ].filter(Boolean).length;
   const savedParts: string[] = [];
   const savedFolderRuleCount = [shouldSaveExcludedFolders, shouldSaveStories, shouldSaveCarousels].filter(Boolean).length;
@@ -3018,6 +3059,18 @@ async function saveGeneralSettings() {
       appStore.setVideoPlaybackQualityOverride(null);
     }
 
+    if (shouldSaveSharePublicBaseUrl) {
+      const trimmed = sharePublicBaseUrlDraft.value.trim();
+      const payload = await updateSharePublicBaseUrl(trimmed.length > 0 ? trimmed : null);
+      savedParts.push(t('settings.general.feedback.parts.sharePublicBaseUrl'));
+
+      if (appStore.stats) {
+        appStore.stats.preferences.sharePublicBaseUrl = payload.sharePublicBaseUrl;
+      }
+
+      sharePublicBaseUrlDraft.value = payload.sharePublicBaseUrl ?? '';
+    }
+
     await appStore.fetchStats({ background: true });
 
     if (shouldSaveStories || shouldSaveCarousels || shouldSaveExcludedFolders) {
@@ -3070,6 +3123,8 @@ async function saveGeneralSettings() {
         'success',
         t('settings.general.feedback.videoPlaybackQualitySaved', { label: selectedVideoPlaybackQualityOption.value.label })
       );
+    } else if (shouldSaveSharePublicBaseUrl) {
+      setGeneralSettingsFeedback('success', t('settings.general.feedback.sharePublicBaseUrlSaved'));
     }
   } catch (error) {
     await appStore.fetchStats({ background: true }).catch(() => {});

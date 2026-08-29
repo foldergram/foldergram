@@ -17,8 +17,6 @@ import {
 import { resolveOriginalPath } from '../utils/media-paths.js';
 import { applyProtectedMediaHeaders } from '../utils/media-response.js';
 
-const videoStreamRouter = express.Router();
-
 const imageIdParamSchema = z.object({
   id: z.coerce.number().int().positive()
 });
@@ -76,158 +74,195 @@ function sendPlaylist(response: express.Response, body: string): void {
   response.send(body);
 }
 
-videoStreamRouter.get('/:id/hls/master.m3u8', (request, response) => {
-  const params = imageIdParamSchema.parse(request.params);
-  const video = resolveStreamableVideo(params.id);
+export interface VideoStreamRouterOptions {
+  /**
+   * Extra gate applied before anything is streamed. Post shares use it so a token
+   * only ever streams the post it was minted for; the library-wide router leaves it
+   * undefined and relies on the API auth middleware alone.
+   */
+  authorizeImage?: (request: express.Request, imageId: number) => boolean;
+  /**
+   * How the master playlist addresses its media playlists. Share links live under a
+   * token prefix, so they cannot point at `/api/videos/...`.
+   */
+  buildPlaylistPath?: (request: express.Request, imageId: number, quality: string) => string;
+}
 
-  if (!video) {
-    response.status(404).json({ message: 'Video not found' });
-    return;
+export function createVideoStreamRouter(options: VideoStreamRouterOptions = {}): express.Router {
+  const { authorizeImage, buildPlaylistPath } = options;
+  const videoStreamRouter = express.Router();
+
+  function resolveAuthorizedVideo(request: express.Request, id: number): StreamableVideo | null {
+    if (authorizeImage && !authorizeImage(request, id)) {
+      return null;
+    }
+
+    return resolveStreamableVideo(id);
   }
 
-  if (getSegmentCount(video.durationMs) === 0) {
-    response.status(409).json({ message: 'Video duration is unknown, streaming is unavailable.' });
-    return;
-  }
+  videoStreamRouter.get('/:id/hls/master.m3u8', (request, response) => {
+    const params = imageIdParamSchema.parse(request.params);
+    const video = resolveAuthorizedVideo(request, params.id);
 
-  sendPlaylist(
-    response,
-    buildMasterPlaylist(video.id, video.width, video.height, resolveOfferedQualities(video.width, video.height))
-  );
-});
-
-videoStreamRouter.get('/:id/hls/:quality/index.m3u8', (request, response) => {
-  const params = segmentParamSchema.omit({ index: true }).parse(request.params);
-
-  if (!isStreamQuality(params.quality)) {
-    response.status(404).json({ message: 'Unknown stream quality' });
-    return;
-  }
-
-  const video = resolveStreamableVideo(params.id);
-  if (!video) {
-    response.status(404).json({ message: 'Video not found' });
-    return;
-  }
-
-  if (getSegmentCount(video.durationMs) === 0) {
-    response.status(409).json({ message: 'Video duration is unknown, streaming is unavailable.' });
-    return;
-  }
-
-  sendPlaylist(response, buildMediaPlaylist(video.durationMs));
-});
-
-videoStreamRouter.get('/:id/hls/:quality/segment-:index.ts', async (request, response) => {
-  const params = segmentParamSchema.parse(request.params);
-
-  if (!isStreamQuality(params.quality)) {
-    response.status(404).json({ message: 'Unknown stream quality' });
-    return;
-  }
-
-  const video = resolveStreamableVideo(params.id);
-  if (!video) {
-    response.status(404).json({ message: 'Video not found' });
-    return;
-  }
-
-  if (params.index >= getSegmentCount(video.durationMs)) {
-    response.status(404).json({ message: 'Segment out of range' });
-    return;
-  }
-
-  try {
-    const payload = await getSegment({
-      imageId: video.id,
-      sourcePath: video.sourcePath,
-      sourceCodec: await getSourceVideoCodec(video.sourcePath),
-      durationMs: video.durationMs,
-      width: video.width,
-      height: video.height,
-      quality: params.quality,
-      index: params.index
-    });
-
-    applyProtectedMediaHeaders(response);
-    response.setHeader('Content-Type', 'video/mp2t');
-    response.setHeader('Content-Length', String(payload.byteLength));
-    response.end(payload);
-  } catch (error) {
-    if (response.headersSent) {
-      response.end();
+    if (!video) {
+      response.status(404).json({ message: 'Video not found' });
       return;
     }
 
-    response.setHeader('Cache-Control', 'no-store');
-    response.status(500).json({
-      message: error instanceof Error ? error.message : 'Failed to produce video segment.'
-    });
-  }
-});
+    if (getSegmentCount(video.durationMs) === 0) {
+      response.status(409).json({ message: 'Video duration is unknown, streaming is unavailable.' });
+      return;
+    }
 
-/**
- * Fire-and-forget segment warm-up. The reels deck calls this for the clip the user
- * is about to swipe to, so the first segments are already transcoded and cached by
- * the time the player asks for them. The response returns immediately: waiting
- * here would just move the stall from the player to this request.
- */
-videoStreamRouter.post('/:id/hls/:quality/warm', (request, response) => {
-  const params = segmentParamSchema.omit({ index: true }).parse(request.params);
+    sendPlaylist(
+      response,
+      buildMasterPlaylist(
+        video.id,
+        video.width,
+        video.height,
+        resolveOfferedQualities(video.width, video.height),
+        buildPlaylistPath ? (imageId, quality) => buildPlaylistPath(request, imageId, quality) : undefined
+      )
+    );
+  });
 
-  if (!isStreamQuality(params.quality)) {
-    response.status(404).json({ message: 'Unknown stream quality' });
-    return;
-  }
+  videoStreamRouter.get('/:id/hls/:quality/index.m3u8', (request, response) => {
+    const params = segmentParamSchema.omit({ index: true }).parse(request.params);
 
-  // Captured before the async closure so the narrowed type survives.
-  const quality = params.quality;
+    if (!isStreamQuality(params.quality)) {
+      response.status(404).json({ message: 'Unknown stream quality' });
+      return;
+    }
 
-  const video = resolveStreamableVideo(params.id);
-  if (!video) {
-    response.status(404).json({ message: 'Video not found' });
-    return;
-  }
+    const video = resolveAuthorizedVideo(request, params.id);
+    if (!video) {
+      response.status(404).json({ message: 'Video not found' });
+      return;
+    }
 
-  const segmentCount = getSegmentCount(video.durationMs);
-  if (segmentCount === 0) {
-    response.status(409).json({ message: 'Video duration is unknown, streaming is unavailable.' });
-    return;
-  }
+    if (getSegmentCount(video.durationMs) === 0) {
+      response.status(409).json({ message: 'Video duration is unknown, streaming is unavailable.' });
+      return;
+    }
 
-  const warmQuery = warmQuerySchema.parse(request.query);
-  // Handing a clip over from another surface resumes mid-file, so warm the segment
-  // that holds that position rather than always the head of the playlist.
-  const firstIndex = Math.min(
-    Math.max(0, Math.floor(warmQuery.from / HLS_SEGMENT_SECONDS)),
-    segmentCount - 1
-  );
-  const indexes = Array.from(
-    { length: Math.min(warmQuery.segments, segmentCount - firstIndex) },
-    (_, offset) => firstIndex + offset
-  );
+    sendPlaylist(response, buildMediaPlaylist(video.durationMs));
+  });
 
-  void (async () => {
-    for (const index of indexes) {
-      try {
-        await getSegment({
-          imageId: video.id,
-          sourcePath: video.sourcePath,
-          sourceCodec: await getSourceVideoCodec(video.sourcePath),
-          durationMs: video.durationMs,
-          width: video.width,
-          height: video.height,
-          quality,
-          index
-        });
-      } catch {
-        // A warm-up failure is not user visible; the player will retry the segment.
+  videoStreamRouter.get('/:id/hls/:quality/segment-:index.ts', async (request, response) => {
+    const params = segmentParamSchema.parse(request.params);
+
+    if (!isStreamQuality(params.quality)) {
+      response.status(404).json({ message: 'Unknown stream quality' });
+      return;
+    }
+
+    const video = resolveAuthorizedVideo(request, params.id);
+    if (!video) {
+      response.status(404).json({ message: 'Video not found' });
+      return;
+    }
+
+    if (params.index >= getSegmentCount(video.durationMs)) {
+      response.status(404).json({ message: 'Segment out of range' });
+      return;
+    }
+
+    try {
+      const payload = await getSegment({
+        imageId: video.id,
+        sourcePath: video.sourcePath,
+        sourceCodec: await getSourceVideoCodec(video.sourcePath),
+        durationMs: video.durationMs,
+        width: video.width,
+        height: video.height,
+        quality: params.quality,
+        index: params.index
+      });
+
+      applyProtectedMediaHeaders(response);
+      response.setHeader('Content-Type', 'video/mp2t');
+      response.setHeader('Content-Length', String(payload.byteLength));
+      response.end(payload);
+    } catch (error) {
+      if (response.headersSent) {
+        response.end();
         return;
       }
-    }
-  })();
 
-  response.status(202).json({ warming: indexes.length });
-});
+      response.setHeader('Cache-Control', 'no-store');
+      response.status(500).json({
+        message: error instanceof Error ? error.message : 'Failed to produce video segment.'
+      });
+    }
+  });
+
+  /**
+   * Fire-and-forget segment warm-up. The reels deck calls this for the clip the user
+   * is about to swipe to, so the first segments are already transcoded and cached by
+   * the time the player asks for them. The response returns immediately: waiting
+   * here would just move the stall from the player to this request.
+   */
+  videoStreamRouter.post('/:id/hls/:quality/warm', (request, response) => {
+    const params = segmentParamSchema.omit({ index: true }).parse(request.params);
+
+    if (!isStreamQuality(params.quality)) {
+      response.status(404).json({ message: 'Unknown stream quality' });
+      return;
+    }
+
+    // Captured before the async closure so the narrowed type survives.
+    const quality = params.quality;
+
+    const video = resolveAuthorizedVideo(request, params.id);
+    if (!video) {
+      response.status(404).json({ message: 'Video not found' });
+      return;
+    }
+
+    const segmentCount = getSegmentCount(video.durationMs);
+    if (segmentCount === 0) {
+      response.status(409).json({ message: 'Video duration is unknown, streaming is unavailable.' });
+      return;
+    }
+
+    const warmQuery = warmQuerySchema.parse(request.query);
+    // Handing a clip over from another surface resumes mid-file, so warm the segment
+    // that holds that position rather than always the head of the playlist.
+    const firstIndex = Math.min(
+      Math.max(0, Math.floor(warmQuery.from / HLS_SEGMENT_SECONDS)),
+      segmentCount - 1
+    );
+    const indexes = Array.from(
+      { length: Math.min(warmQuery.segments, segmentCount - firstIndex) },
+      (_, offset) => firstIndex + offset
+    );
+
+    void (async () => {
+      for (const index of indexes) {
+        try {
+          await getSegment({
+            imageId: video.id,
+            sourcePath: video.sourcePath,
+            sourceCodec: await getSourceVideoCodec(video.sourcePath),
+            durationMs: video.durationMs,
+            width: video.width,
+            height: video.height,
+            quality,
+            index
+          });
+        } catch {
+          // A warm-up failure is not user visible; the player will retry the segment.
+          return;
+        }
+      }
+    })();
+
+    response.status(202).json({ warming: indexes.length });
+  });
+
+  return videoStreamRouter;
+}
+
+const videoStreamRouter = createVideoStreamRouter();
 
 export { videoStreamRouter };

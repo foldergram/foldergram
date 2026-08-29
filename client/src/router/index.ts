@@ -14,6 +14,7 @@ import PlacesView from '../views/PlacesView.vue';
 import ReelsView from '../views/ReelsView.vue';
 import SharedFolderView from '../views/SharedFolderView.vue';
 import SharedPostView from '../views/SharedPostView.vue';
+import SharedTokenPostView from '../views/SharedTokenPostView.vue';
 import TrashView from '../views/TrashView.vue';
 import { useAppStore } from '../stores/app';
 import { useAuthStore } from '../stores/auth';
@@ -161,6 +162,16 @@ export const router = createRouter({
       path: '/share/:slug/images/:id',
       name: 'shared-image',
       component: SharedPostView,
+      props: true,
+      meta: {
+        publicShare: true
+      }
+    },
+    {
+      // Post-level share tokens. Short on purpose: this URL gets pasted into chats.
+      path: '/s/:token',
+      name: 'shared-token-post',
+      component: SharedTokenPostView,
       props: true,
       meta: {
         publicShare: true

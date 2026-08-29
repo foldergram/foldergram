@@ -10,6 +10,9 @@ import type {
   CreateCollectionResult,
   CreateFolderShareLinkInput,
   CreateFolderShareLinkResult,
+  CreatePostShareLinkResult,
+  PostShareLinksPayload,
+  SharePublicBaseUrlSetting,
   DeleteCollectionResult,
   FolderShareAccessState,
   FolderShareLinksPayload,
@@ -62,7 +65,13 @@ import type {
 } from '../types/api';
 import { requestJson } from './http';
 
-export function fetchFeed(page = 1, limit = 24, mode: FeedMode = 'random', seed?: number) {
+export function fetchFeed(
+  page = 1,
+  limit = 24,
+  mode: FeedMode = 'random',
+  seed?: number,
+  excludeIds?: number[]
+) {
   const params = new URLSearchParams({
     page: String(page),
     limit: String(limit),
@@ -71,6 +80,10 @@ export function fetchFeed(page = 1, limit = 24, mode: FeedMode = 'random', seed?
 
   if (typeof seed === 'number') {
     params.set('seed', String(seed));
+  }
+
+  if (excludeIds && excludeIds.length > 0) {
+    params.set('exclude', excludeIds.join(','));
   }
 
   return requestJson<PaginatedFeed>(`/api/feed?${params.toString()}`);
@@ -274,6 +287,37 @@ function fetchSharedDetail(resource: 'posts' | 'images', id: number, mediaType?:
 
   const suffix = params.size > 0 ? `?${params.toString()}` : '';
   return requestJson<SharedImageDetail>(`/api/share/${resource}/${id}${suffix}`);
+}
+
+export function fetchPostShareLinks(postId: number) {
+  return requestJson<PostShareLinksPayload>(`/api/share/posts/${postId}/links`);
+}
+
+export function createPostShareLink(postId: number, input: CreateFolderShareLinkInput = { expiresIn: 'unlimited', unlimited: true }) {
+  return requestJson<CreatePostShareLinkResult>(`/api/share/posts/${postId}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input)
+  });
+}
+
+export function revokePostShareLink(postId: number, linkId: number) {
+  return requestJson<{ ok: boolean; link: CreatePostShareLinkResult['link'] }>(
+    `/api/share/posts/${postId}/links/${linkId}`,
+    { method: 'DELETE' }
+  );
+}
+
+export function fetchSharedPostByToken(token: string) {
+  return requestJson<SharedImageDetail>(`/api/share/post-links/${encodeURIComponent(token)}`);
+}
+
+export function updateSharePublicBaseUrl(publicBaseUrl: string | null) {
+  return requestJson<SharePublicBaseUrlSetting>('/api/admin/settings/share-public-base-url', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ publicBaseUrl })
+  });
 }
 
 export function fetchSharedPost(id: number, mediaType?: 'image' | 'video') {

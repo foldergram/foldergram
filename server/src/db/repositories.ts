@@ -15,6 +15,7 @@ import type {
   FolderScanStateRecord,
   FolderShareLinkRecord,
   FolderSharePasswordRecord,
+  PostShareLinkRecord,
   ImageDetail,
   ImageRecord,
   LikeRecord,
@@ -82,6 +83,22 @@ const VISIBLE_POST_WHERE_UNSCOPED_SQL =
  * empty-looking while a scan runs.
  */
 const RENDERABLE_COVER_WHERE_SQL = "images.thumbnail_path IS NOT NULL AND images.thumbnail_path != ''";
+
+/**
+ * Pull-to-refresh asks for content the viewer has not seen yet. The caller caps the id
+ * list, so this only ever builds a bounded `NOT IN (...)`.
+ */
+function buildExcludedPostIdsClause(excludeIds: number[] | undefined): { sql: string; params: number[] } {
+  const ids = (excludeIds ?? []).filter((id) => Number.isInteger(id) && id > 0);
+  if (ids.length === 0) {
+    return { sql: '', params: [] };
+  }
+
+  return {
+    sql: ` AND posts.id NOT IN (${ids.map(() => '?').join(',')})`,
+    params: ids
+  };
+}
 
 const STORY_IMAGE_WHERE_SQL = 'images.is_deleted = 0 AND images.is_trashed = 0';
 const STORY_IMAGE_WHERE_UNSCOPED_SQL = 'is_deleted = 0 AND is_trashed = 0';
@@ -484,6 +501,13 @@ export interface SaveFolderResult {
 
 export interface CreateFolderShareLinkInput {
   folderId: number;
+  tokenHash: string;
+  tokenPrefix: string;
+  expiresAt: string | null;
+}
+
+export interface CreatePostShareLinkInput {
+  postId: number;
   tokenHash: string;
   tokenPrefix: string;
   expiresAt: string | null;
@@ -1554,15 +1578,16 @@ export const postRepository = {
     );
   },
 
-  listRecentCandidates(offset: number, limit: number): FeedPost[] {
+  listRecentCandidates(offset: number, limit: number, excludeIds?: number[]): FeedPost[] {
+    const excluded = buildExcludedPostIdsClause(excludeIds);
     const posts = database.prepare(
       `
       ${BASE_POST_SELECT_SQL}
-      WHERE ${VISIBLE_POST_WHERE_SQL} AND ${RENDERABLE_COVER_WHERE_SQL}
+      WHERE ${VISIBLE_POST_WHERE_SQL} AND ${RENDERABLE_COVER_WHERE_SQL}${excluded.sql}
       ORDER BY ${EFFECTIVE_FEED_TIME_SQL} DESC, posts.sort_timestamp DESC, posts.id DESC
       LIMIT ? OFFSET ?
       `
-    ).all(limit, offset) as unknown as FeedPost[];
+    ).all(...excluded.params, limit, offset) as unknown as FeedPost[];
 
     return this.hydratePostItems(posts);
   },
@@ -1602,16 +1627,17 @@ export const postRepository = {
     return this.hydratePostItems(posts);
   },
 
-  listRandom(page: number, limit: number, seed: number): FeedPost[] {
+  listRandom(page: number, limit: number, seed: number, excludeIds?: number[]): FeedPost[] {
     const offset = (page - 1) * limit;
+    const excluded = buildExcludedPostIdsClause(excludeIds);
     const posts = database.prepare(
       `
       ${BASE_POST_SELECT_SQL}
-      WHERE ${VISIBLE_POST_WHERE_SQL} AND ${RENDERABLE_COVER_WHERE_SQL}
+      WHERE ${VISIBLE_POST_WHERE_SQL} AND ${RENDERABLE_COVER_WHERE_SQL}${excluded.sql}
       ORDER BY ABS(((posts.id * 1103515245) + (? * 1013904223)) % 2147483647), posts.id DESC
       LIMIT ? OFFSET ?
       `
-    ).all(seed, limit, offset) as unknown as FeedPost[];
+    ).all(...excluded.params, seed, limit, offset) as unknown as FeedPost[];
 
     return this.hydratePostItems(posts);
   },
@@ -2546,8 +2572,8 @@ export const imageRepository = {
     return postRepository.countVisibleSearch(query);
   },
 
-  listRecentCandidates(offset: number, limit: number): FeedImage[] {
-    return postRepository.listRecentCandidates(offset, limit);
+  listRecentCandidates(offset: number, limit: number, excludeIds?: number[]): FeedImage[] {
+    return postRepository.listRecentCandidates(offset, limit, excludeIds);
   },
 
   countRenderableFeed(): number {
@@ -2562,8 +2588,8 @@ export const imageRepository = {
     return postRepository.listRediscoverCandidates(offset, limit, cutoffTimestamp);
   },
 
-  listRandom(page: number, limit: number, seed: number): FeedImage[] {
-    return postRepository.listRandom(page, limit, seed);
+  listRandom(page: number, limit: number, seed: number, excludeIds?: number[]): FeedImage[] {
+    return postRepository.listRandom(page, limit, seed, excludeIds);
   },
 
   listVisibleVideoCandidates(): ReelCandidate[] {
@@ -3670,6 +3696,64 @@ export const folderShareLinkRepository = {
 };
 
 export const folderShareRepository = folderShareLinkRepository;
+
+/**
+ * Post-level share links. Separate from folder shares on purpose: a folder token
+ * unlocks a whole album, while these only ever unlock the single post they were
+ * minted for, which is what the "share this clip" button needs.
+ */
+export const postShareLinkRepository = {
+  create(input: CreatePostShareLinkInput): PostShareLinkRecord {
+    database
+      .prepare(
+        `
+        INSERT INTO post_share_links (
+          post_id, token_hash, token_prefix, expires_at, revoked_at, created_at
+        )
+        VALUES (?, ?, ?, ?, NULL, ?)
+        `
+      )
+      .run(input.postId, input.tokenHash, input.tokenPrefix, input.expiresAt, nowIso());
+
+    return database
+      .prepare('SELECT * FROM post_share_links WHERE token_hash = ?')
+      .get(input.tokenHash) as unknown as PostShareLinkRecord;
+  },
+
+  getById(id: number): PostShareLinkRecord | undefined {
+    return database.prepare('SELECT * FROM post_share_links WHERE id = ?').get(id) as PostShareLinkRecord | undefined;
+  },
+
+  getByTokenHash(tokenHash: string): PostShareLinkRecord | undefined {
+    return database
+      .prepare('SELECT * FROM post_share_links WHERE token_hash = ?')
+      .get(tokenHash) as PostShareLinkRecord | undefined;
+  },
+
+  listByPost(postId: number): PostShareLinkRecord[] {
+    return database
+      .prepare('SELECT * FROM post_share_links WHERE post_id = ? ORDER BY created_at DESC, id DESC')
+      .all(postId) as unknown as PostShareLinkRecord[];
+  },
+
+  revoke(id: number, postId: number): PostShareLinkRecord | undefined {
+    database
+      .prepare(
+        `
+        UPDATE post_share_links
+        SET revoked_at = ?
+        WHERE id = ? AND post_id = ? AND revoked_at IS NULL
+        `
+      )
+      .run(nowIso(), id, postId);
+
+    return this.getById(id);
+  },
+
+  touchLastUsed(id: number): void {
+    database.prepare('UPDATE post_share_links SET last_used_at = ? WHERE id = ?').run(nowIso(), id);
+  }
+};
 
 export const folderSharePasswordRepository = {
   get(folderId: number): FolderSharePasswordRecord | undefined {

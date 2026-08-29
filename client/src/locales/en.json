@@ -32,6 +32,11 @@
       "eyebrow": "Access Protection",
       "title": "Checking access",
       "description": "Loading the current password protection status."
+    },
+    "pullToRefresh": {
+      "pull": "Pull to refresh",
+      "release": "Release to refresh",
+      "refreshing": "Loading new posts..."
     }
   },
   "auth": {
@@ -286,6 +291,12 @@
           }
         }
       },
+      "sharePublicBaseUrl": {
+        "label": "Public share address",
+        "description": "Share links created from outside the LAN use this address. LAN visits always keep the LAN address.",
+        "fieldLabel": "Public base URL",
+        "helper": "Leave empty to fall back to the address currently in use. Enter a full URL, for example https://gallery.example.com."
+      },
       "storiesMode": {
         "label": "Treat stories folders as normal app folders",
         "scanRequired": "Scan required",
@@ -324,6 +335,7 @@
         "reelsOnly": "This updates the queue style used when Reels opens for this app. Visitors cannot switch modes from the reels page.",
         "folderOnly": "This updates the default photo order used by app folder grids.",
         "nestedFolderTitleOnly": "This updates how nested app folders are labeled throughout the app.",
+        "sharePublicBaseUrlOnly": "This updates the address prefix used by share links created from outside the LAN.",
         "carouselReconciliation": "The Carousel folder mode is saved. Complete the library action above to apply it to the index.",
         "idle": "These are the current app-wide defaults for language, Home, Reels, app folders, nested folder titles, stories folders, carousel folders, and excluded folders."
       },
@@ -361,8 +373,10 @@
           "reelsFeedDefault": "Reels feed default",
           "appFolderOrder": "app folder order",
           "nestedFolderTitles": "nested folder titles",
-          "videoPlaybackQuality": "video playback quality"
-        }
+          "videoPlaybackQuality": "video playback quality",
+          "sharePublicBaseUrl": "public share address"
+        },
+        "sharePublicBaseUrlSaved": "Public share address saved."
       },
       "errors": {
         "validateExcludedFolders": "Unable to validate the excluded folder rules.",
@@ -848,7 +862,18 @@
     "errorTitle": "Could not open folder share",
     "errorDescription": "Unable to load this folder share.",
     "backToFolder": "Back to shared folder",
-    "postErrorTitle": "Could not load shared post"
+    "postErrorTitle": "Could not load shared post",
+    "post": {
+      "action": "Share this post",
+      "copied": "Link copied",
+      "creating": "Creating link...",
+      "createError": "Unable to create a share link.",
+      "copyManually": "Copy this link manually:",
+      "notFoundTitle": "This share link is unavailable",
+      "notFoundDescription": "The link may be expired, revoked, or invalid.",
+      "loadingTitle": "Opening shared post",
+      "badge": "Shared post"
+    }
   },
   "reels": {
     "view": {

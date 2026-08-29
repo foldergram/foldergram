@@ -22,6 +22,7 @@ export const AUTH_VIEWER_ACCESS_MODE_SETTING_KEY = 'auth.viewer_access_mode';
 export const AUTH_VIEWER_PASSWORD_HASH_SETTING_KEY = 'auth.viewer_password_hash';
 export const AUTH_VIEWER_PASSWORD_SALT_SETTING_KEY = 'auth.viewer_password_salt';
 export const SHARE_SESSION_SECRET_SETTING_KEY = 'share.session_secret';
+export const SHARE_PUBLIC_BASE_URL_SETTING_KEY = 'share.public_base_url';
 export const TREAT_CAROUSELS_AS_FOLDERS_SETTING_KEY = 'library.treat_carousels_as_folders';
 export const CAROUSELS_MIGRATION_DECISION_SETTING_KEY = 'library.carousels_migration_decision';
 export const CAROUSELS_APPLIED_MODE_SETTING_KEY = 'library.carousels_applied_mode';

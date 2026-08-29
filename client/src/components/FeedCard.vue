@@ -45,7 +45,7 @@
         type="button"
         :aria-label="t('post.feedCard.moreOptions')"
         :title="t('post.feedCard.moreOptions')"
-        @click="menuOpen = true"
+        @click="openMenu"
       >
         <svg class="w-[1.15rem] h-[1.15rem]" viewBox="0 0 24 24" role="presentation">
           <circle cx="6.5" cy="12" r="1.5" fill="currentColor" />
@@ -334,6 +334,30 @@
           <span>{{ t('post.viewer.editCaption') }}</span>
         </button>
         <button
+          class="flex items-center gap-[0.8rem] w-full px-4 py-[0.95rem] border-0 border-b border-border text-text bg-transparent cursor-pointer text-left disabled:opacity-70 disabled:cursor-wait"
+          type="button"
+          data-test="feed-share"
+          :disabled="postShare.sharing.value"
+          @click="handleShare"
+        >
+          <span class="i-fluent-share-20-regular w-[1.15rem] h-[1.15rem] shrink-0" aria-hidden="true" />
+          <span>{{ postShare.sharing.value ? t('share.post.creating') : postShare.copied.value ? t('share.post.copied') : t('share.post.action') }}</span>
+        </button>
+        <p
+          v-if="postShare.error.value"
+          class="m-0 px-4 py-2 border-b border-border text-[0.82rem] text-[#d93025]"
+          role="status"
+        >
+          {{ postShare.error.value }}
+        </p>
+        <p
+          v-else-if="postShare.shareUrl.value && !postShare.copied.value"
+          class="m-0 px-4 py-2 border-b border-border text-[0.8rem] text-muted break-words"
+        >
+          {{ t('share.post.copyManually') }}
+          <span class="block mt-[0.1rem] font-semibold text-text">{{ postShare.shareUrl.value }}</span>
+        </p>
+        <button
           class="flex items-center gap-[0.8rem] w-full px-4 py-[0.95rem] border-0 border-b border-border text-text bg-transparent cursor-pointer text-left"
           type="button"
           @click="openOriginal"
@@ -450,6 +474,7 @@ import type { MediaPlayerElement } from 'vidstack/elements';
 
 import { deleteImage, trashImage } from '../api/gallery';
 import { useImageCaptionEditor } from '../composables/useImageCaptionEditor';
+import { usePostShare } from '../composables/usePostShare';
 import { useAppStore } from '../stores/app';
 import { useAuthStore } from '../stores/auth';
 import { useFeedStore } from '../stores/feed';
@@ -520,6 +545,7 @@ const immersiveVideoStore = useImmersiveVideoStore();
 const route = useRoute();
 const { t, locale } = useI18n();
 const menuOpen = ref(false);
+const postShare = usePostShare();
 const deleting = ref(false);
 const confirmDeleteOpen = ref(false);
 const deleteOriginalFromDisk = ref(false);
@@ -1152,6 +1178,17 @@ function bindHomePlayerEventListeners(player: MediaPlayerElement | null) {
     syncHomeVideoAspectRatio(player);
     void syncHomeVideoPlayback();
   }
+}
+
+function openMenu() {
+  postShare.reset();
+  menuOpen.value = true;
+}
+
+// The menu stays open so the fallback line can show the URL when the clipboard is
+// unavailable, which is what happens on a plain-http LAN address.
+async function handleShare() {
+  await postShare.share(props.item.id);
 }
 
 function openOriginal() {
