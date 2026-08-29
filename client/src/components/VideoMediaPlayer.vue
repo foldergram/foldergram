@@ -575,6 +575,16 @@ function setupListeners() {
     isPaused.value = true;
   };
 
+  // Vidstack re-initialises its own muted state after the provider attaches and
+  // after a source swap, so the element is pushed back onto the owner's value
+  // whenever it drifts. Otherwise the immersive layer starts audible even though
+  // the feed was muted.
+  const onVolumeChange = () => {
+    if (player.muted !== props.muted) {
+      player.muted = props.muted;
+    }
+  };
+
   const onError = () => {
     switchToFallbackSource();
   };
@@ -583,6 +593,7 @@ function setupListeners() {
 
   player.addEventListener('loaded-metadata', onLoadedMetadata);
   player.addEventListener('can-play', onCanPlay);
+  player.addEventListener('volume-change', onVolumeChange);
   player.addEventListener('time-update', onTimeUpdate);
   player.addEventListener('play', onPlay);
   player.addEventListener('pause', onPause);
@@ -592,6 +603,7 @@ function setupListeners() {
     removeHlsLibraryBinding();
     player.removeEventListener('loaded-metadata', onLoadedMetadata);
     player.removeEventListener('can-play', onCanPlay);
+    player.removeEventListener('volume-change', onVolumeChange);
     player.removeEventListener('time-update', onTimeUpdate);
     player.removeEventListener('play', onPlay);
     player.removeEventListener('pause', onPause);

@@ -194,6 +194,25 @@ describe('VideoMediaPlayer', () => {
     expect(playerEl.muted).toBe(false);
   });
 
+  it('pushes the element back onto the owner value when vidstack un-mutes itself', async () => {
+    const wrapper = mount(VideoMediaPlayer, {
+      props: {
+        src: '/test-video.mp4',
+        muted: true
+      },
+      global: {
+        plugins: [i18n]
+      }
+    });
+
+    const playerEl = wrapper.find('media-player').element as any;
+    // This is what vidstack does when a provider attaches or the source changes.
+    playerEl.muted = false;
+    playerEl.dispatchEvent(new Event('volume-change'));
+
+    expect(playerEl.muted).toBe(true);
+  });
+
   it('applies a handover start time on can-play when loaded-metadata could not seek', async () => {
     const wrapper = mount(VideoMediaPlayer, {
       props: {

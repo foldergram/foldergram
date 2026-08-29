@@ -1010,6 +1010,16 @@
     player.muted = muted
   }
 
+  // Vidstack re-initialises its own muted state after the provider attaches and
+  // after a source swap, so the element is pushed back onto the stored preference
+  // whenever it drifts.
+  function enforceVideoMuted() {
+    const player = playerElement.value
+    if (player && player.muted !== appStore.videoMuted) {
+      player.muted = appStore.videoMuted
+    }
+  }
+
   function isPrimaryPlainClick(event: MouseEvent) {
     return (
       !event.defaultPrevented &&
@@ -1627,6 +1637,9 @@
     const handleEnded = () => {
       videoCurrentTimeMs.value = videoDurationMs.value
     }
+    const handleVolume = () => {
+      enforceVideoMuted()
+    }
     const handleError = () => {
       switchVideoToFallbackSource()
     }
@@ -1635,6 +1648,7 @@
 
     player.addEventListener("loaded-metadata", handleReady)
     player.addEventListener("can-play", handleReady)
+    player.addEventListener("volume-change", handleVolume)
     player.addEventListener("play", handlePlay)
     player.addEventListener("pause", handlePause)
     player.addEventListener("duration-change", handleDuration)
@@ -1646,6 +1660,7 @@
       removeHlsLibraryBinding()
       player.removeEventListener("loaded-metadata", handleReady)
       player.removeEventListener("can-play", handleReady)
+      player.removeEventListener("volume-change", handleVolume)
       player.removeEventListener("play", handlePlay)
       player.removeEventListener("pause", handlePause)
       player.removeEventListener("duration-change", handleDuration)

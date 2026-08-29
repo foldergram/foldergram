@@ -1008,6 +1008,17 @@ function handleHomeVideoFullscreenChange(event: Event) {
 // explicit tap writes to it. Listening to `volume-change` used to feed vidstack's
 // own `muted=false` initialisation (new card, source swap, fallback) straight back
 // into the store, which silently un-muted the whole feed a few swipes later.
+// Vidstack re-initialises its own `muted` state after the provider attaches and
+// after a source swap, which is how a card ended up audible while the store and the
+// icon still said muted. Enforcing the store's value on every volume-change makes
+// the element follow the preference instead of inventing its own.
+function enforceHomeVideoMuted() {
+  const player = homePlayerElement.value;
+  if (player && player.muted !== appStore.videoMuted) {
+    player.muted = appStore.videoMuted;
+  }
+}
+
 function toggleHomeVideoSound() {
   const nextMuted = !appStore.videoMuted;
   appStore.setVideoMuted(nextMuted);
@@ -1039,6 +1050,9 @@ function bindHomePlayerEventListeners(player: MediaPlayerElement | null) {
     return;
   }
 
+  const handleVolume = () => {
+    enforceHomeVideoMuted();
+  };
   const handleReady = () => {
     homePlayerReady = true;
     syncHomeVideoAspectRatio(player);
@@ -1068,6 +1082,7 @@ function bindHomePlayerEventListeners(player: MediaPlayerElement | null) {
 
   player.addEventListener('loaded-metadata', handleReady);
   player.addEventListener('can-play', handleReady);
+  player.addEventListener('volume-change', handleVolume);
   player.addEventListener('play', handlePlay);
   player.addEventListener('pause', handlePause);
   player.addEventListener('duration-change', handleDuration);
@@ -1079,6 +1094,7 @@ function bindHomePlayerEventListeners(player: MediaPlayerElement | null) {
     removeHlsLibraryBinding();
     player.removeEventListener('loaded-metadata', handleReady);
     player.removeEventListener('can-play', handleReady);
+    player.removeEventListener('volume-change', handleVolume);
     player.removeEventListener('play', handlePlay);
     player.removeEventListener('pause', handlePause);
     player.removeEventListener('duration-change', handleDuration);

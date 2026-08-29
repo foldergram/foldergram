@@ -299,6 +299,17 @@ function syncMuted(player: MediaPlayerElement, muted: boolean) {
   player.muted = muted;
 }
 
+// Vidstack re-initialises its own muted state after the provider attaches and after
+// a source swap, so the element is pushed back onto the stored preference whenever
+// it drifts. Without this a card starts playing audibly while the icon still shows
+// muted.
+function enforceMuted() {
+  const player = playerElement.value;
+  if (player && player.muted !== appStore.videoMuted) {
+    player.muted = appStore.videoMuted;
+  }
+}
+
 async function syncPlayback() {
   const player = playerElement.value;
   if (!player) {
@@ -361,6 +372,9 @@ function bindPlayerEventListeners(player: MediaPlayerElement | null) {
   const handleReady = () => {
     void syncPlayback();
   };
+  const handleVolume = () => {
+    enforceMuted();
+  };
   const handleError = () => {
     switchToFallbackSource();
   };
@@ -392,6 +406,7 @@ function bindPlayerEventListeners(player: MediaPlayerElement | null) {
 
   player.addEventListener('loaded-metadata', handleReady);
   player.addEventListener('can-play', handleReady);
+  player.addEventListener('volume-change', handleVolume);
   player.addEventListener('play', handlePlay);
   player.addEventListener('pause', handlePause);
   player.addEventListener('error', handleError);
@@ -403,6 +418,7 @@ function bindPlayerEventListeners(player: MediaPlayerElement | null) {
     removeHlsLibraryBinding();
     player.removeEventListener('loaded-metadata', handleReady);
     player.removeEventListener('can-play', handleReady);
+    player.removeEventListener('volume-change', handleVolume);
     player.removeEventListener('play', handlePlay);
     player.removeEventListener('pause', handlePause);
     player.removeEventListener('error', handleError);
