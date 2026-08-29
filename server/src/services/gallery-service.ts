@@ -1429,6 +1429,7 @@ export const galleryService = {
       };
     }
 
+    const offset = (page - 1) * limit;
     const orderedCandidates =
       mode === 'recent'
         ? candidates
@@ -1437,9 +1438,13 @@ export const galleryService = {
               ? Number(seed)
               : Number(new Date().toISOString().slice(0, 10).replaceAll('-', ''));
 
-            return mode === 'random' ? shuffleReelCandidates(candidates, sessionSeed) : buildReelQueue(candidates, sessionSeed, signals);
+            // The greedy interleave is sequential, so a prefix of the full queue is
+            // identical to a queue built with that cap. Only building as far as the
+            // requested page keeps reels responsive on large libraries.
+            return mode === 'random'
+              ? shuffleReelCandidates(candidates, sessionSeed)
+              : buildReelQueue(candidates, sessionSeed, signals, offset + limit);
           })();
-    const offset = (page - 1) * limit;
 
     return {
       mode,
