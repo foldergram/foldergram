@@ -78,16 +78,23 @@ const VISIBLE_POST_WHERE_UNSCOPED_SQL =
 const STORY_IMAGE_WHERE_SQL = 'images.is_deleted = 0 AND images.is_trashed = 0';
 const STORY_IMAGE_WHERE_UNSCOPED_SQL = 'is_deleted = 0 AND is_trashed = 0';
 
+// Nested EXISTS instead of a JOIN: it forces SQLite to drive from
+// idx_folders_story_owner_role. With a JOIN and no ANALYZE stats the planner
+// picks images as the outer loop and rescans the whole table per folder,
+// which measured 15.4s for 1769 folders versus 10ms here.
 const HAS_AVATAR_STORY_SQL = `
   EXISTS (
     SELECT 1
     FROM folders AS story_folders
-    INNER JOIN images AS story_images ON story_images.folder_id = story_folders.id
     WHERE story_folders.story_owner_folder_id = folders.id
       AND story_folders.role IN ('story_root', 'story_capsule')
-      AND story_images.is_deleted = 0
-      AND story_images.is_trashed = 0
-    LIMIT 1
+      AND EXISTS (
+        SELECT 1
+        FROM images AS story_images
+        WHERE story_images.folder_id = story_folders.id
+          AND story_images.is_deleted = 0
+          AND story_images.is_trashed = 0
+      )
   )
 `;
 

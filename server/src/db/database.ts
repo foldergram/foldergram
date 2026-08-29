@@ -10,6 +10,24 @@ function initializeTransientDatabase(database: DatabaseSync): DatabaseSync {
   return database;
 }
 
+// Without sqlite_stat1 the planner guesses index selectivity and can pick a
+// disastrous join order (folder summaries measured 15s instead of 10ms).
+// PRAGMA optimize only re-analyses tables whose stats are missing or stale.
+function refreshQueryPlannerStatistics(database: DatabaseSync): void {
+  try {
+    const statsTable = database
+      .prepare("SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'sqlite_stat1' LIMIT 1")
+      .get() as { present: number } | undefined;
+    if (statsTable) {
+      database.exec('PRAGMA optimize');
+      return;
+    }
+    database.exec('ANALYZE');
+  } catch {
+    // Statistics are an optimisation only; never block startup on them.
+  }
+}
+
 const GLOBAL_DB_KEY = Symbol.for('foldergram.database.connection');
 
 class DatabaseManager {
@@ -28,6 +46,7 @@ class DatabaseManager {
       runStartupMigrations({ databasePath });
       db = new DatabaseSync(databasePath);
       assertNoLegacySchema(db);
+      refreshQueryPlannerStatistics(db);
     }
 
     globalObj[GLOBAL_DB_KEY] = db;
