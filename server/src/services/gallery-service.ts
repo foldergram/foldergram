@@ -545,15 +545,17 @@ function isSameOrDescendantFolderPath(rootFolderPath: string, candidateFolderPat
   return candidateFolderPath === rootFolderPath || candidateFolderPath.startsWith(`${rootFolderPath}/`);
 }
 
-function getParentFolderDisplayName(folderPath: string): string | null {
+function getParentFolderDisplayName(folderPath: string, folderNamesByPath?: Map<string, string>): string | null {
   const parentFolderPath = getParentRelativePath(folderPath);
   if (!parentFolderPath) {
     return null;
   }
 
-  const parentFolder = folderRepository.getByFolderPath(parentFolderPath);
-  if (parentFolder?.name.trim()) {
-    return parentFolder.name.trim();
+  const parentName = folderNamesByPath
+    ? folderNamesByPath.get(parentFolderPath)
+    : folderRepository.getByFolderPath(parentFolderPath)?.name;
+  if (parentName?.trim()) {
+    return parentName.trim();
   }
 
   return getLeafPathName(parentFolderPath);
@@ -758,8 +760,22 @@ function mapTrashImage(image: IndexedTrashImage, derivativeVersion = getDerivati
   };
 }
 
-function buildFolderSummary(folder: FolderSummaryRecord) {
-  const derivativeVersion = getDerivativeAssetVersion();
+interface FolderSummaryContext {
+  /** Resolved once per list so scan_runs is not queried per folder. */
+  derivativeVersion: string | null;
+  /** Prebuilt folder_path -> name map so parents are not looked up per folder. */
+  folderNamesByPath: Map<string, string>;
+}
+
+function createFolderSummaryContext(): FolderSummaryContext {
+  return {
+    derivativeVersion: getDerivativeAssetVersion(),
+    folderNamesByPath: new Map(folderRepository.listPathNames().map((row) => [row.folder_path, row.name]))
+  };
+}
+
+function buildFolderSummary(folder: FolderSummaryRecord, context?: FolderSummaryContext) {
+  const derivativeVersion = context ? context.derivativeVersion : getDerivativeAssetVersion();
   const hasPreloadedAvatarSummary =
     Object.hasOwn(folder, 'summary_avatar_image_id') || Object.hasOwn(folder, 'summary_avatar_thumbnail_path');
 
@@ -769,7 +785,7 @@ function buildFolderSummary(folder: FolderSummaryRecord) {
       slug: folder.slug,
       name: folder.name,
       description: folder.description,
-      parentFolderName: getParentFolderDisplayName(folder.folder_path),
+      parentFolderName: getParentFolderDisplayName(folder.folder_path, context?.folderNamesByPath),
       folderPath: folder.folder_path,
       breadcrumb: getPathBreadcrumb(folder.folder_path),
       imageCount: folder.image_count,
@@ -797,7 +813,7 @@ function buildFolderSummary(folder: FolderSummaryRecord) {
     slug: folder.slug,
     name: folder.name,
     description: folder.description,
-    parentFolderName: getParentFolderDisplayName(folder.folder_path),
+    parentFolderName: getParentFolderDisplayName(folder.folder_path, context?.folderNamesByPath),
     folderPath: folder.folder_path,
     breadcrumb: getPathBreadcrumb(folder.folder_path),
     imageCount: folder.image_count,
@@ -1547,7 +1563,8 @@ export const galleryService = {
       return [];
     }
 
-    return folderRepository.getAllSummaries().map(buildFolderSummary);
+    const context = createFolderSummaryContext();
+    return folderRepository.getAllSummaries().map((folder) => buildFolderSummary(folder, context));
   },
 
   listPlaces() {

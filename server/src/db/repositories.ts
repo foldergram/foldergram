@@ -610,6 +610,14 @@ export const folderRepository = {
     return database.prepare("SELECT * FROM folders WHERE slug = ? AND role = 'normal'").get(slug) as FolderRecord | undefined;
   },
 
+  // One round trip instead of one lookup per folder while naming parents.
+  listPathNames(): Array<{ folder_path: string; name: string }> {
+    return database.prepare('SELECT folder_path, name FROM folders').all() as unknown as Array<{
+      folder_path: string;
+      name: string;
+    }>;
+  },
+
   getAllSummaries(): FolderSummaryRecord[] {
     return database
       .prepare(
