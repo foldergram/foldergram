@@ -90,7 +90,10 @@ export interface VideoStreamRouterOptions {
 
 export function createVideoStreamRouter(options: VideoStreamRouterOptions = {}): express.Router {
   const { authorizeImage, buildPlaylistPath } = options;
-  const videoStreamRouter = express.Router();
+  // `mergeParams` is what makes the mount path's own params visible in here. A share
+  // mount is `/share/post-links/:token/videos`, and without this the token is dropped,
+  // so every authorization check would fail and nothing would ever stream.
+  const videoStreamRouter = express.Router({ mergeParams: true });
 
   function resolveAuthorizedVideo(request: express.Request, id: number): StreamableVideo | null {
     if (authorizeImage && !authorizeImage(request, id)) {

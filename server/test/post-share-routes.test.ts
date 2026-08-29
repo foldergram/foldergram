@@ -16,6 +16,8 @@ describe.sequential('post share links', () => {
   let postBId = 0;
   let imageAId = 0;
   let imageBId = 0;
+  let videoPostId = 0;
+  let videoImageId = 0;
 
   beforeAll(async () => {
     tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'foldergram-post-share-'));
@@ -85,14 +87,43 @@ describe.sequential('post share links', () => {
     imageAId = imageA.id;
     imageBId = imageB.id;
 
+    // A video record is what exercises the HLS mount; images never reach it.
+    const video = imageRepository.upsert({
+      folderId: folder.id,
+      filename: 'clip.mp4',
+      extension: 'mp4',
+      relativePath: 'album/clip.mp4',
+      absolutePath: path.join(tempRoot, 'gallery', 'album', 'clip.mp4'),
+      fileSize: 4096,
+      width: 720,
+      height: 1280,
+      mediaType: 'video',
+      mimeType: 'video/mp4',
+      durationMs: 12_400,
+      fingerprint: 'fp-clip',
+      mtimeMs: Date.now(),
+      firstSeenAt: new Date().toISOString(),
+      sortTimestamp: Date.now(),
+      takenAt: Date.now(),
+      takenAtSource: 'mtime',
+      thumbnailPath: 'album/clip.webp',
+      previewPath: 'album/clip.webp',
+      exifJson: null
+    });
+    videoImageId = video.id;
+
     const { postRepository } = await import('../src/db/repositories.js');
     postAId = postRepository.findByImageId(imageA.id)!.id;
     postBId = postRepository.findByImageId(imageB.id)!.id;
+    videoPostId = postRepository.findByImageId(video.id)!.id;
 
     await fs.writeFile(path.join(tempRoot, 'thumbnails', 'album', 'shared.webp'), 'thumb-shared');
     await fs.writeFile(path.join(tempRoot, 'thumbnails', 'album', 'secret.webp'), 'thumb-secret');
     await fs.writeFile(path.join(tempRoot, 'previews', 'album', 'shared.webp'), 'preview-shared');
     await fs.writeFile(path.join(tempRoot, 'previews', 'album', 'secret.webp'), 'preview-secret');
+    await fs.writeFile(path.join(tempRoot, 'gallery', 'album', 'clip.mp4'), 'not-a-real-clip');
+    await fs.writeFile(path.join(tempRoot, 'thumbnails', 'album', 'clip.webp'), 'thumb-clip');
+    await fs.writeFile(path.join(tempRoot, 'previews', 'album', 'clip.webp'), 'preview-clip');
 
     app = createApp();
   });
@@ -127,6 +158,34 @@ describe.sequential('post share links', () => {
       `/api/share/post-links/${created.rawToken}/images/${imageAId}/thumbnail`
     );
     expect(thumbnail.status).toBe(200);
+  });
+
+  it('streams the shared video over HLS with token-scoped playlist paths', async () => {
+    const { postShareService } = await import('../src/services/post-share-service.js');
+    const created = postShareService.createLink(videoPostId, { expiresAt: null })!;
+    const base = `/api/share/post-links/${created.rawToken}/videos`;
+
+    // Regression: the stream router is mounted under `:token`, so it needs
+    // `mergeParams` or the grant lookup never sees the token and 404s.
+    const master = await requestApp(app, 'GET', `${base}/${videoImageId}/hls/master.m3u8`);
+    expect(master.status).toBe(200);
+    expect(master.headers.get('content-type')).toContain('application/vnd.apple.mpegurl');
+    expect(master.body).toContain(
+      `/api/share/post-links/${created.rawToken}/videos/${videoImageId}/hls/720p/index.m3u8`
+    );
+    // A viewer must never be handed the library-wide route.
+    expect(master.body).not.toContain('/api/videos/');
+
+    const media = await requestApp(app, 'GET', `${base}/${videoImageId}/hls/720p/index.m3u8`);
+    expect(media.status).toBe(200);
+    expect(media.body).toContain('#EXTM3U');
+
+    const foreign = await requestApp(app, 'GET', `${base}/${imageAId}/hls/master.m3u8`);
+    expect(foreign.status).toBe(404);
+
+    postShareService.revokeLink(videoPostId, created.link.id);
+    const afterRevoke = await requestApp(app, 'GET', `${base}/${videoImageId}/hls/master.m3u8`);
+    expect(afterRevoke.status).toBe(404);
   });
 
   it('refuses ids the token was not minted for', async () => {
