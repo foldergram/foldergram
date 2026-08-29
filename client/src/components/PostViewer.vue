@@ -1013,10 +1013,12 @@
   // Vidstack re-initialises its own muted state after the provider attaches and
   // after a source swap, so the element is pushed back onto the stored preference
   // whenever it drifts.
+  // One-directional: only ever mutes, so the muted autoplay fallback survives and
+  // un-muting stays an explicit tap.
   function enforceVideoMuted() {
     const player = playerElement.value
-    if (player && player.muted !== appStore.videoMuted) {
-      player.muted = appStore.videoMuted
+    if (player && appStore.videoMuted && !player.muted) {
+      player.muted = true
     }
   }
 

@@ -522,11 +522,31 @@ function applyStartTime(player: MediaPlayerElement) {
   }
 }
 
+/**
+ * `:muted.prop` lands on the element before vidstack upgrades it, so the library's
+ * own default (audible) overwrites it and the immersive layer used to open with the
+ * sound on even though the feed was muted. Re-asserting the preference on every
+ * lifecycle point that resets media state keeps the element, the icon and the stored
+ * value telling the same story.
+ *
+ * Deliberately one-directional: it only ever mutes. Un-muting is an explicit owner
+ * decision handled by the prop watcher, which also leaves the muted autoplay
+ * fallback intact instead of immediately fighting it.
+ */
+function enforceMuted(player: MediaPlayerElement) {
+  if (props.muted && !player.muted) {
+    player.muted = true;
+  }
+}
+
 function setupListeners() {
   const player = playerElement.value;
   if (!player) return;
 
+  enforceMuted(player);
+
   const onLoadedMetadata = async () => {
+    enforceMuted(player);
     durationSec.value = player.duration || 0;
     const video = player.querySelector('video');
     emit('loaded-metadata', {
@@ -551,6 +571,7 @@ function setupListeners() {
   };
 
   const onCanPlay = () => {
+    enforceMuted(player);
     // HLS providers regularly ignore a seek issued at `loaded-metadata` because the
     // media source has no buffered range yet, so confirm the handover once the
     // provider reports it can play.
@@ -575,14 +596,8 @@ function setupListeners() {
     isPaused.value = true;
   };
 
-  // Vidstack re-initialises its own muted state after the provider attaches and
-  // after a source swap, so the element is pushed back onto the owner's value
-  // whenever it drifts. Otherwise the immersive layer starts audible even though
-  // the feed was muted.
   const onVolumeChange = () => {
-    if (player.muted !== props.muted) {
-      player.muted = props.muted;
-    }
+    enforceMuted(player);
   };
 
   const onError = () => {

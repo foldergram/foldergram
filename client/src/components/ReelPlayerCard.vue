@@ -305,8 +305,10 @@ function syncMuted(player: MediaPlayerElement, muted: boolean) {
 // muted.
 function enforceMuted() {
   const player = playerElement.value;
-  if (player && player.muted !== appStore.videoMuted) {
-    player.muted = appStore.videoMuted;
+  // One-directional: only ever mutes, so the muted autoplay fallback survives and
+  // un-muting stays an explicit tap.
+  if (player && appStore.videoMuted && !player.muted) {
+    player.muted = true;
   }
 }
 

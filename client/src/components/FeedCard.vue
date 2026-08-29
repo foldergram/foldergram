@@ -1012,10 +1012,12 @@ function handleHomeVideoFullscreenChange(event: Event) {
 // after a source swap, which is how a card ended up audible while the store and the
 // icon still said muted. Enforcing the store's value on every volume-change makes
 // the element follow the preference instead of inventing its own.
+// One-directional on purpose: it only mutes. Un-muting is an explicit tap handled by
+// `toggleHomeVideoSound`, so the muted autoplay fallback is never fought either.
 function enforceHomeVideoMuted() {
   const player = homePlayerElement.value;
-  if (player && player.muted !== appStore.videoMuted) {
-    player.muted = appStore.videoMuted;
+  if (player && appStore.videoMuted && !player.muted) {
+    player.muted = true;
   }
 }
 
