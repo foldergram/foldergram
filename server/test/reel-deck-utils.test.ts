@@ -32,8 +32,8 @@ describe('reel deck utils', () => {
     expect(shouldPrefetchReels(4, 6)).toBe(true);
   });
 
-  it('warms the next three cards without running past the queue', () => {
-    expect([...getReelPrefetchIndexes(2, 10)]).toEqual([3, 4, 5]);
+  it('warms the next four cards without running past the queue', () => {
+    expect([...getReelPrefetchIndexes(2, 10)]).toEqual([3, 4, 5, 6]);
     expect([...getReelPrefetchIndexes(8, 10)]).toEqual([9]);
     expect([...getReelPrefetchIndexes(9, 10)]).toEqual([]);
     expect([...getReelPrefetchIndexes(-1, 10)]).toEqual([]);

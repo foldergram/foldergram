@@ -155,6 +155,7 @@ import {
   resolveVideoSource,
   toPlayerSrc,
   useBundledHlsLibrary,
+  warmVideoStream,
   type ResolvedVideoSource,
   type VideoPlaybackMedia
 } from '../utils/video-playback';
@@ -320,6 +321,23 @@ function scheduleStallRetry() {
   );
 }
 
+/**
+ * Asks the NAS for the segments around a seek target before the player requests them.
+ * Jumping into a cold part of a stream is the one case where the transcode start-up
+ * cost is fully exposed, so the request goes out the moment the target is known.
+ */
+function warmSeekTarget(seconds: number) {
+  const media = props.media;
+  if (!media || !Number.isFinite(seconds) || seconds <= 0) {
+    return;
+  }
+
+  warmVideoStream(media, isHd.value ? 'original' : appStore.videoPlaybackQuality, {
+    fromSeconds: seconds,
+    segments: 2
+  });
+}
+
 const holdSpeed = useHoldToSpeed({
   canStart: (event) => !isInteractiveTarget(event.target),
   getCurrentTime: () => playerElement.value?.currentTime ?? 0,
@@ -327,6 +345,7 @@ const holdSpeed = useHoldToSpeed({
   seekTo: (seconds) => {
     const player = playerElement.value;
     if (!player) return;
+    warmSeekTarget(seconds);
     try {
       player.currentTime = seconds;
     } catch {
@@ -673,6 +692,12 @@ function setupListeners() {
     }
   };
 
+  const onSeeking = () => {
+    // Covers the seeks this component does not own: the footer slider, keyboard steps
+    // and the provider's own recovery jumps.
+    warmSeekTarget(player.currentTime || 0);
+  };
+
   const onStall = () => {
     if (props.autoplay && (player.currentTime || 0) <= 0.05) {
       scheduleStallRetry();
@@ -720,6 +745,7 @@ function setupListeners() {
   player.addEventListener('error', onError);
   player.addEventListener('waiting', onStall);
   player.addEventListener('stalled', onStall);
+  player.addEventListener('seeking', onSeeking);
 
   removeEventListeners = () => {
     removeHlsLibraryBinding();
@@ -732,6 +758,7 @@ function setupListeners() {
     player.removeEventListener('error', onError);
     player.removeEventListener('waiting', onStall);
     player.removeEventListener('stalled', onStall);
+    player.removeEventListener('seeking', onSeeking);
   };
 }
 

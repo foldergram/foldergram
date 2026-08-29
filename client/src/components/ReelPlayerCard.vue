@@ -403,6 +403,10 @@ function bindPlayerEventListeners(player: MediaPlayerElement | null) {
       hasRenderedFrame.value = true;
     }
   };
+  const handleSeeking = () => {
+    // The bottom seek bar and the provider's own recovery jumps also land here.
+    warmSeekTarget(player.currentTime ?? 0);
+  };
   const handleStall = () => {
     // A stalled stream never resolves on its own here, because the provider has
     // already committed to a source the NAS has not finished transcoding.
@@ -422,6 +426,7 @@ function bindPlayerEventListeners(player: MediaPlayerElement | null) {
   player.addEventListener('time-update', handleProgress);
   player.addEventListener('waiting', handleStall);
   player.addEventListener('stalled', handleStall);
+  player.addEventListener('seeking', handleSeeking);
 
   removePlayerEventListeners = () => {
     removeHlsLibraryBinding();
@@ -434,6 +439,7 @@ function bindPlayerEventListeners(player: MediaPlayerElement | null) {
     player.removeEventListener('time-update', handleProgress);
     player.removeEventListener('waiting', handleStall);
     player.removeEventListener('stalled', handleStall);
+    player.removeEventListener('seeking', handleSeeking);
   };
 
   if (player.hasAttribute('data-can-play')) {
@@ -472,6 +478,22 @@ async function toggleSound() {
   }
 }
 
+/**
+ * Jumping into a cold part of a stream is where the NAS transcode start-up cost shows
+ * up as a stall, so the segments around the target are requested as soon as it is
+ * known rather than when the player finally asks for them.
+ */
+function warmSeekTarget(seconds: number) {
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    return;
+  }
+
+  warmVideoStream(props.item, appStore.videoPlaybackQuality, {
+    fromSeconds: seconds,
+    segments: 2
+  });
+}
+
 const holdSpeed = useHoldToSpeed({
   canStart: (event) => props.active && !isInteractiveTarget(event.target),
   getCurrentTime: () => playerElement.value?.currentTime ?? 0,
@@ -481,6 +503,8 @@ const holdSpeed = useHoldToSpeed({
     if (!player) {
       return;
     }
+
+    warmSeekTarget(seconds);
 
     try {
       player.currentTime = seconds;

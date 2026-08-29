@@ -34,8 +34,8 @@ describe.sequential('video stream service playlists', () => {
     expect(service.getSegmentCount(null)).toBe(0);
     expect(service.getSegmentCount(0)).toBe(0);
     expect(service.getSegmentCount(1_000)).toBe(1);
-    expect(service.getSegmentCount(16_000)).toBe(4);
-    expect(service.getSegmentCount(16_400)).toBe(5);
+    expect(service.getSegmentCount(16_000)).toBe(8);
+    expect(service.getSegmentCount(16_400)).toBe(9);
   });
 
   it('builds a VOD media playlist whose final segment carries the remainder', () => {
@@ -48,10 +48,13 @@ describe.sequential('video stream service playlists', () => {
     expect(lines.filter((line) => line.startsWith('segment-'))).toEqual([
       'segment-0.ts',
       'segment-1.ts',
-      'segment-2.ts'
+      'segment-2.ts',
+      'segment-3.ts',
+      'segment-4.ts',
+      'segment-5.ts'
     ]);
-    expect(lines).toContain('#EXTINF:4.000,');
-    expect(lines).toContain('#EXTINF:2.500,');
+    expect(lines).toContain('#EXTINF:2.000,');
+    expect(lines).toContain('#EXTINF:0.500,');
     expect(lines.at(-1)).toBe('#EXT-X-ENDLIST');
   });
 

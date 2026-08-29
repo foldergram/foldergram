@@ -61,7 +61,7 @@ export function getActiveReelId(
  * segments cost 1.2-1.5s of ffmpeg start-up on the NAS, so warming only the very
  * next card falls behind as soon as the user swipes several times in a row.
  */
-export function getReelPrefetchIndexes(activeIndex: number, totalItems: number, lookahead = 3): Set<number> {
+export function getReelPrefetchIndexes(activeIndex: number, totalItems: number, lookahead = 4): Set<number> {
   if (activeIndex < 0 || totalItems <= 0) {
     return new Set<number>();
   }

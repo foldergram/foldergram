@@ -32,8 +32,8 @@ describe('ReelDeck', () => {
     setActivePinia(createPinia());
   });
 
-  it('warms only the three cards after the active one', () => {
-    const items = [1, 2, 3, 4, 5].map(createFeedItem);
+  it('warms only the four cards after the active one', () => {
+    const items = [1, 2, 3, 4, 5, 6, 7].map(createFeedItem);
     const wrapper = mount(ReelDeck, {
       props: {
         items,
@@ -54,11 +54,13 @@ describe('ReelDeck', () => {
       wrapper.findAll('.reel-stub').map((stub) => [stub.attributes('data-id'), stub.attributes('data-prefetch')])
     );
 
-    // Buffering the next three keeps repeated swipes instant without decoding the whole deck.
+    // Buffering the next four keeps repeated swipes instant without decoding the whole deck.
     expect(prefetchByItemId.get('2')).toBe('0');
     expect(prefetchByItemId.get('3')).toBe('1');
     expect(prefetchByItemId.get('4')).toBe('1');
     expect(prefetchByItemId.get('5')).toBe('1');
+    expect(prefetchByItemId.get('6')).toBe('1');
+    expect(prefetchByItemId.get('7')).toBe('0');
     expect(prefetchByItemId.get('1')).toBe('0');
   });
 

@@ -11,13 +11,16 @@ import { log } from './log-service.js';
 
 const execFileAsync = promisify(execFile);
 
-// Segment length drives both start-up latency and seek granularity. Four seconds
-// keeps the first segment fast to produce while staying inside the range every
-// HLS client tolerates.
-export const HLS_SEGMENT_SECONDS = 4;
+// Segment length drives both start-up latency and seek granularity. Segments here are
+// transcoded on demand, so the first one is on the critical path for every start and
+// every seek: two seconds halves that work, at the cost of more requests overall,
+// which a LAN NAS can absorb. Every HLS client tolerates this target duration.
+export const HLS_SEGMENT_SECONDS = 2;
 
 const AUDIO_ARGS = ['-c:a', 'aac', '-b:a', '128k', '-ac', '2'];
-const SEGMENT_CONCURRENCY = Math.max(1, Math.min(3, appConfig.scanDerivativeConcurrency));
+// Shorter segments mean more, cheaper ffmpeg invocations, so one more in flight keeps
+// the prefetch queue draining without starving playback of CPU.
+const SEGMENT_CONCURRENCY = Math.max(1, Math.min(4, appConfig.scanDerivativeConcurrency));
 const segmentLimit = pLimit(SEGMENT_CONCURRENCY);
 const inflightSegments = new Map<string, Promise<Buffer>>();
 

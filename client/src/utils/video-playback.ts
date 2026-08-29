@@ -112,7 +112,7 @@ const warmedStreams = new Set<string>();
  * straight from disk. Failures are ignored because this is pure optimisation.
  */
 /** Mirrors HLS_SEGMENT_SECONDS on the server; only used to dedupe warm calls. */
-const WARM_SEGMENT_SECONDS = 4;
+const WARM_SEGMENT_SECONDS = 2;
 
 export function warmVideoStream(
   media: VideoPlaybackMedia,
@@ -131,7 +131,9 @@ export function warmVideoStream(
 
   const streamQuality = match[2] ?? '720p';
   const fromSeconds = Math.max(0, options.fromSeconds ?? 0);
-  const segments = options.segments ?? 2;
+  // Segments are two seconds each, so three of them is the same amount of video the
+  // old four-second default covered.
+  const segments = options.segments ?? 3;
   // Keyed by segment index so resuming at 0:10 still warms segment 2 even though
   // the head of the same clip was warmed earlier.
   const segmentIndex = Math.floor(fromSeconds / WARM_SEGMENT_SECONDS);
@@ -190,9 +192,18 @@ export function useBundledHlsLibrary(player: MediaPlayerElement | null): () => v
       // request the NAS is still transcoding.
       fragLoadingTimeOut: 60_000,
       manifestLoadingTimeOut: 30_000,
-      maxBufferLength: 20,
-      maxMaxBufferLength: 40,
-      backBufferLength: 30,
+      // Tuned for a LAN NAS that transcodes on demand: bandwidth is effectively free,
+      // but producing a segment is not, so buffering further ahead is what absorbs the
+      // ffmpeg start-up cost instead of turning it into a visible stall.
+      maxBufferLength: 30,
+      maxMaxBufferLength: 60,
+      backBufferLength: 60,
+      // Segments arrive as they finish transcoding, so gaps and short appends are
+      // normal here; hls.js has to keep nudging over them rather than give up.
+      maxBufferHole: 0.5,
+      nudgeMaxRetry: 10,
+      appendErrorMaxRetry: 5,
+      startFragPrefetch: true,
       startLevel: -1,
       lowLatencyMode: false
     };

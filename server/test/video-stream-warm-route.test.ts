@@ -121,7 +121,7 @@ describe.sequential('HLS segment warm-up route', () => {
     const handler = getRouteHandler('/:id/hls/:quality/warm');
     const response = createResponse();
 
-    // 10s sits inside segment 2 with a 4 second target duration, which is where a
+    // 10s sits inside segment 5 with a 2 second target duration, which is where a
     // handover from the feed lands.
     handler(
       {
@@ -134,7 +134,7 @@ describe.sequential('HLS segment warm-up route', () => {
 
     expect(response.json).toHaveBeenCalledWith({ warming: 3 });
     await vi.waitFor(() => expect(getSegmentMock).toHaveBeenCalledTimes(3));
-    expect(getSegmentMock.mock.calls.map(([input]: any[]) => input.index)).toEqual([2, 3, 4]);
+    expect(getSegmentMock.mock.calls.map(([input]: any[]) => input.index)).toEqual([5, 6, 7]);
   });
 
   it('clamps a resume position past the end of the clip to the last segment', async () => {
@@ -154,7 +154,7 @@ describe.sequential('HLS segment warm-up route', () => {
 
     expect(response.json).toHaveBeenCalledWith({ warming: 1 });
     await vi.waitFor(() => expect(getSegmentMock).toHaveBeenCalledTimes(1));
-    expect(getSegmentMock.mock.calls.map(([input]: any[]) => input.index)).toEqual([2]);
+    expect(getSegmentMock.mock.calls.map(([input]: any[]) => input.index)).toEqual([4]);
   });
 
   it('never warms more segments than the clip actually has', async () => {
@@ -172,8 +172,9 @@ describe.sequential('HLS segment warm-up route', () => {
       vi.fn()
     );
 
-    expect(response.json).toHaveBeenCalledWith({ warming: 1 });
-    await vi.waitFor(() => expect(getSegmentMock).toHaveBeenCalledTimes(1));
+    // A 3 second clip only has two 2-second segments to warm.
+    expect(response.json).toHaveBeenCalledWith({ warming: 2 });
+    await vi.waitFor(() => expect(getSegmentMock).toHaveBeenCalledTimes(2));
   });
 
   it('rejects unknown qualities and unknown videos without transcoding anything', async () => {
