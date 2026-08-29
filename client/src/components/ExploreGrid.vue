@@ -22,6 +22,7 @@
 <script setup lang="ts">
 import { RouterLink, useRoute } from 'vue-router';
 
+import { useImmersiveMediaOpen } from '../composables/useImmersiveMediaOpen';
 import { useAppStore } from '../stores/app';
 import type { FeedItem } from '../types/api';
 import { formatMediaDuration } from '../utils/media';
@@ -39,6 +40,7 @@ const FEATURE_INDEXES = new Set([2, 8, 13]);
 
 const appStore = useAppStore();
 const route = useRoute();
+const immersiveOpen = useImmersiveMediaOpen();
 
 function getTileClass(index: number): string {
   return FEATURE_INDEXES.has(index % 15) ? 'explore-grid__item--feature' : '';
@@ -59,6 +61,14 @@ function handleImageNavigation(event: MouseEvent, item: FeedItem, navigate: () =
 
   event.preventDefault();
   emit('open', item);
+
+  // Search results open in the same immersive players as the home feed, so the
+  // details/delete entry and the playback gestures are the ones the viewer already
+  // knows. Carousels still need the post route.
+  if (immersiveOpen.openInPlace(item)) {
+    return;
+  }
+
   appStore.setImageModalBackground(route.fullPath);
   navigate();
 }

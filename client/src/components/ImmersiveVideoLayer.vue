@@ -2,6 +2,7 @@
   <Teleport to="body">
     <div
       v-if="target"
+      ref="layerElement"
       class="immersive-video"
       :class="{
         'immersive-video--dragging': isDragging,
@@ -118,7 +119,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 
 import { useAppStore } from '../stores/app';
@@ -136,7 +137,10 @@ import VideoMediaPlayer from './VideoMediaPlayer.vue';
 const { t } = useI18n();
 const appStore = useAppStore();
 const store = useImmersiveVideoStore();
+const layerElement = ref<HTMLElement | null>(null);
 const stageElement = ref<HTMLElement | null>(null);
+const layerSize = ref<{ width: number; height: number } | null>(null);
+let layerSizeObserver: ResizeObserver | null = null;
 const playerComponent = ref<InstanceType<typeof VideoMediaPlayer> | null>(null);
 const isRotated = ref(false);
 const isNativeFullscreen = ref(false);
@@ -155,9 +159,19 @@ const { dragOffset, isDragging, onPointercancel, onPointerdown, onPointermove, o
     }
   });
 
-const layerStyle = computed(() => {
+const layerStyle = computed<Record<string, string> | undefined>(() => {
+  // Published as custom properties so the rotated box can size itself against the
+  // layer's real dimensions. Container query units were the first attempt and did not
+  // resolve reliably on a transformed container.
+  const sizeVariables: Record<string, string> = layerSize.value
+    ? {
+        '--immersive-layer-width': `${layerSize.value.width}px`,
+        '--immersive-layer-height': `${layerSize.value.height}px`
+      }
+    : {};
+
   if (!isDragging.value || dragOffset.value === 0) {
-    return undefined;
+    return Object.keys(sizeVariables).length > 0 ? sizeVariables : undefined;
   }
 
   // Following the finger is what makes the layer feel attached to the gesture. The
@@ -169,6 +183,7 @@ const layerStyle = computed(() => {
     : `translateY(${dragOffset.value}px)`;
 
   return {
+    ...sizeVariables,
     transform: `${shift} scale(${1 - (travel / 240) * 0.08})`,
     opacity: String(1 - (travel / 240) * 0.35)
   };
@@ -275,6 +290,34 @@ function unlockScroll() {
   document.body.style.overflow = '';
 }
 
+/**
+ * The rotated box is sized in pixels taken from the layer itself, so the layer's own
+ * size has to be observed: on a phone the viewport changes when the URL bar hides, and
+ * a stale width is exactly what makes a turned picture cover half the screen.
+ */
+function observeLayerSize() {
+  const element = layerElement.value;
+  if (!element || typeof ResizeObserver === 'undefined') {
+    layerSize.value = element
+      ? { width: element.clientWidth, height: element.clientHeight }
+      : null;
+    return;
+  }
+
+  layerSizeObserver?.disconnect();
+  layerSizeObserver = new ResizeObserver(() => {
+    layerSize.value = { width: element.clientWidth, height: element.clientHeight };
+  });
+  layerSizeObserver.observe(element);
+  layerSize.value = { width: element.clientWidth, height: element.clientHeight };
+}
+
+function stopObservingLayerSize() {
+  layerSizeObserver?.disconnect();
+  layerSizeObserver = null;
+  layerSize.value = null;
+}
+
 watch(
   () => store.isOpen,
   async (isOpen) => {
@@ -285,8 +328,12 @@ watch(
       lockScroll();
       document.addEventListener('keydown', handleKeydown);
       document.addEventListener('fullscreenchange', handleFullscreenChange);
+      await nextTick();
+      observeLayerSize();
       return;
     }
+
+    stopObservingLayerSize();
 
     reset();
     unlockScroll();
@@ -298,6 +345,7 @@ watch(
 );
 
 onBeforeUnmount(() => {
+  stopObservingLayerSize();
   unlockScroll();
   unlockScreenOrientation();
   document.removeEventListener('keydown', handleKeydown);
@@ -314,9 +362,6 @@ onBeforeUnmount(() => {
   overscroll-behavior: contain;
   touch-action: none;
   transition: transform 0.22s ease, opacity 0.22s ease;
-  /* Size container for the rotator below: 100cqh/100cqw is how the turned layer gets
-     the viewport's swapped dimensions without measuring in JavaScript. */
-  container-type: size;
 }
 
 /* Everything the viewer sees lives in here so the toolbar and the details panel turn
@@ -406,14 +451,19 @@ onBeforeUnmount(() => {
 
 /* Landscape without touching the device orientation: the whole layer takes the
    viewport's swapped dimensions and turns a quarter, so the picture fills the screen
-   edge to edge once the phone is held sideways and the controls come along with it. */
+   edge to edge once the phone is held sideways and the controls come along with it.
+
+   The swapped dimensions come from a measurement rather than `100cqh`/`100cqw`. The
+   layer carries the drag transform, and a transformed size container did not resolve
+   those units on every engine, which is what left the turned picture sitting on half
+   the screen. `--immersive-layer-*` is written by a ResizeObserver on the layer. */
 .immersive-video--rotated .immersive-video__rotator {
   top: 50%;
   left: 50%;
   right: auto;
   bottom: auto;
-  width: 100cqh;
-  height: 100cqw;
+  width: var(--immersive-layer-height, 100%);
+  height: var(--immersive-layer-width, 100%);
   transform: translate(-50%, -50%) rotate(90deg);
   transform-origin: center;
 }

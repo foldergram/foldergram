@@ -86,18 +86,17 @@ export function useHoldToSpeed(options: HoldToSpeedOptions) {
   }
 
   /**
-   * Always writes the baseline back, even when the flag says no hold is running: a
-   * card rebuilt mid-gesture used to leave the element parked at 2x with nothing left
-   * to reset it. Resuming is still limited to a real hold so a tap-to-pause is not
+   * Always writes the baseline back, even when the flag says no hold is running and
+   * even when the reported rate already looks right: vidstack reports its own pending
+   * state, so a player that was really still at 2x used to be skipped here and stayed
+   * fast forever. Resuming is still limited to a real hold so a tap-to-pause is not
    * undone.
    */
   function restorePlaybackRate() {
     const wasFastForwarding = isFastForwarding.value;
     isFastForwarding.value = false;
 
-    if (options.getPlaybackRate() !== baseRate) {
-      options.setPlaybackRate(baseRate);
-    }
+    options.setPlaybackRate(baseRate);
 
     if (wasFastForwarding) {
       void options.play?.();
@@ -186,6 +185,8 @@ export function useHoldToSpeed(options: HoldToSpeedOptions) {
   function beginScrub() {
     capturePointer();
     clearActivationTimer();
+    // Resets the rate whether or not the hold had already fired, and resumes playback
+    // if it had, so the scrub preview tracks a clip running at normal speed.
     restorePlaybackRate();
     suppressClick = true;
     scrubOrigin = options.getCurrentTime();
@@ -233,10 +234,20 @@ export function useHoldToSpeed(options: HoldToSpeedOptions) {
         return;
       }
 
-      if (isFastForwarding.value || Math.abs(deltaX) < scrubActivationPx || Math.abs(deltaX) <= Math.abs(deltaY)) {
+      // A sideways drag is a scrub, so the pending hold is dropped before it can fire.
+      // Without this a swipe that took longer than `activationMs` to get going turned
+      // into fast playback first, and fast playback used to win the gesture for good.
+      if (activationTimer !== null && Math.abs(deltaX) > cancelActivationPx && Math.abs(deltaX) > Math.abs(deltaY)) {
+        clearActivationTimer();
+      }
+
+      if (Math.abs(deltaX) < scrubActivationPx || Math.abs(deltaX) <= Math.abs(deltaY)) {
         return;
       }
 
+      // Horizontal travel takes the gesture over even when fast playback already
+      // started: `beginScrub` drops the rate back to the baseline first, so the clip
+      // cannot be left running at 2x for the rest of the drag.
       beginScrub();
     }
 

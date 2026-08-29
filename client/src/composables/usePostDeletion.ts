@@ -4,10 +4,13 @@ import { useI18n } from 'vue-i18n';
 import { deleteImage, trashImage } from '../api/gallery';
 import { useAppStore } from '../stores/app';
 import { useAuthStore } from '../stores/auth';
+import { useCollectionsStore } from '../stores/collections';
+import { useExploreStore } from '../stores/explore';
 import { useFeedStore } from '../stores/feed';
 import { useFoldersStore } from '../stores/folders';
 import { useLikesStore } from '../stores/likes';
 import { useMomentsStore } from '../stores/moments';
+import { usePlacesStore } from '../stores/places';
 import { useReelsStore } from '../stores/reels';
 import type { FeedItem } from '../types/api';
 
@@ -23,10 +26,13 @@ export function usePostDeletion() {
   const { t } = useI18n();
   const appStore = useAppStore();
   const authStore = useAuthStore();
+  const collectionsStore = useCollectionsStore();
+  const exploreStore = useExploreStore();
   const feedStore = useFeedStore();
   const foldersStore = useFoldersStore();
   const likesStore = useLikesStore();
   const momentsStore = useMomentsStore();
+  const placesStore = usePlacesStore();
   const reelsStore = useReelsStore();
 
   const isConfirmOpen = ref(false);
@@ -60,10 +66,15 @@ export function usePostDeletion() {
     error.value = null;
   }
 
+  // Every list that can hold the post has to drop it, otherwise a tile the viewer just
+  // deleted from Search or a collection stays on screen until the next reload.
   function applyRemoval(deleted: { id: number; folderSlug: string }, mediaType: DeletableItem['mediaType']) {
     feedStore.removeImage(deleted.id);
     reelsStore.removeImage(deleted.id);
     likesStore.removeImage(deleted.id);
+    collectionsStore.removeImage(deleted.id);
+    exploreStore.removeImage(deleted.id);
+    placesStore.removeImage(deleted.id);
     const removedFolder = foldersStore.removeImage(deleted.id, deleted.folderSlug, mediaType);
     momentsStore.removeImage(deleted.id);
     appStore.removeIndexedImage(removedFolder ? 1 : 0, mediaType);

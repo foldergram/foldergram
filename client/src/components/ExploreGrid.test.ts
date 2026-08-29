@@ -2,6 +2,7 @@ import { mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { useImmersiveImageStore } from '../stores/immersive-image';
 import type { FeedItem } from '../types/api';
 import ExploreGrid from './ExploreGrid.vue';
 
@@ -75,5 +76,38 @@ describe('ExploreGrid', () => {
     expect(tileRoute.attributes('data-to')).toContain('"name":"image"');
     expect(tileRoute.attributes('data-to')).toContain('"id":"215"');
     expect(tileRoute.attributes('data-to')).toContain('"q":"animals"');
+  });
+
+  it('opens a tapped tile in the immersive layer instead of navigating away', async () => {
+    const imageStore = useImmersiveImageStore();
+    const navigate = vi.fn();
+
+    const wrapper = mount(ExploreGrid, {
+      props: {
+        items: [createImageItem(311)]
+      },
+      global: {
+        stubs: {
+          ResilientImage: {
+            template: '<img data-test="resilient-image" />'
+          },
+          RouterLink: {
+            // Declared as a Boolean so the bare `custom` attribute resolves to true and
+            // the grid's own anchor is what ends up in the DOM.
+            props: { custom: { type: Boolean, default: false }, to: { type: null, default: null } },
+            template: '<span class="router-link-stub"><slot href="#" :navigate="navigate" /></span>',
+            setup: () => ({ navigate })
+          }
+        }
+      }
+    });
+
+    await wrapper.get('a').trigger('click', { button: 0 });
+
+    // Search results have to reach the same players as the feed, so the delete entry and
+    // the playback gestures are the ones the viewer already knows.
+    expect(imageStore.isOpen).toBe(true);
+    expect(imageStore.target?.id).toBe(311);
+    expect(navigate).not.toHaveBeenCalled();
   });
 });

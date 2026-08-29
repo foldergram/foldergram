@@ -156,6 +156,10 @@ export const usePlacesStore = defineStore('places', {
 
     updateImageCaption(id: number, caption: string | null) {
       this.currentImages = updateCaptionInItems(this.currentImages, id, caption);
+    },
+
+    removeImage(id: number) {
+      this.currentImages = this.currentImages.filter((item) => item.id !== id);
     }
   }
 });

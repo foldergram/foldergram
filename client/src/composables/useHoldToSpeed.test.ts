@@ -6,6 +6,7 @@ function createHarness(options: { currentTime?: number; duration?: number } = {}
   let currentTime = options.currentTime ?? 30;
   let playbackRate = 1;
   let playCalls = 0;
+  let rateWrites: number[] | null = null;
   const surface = document.createElement('div');
 
   const hold = useHoldToSpeed({
@@ -17,6 +18,7 @@ function createHarness(options: { currentTime?: number; duration?: number } = {}
     getPlaybackRate: () => playbackRate,
     setPlaybackRate: (rate) => {
       playbackRate = rate;
+      rateWrites?.push(rate);
     },
     play: () => {
       playCalls += 1;
@@ -40,12 +42,17 @@ function createHarness(options: { currentTime?: number; duration?: number } = {}
     playbackRate = rate;
   }
 
+  function recordRateWrites(sink: number[]) {
+    rateWrites = sink;
+  }
+
   return {
     hold,
     press,
     move,
     release,
     setPlaybackRate,
+    recordRateWrites,
     surface,
     getCurrentTime: () => currentTime,
     getPlaybackRate: () => playbackRate,
@@ -151,6 +158,64 @@ describe('useHoldToSpeed', () => {
     expect(harness.getCurrentTime()).toBeCloseTo(42, 5);
     expect(harness.hold.isScrubbing.value).toBe(false);
     expect(harness.hold.shouldSuppressClick()).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it('hands a slow horizontal drag to the scrub instead of fast playback', () => {
+    vi.useFakeTimers();
+    const harness = createHarness({ currentTime: 30 });
+
+    harness.press(200);
+    // The finger moved sideways before the hold timer was due, so the timer must be
+    // dropped: it used to fire mid-drag and leave the clip at 2x for the whole scrub.
+    harness.move(216);
+    vi.advanceTimersByTime(600);
+
+    expect(harness.hold.isFastForwarding.value).toBe(false);
+    expect(harness.getPlaybackRate()).toBe(1);
+    expect(harness.hold.isScrubbing.value).toBe(true);
+
+    harness.release(216);
+    expect(harness.getPlaybackRate()).toBe(1);
+    expect(harness.getCurrentTime()).toBeCloseTo(31.92, 5);
+    vi.useRealTimers();
+  });
+
+  it('drops back to normal speed when a hold turns into a scrub', () => {
+    vi.useFakeTimers();
+    const harness = createHarness({ currentTime: 30 });
+
+    harness.press(200);
+    vi.advanceTimersByTime(300);
+    expect(harness.getPlaybackRate()).toBe(2);
+
+    // Sliding after the hold fired used to be ignored, so the clip stayed at 2x until
+    // the finger lifted and the seek never happened.
+    harness.move(280);
+    expect(harness.hold.isFastForwarding.value).toBe(false);
+    expect(harness.getPlaybackRate()).toBe(1);
+    expect(harness.hold.isScrubbing.value).toBe(true);
+
+    harness.release(280);
+    expect(harness.getPlaybackRate()).toBe(1);
+    expect(harness.getCurrentTime()).toBeCloseTo(39.6, 5);
+    vi.useRealTimers();
+  });
+
+  it('rewrites the baseline even when the player misreports its rate', () => {
+    vi.useFakeTimers();
+    const harness = createHarness();
+
+    harness.press();
+    vi.advanceTimersByTime(300);
+    // vidstack answers with its own pending state, so a player really still at 2x can
+    // report 1 here. Trusting that report used to leave it fast forever.
+    harness.setPlaybackRate(1);
+    const writes: number[] = [];
+    harness.recordRateWrites(writes);
+
+    harness.release();
+    expect(writes).toEqual([1]);
     vi.useRealTimers();
   });
 
