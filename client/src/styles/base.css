@@ -1082,9 +1082,15 @@ img[data-loaded="true"] {
   cursor: pointer;
 }
 
-/* iOS pops a text-selection loupe on a long press unless the callout is refused. */
+/* iOS pops a text-selection loupe on a long press unless the callout is refused.
+   The properties do not inherit into every descendant reliably, so the shell and
+   everything it renders (including vidstack's shadow video) all opt out. Native
+   apps have no equivalent because the surface is not selectable text to begin
+   with; this is the closest a web app gets. */
 .feed-card__video-shell,
-.viewer__media-shell--video-interactive {
+.viewer__media-shell--video-interactive,
+.feed-card__video-shell *,
+.viewer__media-shell--video-interactive * {
   -webkit-touch-callout: none;
   -webkit-user-select: none;
   user-select: none;

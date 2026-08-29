@@ -115,6 +115,48 @@ describe.sequential('HLS segment warm-up route', () => {
     expect((getSegmentMock.mock.calls[0]?.[0] as any).quality).toBe('720p');
   });
 
+  it('warms the segments around a resume position instead of the head of the clip', async () => {
+    const folder = folderRepository.upsert({ slug: 'resume', name: 'Resume', folderPath: 'resume' });
+    const video = await createIndexedVideo(folder, 'resume.mp4', 7_000, 60_000);
+    const handler = getRouteHandler('/:id/hls/:quality/warm');
+    const response = createResponse();
+
+    // 10s sits inside segment 2 with a 4 second target duration, which is where a
+    // handover from the feed lands.
+    handler(
+      {
+        params: { id: String(video.id), quality: '720p' },
+        query: { segments: '3', from: '10' }
+      } as unknown as express.Request,
+      response as unknown as express.Response,
+      vi.fn()
+    );
+
+    expect(response.json).toHaveBeenCalledWith({ warming: 3 });
+    await vi.waitFor(() => expect(getSegmentMock).toHaveBeenCalledTimes(3));
+    expect(getSegmentMock.mock.calls.map(([input]: any[]) => input.index)).toEqual([2, 3, 4]);
+  });
+
+  it('clamps a resume position past the end of the clip to the last segment', async () => {
+    const folder = folderRepository.upsert({ slug: 'clamp', name: 'Clamp', folderPath: 'clamp' });
+    const video = await createIndexedVideo(folder, 'clamp.mp4', 8_000, 9_000);
+    const handler = getRouteHandler('/:id/hls/:quality/warm');
+    const response = createResponse();
+
+    handler(
+      {
+        params: { id: String(video.id), quality: '720p' },
+        query: { segments: '2', from: '900' }
+      } as unknown as express.Request,
+      response as unknown as express.Response,
+      vi.fn()
+    );
+
+    expect(response.json).toHaveBeenCalledWith({ warming: 1 });
+    await vi.waitFor(() => expect(getSegmentMock).toHaveBeenCalledTimes(1));
+    expect(getSegmentMock.mock.calls.map(([input]: any[]) => input.index)).toEqual([2]);
+  });
+
   it('never warms more segments than the clip actually has', async () => {
     const folder = folderRepository.upsert({ slug: 'short', name: 'Short', folderPath: 'short' });
     const video = await createIndexedVideo(folder, 'short.mp4', 5_000, 3_000);

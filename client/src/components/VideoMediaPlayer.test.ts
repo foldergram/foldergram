@@ -80,7 +80,7 @@ describe('VideoMediaPlayer', () => {
       }
     });
 
-    const hdBtn = wrapperEligible.find('button[data-swipe-ignore="true"]');
+    const hdBtn = wrapperEligible.find('button[data-test="hd-toggle"]');
     expect(hdBtn.exists()).toBe(true);
     expect(hdBtn.classes()).not.toContain('video-media-player__control--active');
 
@@ -97,7 +97,7 @@ describe('VideoMediaPlayer', () => {
         plugins: [i18n]
       }
     });
-    expect(wrapperIneligibleStrategy.find('button[data-swipe-ignore="true"]').exists()).toBe(false);
+    expect(wrapperIneligibleStrategy.find('button[data-test="hd-toggle"]').exists()).toBe(false);
 
     // Ineligible: small resolution that did not downscale
     const wrapperIneligibleSize = mount(VideoMediaPlayer, {
@@ -112,7 +112,7 @@ describe('VideoMediaPlayer', () => {
         plugins: [i18n]
       }
     });
-    expect(wrapperIneligibleSize.find('button[data-swipe-ignore="true"]').exists()).toBe(false);
+    expect(wrapperIneligibleSize.find('button[data-test="hd-toggle"]').exists()).toBe(false);
   });
 
   it('toggles HD state and resets when src changes', async () => {
@@ -129,7 +129,7 @@ describe('VideoMediaPlayer', () => {
       }
     });
 
-    const hdBtn = wrapper.find('button[data-swipe-ignore="true"]');
+    const hdBtn = wrapper.find('button[data-test="hd-toggle"]');
     await hdBtn.trigger('click');
     expect(wrapper.emitted('toggle-hd')?.[0]).toEqual([true]);
     expect(wrapper.vm.isHd).toBe(true);
@@ -158,7 +158,7 @@ describe('VideoMediaPlayer', () => {
     playerEl.paused = false; // playing before toggle
     playerEl.play = vi.fn().mockResolvedValue(undefined);
 
-    const hdBtn = wrapper.find('button[data-swipe-ignore="true"]');
+    const hdBtn = wrapper.find('button[data-test="hd-toggle"]');
     await hdBtn.trigger('click');
 
     // Simulate loaded-metadata event on media player after source changed
@@ -166,6 +166,72 @@ describe('VideoMediaPlayer', () => {
 
     expect(playerEl.currentTime).toBe(42.5);
     expect(playerEl.play).toHaveBeenCalled();
+  });
+
+  it('reports a mute tap to the owner instead of flipping the element itself', async () => {
+    const wrapper = mount(VideoMediaPlayer, {
+      props: {
+        src: '/test-video.mp4',
+        muted: true
+      },
+      global: {
+        plugins: [i18n]
+      }
+    });
+
+    const playerEl = wrapper.find('media-player').element as any;
+    expect(playerEl.muted).toBe(true);
+
+    await wrapper.find('button[data-test="mute-toggle"]').trigger('click');
+
+    // The owning store decides; the element must not have un-muted on its own,
+    // otherwise vidstack's state becomes the source of truth and the persisted
+    // preference gets overwritten a few cards later.
+    expect(wrapper.emitted('toggle-mute')).toHaveLength(1);
+    expect(playerEl.muted).toBe(true);
+
+    await wrapper.setProps({ muted: false });
+    expect(playerEl.muted).toBe(false);
+  });
+
+  it('applies a handover start time on can-play when loaded-metadata could not seek', async () => {
+    const wrapper = mount(VideoMediaPlayer, {
+      props: {
+        src: '/test-video.mp4',
+        startTime: 10
+      },
+      global: {
+        plugins: [i18n]
+      }
+    });
+
+    const playerEl = wrapper.find('media-player').element as any;
+    // An HLS provider reports no duration and refuses the seek at this point,
+    // which is what used to restart the clip from zero.
+    let seekable = false;
+    let currentTime = 0;
+    Object.defineProperty(playerEl, 'currentTime', {
+      configurable: true,
+      get: () => currentTime,
+      set: (value: number) => {
+        if (seekable) {
+          currentTime = value;
+        }
+      }
+    });
+
+    playerEl.dispatchEvent(new Event('loaded-metadata'));
+    expect(playerEl.currentTime).toBe(0);
+
+    seekable = true;
+    playerEl.dispatchEvent(new Event('can-play'));
+    expect(playerEl.currentTime).toBe(10);
+
+    // Idempotent: a second can-play must not drag the viewer back to the handover
+    // position after they have watched on.
+    currentTime = 25;
+    playerEl.dispatchEvent(new Event('can-play'));
+    expect(playerEl.currentTime).toBe(25);
   });
 
   it('stops keyboard event propagation for arrow keys on controls', async () => {
@@ -178,7 +244,7 @@ describe('VideoMediaPlayer', () => {
       }
     });
 
-    const muteBtn = wrapper.find('media-mute-button');
+    const muteBtn = wrapper.find('button[data-test="mute-toggle"]');
     const keyEvent = new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true });
     const stopPropagationSpy = vi.spyOn(keyEvent, 'stopPropagation');
 

@@ -5,6 +5,7 @@ import { imageRepository } from '../db/repositories.js';
 import { scannerService } from '../services/scanner-service.js';
 import { storageService } from '../services/storage-service.js';
 import {
+  HLS_SEGMENT_SECONDS,
   buildMasterPlaylist,
   buildMediaPlaylist,
   getSegment,
@@ -28,7 +29,9 @@ const segmentParamSchema = imageIdParamSchema.extend({
 });
 
 const warmQuerySchema = z.object({
-  segments: z.coerce.number().int().min(1).max(4).default(2)
+  segments: z.coerce.number().int().min(1).max(4).default(2),
+  /** Playback position in seconds the viewer is about to seek to. */
+  from: z.coerce.number().min(0).default(0)
 });
 
 interface StreamableVideo {
@@ -192,8 +195,17 @@ videoStreamRouter.post('/:id/hls/:quality/warm', (request, response) => {
     return;
   }
 
-  const requestedSegments = warmQuerySchema.parse(request.query).segments;
-  const indexes = Array.from({ length: Math.min(requestedSegments, segmentCount) }, (_, index) => index);
+  const warmQuery = warmQuerySchema.parse(request.query);
+  // Handing a clip over from another surface resumes mid-file, so warm the segment
+  // that holds that position rather than always the head of the playlist.
+  const firstIndex = Math.min(
+    Math.max(0, Math.floor(warmQuery.from / HLS_SEGMENT_SECONDS)),
+    segmentCount - 1
+  );
+  const indexes = Array.from(
+    { length: Math.min(warmQuery.segments, segmentCount - firstIndex) },
+    (_, offset) => firstIndex + offset
+  );
 
   void (async () => {
     for (const index of indexes) {

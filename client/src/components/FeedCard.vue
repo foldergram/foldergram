@@ -120,6 +120,7 @@
       role="button"
       tabindex="0"
       @click="handleHomeVideoSurfaceClick"
+      @contextmenu.prevent
       @keydown="handleHomeVideoSurfaceKeydown"
     >
       <media-player
@@ -163,19 +164,22 @@
           </template>
           <template #trailing>
             <div v-if="showHomeVideoControls" class="feed-card__player-controls-group">
-              <media-mute-button
+              <button
                 class="feed-card__player-control"
+                type="button"
                 aria-label="Toggle sound"
+                @click.stop="toggleHomeVideoSound"
               >
                 <span
-                  class="feed-card__player-control-icon feed-card__player-mute-icon feed-card__player-mute-icon--on i-fluent-speaker-2-16-regular"
+                  class="feed-card__player-control-icon"
+                  :class="
+                    appStore.videoMuted
+                      ? 'i-fluent-speaker-mute-16-regular'
+                      : 'i-fluent-speaker-2-16-regular'
+                  "
                   aria-hidden="true"
                 />
-                <span
-                  class="feed-card__player-control-icon feed-card__player-mute-icon feed-card__player-mute-icon--off i-fluent-speaker-mute-16-regular"
-                  aria-hidden="true"
-                />
-              </media-mute-button>
+              </button>
               <media-fullscreen-button
                 class="feed-card__player-control"
                 aria-label="Toggle fullscreen"
@@ -455,6 +459,7 @@ import {
   resolveVideoSource,
   toPlayerSrc,
   useBundledHlsLibrary,
+  warmVideoStream,
   type ResolvedVideoSource
 } from '../utils/video-playback';
 import Avatar from './Avatar.vue';
@@ -524,7 +529,6 @@ const carouselIndex = ref(0);
 let homeImageTapResetTimer: ReturnType<typeof setTimeout> | null = null;
 let homeImageOpenTimer: ReturnType<typeof setTimeout> | null = null;
 let homeVideoObserver: IntersectionObserver | null = null;
-let homeVideoMuteSyncToken = 0;
 let homePlayerReady = false;
 let removeHomePlayerEventListeners: (() => void) | null = null;
 const {
@@ -825,14 +829,7 @@ function startHomeVideoObserver() {
 }
 
 function syncHomeVideoMuted(player: MediaPlayerElement, muted: boolean) {
-  const token = ++homeVideoMuteSyncToken;
   player.muted = muted;
-
-  requestAnimationFrame(() => {
-    if (homeVideoMuteSyncToken === token) {
-      homeVideoMuteSyncToken = 0;
-    }
-  });
 }
 
 async function syncHomeVideoPlayback() {
@@ -931,6 +928,14 @@ function openImmersiveVideo() {
     // Ignore pause rejections before the provider is ready.
   });
 
+  // The fullscreen layer resumes at `currentTime`, which usually lands in a
+  // segment the NAS has not transcoded yet. Warming it before the player asks
+  // removes the stall that used to show up right after the zoom animation.
+  warmVideoStream(props.item, appStore.videoPlaybackQuality, {
+    fromSeconds: currentTime,
+    segments: 3
+  });
+
   immersiveVideoStore.open(
     {
       id: props.item.id,
@@ -994,17 +999,17 @@ function handleHomeVideoFullscreenChange(event: Event) {
   void syncHomeVideoPlayback();
 }
 
-function handleHomeVideoVolumeChange() {
-  const player = homePlayerElement.value;
-  // Ignore volume-change events that fire before the player has fully initialized.
-  // Vidstack can emit these during its own setup with muted=false, which would
-  // overwrite the persisted muted preference read from localStorage.
-  if (!player || !homePlayerReady || homeVideoMuteSyncToken !== 0) {
-    return;
-  }
+// The store is the single source of truth for the muted preference: only an
+// explicit tap writes to it. Listening to `volume-change` used to feed vidstack's
+// own `muted=false` initialisation (new card, source swap, fallback) straight back
+// into the store, which silently un-muted the whole feed a few swipes later.
+function toggleHomeVideoSound() {
+  const nextMuted = !appStore.videoMuted;
+  appStore.setVideoMuted(nextMuted);
 
-  if (player.muted !== appStore.videoMuted) {
-    appStore.setVideoMuted(player.muted);
+  const player = homePlayerElement.value;
+  if (player) {
+    syncHomeVideoMuted(player, nextMuted);
   }
 }
 
@@ -1035,9 +1040,6 @@ function bindHomePlayerEventListeners(player: MediaPlayerElement | null) {
     syncHomeVideoTimelineState(player);
     void syncHomeVideoPlayback();
   };
-  const handleVolume = () => {
-    handleHomeVideoVolumeChange();
-  };
   const handlePlay = () => {
     handleHomeVideoPlay();
   };
@@ -1061,7 +1063,6 @@ function bindHomePlayerEventListeners(player: MediaPlayerElement | null) {
 
   player.addEventListener('loaded-metadata', handleReady);
   player.addEventListener('can-play', handleReady);
-  player.addEventListener('volume-change', handleVolume);
   player.addEventListener('play', handlePlay);
   player.addEventListener('pause', handlePause);
   player.addEventListener('duration-change', handleDuration);
@@ -1073,7 +1074,6 @@ function bindHomePlayerEventListeners(player: MediaPlayerElement | null) {
     removeHlsLibraryBinding();
     player.removeEventListener('loaded-metadata', handleReady);
     player.removeEventListener('can-play', handleReady);
-    player.removeEventListener('volume-change', handleVolume);
     player.removeEventListener('play', handlePlay);
     player.removeEventListener('pause', handlePause);
     player.removeEventListener('duration-change', handleDuration);

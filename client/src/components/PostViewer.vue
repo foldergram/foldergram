@@ -199,19 +199,22 @@
                 </template>
                 <template #trailing>
                   <div class="viewer__player-controls-group">
-                    <media-mute-button
+                    <button
                       class="viewer__player-control"
+                      type="button"
                       :aria-label="t('post.viewer.toggleSound')"
+                      @click.stop="toggleViewerSound"
                     >
                       <span
-                        class="viewer__player-control-icon viewer__player-mute-icon viewer__player-mute-icon--on i-fluent-speaker-2-16-regular"
+                        class="viewer__player-control-icon"
+                        :class="
+                          appStore.videoMuted
+                            ? 'i-fluent-speaker-mute-16-regular'
+                            : 'i-fluent-speaker-2-16-regular'
+                        "
                         aria-hidden="true"
                       />
-                      <span
-                        class="viewer__player-control-icon viewer__player-mute-icon viewer__player-mute-icon--off i-fluent-speaker-mute-16-regular"
-                        aria-hidden="true"
-                      />
-                    </media-mute-button>
+                    </button>
                     <button
                       v-if="showHdButton"
                       class="viewer__player-control"
@@ -719,7 +722,6 @@
     value: string
   }
 
-  let videoMuteSyncToken = 0
   let playerReady = false
   let pendingVideoRestore: { currentTime: number; wasPaused: boolean } | null = null
   let removePlayerEventListeners: (() => void) | null = null
@@ -1005,14 +1007,7 @@
   })
 
   function syncVideoMuted(player: MediaPlayerElement, muted: boolean) {
-    const token = ++videoMuteSyncToken
     player.muted = muted
-
-    requestAnimationFrame(() => {
-      if (videoMuteSyncToken === token) {
-        videoMuteSyncToken = 0
-      }
-    })
   }
 
   function isPrimaryPlainClick(event: MouseEvent) {
@@ -1521,17 +1516,16 @@
     }
   }
 
-  function handlePlayerVolumeChange() {
-    const player = playerElement.value
-    // Ignore volume-change events that fire before the player has fully initialized.
-    // Vidstack can emit these during its own setup with muted=false, which would
-    // overwrite the persisted muted preference read from localStorage.
-    if (!player || !playerReady || videoMuteSyncToken !== 0) {
-      return
-    }
+  // Only an explicit tap writes the muted preference. Mirroring vidstack's
+  // `volume-change` back into the store also captured its own `muted=false`
+  // initialisation on every source swap, which un-muted the library silently.
+  function toggleViewerSound() {
+    const nextMuted = !appStore.videoMuted
+    appStore.setVideoMuted(nextMuted)
 
-    if (player.muted !== appStore.videoMuted) {
-      appStore.setVideoMuted(player.muted)
+    const player = playerElement.value
+    if (player) {
+      syncVideoMuted(player, nextMuted)
     }
   }
 
@@ -1606,9 +1600,6 @@
       isVideoPaused.value = props.image?.mediaType === "video"
       syncVideoTimelineState(player)
     }
-    const handleVolume = () => {
-      handlePlayerVolumeChange()
-    }
     const handleDuration = (event: Event) => {
       if (event instanceof CustomEvent && typeof event.detail === "number" && event.detail > 0) {
         videoDurationMs.value = event.detail * 1000
@@ -1643,7 +1634,6 @@
     player.addEventListener("can-play", handleReady)
     player.addEventListener("play", handlePlay)
     player.addEventListener("pause", handlePause)
-    player.addEventListener("volume-change", handleVolume)
     player.addEventListener("duration-change", handleDuration)
     player.addEventListener("time-update", handleTimeUpdate)
     player.addEventListener("ended", handleEnded)
@@ -1655,7 +1645,6 @@
       player.removeEventListener("can-play", handleReady)
       player.removeEventListener("play", handlePlay)
       player.removeEventListener("pause", handlePause)
-      player.removeEventListener("volume-change", handleVolume)
       player.removeEventListener("duration-change", handleDuration)
       player.removeEventListener("time-update", handleTimeUpdate)
       player.removeEventListener("ended", handleEnded)

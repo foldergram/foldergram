@@ -126,7 +126,6 @@ import { useVerticalDismiss } from '../composables/useVerticalDismiss';
 import {
   exitDocumentFullscreen,
   isDocumentFullscreen,
-  lockScreenOrientation,
   requestElementFullscreen,
   unlockScreenOrientation
 } from '../utils/fullscreen';
@@ -186,22 +185,13 @@ function getVideoElement(): HTMLVideoElement | null {
   return shadow instanceof HTMLVideoElement ? shadow : null;
 }
 
-async function toggleOrientation() {
-  const next = !isRotated.value;
-
-  if (next) {
-    // Real orientation lock where the platform has it, CSS rotation elsewhere
-    // (iOS Safari has no Screen Orientation lock at all).
-    const locked = await lockScreenOrientation('landscape');
-    isRotated.value = !locked;
-    if (locked) {
-      isNativeFullscreen.value = isDocumentFullscreen();
-    }
-    return;
-  }
-
-  unlockScreenOrientation();
-  isRotated.value = false;
+// Rotating the picture rather than asking the platform to rotate the screen. An
+// orientation lock is silently refused on iOS and only granted to a fullscreen
+// document on Android, so the button used to do nothing visible and then surprise
+// the viewer with a turned layout later. Turning the stage ourselves always works;
+// the viewer holds the phone sideways.
+function toggleOrientation() {
+  isRotated.value = !isRotated.value;
 }
 
 async function toggleFullscreen() {
@@ -393,7 +383,9 @@ onBeforeUnmount(() => {
   height: 100%;
 }
 
-/* Pseudo landscape for platforms without a Screen Orientation lock. */
+/* Landscape without touching the device orientation: the stage takes the viewport's
+   swapped dimensions and turns a quarter, so the picture fills the screen edge to
+   edge once the phone is held sideways. */
 .immersive-video--rotated .immersive-video__stage {
   width: 100vh;
   height: 100vw;

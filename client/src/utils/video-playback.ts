@@ -111,7 +111,14 @@ const warmedStreams = new Set<string>();
  * them. Only streamed sources benefit: a directly playable file is already served
  * straight from disk. Failures are ignored because this is pure optimisation.
  */
-export function warmVideoStream(media: VideoPlaybackMedia, quality: VideoPlaybackQuality): void {
+/** Mirrors HLS_SEGMENT_SECONDS on the server; only used to dedupe warm calls. */
+const WARM_SEGMENT_SECONDS = 4;
+
+export function warmVideoStream(
+  media: VideoPlaybackMedia,
+  quality: VideoPlaybackQuality,
+  options: { fromSeconds?: number; segments?: number } = {}
+): void {
   const source = resolveVideoSource(media, quality);
   if (!source.isStream) {
     return;
@@ -123,13 +130,19 @@ export function warmVideoStream(media: VideoPlaybackMedia, quality: VideoPlaybac
   }
 
   const streamQuality = match[2] ?? '720p';
-  const key = `${match[1]}:${streamQuality}`;
+  const fromSeconds = Math.max(0, options.fromSeconds ?? 0);
+  const segments = options.segments ?? 2;
+  // Keyed by segment index so resuming at 0:10 still warms segment 2 even though
+  // the head of the same clip was warmed earlier.
+  const segmentIndex = Math.floor(fromSeconds / WARM_SEGMENT_SECONDS);
+  const key = `${match[1]}:${streamQuality}:${segmentIndex}`;
   if (warmedStreams.has(key)) {
     return;
   }
 
   warmedStreams.add(key);
-  void fetch(`/api/videos/${match[1]}/hls/${streamQuality}/warm?segments=2`, {
+  const query = `segments=${segments}&from=${fromSeconds.toFixed(3)}`;
+  void fetch(`/api/videos/${match[1]}/hls/${streamQuality}/warm?${query}`, {
     method: 'POST',
     credentials: 'same-origin',
     headers: { 'x-foldergram-intent': '1' }

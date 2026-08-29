@@ -1,12 +1,14 @@
 <template>
   <article class="reel-player-card" :class="{ 'reel-player-card--rotated': landscape.isRotated.value }">
     <div ref="stageElement" class="reel-player-card__stage">
+      <div class="reel-player-card__rotator">
       <div
         class="reel-player-card__surface"
         :aria-label="active ? t('post.viewer.togglePlayback') : undefined"
         :role="active ? 'button' : undefined"
         :tabindex="active ? 0 : -1"
         @click="handleSurfaceClick"
+        @contextmenu.prevent
         @keydown="handleSurfaceKeydown"
         @pointercancel="holdSpeed.onPointercancel"
         @pointerdown="holdSpeed.onPointerdown"
@@ -166,6 +168,7 @@
           </div>
         </div>
       </div>
+      </div>
     </div>
   </article>
 </template>
@@ -181,6 +184,7 @@ import type { MediaPlayerElement } from 'vidstack/elements';
 
 import { useHoldToSpeed } from '../composables/useHoldToSpeed';
 import { useLandscapeStage } from '../composables/useLandscapeStage';
+import { reelsLandscapeRotation } from '../composables/useReelsLandscape';
 import { useAppStore } from '../stores/app';
 import { useImmersiveVideoStore } from '../stores/immersive-video';
 import type { FeedItem, FolderSummary } from '../types/api';
@@ -468,7 +472,12 @@ const scrubLabel = computed(() => {
   return formatVideoTimestamp((playerElement.value?.duration ?? 0) * 1000, seconds * 1000);
 });
 
+// Rotating in place instead of asking for native fullscreen: fullscreen took the
+// card out of the scroll container, which is why the deck stopped swiping and the
+// picture came back half-off-screen after closing.
 const landscape = useLandscapeStage({
+  mode: 'rotate',
+  rotationState: reelsLandscapeRotation,
   getStage: () => stageElement.value,
   getVideo: () => {
     const player = playerElement.value;
@@ -674,6 +683,14 @@ onBeforeUnmount(() => {
   box-shadow: none;
 }
 
+/* Size container for the rotated surface below: 100cqh/100cqw is how the turned
+   picture gets the stage's swapped dimensions without measuring in JavaScript. */
+.reel-player-card__rotator {
+  position: absolute;
+  inset: 0;
+  container-type: size;
+}
+
 .reel-player-card__surface {
   position: relative;
   display: block;
@@ -690,6 +707,15 @@ onBeforeUnmount(() => {
   -webkit-user-select: none;
   user-select: none;
   touch-action: pan-y;
+}
+
+/* The callout refusal has to reach the shadow video too, otherwise the loupe still
+   appears when the press lands on the picture itself. */
+.reel-player-card__surface *,
+.reel-player-card__surface :deep(*) {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .reel-player-card__player {
@@ -849,15 +875,22 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-/* Pseudo landscape for platforms without a Screen Orientation lock (iOS Safari). */
-.reel-player-card--rotated .reel-player-card__stage {
-  width: 100vh;
-  height: 100vw;
-  max-width: none;
-  max-height: none;
-  aspect-ratio: auto;
-  transform: rotate(90deg);
+/* Landscape without leaving the page: the stage box keeps its portrait footprint so
+   scroll-snap and the vertical swipe still work, while the picture inside is turned
+   a quarter and sized against the stage's own container so it fills it edge to edge.
+   The viewer turns the phone; nothing about the deck layout moves. */
+.reel-player-card--rotated .reel-player-card__surface {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 100cqh;
+  height: 100cqw;
+  transform: translate(-50%, -50%) rotate(90deg);
   transform-origin: center;
+  /* `pan-y` is expressed in screen space, so after the quarter turn it would block
+     the swipe that moves the deck. Handing panning back to the browser keeps the
+     vertical swipe alive; the scrub gesture uses pointer capture either way. */
+  touch-action: auto;
 }
 
 .reel-player-card__hold-indicator {

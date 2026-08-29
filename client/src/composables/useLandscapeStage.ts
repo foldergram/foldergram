@@ -1,4 +1,4 @@
-import { onBeforeUnmount, ref } from 'vue';
+import { onBeforeUnmount, ref, type Ref } from 'vue';
 
 import {
   exitDocumentFullscreen,
@@ -13,19 +13,33 @@ interface LandscapeStageOptions {
   getStage: () => HTMLElement | null;
   /** iOS only exposes fullscreen on the video element itself. */
   getVideo?: () => HTMLVideoElement | null;
+  /**
+   * `native` asks the platform for fullscreen plus an orientation lock and only
+   * rotates by hand when both are refused. `rotate` never leaves the page: the
+   * host widens the picture with a CSS rotation and the viewer turns the device.
+   * The reels deck needs `rotate` so vertical swiping keeps working.
+   */
+  mode?: 'native' | 'rotate';
+  /** Lets several hosts share one rotation flag, e.g. every card in a deck. */
+  rotationState?: Ref<boolean>;
 }
 
 /**
- * Turns a portrait stage into a landscape one on whatever the platform supports:
- * a real orientation lock where it exists, native fullscreen next, and a CSS
- * rotation as the last resort (iPhone Safari has neither). `isRotated` is the
- * flag the host binds to its rotated class.
+ * Turns a portrait stage into a landscape one. `isRotated` is the flag the host
+ * binds to its rotated class; `isFullscreen` only ever becomes true in `native`
+ * mode.
  */
 export function useLandscapeStage(options: LandscapeStageOptions) {
-  const isRotated = ref(false);
+  const mode = options.mode ?? 'native';
+  const isRotated = options.rotationState ?? ref(false);
   const isFullscreen = ref(false);
 
   async function enter() {
+    if (mode === 'rotate') {
+      isRotated.value = true;
+      return;
+    }
+
     // Fullscreen first: an orientation lock is only granted to a fullscreen
     // document on Android Chrome, and it also hides the browser chrome.
     const entered = await requestElementFullscreen(options.getStage(), options.getVideo?.() ?? null);
@@ -37,8 +51,13 @@ export function useLandscapeStage(options: LandscapeStageOptions) {
   }
 
   async function exit() {
-    unlockScreenOrientation();
     isRotated.value = false;
+
+    if (mode === 'rotate') {
+      return;
+    }
+
+    unlockScreenOrientation();
 
     if (isFullscreen.value || isDocumentFullscreen()) {
       await exitDocumentFullscreen();
@@ -61,7 +80,9 @@ export function useLandscapeStage(options: LandscapeStageOptions) {
   }
 
   onBeforeUnmount(() => {
-    unlockScreenOrientation();
+    if (mode !== 'rotate') {
+      unlockScreenOrientation();
+    }
   });
 
   return {

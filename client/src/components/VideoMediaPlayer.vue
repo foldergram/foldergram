@@ -4,6 +4,7 @@
     role="button"
     tabindex="0"
     @click="handleSurfaceClick"
+    @contextmenu.prevent
     @keydown="handleSurfaceKeydown"
     @pointercancel="handleHoldPointercancel"
     @pointerdown="handleHoldPointerdown"
@@ -59,27 +60,27 @@
         </template>
         <template #trailing>
           <div class="video-media-player__controls-group" data-swipe-ignore="true">
-            <media-mute-button
+            <button
               class="video-media-player__control"
+              type="button"
+              data-test="mute-toggle"
               :aria-label="t('post.viewer.toggleSound')"
               data-swipe-ignore="true"
               @click.stop="handleMuteClick"
             >
               <span
-                class="video-media-player__control-icon video-media-player__mute-icon video-media-player__mute-icon--on i-fluent-speaker-2-16-regular"
+                class="video-media-player__control-icon"
+                :class="muted ? 'i-fluent-speaker-mute-16-regular' : 'i-fluent-speaker-2-16-regular'"
                 aria-hidden="true"
               />
-              <span
-                class="video-media-player__control-icon video-media-player__mute-icon video-media-player__mute-icon--off i-fluent-speaker-mute-16-regular"
-                aria-hidden="true"
-              />
-            </media-mute-button>
+            </button>
 
             <button
               v-if="hasHdOption"
               class="video-media-player__control"
               :class="{ 'video-media-player__control--active': isHd }"
               type="button"
+              data-test="hd-toggle"
               :aria-label="isHd ? t('post.viewer.switchToPreviewQuality') : t('post.viewer.switchToHdOriginal')"
               :aria-pressed="isHd"
               :title="isHd ? t('post.viewer.previewQuality') : t('post.viewer.hdOriginal')"
@@ -248,6 +249,8 @@ let pendingRestoreState: { currentTime: number; wasPaused: boolean } | null = nu
 let hidePausedTimer: NodeJS.Timeout | null = null;
 let removeEventListeners: (() => void) | null = null;
 let appliedStartTime = false;
+/** A handover lands on a keyframe, so an exact match is not expected. */
+const START_TIME_TOLERANCE_SEC = 1.5;
 
 const holdSpeed = useHoldToSpeed({
   canStart: (event) => !isInteractiveTarget(event.target),
@@ -490,6 +493,35 @@ async function togglePlayback() {
   emit('toggle-playback');
 }
 
+/**
+ * Continues the clip where the previous surface left off. Called from both
+ * `loaded-metadata` and `can-play`: the earlier event is enough for a progressive
+ * file, while HLS only honours the seek once a segment is attached. The tolerance
+ * check keeps it idempotent so an already-applied handover is never re-seeked.
+ */
+function applyStartTime(player: MediaPlayerElement) {
+  if (appliedStartTime || props.startTime <= 0) {
+    return;
+  }
+
+  const target = props.startTime;
+  const duration = player.duration || 0;
+  if (duration > 0 && target >= duration - 0.25) {
+    appliedStartTime = true;
+    return;
+  }
+
+  try {
+    player.currentTime = target;
+  } catch {
+    return;
+  }
+
+  if (Math.abs((player.currentTime || 0) - target) <= START_TIME_TOLERANCE_SEC) {
+    appliedStartTime = true;
+  }
+}
+
 function setupListeners() {
   const player = playerElement.value;
   if (!player) return;
@@ -515,13 +547,14 @@ function setupListeners() {
       return;
     }
 
-    // Handing over from another surface should continue the clip, not restart it.
-    if (!appliedStartTime && props.startTime > 0) {
-      appliedStartTime = true;
-      try {
-        player.currentTime = props.startTime;
-      } catch {}
-    }
+    applyStartTime(player);
+  };
+
+  const onCanPlay = () => {
+    // HLS providers regularly ignore a seek issued at `loaded-metadata` because the
+    // media source has no buffered range yet, so confirm the handover once the
+    // provider reports it can play.
+    applyStartTime(player);
   };
 
   const onTimeUpdate = () => {
@@ -549,6 +582,7 @@ function setupListeners() {
   const removeHlsLibraryBinding = useBundledHlsLibrary(player);
 
   player.addEventListener('loaded-metadata', onLoadedMetadata);
+  player.addEventListener('can-play', onCanPlay);
   player.addEventListener('time-update', onTimeUpdate);
   player.addEventListener('play', onPlay);
   player.addEventListener('pause', onPause);
@@ -557,6 +591,7 @@ function setupListeners() {
   removeEventListeners = () => {
     removeHlsLibraryBinding();
     player.removeEventListener('loaded-metadata', onLoadedMetadata);
+    player.removeEventListener('can-play', onCanPlay);
     player.removeEventListener('time-update', onTimeUpdate);
     player.removeEventListener('play', onPlay);
     player.removeEventListener('pause', onPause);
@@ -597,6 +632,18 @@ watch(playerElement, () => {
   if (removeEventListeners) removeEventListeners();
   setupListeners();
 });
+
+// The mute button now reports to the owning store instead of flipping the player
+// itself, so the element follows the prop in both directions.
+watch(
+  () => props.muted,
+  (muted) => {
+    const player = playerElement.value;
+    if (player) {
+      player.muted = muted;
+    }
+  }
+);
 
 defineExpose({
   playerElement,
@@ -732,6 +779,16 @@ defineExpose({
 .video-media-player__control-icon {
   width: 1.125rem;
   height: 1.125rem;
+}
+
+/* The loupe suppression has to reach vidstack's own elements, including the video
+   inside the shadow root, or a long press on the picture still raises it. */
+.video-media-player,
+.video-media-player *,
+.video-media-player :deep(*) {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 media-player[data-paused] .video-media-player__play-icon--pause,
