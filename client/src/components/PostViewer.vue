@@ -1489,6 +1489,9 @@
       }
     }
 
+    // Audible autoplay was refused, so record the fallback in the store and keep
+    // the element, the icon and the persisted preference consistent.
+    appStore.setVideoMuted(true)
     syncVideoMuted(player, true)
 
     try {

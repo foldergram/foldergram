@@ -243,7 +243,6 @@ const folderDescription = computed(() => {
   return currentFolderName ? `${currentFolderName}/${props.item.filename}` : props.item.filename;
 });
 
-let muteSyncToken = 0;
 let removePlayerEventListeners: (() => void) | null = null;
 let autoplayRetryAttempts = 0;
 let autoplayRetryTimer = 0;
@@ -297,14 +296,7 @@ function switchToFallbackSource() {
 }
 
 function syncMuted(player: MediaPlayerElement, muted: boolean) {
-  const token = ++muteSyncToken;
   player.muted = muted;
-
-  requestAnimationFrame(() => {
-    if (muteSyncToken === token) {
-      muteSyncToken = 0;
-    }
-  });
 }
 
 async function syncPlayback() {
@@ -342,6 +334,19 @@ async function syncPlayback() {
       scheduleAutoplayRetry();
       return;
     }
+  }
+
+  // Audible autoplay was refused. Recording it in the store keeps the icon and the
+  // persisted preference honest instead of silently muting only this element.
+  appStore.setVideoMuted(true);
+  syncMuted(player, true);
+
+  try {
+    await player.play();
+    resetAutoplayRetry();
+    isPaused.value = false;
+  } catch {
+    scheduleAutoplayRetry();
   }
 }
 

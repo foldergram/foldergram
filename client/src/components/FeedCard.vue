@@ -866,6 +866,11 @@ async function syncHomeVideoPlayback() {
     }
   }
 
+  // The browser refused audible autoplay. Recording that in the store keeps the
+  // element, the icon and the persisted preference telling the same story; muting
+  // only the element left the store claiming sound was on, and the next sync
+  // un-muted the clip behind the viewer's back.
+  appStore.setVideoMuted(true);
   syncHomeVideoMuted(player, true);
 
   try {
