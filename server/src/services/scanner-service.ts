@@ -2319,6 +2319,8 @@ class ScannerService {
         }
       }
 
+      summary.removed_files += await this.softDeleteVanishedOriginals();
+
       postRepository.syncRepresentativePlaces();
 
       metrics.removedFolderStateRows = folderScanStateRepository.deleteMissing([...activeFolderPaths]);
@@ -2382,6 +2384,50 @@ class ScannerService {
     this.finishProgress();
 
     return summary;
+  }
+
+  /**
+   * Final safety net after discovery: any indexed file whose original is gone
+   * gets soft deleted. Per-folder cleanup only reaches folders discovery walked,
+   * so a source directory that vanished as a whole would otherwise keep serving
+   * rows that 404 in the feed.
+   */
+  private async softDeleteVanishedOriginals(): Promise<number> {
+    const rows = imageRepository.listAliveRelativePaths();
+    if (rows.length === 0) {
+      return 0;
+    }
+
+    const vanished: string[] = [];
+    await Promise.all(
+      rows.map((row) =>
+        discoveryLimit(async () => {
+          let absolutePath: string;
+          try {
+            absolutePath = resolveOriginalPath(row.relative_path);
+          } catch {
+            vanished.push(row.relative_path);
+            return;
+          }
+
+          try {
+            await fs.stat(absolutePath);
+          } catch {
+            vanished.push(row.relative_path);
+          }
+        })
+      )
+    );
+
+    for (const relativePath of vanished) {
+      imageRepository.markDeleted(relativePath);
+    }
+
+    if (vanished.length > 0) {
+      log.info(joinLogParts(['Pruned vanished originals', formatStep('files', vanished.length)]));
+    }
+
+    return vanished.length;
   }
 
   private async performIncrementalScan(relativePaths: string[], reason: string): Promise<ScanSummary> {

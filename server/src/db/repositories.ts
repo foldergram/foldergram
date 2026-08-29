@@ -2282,6 +2282,18 @@ export const imageRepository = {
     return removedCount;
   },
 
+  /**
+   * Lists every indexed file the API would still serve, so a caller can verify
+   * the originals are actually on disk. Discovery only walks folders it finds,
+   * so a source directory that disappeared as a whole leaves rows behind that no
+   * per-folder cleanup ever touches.
+   */
+  listAliveRelativePaths(): Array<{ id: number; relative_path: string }> {
+    return database
+      .prepare('SELECT id, relative_path FROM images WHERE is_deleted = 0 AND is_trashed = 0')
+      .all() as Array<{ id: number; relative_path: string }>;
+  },
+
   markAllDeletedByFolder(folderId: number, postType?: PostType): number {
     const deletedAt = nowIso();
     const result = database

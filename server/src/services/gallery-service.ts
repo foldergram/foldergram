@@ -400,6 +400,10 @@ function resolveOriginalMediaFile(id: number): { path: string; filename: string 
   }
 
   if (!resolvedPath || !fs.existsSync(resolvedPath)) {
+    // The index outlived the file. Soft deleting here keeps the feed from
+    // handing out the same dead post on every reload, instead of waiting for
+    // the next full scan to notice.
+    imageRepository.markDeleted(detail.relative_path);
     return null;
   }
 

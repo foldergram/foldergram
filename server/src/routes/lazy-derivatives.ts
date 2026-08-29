@@ -111,6 +111,30 @@ function queueLazyGeneration(
   return trackedGeneration;
 }
 
+async function retireRecordWhenOriginalIsGone(requestedPath: string, kind: 'thumbnail' | 'preview'): Promise<boolean> {
+  const imageRecord = findCurrentImageRecord(requestedPath, kind);
+  if (!imageRecord) {
+    return false;
+  }
+
+  let sourcePath: string;
+  try {
+    sourcePath = resolveOriginalPath(imageRecord.relative_path);
+  } catch {
+    imageRepository.markDeleted(imageRecord.relative_path);
+    return true;
+  }
+
+  if (await pathExists(sourcePath)) {
+    return false;
+  }
+
+  // Generation can never succeed without the original, so retiring the row here
+  // stops the feed from handing out the same broken card on every reload.
+  imageRepository.markDeleted(imageRecord.relative_path);
+  return true;
+}
+
 function isConnectionTerminationError(error: unknown): boolean {
   if (!(error instanceof Error)) {
     return false;
@@ -219,6 +243,12 @@ async function serveOrGenerate(
       sendDerivativeNotFound(response);
       return;
     }
+
+    if (await retireRecordWhenOriginalIsGone(requestedPath, kind)) {
+      sendDerivativeNotFound(response);
+      return;
+    }
+
     const message = error instanceof Error ? error.message : 'Failed to generate derivative.';
     applyDerivativeErrorHeaders(response);
     response.status(500).json({ message });
@@ -310,6 +340,12 @@ export async function serveDerivativeForImage(
       sendDerivativeNotFound(response);
       return;
     }
+
+    if (await retireRecordWhenOriginalIsGone(requestedPath, kind)) {
+      sendDerivativeNotFound(response);
+      return;
+    }
+
     const message = error instanceof Error ? error.message : 'Failed to generate derivative.';
     applyDerivativeErrorHeaders(response);
     response.status(500).json({ message });
