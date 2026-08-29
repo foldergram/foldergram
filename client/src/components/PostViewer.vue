@@ -164,7 +164,7 @@
               :title.prop="image.filename"
               :fullscreenOrientation.prop="'landscape'"
               :playsInline.prop="true"
-              :muted.prop="appStore.videoMuted"
+              :muted.prop="viewerEffectiveMuted"
               :loop.prop="true"
               load="eager"
               preload="metadata"
@@ -208,7 +208,7 @@
                       <span
                         class="viewer__player-control-icon"
                         :class="
-                          appStore.videoMuted
+                          viewerEffectiveMuted
                             ? 'i-fluent-speaker-mute-16-regular'
                             : 'i-fluent-speaker-2-16-regular'
                         "
@@ -637,6 +637,7 @@
     resolveVideoSource,
     toPlayerSrc,
     useBundledHlsLibrary,
+    warmVideoStream,
     type ResolvedVideoSource,
   } from "../utils/video-playback"
   import Avatar from "./Avatar.vue"
@@ -1006,6 +1007,11 @@
     },
   })
 
+  // A refused audible autoplay applies to this element until the next user gesture,
+  // so it stays local instead of overwriting the stored preference.
+  const viewerAudioBlocked = ref(false)
+  const viewerEffectiveMuted = computed(() => appStore.videoMuted || viewerAudioBlocked.value)
+
   function syncVideoMuted(player: MediaPlayerElement, muted: boolean) {
     player.muted = muted
   }
@@ -1017,7 +1023,7 @@
   // un-muting stays an explicit tap.
   function enforceVideoMuted() {
     const player = playerElement.value
-    if (player && appStore.videoMuted && !player.muted) {
+    if (player && viewerEffectiveMuted.value && !player.muted) {
       player.muted = true
     }
   }
@@ -1487,23 +1493,23 @@
       return
     }
 
-    syncVideoMuted(player, appStore.videoMuted)
+    syncVideoMuted(player, viewerEffectiveMuted.value)
 
     try {
       await player.play()
       isVideoPaused.value = false
       return
     } catch {
-      if (appStore.videoMuted) {
+      if (viewerEffectiveMuted.value) {
         // Ignore autoplay rejections and leave manual controls available.
         isVideoPaused.value = true
         return
       }
     }
 
-    // Audible autoplay was refused, so record the fallback in the store and keep
-    // the element, the icon and the persisted preference consistent.
-    appStore.setVideoMuted(true)
+    // Audible autoplay was refused. Only this element falls back to muted playback so
+    // the stored preference keeps describing what the viewer actually asked for.
+    viewerAudioBlocked.value = true
     syncVideoMuted(player, true)
 
     try {
@@ -1521,7 +1527,7 @@
       return
     }
 
-    syncVideoMuted(player, appStore.videoMuted)
+    syncVideoMuted(player, viewerEffectiveMuted.value)
 
     try {
       await player.play()
@@ -1534,11 +1540,26 @@
   // Only an explicit tap writes the muted preference. Mirroring vidstack's
   // `volume-change` back into the store also captured its own `muted=false`
   // initialisation on every source swap, which un-muted the library silently.
-  function toggleViewerSound() {
+  async function toggleViewerSound() {
+    const player = playerElement.value
+
+    // The tap is the gesture the browser wanted, so retry audible playback instead of
+    // flipping the stored preference the wrong way.
+    if (viewerAudioBlocked.value && !appStore.videoMuted) {
+      viewerAudioBlocked.value = false
+      if (player) {
+        syncVideoMuted(player, false)
+        await player.play().catch(() => {
+          // Ignore play rejections before the provider is ready.
+        })
+      }
+      return
+    }
+
     const nextMuted = !appStore.videoMuted
+    viewerAudioBlocked.value = false
     appStore.setVideoMuted(nextMuted)
 
-    const player = playerElement.value
     if (player) {
       syncVideoMuted(player, nextMuted)
     }
@@ -1703,6 +1724,10 @@
   watch(
     () => appStore.videoMuted,
     videoMuted => {
+      if (!videoMuted) {
+        viewerAudioBlocked.value = false
+      }
+
       const player = playerElement.value
       if (!player) {
         return
@@ -1713,6 +1738,7 @@
   )
 
   watch(playerElement, player => {
+    viewerAudioBlocked.value = false
     videoDurationMs.value = props.image?.durationMs ?? 0
     videoCurrentTimeMs.value = 0
     playerReady = false
@@ -1866,6 +1892,12 @@
     },
   })
 
+  // Ending the gesture before the provider changes: a hold that outlives its own
+  // element never receives `pointerup` there, which used to leave the clip at 2x.
+  watch([videoSource, () => props.image?.id ?? null], () => {
+    holdSpeed.stop()
+  })
+
   const videoScrubLabel = computed(() => {
     const seconds = holdSpeed.scrubSeconds.value
     if (seconds === null) {
@@ -1907,6 +1939,13 @@
 
     void player?.pause().catch(() => {
       // Ignore pause rejections before the provider is ready.
+    })
+
+    // The layer resumes at `currentTime`, which usually lands in a segment the NAS has
+    // not transcoded yet; warming it removes the stall right after the zoom.
+    warmVideoStream(image, appStore.videoPlaybackQuality, {
+      fromSeconds: currentTime ?? 0,
+      segments: 4,
     })
 
     immersiveVideoStore.open(

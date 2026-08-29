@@ -100,37 +100,17 @@
       v-if="deletion.canDelete.value"
       class="reels-info-sidebar__delete"
       type="button"
+      data-test="reel-delete"
       :disabled="deletion.isDeleting.value"
-      @click="deletion.requestDelete()"
+      @click="handleDelete"
     >
       <span class="reels-info-sidebar__delete-icon i-fluent-delete-20-regular" aria-hidden="true" />
       <span>{{ t('reels.info.deleteVideo') }}</span>
     </button>
 
-    <ConfirmDialog
-      v-if="deletion.isConfirmOpen.value"
-      :title="t('post.feedCard.delete.title')"
-      :message="deletion.dialogMessage.value"
-      :confirm-label="deletion.dialogConfirmLabel.value"
-      :loading="deletion.isDeleting.value"
-      @cancel="deletion.cancelDelete()"
-      @confirm="handleDeleteConfirm"
-    >
-      <template #details>
-        <label class="reels-info-sidebar__delete-option">
-          <input
-            v-model="deletion.deleteOriginalFromDisk.value"
-            type="checkbox"
-            :disabled="deletion.isDeleting.value"
-          />
-          <span>
-            <span class="reels-info-sidebar__delete-option-title">{{ t('post.feedCard.delete.deleteOriginalLabel') }}</span>
-            <span class="reels-info-sidebar__delete-option-hint">{{ t('post.feedCard.delete.deleteOriginalDescription') }}</span>
-          </span>
-        </label>
-        <p v-if="deletion.error.value" class="reels-info-sidebar__delete-error">{{ deletion.error.value }}</p>
-      </template>
-    </ConfirmDialog>
+    <p v-if="deletion.error.value" class="reels-info-sidebar__delete-error" role="status">
+      {{ deletion.error.value }}
+    </p>
   </aside>
 </template>
 
@@ -147,7 +127,6 @@ import { resolveDisplayCaption } from '../utils/caption';
 import { formatFolderTitle } from '../utils/folder-titles';
 import { formatMediaDuration } from '../utils/media';
 import Avatar from './Avatar.vue';
-import ConfirmDialog from './ConfirmDialog.vue';
 
 const props = withDefaults(defineProps<{
   item: FeedItem;
@@ -172,8 +151,10 @@ const detailCache = new Map<number, ImageDetail>();
 const deletion = usePostDeletion();
 let requestToken = 0;
 
-async function handleDeleteConfirm() {
-  const deleted = await deletion.confirmDelete(props.item);
+// Straight to the Trash, no dialog: the Trash view is the undo, and permanent
+// deletion still asks first from the feed card.
+async function handleDelete() {
+  const deleted = await deletion.trashNow(props.item);
   if (deleted) {
     // The reel is gone, so the panel that described it has nothing left to show.
     emit('close');

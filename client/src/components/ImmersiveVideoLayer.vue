@@ -17,6 +17,7 @@
       @pointermove="onPointermove"
       @pointerup="onPointerup"
     >
+      <div class="immersive-video__rotator">
       <div class="immersive-video__toolbar" data-swipe-ignore="true">
         <button
           class="immersive-video__button"
@@ -108,9 +109,9 @@
           hold-to-seek
           :show-fullscreen-control="false"
           variant="viewer"
-          @autoplay-muted="appStore.setVideoMuted(true)"
           @toggle-mute="appStore.setVideoMuted(!appStore.videoMuted)"
         />
+      </div>
       </div>
     </div>
   </Teleport>
@@ -146,6 +147,9 @@ const target = computed(() => store.target);
 const { dragOffset, isDragging, onPointercancel, onPointerdown, onPointermove, onPointerup, reset } =
   useVerticalDismiss({
     canStart: (event) => !isInteractiveTarget(event.target),
+    // Rotated, the picture's "down" runs across the screen, so the swipe that closes
+    // the layer has to be measured on the other axis.
+    getAxis: () => (isRotated.value ? 'horizontal' : 'vertical'),
     onDismiss: () => {
       void requestClose();
     }
@@ -156,10 +160,16 @@ const layerStyle = computed(() => {
     return undefined;
   }
 
-  // Following the finger is what makes the layer feel attached to the gesture.
+  // Following the finger is what makes the layer feel attached to the gesture. The
+  // offset arrives in the picture's frame, so rotated it has to be played back along
+  // the screen axis the finger actually travelled.
   const travel = Math.min(Math.abs(dragOffset.value), 240);
+  const shift = isRotated.value
+    ? `translateX(${-dragOffset.value}px)`
+    : `translateY(${dragOffset.value}px)`;
+
   return {
-    transform: `translateY(${dragOffset.value}px) scale(${1 - (travel / 240) * 0.08})`,
+    transform: `${shift} scale(${1 - (travel / 240) * 0.08})`,
     opacity: String(1 - (travel / 240) * 0.35)
   };
 });
@@ -300,12 +310,23 @@ onBeforeUnmount(() => {
   position: fixed;
   inset: 0;
   z-index: 90;
-  display: flex;
-  flex-direction: column;
   background: #000;
   overscroll-behavior: contain;
   touch-action: none;
   transition: transform 0.22s ease, opacity 0.22s ease;
+  /* Size container for the rotator below: 100cqh/100cqw is how the turned layer gets
+     the viewport's swapped dimensions without measuring in JavaScript. */
+  container-type: size;
+}
+
+/* Everything the viewer sees lives in here so the toolbar and the details panel turn
+   with the picture. Rotating only the stage left the controls upright and pushed the
+   layout off-centre. */
+.immersive-video__rotator {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .immersive-video--dragging {
@@ -383,15 +404,17 @@ onBeforeUnmount(() => {
   height: 100%;
 }
 
-/* Landscape without touching the device orientation: the stage takes the viewport's
-   swapped dimensions and turns a quarter, so the picture fills the screen edge to
-   edge once the phone is held sideways. */
-.immersive-video--rotated .immersive-video__stage {
-  width: 100vh;
-  height: 100vw;
-  flex: none;
-  margin: auto;
-  transform: rotate(90deg);
+/* Landscape without touching the device orientation: the whole layer takes the
+   viewport's swapped dimensions and turns a quarter, so the picture fills the screen
+   edge to edge once the phone is held sideways and the controls come along with it. */
+.immersive-video--rotated .immersive-video__rotator {
+  top: 50%;
+  left: 50%;
+  right: auto;
+  bottom: auto;
+  width: 100cqh;
+  height: 100cqw;
+  transform: translate(-50%, -50%) rotate(90deg);
   transform-origin: center;
 }
 </style>

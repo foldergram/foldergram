@@ -36,11 +36,17 @@ function createHarness(options: { currentTime?: number; duration?: number } = {}
     hold.onPointerup({ clientX, clientY, pointerId: 1 } as unknown as PointerEvent);
   }
 
+  function setPlaybackRate(rate: number) {
+    playbackRate = rate;
+  }
+
   return {
     hold,
     press,
     move,
     release,
+    setPlaybackRate,
+    surface,
     getCurrentTime: () => currentTime,
     getPlaybackRate: () => playbackRate,
     getPlayCalls: () => playCalls
@@ -65,6 +71,54 @@ describe('useHoldToSpeed', () => {
     // Never leave the clip parked: releasing resumes normal-speed playback.
     expect(harness.getPlayCalls()).toBeGreaterThanOrEqual(2);
     vi.useRealTimers();
+  });
+
+  it('does not let a stuck rate become the baseline across two holds', () => {
+    vi.useFakeTimers();
+    const harness = createHarness();
+
+    harness.press();
+    vi.advanceTimersByTime(300);
+    expect(harness.getPlaybackRate()).toBe(2);
+
+    // Simulate the release being lost, so the element is still parked at 2x.
+    harness.hold.isFastForwarding.value = false;
+
+    harness.press();
+    vi.advanceTimersByTime(300);
+    expect(harness.getPlaybackRate()).toBe(2);
+
+    harness.release();
+    // Sampling the current rate on activation used to make 2x the new "normal".
+    expect(harness.getPlaybackRate()).toBe(1);
+    vi.useRealTimers();
+  });
+
+  it('restores the baseline from a window pointerup when the surface never sees it', () => {
+    vi.useFakeTimers();
+    const harness = createHarness();
+
+    harness.press();
+    vi.advanceTimersByTime(300);
+    expect(harness.getPlaybackRate()).toBe(2);
+
+    // The captured element left the DOM mid-hold, so only the window hears the release.
+    const event = new Event('pointerup');
+    Object.defineProperty(event, 'pointerId', { value: 1 });
+    window.dispatchEvent(event);
+
+    expect(harness.hold.isFastForwarding.value).toBe(false);
+    expect(harness.getPlaybackRate()).toBe(1);
+    vi.useRealTimers();
+  });
+
+  it('writes the baseline back even when stop runs with no hold flagged', () => {
+    const harness = createHarness();
+
+    harness.setPlaybackRate(2);
+    harness.hold.stop();
+
+    expect(harness.getPlaybackRate()).toBe(1);
   });
 
   it('leaves a short tap alone so it still counts as a click', () => {

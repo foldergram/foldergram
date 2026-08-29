@@ -113,7 +113,7 @@ describe('ReelInfoSidebar', () => {
     expect(wrapper.find('.reels-info-sidebar__delete').exists()).toBe(false);
   });
 
-  it('trashes the reel and closes the panel once the confirmation is accepted', async () => {
+  it('trashes the reel and closes the panel on the first tap, with no dialog', async () => {
     fetchImageMock.mockResolvedValue(createImageDetail(32));
     trashImageMock.mockResolvedValue({ id: 32, folderSlug: 'animal-planet' });
 
@@ -138,15 +138,11 @@ describe('ReelInfoSidebar', () => {
     });
 
     await flushPromises();
-    await wrapper.get('.reels-info-sidebar__delete').trigger('click');
+    await wrapper.get('[data-test="reel-delete"]').trigger('click');
     await flushPromises();
 
-    const confirmButtons = wrapper.findAll('button').filter((button) => button.text() === 'Delete');
-    expect(confirmButtons).toHaveLength(1);
-
-    await confirmButtons[0]!.trigger('click');
-    await flushPromises();
-
+    // The Trash is the undo, so the tap is the whole interaction: no confirmation step.
+    expect(wrapper.findAll('button').filter((button) => button.text() === 'Delete')).toHaveLength(0);
     expect(trashImageMock).toHaveBeenCalledWith(32);
     expect(reelsStore.items.map((item) => item.id)).toEqual([33]);
     expect(reelsStore.activeReelId).toBe(33);

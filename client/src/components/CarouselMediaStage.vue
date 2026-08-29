@@ -27,7 +27,6 @@
         :muted="appStore.videoMuted"
         :autoplay="autoplay"
         variant="viewer"
-        @autoplay-muted="appStore.setVideoMuted(true)"
         @toggle-mute="appStore.setVideoMuted(!appStore.videoMuted)"
       />
       <ResilientImage

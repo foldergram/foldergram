@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 
 import { i18n } from '../locales';
+import { useAppStore } from '../stores/app';
 import VideoMediaPlayer from './VideoMediaPlayer.vue';
 
 describe('VideoMediaPlayer', () => {
@@ -63,6 +64,59 @@ describe('VideoMediaPlayer', () => {
 
     expect(playerEl.muted).toBe(true);
     expect(wrapper.emitted('autoplay-muted')).toHaveLength(1);
+  });
+
+  it('keeps the stored mute preference untouched when audible autoplay is refused', async () => {
+    const appStore = useAppStore();
+    appStore.videoMuted = false;
+
+    const wrapper = mount(VideoMediaPlayer, {
+      props: {
+        src: '/test-video.mp4',
+        autoplay: true,
+        muted: false
+      },
+      global: {
+        plugins: [i18n]
+      }
+    });
+
+    const playerEl = wrapper.find('media-player').element as any;
+    playerEl.play = vi.fn().mockResolvedValue(undefined);
+    playerEl.dispatchEvent(new CustomEvent('auto-play-fail'));
+    await vi.waitFor(() => expect(playerEl.play).toHaveBeenCalled());
+
+    // The browser's refusal is local to this element; the feed-wide preference stays audible.
+    expect(appStore.videoMuted).toBe(false);
+    expect((wrapper.vm as any).audioBlocked).toBe(true);
+    expect(wrapper.find('button[data-test="mute-toggle"] span').classes()).toContain(
+      'i-fluent-speaker-mute-16-regular'
+    );
+  });
+
+  it('retries audible playback on the mute tap that follows a refusal', async () => {
+    const wrapper = mount(VideoMediaPlayer, {
+      props: {
+        src: '/test-video.mp4',
+        autoplay: true,
+        muted: false
+      },
+      global: {
+        plugins: [i18n]
+      }
+    });
+
+    const playerEl = wrapper.find('media-player').element as any;
+    playerEl.play = vi.fn().mockResolvedValue(undefined);
+    playerEl.dispatchEvent(new CustomEvent('auto-play-fail'));
+    await vi.waitFor(() => expect((wrapper.vm as any).audioBlocked).toBe(true));
+
+    await wrapper.find('button[data-test="mute-toggle"]').trigger('click');
+
+    expect((wrapper.vm as any).audioBlocked).toBe(false);
+    expect(playerEl.muted).toBe(false);
+    // The tap is the gesture the browser wanted, so it must not read as "mute me".
+    expect(wrapper.emitted('toggle-mute')).toBeUndefined();
   });
 
   it('evaluates HD eligibility based on playbackStrategy, dimensions, and originalUrl', async () => {
@@ -251,6 +305,78 @@ describe('VideoMediaPlayer', () => {
     currentTime = 25;
     playerEl.dispatchEvent(new Event('can-play'));
     expect(playerEl.currentTime).toBe(25);
+  });
+
+  it('retries a stream that can play but refuses to start', async () => {
+    vi.useFakeTimers();
+
+    const wrapper = mount(VideoMediaPlayer, {
+      props: {
+        src: '/test-video.mp4',
+        autoplay: true,
+        muted: true
+      },
+      global: {
+        plugins: [i18n]
+      }
+    });
+
+    const playerEl = wrapper.find('media-player').element as any;
+    let currentTime = 0;
+    Object.defineProperty(playerEl, 'currentTime', {
+      configurable: true,
+      get: () => currentTime,
+      set: (value: number) => {
+        currentTime = value;
+      }
+    });
+    Object.defineProperty(playerEl, 'paused', { configurable: true, get: () => true });
+    playerEl.play = vi.fn().mockResolvedValue(undefined);
+
+    playerEl.dispatchEvent(new Event('can-play'));
+    expect(playerEl.play).not.toHaveBeenCalled();
+
+    // A segment the NAS has not finished transcoding yet: the first attempt resolves
+    // without moving the clock, so the loop keeps nudging on a backoff.
+    await vi.advanceTimersByTimeAsync(200);
+    expect(playerEl.play).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(400);
+    expect(playerEl.play).toHaveBeenCalledTimes(2);
+
+    // Once frames arrive the loop stands down.
+    currentTime = 1.4;
+    playerEl.dispatchEvent(new Event('time-update'));
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(playerEl.play).toHaveBeenCalledTimes(2);
+
+    vi.useRealTimers();
+  });
+
+  it('nudges a stalled stream that never reached its first frame', async () => {
+    vi.useFakeTimers();
+
+    const wrapper = mount(VideoMediaPlayer, {
+      props: {
+        src: '/test-video.mp4',
+        autoplay: true,
+        muted: true
+      },
+      global: {
+        plugins: [i18n]
+      }
+    });
+
+    const playerEl = wrapper.find('media-player').element as any;
+    Object.defineProperty(playerEl, 'currentTime', { configurable: true, get: () => 0 });
+    Object.defineProperty(playerEl, 'paused', { configurable: true, get: () => true });
+    playerEl.play = vi.fn().mockResolvedValue(undefined);
+
+    playerEl.dispatchEvent(new Event('waiting'));
+    await vi.advanceTimersByTimeAsync(200);
+
+    expect(playerEl.play).toHaveBeenCalled();
+    vi.useRealTimers();
   });
 
   it('stops keyboard event propagation for arrow keys on controls', async () => {

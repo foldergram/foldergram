@@ -197,6 +197,33 @@ describe('FeedCard', () => {
     expect(container.style.aspectRatio).toBe('1080 / 1920');
   });
 
+  it('holds a first-frame cover over the home video until the clip actually starts', async () => {
+    const wrapper = mount(FeedCard, {
+      props: {
+        item: createVideoItem(8049),
+        avatarUrl: null,
+        context: 'home',
+        isActiveVideo: true
+      },
+      global: {
+        stubs: globalStubs
+      }
+    });
+
+    await flushPromises();
+
+    // Vidstack drops its own poster as soon as the provider attaches, so this is the
+    // only thing keeping a deep-scrolled card from going black.
+    expect(wrapper.find('.feed-card__first-frame').exists()).toBe(true);
+
+    const player = wrapper.get('media-player').element as unknown as FakeMediaPlayerElement;
+    player.currentTime = 0.4;
+    player.dispatchEvent(new Event('time-update'));
+    await flushPromises();
+
+    expect(wrapper.find('.feed-card__first-frame').exists()).toBe(false);
+  });
+
   it('opens the immersive layer from home-feed video clicks and pauses the inline copy', async () => {
     const immersiveVideoStore = useImmersiveVideoStore();
     const wrapper = mount(FeedCard, {

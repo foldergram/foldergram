@@ -60,6 +60,40 @@ export function usePostDeletion() {
     error.value = null;
   }
 
+  function applyRemoval(deleted: { id: number; folderSlug: string }, mediaType: DeletableItem['mediaType']) {
+    feedStore.removeImage(deleted.id);
+    reelsStore.removeImage(deleted.id);
+    likesStore.removeImage(deleted.id);
+    const removedFolder = foldersStore.removeImage(deleted.id, deleted.folderSlug, mediaType);
+    momentsStore.removeImage(deleted.id);
+    appStore.removeIndexedImage(removedFolder ? 1 : 0, mediaType);
+  }
+
+  /**
+   * Moving a post to the Trash without a dialog. The Trash view is what makes the
+   * action recoverable, so a confirmation there only slows the viewer down; the
+   * confirmation is reserved for the paths that erase the file from disk.
+   */
+  async function trashNow(item: DeletableItem): Promise<boolean> {
+    if (!canDelete.value) {
+      return false;
+    }
+
+    isDeleting.value = true;
+    error.value = null;
+
+    try {
+      const deleted = await trashImage(item.id);
+      applyRemoval(deleted, item.mediaType);
+      return true;
+    } catch (deleteError) {
+      error.value = deleteError instanceof Error ? deleteError.message : 'Unable to delete post';
+      return false;
+    } finally {
+      isDeleting.value = false;
+    }
+  }
+
   async function confirmDelete(item: DeletableItem): Promise<boolean> {
     if (!canDelete.value) {
       return false;
@@ -70,12 +104,7 @@ export function usePostDeletion() {
 
     try {
       const deleted = deleteOriginalFromDisk.value ? await deleteImage(item.id) : await trashImage(item.id);
-      feedStore.removeImage(deleted.id);
-      reelsStore.removeImage(deleted.id);
-      likesStore.removeImage(deleted.id);
-      const removedFolder = foldersStore.removeImage(deleted.id, deleted.folderSlug, item.mediaType);
-      momentsStore.removeImage(deleted.id);
-      appStore.removeIndexedImage(removedFolder ? 1 : 0, item.mediaType);
+      applyRemoval(deleted, item.mediaType);
       isConfirmOpen.value = false;
       deleteOriginalFromDisk.value = false;
       return true;
@@ -97,6 +126,7 @@ export function usePostDeletion() {
     dialogConfirmLabel,
     requestDelete,
     cancelDelete,
-    confirmDelete
+    confirmDelete,
+    trashNow
   };
 }

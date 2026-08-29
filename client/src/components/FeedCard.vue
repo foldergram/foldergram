@@ -130,7 +130,7 @@
         :title.prop="item.filename"
         :fullscreenOrientation.prop="'landscape'"
         :playsInline.prop="true"
-        :muted.prop="appStore.videoMuted"
+        :muted.prop="homeEffectiveMuted"
         :loop.prop="true"
         load="visible"
         preload="metadata"
@@ -173,7 +173,7 @@
                 <span
                   class="feed-card__player-control-icon"
                   :class="
-                    appStore.videoMuted
+                    homeEffectiveMuted
                       ? 'i-fluent-speaker-mute-16-regular'
                       : 'i-fluent-speaker-2-16-regular'
                   "
@@ -198,6 +198,16 @@
           </template>
         </VideoProgressFooter>
       </media-player>
+
+      <img
+        v-if="!hasRenderedHomeVideoFrame"
+        class="feed-card__first-frame"
+        :src="item.thumbnailUrl"
+        :alt="item.filename"
+        decoding="async"
+        aria-hidden="true"
+      />
+
       <div
         v-if="showHomeVideoPausedIndicator"
         class="feed-card__pause-indicator"
@@ -828,6 +838,13 @@ function startHomeVideoObserver() {
   homeVideoObserver.observe(homeVideoTarget.value);
 }
 
+/**
+ * A refused audible autoplay is this element's problem, not a change of preference,
+ * so it is tracked locally and cleared by the next user gesture.
+ */
+const homeAudioBlocked = ref(false);
+const homeEffectiveMuted = computed(() => appStore.videoMuted || homeAudioBlocked.value);
+
 function syncHomeVideoMuted(player: MediaPlayerElement, muted: boolean) {
   player.muted = muted;
 }
@@ -849,28 +866,27 @@ async function syncHomeVideoPlayback() {
     void player.pause().catch(() => {
       // Ignore pause rejections before the provider is ready.
     });
-    syncHomeVideoMuted(player, appStore.videoMuted);
+    syncHomeVideoMuted(player, homeEffectiveMuted.value);
     return;
   }
 
-  syncHomeVideoMuted(player, appStore.videoMuted);
+  syncHomeVideoMuted(player, homeEffectiveMuted.value);
 
   try {
     await player.play();
     isHomeVideoPaused.value = false;
     return;
   } catch {
-    if (appStore.videoMuted) {
+    if (homeEffectiveMuted.value) {
       // Ignore autoplay rejections and leave manual controls available when focused.
       return;
     }
   }
 
-  // The browser refused audible autoplay. Recording that in the store keeps the
-  // element, the icon and the persisted preference telling the same story; muting
-  // only the element left the store claiming sound was on, and the next sync
-  // un-muted the clip behind the viewer's back.
-  appStore.setVideoMuted(true);
+  // The browser refused audible autoplay. That verdict applies to this element until
+  // the next user gesture, so it is recorded locally; writing it to the store used to
+  // wipe out the viewer's "sound on" preference for the whole feed.
+  homeAudioBlocked.value = true;
   syncHomeVideoMuted(player, true);
 
   try {
@@ -905,6 +921,10 @@ function handleHomeVideoDurationChange(event: Event) {
 }
 
 function handleHomeVideoTimeUpdate(event: Event) {
+  if ((homePlayerElement.value?.currentTime ?? 0) > 0.05) {
+    hasRenderedHomeVideoFrame.value = true;
+  }
+
   if (
     event instanceof CustomEvent &&
     typeof event.detail === 'object' &&
@@ -918,6 +938,14 @@ function handleHomeVideoTimeUpdate(event: Event) {
 
   syncHomeVideoTimelineState();
 }
+
+/**
+ * Vidstack removes `<media-poster>` as soon as the provider attaches, long before the
+ * first frame has decoded, which is what makes deep-scrolled cards go black for a
+ * moment. Holding our own copy of the thumbnail until the clock actually moves keeps a
+ * picture on screen the whole time.
+ */
+const hasRenderedHomeVideoFrame = ref(false);
 
 function handleHomeVideoEnded() {
   homeVideoCurrentTimeMs.value = homeVideoDurationMs.value;
@@ -938,7 +966,7 @@ function openImmersiveVideo() {
   // removes the stall that used to show up right after the zoom animation.
   warmVideoStream(props.item, appStore.videoPlaybackQuality, {
     fromSeconds: currentTime,
-    segments: 3
+    segments: 4
   });
 
   immersiveVideoStore.open(
@@ -1016,16 +1044,31 @@ function handleHomeVideoFullscreenChange(event: Event) {
 // `toggleHomeVideoSound`, so the muted autoplay fallback is never fought either.
 function enforceHomeVideoMuted() {
   const player = homePlayerElement.value;
-  if (player && appStore.videoMuted && !player.muted) {
+  if (player && homeEffectiveMuted.value && !player.muted) {
     player.muted = true;
   }
 }
 
-function toggleHomeVideoSound() {
+async function toggleHomeVideoSound() {
+  const player = homePlayerElement.value;
+
+  // The tap itself is the gesture the browser wanted, so a blocked clip goes audible
+  // again without touching the stored preference.
+  if (homeAudioBlocked.value && !appStore.videoMuted) {
+    homeAudioBlocked.value = false;
+    if (player) {
+      syncHomeVideoMuted(player, false);
+      await player.play().catch(() => {
+        // Ignore play rejections before the provider is ready.
+      });
+    }
+    return;
+  }
+
   const nextMuted = !appStore.videoMuted;
+  homeAudioBlocked.value = false;
   appStore.setVideoMuted(nextMuted);
 
-  const player = homePlayerElement.value;
   if (player) {
     syncHomeVideoMuted(player, nextMuted);
   }
@@ -1242,6 +1285,10 @@ watch(
 watch(
   () => appStore.videoMuted,
   (videoMuted) => {
+    if (!videoMuted) {
+      homeAudioBlocked.value = false;
+    }
+
     const player = homePlayerElement.value;
     if (!player) {
       return;
@@ -1252,6 +1299,8 @@ watch(
 );
 
 watch(homePlayerElement, (player) => {
+  hasRenderedHomeVideoFrame.value = false;
+  homeAudioBlocked.value = false;
   loadedHomeVideoAspectRatio.value = null;
   isHomeVideoPaused.value = false;
   homeVideoDurationMs.value = props.item.durationMs ?? 0;

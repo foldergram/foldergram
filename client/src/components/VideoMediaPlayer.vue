@@ -19,7 +19,7 @@
       :title.prop="title || alt || ''"
       :fullscreenOrientation.prop="fullscreenOrientation"
       :playsInline.prop="playsinline"
-      :muted.prop="muted"
+      :muted.prop="effectiveMuted"
       :autoPlay.prop="autoplay"
       :loop.prop="loop"
       :load="load"
@@ -70,7 +70,7 @@
             >
               <span
                 class="video-media-player__control-icon"
-                :class="muted ? 'i-fluent-speaker-mute-16-regular' : 'i-fluent-speaker-2-16-regular'"
+                :class="effectiveMuted ? 'i-fluent-speaker-mute-16-regular' : 'i-fluent-speaker-2-16-regular'"
                 aria-hidden="true"
               />
             </button>
@@ -245,12 +245,80 @@ const currentTimeSec = ref(0);
 const isPaused = ref(false);
 const showPausedIndicator = ref(false);
 const isHd = ref(false);
+/**
+ * Browsers refuse audible autoplay until the page has seen a user gesture. That is a
+ * property of this element right now, not a change of preference, so it is recorded
+ * locally and cleared on the next gesture instead of being written to the store.
+ */
+const audioBlocked = ref(false);
+const effectiveMuted = computed(() => props.muted || audioBlocked.value);
 let pendingRestoreState: { currentTime: number; wasPaused: boolean } | null = null;
 let hidePausedTimer: NodeJS.Timeout | null = null;
 let removeEventListeners: (() => void) | null = null;
 let appliedStartTime = false;
 /** A handover lands on a keyframe, so an exact match is not expected. */
 const START_TIME_TOLERANCE_SEC = 1.5;
+
+// A stream the NAS is still transcoding can refuse to start or stall on its first
+// segments, and it never recovers on its own here: the provider has already committed
+// to a source that is not ready yet. Retrying on a backoff is what the reels deck
+// already does, and it is why swiping there always starts playing.
+const STALL_RETRY_BASE_DELAY_MS = 160;
+const MAX_STALL_RETRY_DELAY_MS = 1_200;
+const MAX_STALL_RETRIES = 8;
+let stallRetryAttempts = 0;
+let stallRetryTimer = 0;
+
+function clearStallRetry() {
+  if (stallRetryTimer !== 0) {
+    window.clearTimeout(stallRetryTimer);
+    stallRetryTimer = 0;
+  }
+}
+
+function resetStallRetry() {
+  clearStallRetry();
+  stallRetryAttempts = 0;
+}
+
+function scheduleStallRetry() {
+  const player = playerElement.value;
+  if (!player || !props.autoplay || stallRetryTimer !== 0 || stallRetryAttempts >= MAX_STALL_RETRIES) {
+    return;
+  }
+
+  stallRetryAttempts += 1;
+  stallRetryTimer = window.setTimeout(
+    () => {
+      stallRetryTimer = 0;
+      const current = playerElement.value;
+      if (!current || !props.autoplay) {
+        return;
+      }
+
+      // A viewer-initiated pause must survive the retry loop, so only a player that is
+      // still stuck at the very start is nudged.
+      if (!current.paused && (current.currentTime || 0) > 0.05) {
+        resetStallRetry();
+        return;
+      }
+
+      void current
+        .play()
+        .then(() => {
+          if ((current.currentTime || 0) > 0.05) {
+            resetStallRetry();
+          } else {
+            scheduleStallRetry();
+          }
+        })
+        .catch(() => {
+          scheduleStallRetry();
+        });
+    },
+    Math.min(STALL_RETRY_BASE_DELAY_MS * stallRetryAttempts, MAX_STALL_RETRY_DELAY_MS)
+  );
+}
 
 const holdSpeed = useHoldToSpeed({
   canStart: (event) => !isInteractiveTarget(event.target),
@@ -380,15 +448,30 @@ function handleFullscreenChange(event: MediaFullscreenChangeEvent) {
 }
 
 function handleMuteClick() {
+  if (audioBlocked.value) {
+    // The press itself is the gesture the browser was waiting for, so retry audible
+    // playback rather than flipping the stored preference the wrong way.
+    audioBlocked.value = false;
+
+    const player = playerElement.value;
+    if (player && !props.muted) {
+      player.muted = false;
+      void player.play().catch(() => {});
+      return;
+    }
+  }
+
   emit('toggle-mute');
 }
 
 async function handleAutoplayFail() {
   const player = playerElement.value;
-  if (!player || !props.autoplay || props.muted) return;
+  if (!player || !props.autoplay || effectiveMuted.value) return;
 
-  // Browsers commonly reject audible autoplay. Keep carousel playback automatic
-  // by retrying muted and persist that state through the owning app store.
+  // Browsers commonly reject audible autoplay. Fall back to muted playback for this
+  // element only: the stored preference stays audible so the next card (or the next
+  // tap here) can still play with sound.
+  audioBlocked.value = true;
   player.muted = true;
   emit('autoplay-muted');
   await nextTick();
@@ -477,11 +560,19 @@ async function togglePlayback() {
   if (!player) return;
 
   if (player.paused) {
+    // A tap is a user gesture, so an earlier audible rejection no longer applies.
+    if (audioBlocked.value) {
+      audioBlocked.value = false;
+      player.muted = props.muted;
+    }
+
     await player.play().catch(() => {});
     isPaused.value = false;
     showPausedIndicator.value = false;
     if (hidePausedTimer) clearTimeout(hidePausedTimer);
   } else {
+    // The pause was asked for, so the retry loop must not undo it.
+    resetStallRetry();
     player.pause();
     isPaused.value = true;
     showPausedIndicator.value = true;
@@ -534,7 +625,7 @@ function applyStartTime(player: MediaPlayerElement) {
  * fallback intact instead of immediately fighting it.
  */
 function enforceMuted(player: MediaPlayerElement) {
-  if (props.muted && !player.muted) {
+  if (effectiveMuted.value && !player.muted) {
     player.muted = true;
   }
 }
@@ -576,9 +667,23 @@ function setupListeners() {
     // media source has no buffered range yet, so confirm the handover once the
     // provider reports it can play.
     applyStartTime(player);
+
+    if (props.autoplay && player.paused) {
+      scheduleStallRetry();
+    }
+  };
+
+  const onStall = () => {
+    if (props.autoplay && (player.currentTime || 0) <= 0.05) {
+      scheduleStallRetry();
+    }
   };
 
   const onTimeUpdate = () => {
+    if ((player.currentTime || 0) > 0.05) {
+      resetStallRetry();
+    }
+
     currentTimeSec.value = player.currentTime || 0;
     durationSec.value = player.duration || 0;
     emit('time-update', {
@@ -613,6 +718,8 @@ function setupListeners() {
   player.addEventListener('play', onPlay);
   player.addEventListener('pause', onPause);
   player.addEventListener('error', onError);
+  player.addEventListener('waiting', onStall);
+  player.addEventListener('stalled', onStall);
 
   removeEventListeners = () => {
     removeHlsLibraryBinding();
@@ -623,6 +730,8 @@ function setupListeners() {
     player.removeEventListener('play', onPlay);
     player.removeEventListener('pause', onPause);
     player.removeEventListener('error', onError);
+    player.removeEventListener('waiting', onStall);
+    player.removeEventListener('stalled', onStall);
   };
 }
 
@@ -638,11 +747,17 @@ onBeforeUnmount(() => {
   }
   if (removeEventListeners) removeEventListeners();
   if (hidePausedTimer) clearTimeout(hidePausedTimer);
+  clearStallRetry();
   holdSpeed.stop();
 });
 
 watch([basePreviewUrl, () => props.media?.id ?? null], () => {
+  // A source swap tears the provider down, so any hold in flight can no longer be
+  // released by the element it started on.
+  holdSpeed.stop();
+  resetStallRetry();
   isHd.value = false;
+  audioBlocked.value = false;
   fallbackSource.value = null;
   pendingRestoreState = null;
   appliedStartTime = false;
@@ -665,6 +780,12 @@ watch(playerElement, () => {
 watch(
   () => props.muted,
   (muted) => {
+    // Switching the preference to audible is a deliberate act, so it also clears a
+    // stale block; if the browser refuses again `handleAutoplayFail` re-arms it.
+    if (!muted) {
+      audioBlocked.value = false;
+    }
+
     const player = playerElement.value;
     if (player) {
       player.muted = muted;
@@ -674,6 +795,8 @@ watch(
 
 defineExpose({
   playerElement,
+  audioBlocked,
+  effectiveMuted,
   togglePlayback,
   toggleHd,
   isHd,

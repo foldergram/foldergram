@@ -22,7 +22,7 @@
           :title.prop="item.filename"
           :fullscreenOrientation.prop="'landscape'"
           :playsInline.prop="true"
-          :muted.prop="appStore.videoMuted"
+          :muted.prop="effectiveMuted"
           :loop.prop="true"
           :load="playerLoadMode"
           :preload="playerPreloadMode"
@@ -152,13 +152,13 @@
             <button
               class="reel-player-card__sound-button"
               type="button"
-              :aria-label="appStore.videoMuted ? 'Enable sound' : 'Mute sound'"
+              :aria-label="effectiveMuted ? 'Enable sound' : 'Mute sound'"
               @click.stop="toggleSound"
             >
               <span
                 class="reel-player-card__sound-icon"
                 :class="
-                  appStore.videoMuted
+                  effectiveMuted
                     ? 'i-fluent-speaker-mute-16-regular'
                     : 'i-fluent-speaker-2-16-regular'
                 "
@@ -295,6 +295,13 @@ function switchToFallbackSource() {
   fallbackSource.value = fallback;
 }
 
+/**
+ * A refused audible autoplay applies to this element until the next user gesture, so
+ * it stays local instead of overwriting the viewer's stored preference.
+ */
+const audioBlocked = ref(false);
+const effectiveMuted = computed(() => appStore.videoMuted || audioBlocked.value);
+
 function syncMuted(player: MediaPlayerElement, muted: boolean) {
   player.muted = muted;
 }
@@ -307,7 +314,7 @@ function enforceMuted() {
   const player = playerElement.value;
   // One-directional: only ever mutes, so the muted autoplay fallback survives and
   // un-muting stays an explicit tap.
-  if (player && appStore.videoMuted && !player.muted) {
+  if (player && effectiveMuted.value && !player.muted) {
     player.muted = true;
   }
 }
@@ -326,11 +333,11 @@ async function syncPlayback() {
     void player.pause().catch(() => {
       // Ignore pause rejections before the provider is ready.
     });
-    syncMuted(player, appStore.videoMuted);
+    syncMuted(player, effectiveMuted.value);
     return;
   }
 
-  syncMuted(player, appStore.videoMuted);
+  syncMuted(player, effectiveMuted.value);
 
   try {
     await player.play();
@@ -338,7 +345,7 @@ async function syncPlayback() {
     isPaused.value = false;
     return;
   } catch {
-    if (appStore.videoMuted) {
+    if (effectiveMuted.value) {
       if (!fallbackSource.value && autoplayRetryAttempts >= MAX_AUTOPLAY_RETRIES) {
         switchToFallbackSource();
         return;
@@ -349,9 +356,9 @@ async function syncPlayback() {
     }
   }
 
-  // Audible autoplay was refused. Recording it in the store keeps the icon and the
-  // persisted preference honest instead of silently muting only this element.
-  appStore.setVideoMuted(true);
+  // Audible autoplay was refused. Only this element falls back to muted playback; the
+  // stored preference stays audible so the next card can still open with sound.
+  audioBlocked.value = true;
   syncMuted(player, true);
 
   try {
@@ -435,10 +442,25 @@ function bindPlayerEventListeners(player: MediaPlayerElement | null) {
 }
 
 async function toggleSound() {
+  const player = playerElement.value;
+
+  // The tap is the gesture the browser was waiting for, so clear the block and go
+  // audible again rather than flipping the stored preference.
+  if (audioBlocked.value && !appStore.videoMuted) {
+    audioBlocked.value = false;
+    if (player && props.active) {
+      syncMuted(player, false);
+      if (player.paused) {
+        await syncPlayback();
+      }
+    }
+    return;
+  }
+
   const nextMuted = !appStore.videoMuted;
+  audioBlocked.value = false;
   appStore.setVideoMuted(nextMuted);
 
-  const player = playerElement.value;
   if (!player || !props.active) {
     return;
   }
@@ -569,6 +591,10 @@ function handleSurfaceKeydown(event: KeyboardEvent) {
 watch(
   () => props.active,
   (active) => {
+    if (!active) {
+      holdSpeed.stop();
+    }
+
     if (active) {
       resetAutoplayRetry();
     }
@@ -580,6 +606,10 @@ watch(
 watch(
   () => props.item.id,
   () => {
+    // The card is being recycled onto another clip: end any hold before the provider
+    // changes underneath it, otherwise the rate stays at 2x with nothing to reset it.
+    holdSpeed.stop();
+    audioBlocked.value = false;
     resetAutoplayRetry();
     fallbackSource.value = null;
     isPaused.value = false;
@@ -597,6 +627,10 @@ watch(
 watch(
   () => appStore.videoMuted,
   (videoMuted) => {
+    if (!videoMuted) {
+      audioBlocked.value = false;
+    }
+
     const player = playerElement.value;
     if (!player) {
       return;

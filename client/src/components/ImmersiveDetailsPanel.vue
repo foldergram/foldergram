@@ -40,37 +40,17 @@
       v-if="deletion.canDelete.value"
       class="immersive-details__delete"
       type="button"
+      data-test="immersive-delete"
       :disabled="deletion.isDeleting.value"
-      @click="deletion.requestDelete()"
+      @click="handleDelete"
     >
       <span class="i-fluent-delete-20-regular immersive-details__delete-icon" aria-hidden="true" />
       <span>{{ t('post.immersive.deleteVideo') }}</span>
     </button>
 
-    <ConfirmDialog
-      v-if="deletion.isConfirmOpen.value"
-      :title="t('post.feedCard.delete.title')"
-      :message="deletion.dialogMessage.value"
-      :confirm-label="deletion.dialogConfirmLabel.value"
-      :loading="deletion.isDeleting.value"
-      @cancel="deletion.cancelDelete()"
-      @confirm="handleDeleteConfirm"
-    >
-      <template #details>
-        <label class="immersive-details__delete-option">
-          <input
-            v-model="deletion.deleteOriginalFromDisk.value"
-            type="checkbox"
-            :disabled="deletion.isDeleting.value"
-          />
-          <span>
-            <span class="immersive-details__delete-option-title">{{ t('post.feedCard.delete.deleteOriginalLabel') }}</span>
-            <span class="immersive-details__delete-option-hint">{{ t('post.feedCard.delete.deleteOriginalDescription') }}</span>
-          </span>
-        </label>
-        <p v-if="deletion.error.value" class="immersive-details__error">{{ deletion.error.value }}</p>
-      </template>
-    </ConfirmDialog>
+    <p v-if="deletion.error.value" class="immersive-details__error" role="status">
+      {{ deletion.error.value }}
+    </p>
   </section>
 </template>
 
@@ -82,7 +62,6 @@ import { fetchImage } from '../api/gallery';
 import { usePostDeletion } from '../composables/usePostDeletion';
 import type { ImageDetail } from '../types/api';
 import { formatMediaDuration } from '../utils/media';
-import ConfirmDialog from './ConfirmDialog.vue';
 
 const props = defineProps<{
   id: number;
@@ -130,8 +109,10 @@ const formatLabel = computed(() => {
   return mimeType.replace(/^(video|image)\//, '').toUpperCase();
 });
 
-async function handleDeleteConfirm() {
-  const deleted = await deletion.confirmDelete({ id: props.id, mediaType: props.mediaType });
+// Straight to the Trash: it is recoverable there, so a confirmation would only add a
+// tap. Erasing from disk stays behind the feed card's dialog.
+async function handleDelete() {
+  const deleted = await deletion.trashNow({ id: props.id, mediaType: props.mediaType });
   if (deleted) {
     emit('deleted', props.id);
   }

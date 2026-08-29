@@ -17,6 +17,8 @@ interface HoldToSpeedOptions extends HoldToSpeedPlayer {
   activationMs?: number;
   /** Multiplier applied while held. */
   rate?: number;
+  /** Rate restored on release. Fixed rather than sampled, so a stuck rate never becomes the new baseline. */
+  baseRate?: number;
   /** Seconds travelled per pixel of horizontal drag. */
   secondsPerPixel?: number;
   /** Horizontal travel that switches the gesture from press to scrub. */
@@ -27,6 +29,7 @@ interface HoldToSpeedOptions extends HoldToSpeedPlayer {
 
 const DEFAULT_ACTIVATION_MS = 300;
 const DEFAULT_RATE = 2;
+const DEFAULT_BASE_RATE = 1;
 const DEFAULT_SECONDS_PER_PIXEL = 0.12;
 const DEFAULT_SCRUB_ACTIVATION_PX = 12;
 const DEFAULT_CANCEL_ACTIVATION_PX = 10;
@@ -48,6 +51,7 @@ export function useHoldToSpeed(options: HoldToSpeedOptions) {
 
   const activationMs = options.activationMs ?? DEFAULT_ACTIVATION_MS;
   const rate = options.rate ?? DEFAULT_RATE;
+  const baseRate = options.baseRate ?? DEFAULT_BASE_RATE;
   const secondsPerPixel = options.secondsPerPixel ?? DEFAULT_SECONDS_PER_PIXEL;
   const scrubActivationPx = options.scrubActivationPx ?? DEFAULT_SCRUB_ACTIVATION_PX;
   const cancelActivationPx = options.cancelActivationPx ?? DEFAULT_CANCEL_ACTIVATION_PX;
@@ -59,8 +63,8 @@ export function useHoldToSpeed(options: HoldToSpeedOptions) {
   let startX = 0;
   let startY = 0;
   let scrubOrigin = 0;
-  let restoreRate = 1;
   let suppressClick = false;
+  let releaseFallbackAttached = false;
 
   function clearActivationTimer() {
     if (activationTimer !== null) {
@@ -81,14 +85,23 @@ export function useHoldToSpeed(options: HoldToSpeedOptions) {
     capturedElement = null;
   }
 
+  /**
+   * Always writes the baseline back, even when the flag says no hold is running: a
+   * card rebuilt mid-gesture used to leave the element parked at 2x with nothing left
+   * to reset it. Resuming is still limited to a real hold so a tap-to-pause is not
+   * undone.
+   */
   function restorePlaybackRate() {
-    if (!isFastForwarding.value) {
-      return;
+    const wasFastForwarding = isFastForwarding.value;
+    isFastForwarding.value = false;
+
+    if (options.getPlaybackRate() !== baseRate) {
+      options.setPlaybackRate(baseRate);
     }
 
-    isFastForwarding.value = false;
-    options.setPlaybackRate(restoreRate);
-    void options.play?.();
+    if (wasFastForwarding) {
+      void options.play?.();
+    }
   }
 
   function clampToDuration(seconds: number): number {
@@ -97,10 +110,53 @@ export function useHoldToSpeed(options: HoldToSpeedOptions) {
     return Math.min(Math.max(seconds, 0), Math.max(upperBound, 0));
   }
 
+  /**
+   * A pointer capture target that leaves the DOM mid-hold (source swap, card
+   * recycling) never delivers `pointerup` to the surface listener, so the gesture
+   * would never end and the clip stayed at 2x. Window-level listeners guarantee a
+   * release is always observed.
+   */
+  function handleWindowRelease() {
+    if (pointerId === null) {
+      return;
+    }
+
+    const target = scrubSeconds.value;
+    if (target !== null) {
+      options.seekTo(target);
+      void options.play?.();
+    }
+
+    stop();
+  }
+
+  function attachReleaseFallback() {
+    if (releaseFallbackAttached || typeof window === 'undefined') {
+      return;
+    }
+
+    window.addEventListener('pointerup', handleWindowRelease);
+    window.addEventListener('pointercancel', handleWindowRelease);
+    window.addEventListener('lostpointercapture', handleWindowRelease);
+    releaseFallbackAttached = true;
+  }
+
+  function detachReleaseFallback() {
+    if (!releaseFallbackAttached || typeof window === 'undefined') {
+      return;
+    }
+
+    window.removeEventListener('pointerup', handleWindowRelease);
+    window.removeEventListener('pointercancel', handleWindowRelease);
+    window.removeEventListener('lostpointercapture', handleWindowRelease);
+    releaseFallbackAttached = false;
+  }
+
   function stop() {
     clearActivationTimer();
     restorePlaybackRate();
     releasePointerCapture();
+    detachReleaseFallback();
     scrubSeconds.value = null;
     pointerId = null;
     surfaceElement = null;
@@ -121,7 +177,6 @@ export function useHoldToSpeed(options: HoldToSpeedOptions) {
 
   function beginFastForward() {
     capturePointer();
-    restoreRate = options.getPlaybackRate() || 1;
     isFastForwarding.value = true;
     suppressClick = true;
     options.setPlaybackRate(rate);
@@ -153,6 +208,7 @@ export function useHoldToSpeed(options: HoldToSpeedOptions) {
     // would fight the reels deck's native vertical scrolling.
     surfaceElement = event.currentTarget instanceof Element ? event.currentTarget : null;
 
+    attachReleaseFallback();
     clearActivationTimer();
     activationTimer = setTimeout(() => {
       activationTimer = null;
@@ -216,6 +272,7 @@ export function useHoldToSpeed(options: HoldToSpeedOptions) {
 
   return {
     isFastForwarding,
+    baseRate,
     isScrubbing,
     /** Live preview position while a scrub is in flight. */
     scrubSeconds,
