@@ -124,4 +124,18 @@ describe('useHoldToSpeed', () => {
     expect(harness.getCurrentTime()).toBe(30);
     vi.useRealTimers();
   });
+
+  it('drops a pending activation once the finger swipes vertically', () => {
+    vi.useFakeTimers();
+    const harness = createHarness();
+
+    harness.press(200, 150);
+    harness.move(202, 190);
+    vi.advanceTimersByTime(600);
+
+    // A slow reels swipe must not turn into fast playback partway through.
+    expect(harness.hold.isFastForwarding.value).toBe(false);
+    expect(harness.getPlaybackRate()).toBe(1);
+    vi.useRealTimers();
+  });
 });
