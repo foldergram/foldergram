@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { getActiveReelId, resolveReelsAffinitySnapshot, shouldPrefetchReels } from '../../client/src/utils/reels.js';
+import {
+  getActiveReelId,
+  getReelPrefetchIndexes,
+  resolveReelsAffinitySnapshot,
+  shouldPrefetchReels
+} from '../../client/src/utils/reels.js';
 
 describe('reel deck utils', () => {
   it('selects the panel whose center is closest to the viewport center', () => {
@@ -25,6 +30,13 @@ describe('reel deck utils', () => {
     expect(shouldPrefetchReels(0, 6)).toBe(false);
     expect(shouldPrefetchReels(3, 6)).toBe(true);
     expect(shouldPrefetchReels(4, 6)).toBe(true);
+  });
+
+  it('warms the next three cards without running past the queue', () => {
+    expect([...getReelPrefetchIndexes(2, 10)]).toEqual([3, 4, 5]);
+    expect([...getReelPrefetchIndexes(8, 10)]).toEqual([9]);
+    expect([...getReelPrefetchIndexes(9, 10)]).toEqual([]);
+    expect([...getReelPrefetchIndexes(-1, 10)]).toEqual([]);
   });
 
   it('freezes the first affinity snapshot for later pages in the same session', () => {

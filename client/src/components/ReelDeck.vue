@@ -37,7 +37,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type ComponentPublicInstance } from 'vue';
 
 import type { FeedItem, FolderSummary } from '../types/api';
-import { getActiveReelId, shouldPrefetchReels } from '../utils/reels';
+import { getActiveReelId, getReelPrefetchIndexes, shouldPrefetchReels } from '../utils/reels';
 import ReelPlayerCard from './ReelPlayerCard.vue';
 
 const props = defineProps<{
@@ -56,14 +56,12 @@ const scrollerElement = ref<HTMLElement | null>(null);
 const panelElements = new Map<number, HTMLElement>();
 const folderLookup = computed(() => new Map(props.folders.map((folder) => [folder.slug, folder])));
 // Warming the neighbours is what removes the stall on the first frame after a swipe.
-const prefetchIndexes = computed(() => {
-  const activeIndex = props.items.findIndex((item) => item.id === props.activeReelId);
-  if (activeIndex < 0) {
-    return new Set<number>();
-  }
-
-  return new Set([activeIndex + 1, activeIndex + 2].filter((index) => index < props.items.length));
-});
+const prefetchIndexes = computed(() =>
+  getReelPrefetchIndexes(
+    props.items.findIndex((item) => item.id === props.activeReelId),
+    props.items.length
+  )
+);
 
 let resizeObserver: ResizeObserver | null = null;
 let scrollFrame = 0;
