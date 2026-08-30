@@ -382,6 +382,8 @@ export class PermanentDeletionService {
   }
 
   deletePost(postId: number): Promise<{ id: number; folderSlug: string } | null> {
+    // Deletion is user-initiated, so it jumps ahead of any long-running scan
+    // that is currently holding the maintenance lock.
     return maintenanceOperationLock.runExclusive(async () => {
       await this.recoverPendingDeletionsInternal();
       return this.deletePostInternal(postId);

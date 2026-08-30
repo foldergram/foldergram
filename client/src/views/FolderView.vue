@@ -222,14 +222,18 @@
       return
     }
 
-    await Promise.all([
-      foldersStore.loadFolder(
-        props.slug,
-        true,
-        activeTab.value === "reels" ? "video" : undefined,
-      ),
-      folderStoriesStore.fetchStories(props.slug, folderStoriesStore.currentFolderSlug !== props.slug),
-    ])
+    await foldersStore.loadFolder(
+      props.slug,
+      true,
+      activeTab.value === "reels" ? "video" : undefined,
+    )
+    hasLoadedOnce.value = true
+
+    // Stories are supplementary chrome; do not hold the first media grid behind them.
+    void folderStoriesStore.fetchStories(
+      props.slug,
+      folderStoriesStore.currentFolderSlug !== props.slug,
+    )
 
     if (activeTab.value === "reels" && !hasReelsTab.value) {
       await router.replace({

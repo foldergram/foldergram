@@ -41,6 +41,15 @@ describe('useImmersiveMediaOpen', () => {
     expect(videoStore.target?.id).toBe(7);
   });
 
+  it('hands the current playback state to the immersive player', () => {
+    const open = useImmersiveMediaOpen();
+    const videoStore = useImmersiveVideoStore();
+
+    expect(open.openInPlace(createItem(), { startTime: 8.75, startPaused: true })).toBe(true);
+    expect(videoStore.startTime).toBe(8.75);
+    expect(videoStore.startPaused).toBe(true);
+  });
+
   it('opens an image in the zoomable layer', () => {
     const open = useImmersiveMediaOpen();
     const imageStore = useImmersiveImageStore();

@@ -138,7 +138,7 @@
           class="viewer__media-shell"
           :items="image.mediaItems!"
           prefer-preview
-          :retry-while="appStore.isScanning"
+          :retry-while="appStore.isInitialScan"
           loading="eager"
           :muted="appStore.videoMuted"
           autoplay
@@ -208,7 +208,7 @@
                       <span
                         class="viewer__player-control-icon"
                         :class="
-                          viewerEffectiveMuted
+                          appStore.videoMuted
                             ? 'i-fluent-speaker-mute-16-regular'
                             : 'i-fluent-speaker-2-16-regular'
                         "
@@ -294,7 +294,7 @@
             :width="image.width"
             :height="image.height"
             loading="eager"
-            :retry-while="appStore.isScanning"
+            :retry-while="appStore.isInitialScan"
             @click="openImmersiveImage"
           />
         </div>
@@ -1543,19 +1543,6 @@
   async function toggleViewerSound() {
     const player = playerElement.value
 
-    // The tap is the gesture the browser wanted, so retry audible playback instead of
-    // flipping the stored preference the wrong way.
-    if (viewerAudioBlocked.value && !appStore.videoMuted) {
-      viewerAudioBlocked.value = false
-      if (player) {
-        syncVideoMuted(player, false)
-        await player.play().catch(() => {
-          // Ignore play rejections before the provider is ready.
-        })
-      }
-      return
-    }
-
     const nextMuted = !appStore.videoMuted
     viewerAudioBlocked.value = false
     appStore.setVideoMuted(nextMuted)
@@ -1722,8 +1709,8 @@
   )
 
   watch(
-    () => appStore.videoMuted,
-    videoMuted => {
+    () => [appStore.videoMuted, appStore.videoSoundGeneration] as const,
+    ([videoMuted]) => {
       if (!videoMuted) {
         viewerAudioBlocked.value = false
       }
@@ -1957,6 +1944,7 @@
         originalUrl: image.originalUrl,
         streamUrl: image.streamUrl,
         playbackStrategy: image.playbackStrategy,
+        sourceOverride: activeVideoSource.value,
         width: image.width,
         height: image.height,
         durationMs: image.durationMs,

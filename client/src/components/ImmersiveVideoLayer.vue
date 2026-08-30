@@ -42,21 +42,8 @@
           >
             <span class="i-fluent-rotate-left-20-regular h-5 w-5" aria-hidden="true" />
           </button>
-          <button
-            class="immersive-video__button"
-            :class="{ 'immersive-video__button--active': isNativeFullscreen }"
-            type="button"
-            :aria-label="t('post.immersive.fullscreen')"
-            :title="t('post.immersive.fullscreen')"
-            :aria-pressed="isNativeFullscreen"
-            @click.stop="toggleFullscreen"
-          >
-            <span
-              class="h-5 w-5"
-              :class="isNativeFullscreen ? 'i-fluent-full-screen-minimize-20-regular' : 'i-fluent-full-screen-maximize-20-regular'"
-              aria-hidden="true"
-            />
-          </button>
+          <ImmersiveLikeButton v-if="bookmarkItem" :item="bookmarkItem" />
+          <CollectionBookmark v-if="bookmarkItem" :item="bookmarkItem" placement="viewer" />
           <button
             class="immersive-video__button"
             :class="{ 'immersive-video__button--active': detailsOpen }"
@@ -90,14 +77,31 @@
         </div>
       </Transition>
 
-      <div ref="stageElement" class="immersive-video__stage">
-        <VideoMediaPlayer
+      <div
+        ref="stageElement"
+        class="immersive-video__stage"
+        @pointercancel="handleZoomPointerCancel"
+        @pointerdown.capture="handleZoomPointerDownCapture"
+        @pointerdown="handleZoomPointerDown"
+        @pointermove="handleZoomPointerMove"
+        @pointercancel.capture="handleZoomPointerCancelCapture"
+        @pointerup.capture="handleZoomPointerUpCapture"
+        @pointerup="handleZoomPointerUp"
+        @wheel="handleZoomWheel"
+      >
+        <div
+          class="immersive-video__zoom-frame"
+          :class="{ 'immersive-video__zoom-frame--interacting': zoom.isPanning.value || zoom.isPinching.value }"
+          :style="{ transform: zoom.transform.value }"
+        >
+          <VideoMediaPlayer
           ref="playerComponent"
           class="immersive-video__player"
           :src="target.previewUrl ?? ''"
           :media="target"
           :original-url="target.originalUrl"
           :playback-strategy="target.playbackStrategy"
+          :source-override="target.sourceOverride"
           :width="target.width"
           :height="target.height"
           :poster="target.thumbnailUrl"
@@ -105,13 +109,18 @@
           :title="target.filename"
           :muted="appStore.videoMuted"
           :autoplay="!store.startPaused"
+          preload="auto"
           :start-time="store.startTime"
+          :gesture-orientation="gestureOrientation"
           fullscreen-orientation="landscape"
           hold-to-seek
+          capture-touch-gestures
           :show-fullscreen-control="false"
           variant="viewer"
           @toggle-mute="appStore.setVideoMuted(!appStore.videoMuted)"
-        />
+          @surface-gesture-start="handleSurfaceGestureStart"
+          />
+        </div>
       </div>
       </div>
     </div>
@@ -124,13 +133,13 @@ import { useI18n } from 'vue-i18n';
 
 import { useAppStore } from '../stores/app';
 import { useImmersiveVideoStore } from '../stores/immersive-video';
+import { usePinchZoom } from '../composables/usePinchZoom';
 import { useVerticalDismiss } from '../composables/useVerticalDismiss';
-import {
-  exitDocumentFullscreen,
-  isDocumentFullscreen,
-  requestElementFullscreen,
-  unlockScreenOrientation
-} from '../utils/fullscreen';
+import { unlockScreenOrientation } from '../utils/fullscreen';
+import { resolveGesturePoint } from '../utils/gesture-coordinates';
+import type { FeedItem } from '../types/api';
+import CollectionBookmark from './CollectionBookmark.vue';
+import ImmersiveLikeButton from './ImmersiveLikeButton.vue';
 import ImmersiveDetailsPanel from './ImmersiveDetailsPanel.vue';
 import VideoMediaPlayer from './VideoMediaPlayer.vue';
 
@@ -143,16 +152,131 @@ const layerSize = ref<{ width: number; height: number } | null>(null);
 let layerSizeObserver: ResizeObserver | null = null;
 const playerComponent = ref<InstanceType<typeof VideoMediaPlayer> | null>(null);
 const isRotated = ref(false);
-const isNativeFullscreen = ref(false);
 const detailsOpen = ref(false);
+const gestureOrientation = computed<'normal' | 'rotated'>(() => (isRotated.value ? 'rotated' : 'normal'));
 
 const target = computed(() => store.target);
+const bookmarkItem = computed<FeedItem | null>(() => {
+  const current = target.value;
+  if (!current) return null;
+  if (current.collectionItem) return current.collectionItem;
+
+  return {
+    id: current.id,
+    folderId: 0,
+    folderSlug: '',
+    folderName: '',
+    folderPath: '',
+    folderBreadcrumb: null,
+    filename: current.filename,
+    width: current.width,
+    height: current.height,
+    mediaType: 'video',
+    durationMs: current.durationMs,
+    thumbnailUrl: current.thumbnailUrl,
+    previewUrl: current.previewUrl ?? '',
+    playbackStrategy: current.playbackStrategy,
+    streamUrl: current.streamUrl,
+    originalUrl: current.originalUrl,
+    sortTimestamp: 0,
+    takenAt: null
+  };
+});
+
+/**
+ * Assigned after `zoom` exists so the option can read the live zoom state without the
+ * composable referring to itself while it is still being created.
+ */
+let isPanningAllowed = (): boolean => false;
+
+const zoom = usePinchZoom({
+  doubleTapZoom: false,
+  // One finger only moves the picture once it is zoomed in. At rest it belongs to the
+  // video: sideways scrubs, up and down dismisses.
+  singlePointerPan: () => isPanningAllowed(),
+  // The picture is turned by a CSS rotation, so a viewer holding the phone sideways
+  // reads the screen's axes swapped. Gestures are measured in the picture's frame to
+  // follow whatever the viewer is actually looking at.
+  getGesturePoint: (event) => resolveGesturePoint(event, gestureOrientation.value),
+  onDismiss: () => {
+    void requestClose();
+  }
+});
+
+isPanningAllowed = () => zoom.isZoomed.value;
+
+function shouldHandleZoom(event: PointerEvent | WheelEvent): boolean {
+  return !isInteractiveTarget(event.target);
+}
+
+function handleZoomPointerDown(event: PointerEvent) {
+  if (!shouldHandleZoom(event)) return;
+  event.stopPropagation();
+  zoom.onPointerdown(event);
+  // A pinch, and any drag on an already zoomed picture, outrank fast playback and
+  // scrubbing. Cancelling the video's gesture here is what lets a second finger start a
+  // pinch part way through a scrub or a hold.
+  if (zoom.isZoomed.value || zoom.isPinching.value || zoom.pointerCount() >= 2) {
+    playerComponent.value?.cancelHoldGesture();
+  }
+}
+
+/**
+ * The video just took the finger over for a scrub. The zoom layer parks that finger
+ * rather than forgetting it: dropping it from the pointer map is what used to leave
+ * swipe-to-dismiss and pinch dead for the rest of the touch, and for every gesture
+ * after it, once the timeline had been dragged sideways once.
+ */
+function handleSurfaceGestureStart() {
+  zoom.suspendSinglePointer();
+  reset();
+}
+
+// Register the first contact before the nested video player can claim pointer
+// capture. The bubbling handler still lets the player receive the same event.
+function handleZoomPointerDownCapture(event: PointerEvent) {
+  if (!shouldHandleZoom(event)) return;
+  zoom.onPointerdown(event);
+}
+
+function handleZoomPointerMove(event: PointerEvent) {
+  if (!shouldHandleZoom(event)) return;
+  event.stopPropagation();
+  zoom.onPointermove(event);
+}
+
+function handleZoomPointerUp(event: PointerEvent) {
+  if (!shouldHandleZoom(event)) return;
+  event.stopPropagation();
+  zoom.onPointerup(event);
+}
+
+// The video player may capture the release while scrubbing. Capture the event on
+// the stage first so the next single-finger vertical swipe starts cleanly.
+function handleZoomPointerUpCapture(event: PointerEvent) {
+  zoom.onPointerup(event);
+}
+
+function handleZoomPointerCancel(event: PointerEvent) {
+  if (!shouldHandleZoom(event)) return;
+  event.stopPropagation();
+  zoom.onPointercancel(event);
+}
+
+function handleZoomPointerCancelCapture(event: PointerEvent) {
+  zoom.onPointercancel(event);
+}
+
+function handleZoomWheel(event: WheelEvent) {
+  if (!shouldHandleZoom(event)) return;
+  zoom.onWheel(event);
+}
 
 const { dragOffset, isDragging, onPointercancel, onPointerdown, onPointermove, onPointerup, reset } =
   useVerticalDismiss({
     canStart: (event) => !isInteractiveTarget(event.target),
-    // Rotated, the picture's "down" runs across the screen, so the swipe that closes
-    // the layer has to be measured on the other axis.
+    // Turned a quarter, the picture's "down" points at the left edge of the screen, so
+    // the swipe the viewer reads as downwards arrives as horizontal movement.
     getAxis: () => (isRotated.value ? 'horizontal' : 'vertical'),
     onDismiss: () => {
       void requestClose();
@@ -199,41 +323,14 @@ function isInteractiveTarget(node: EventTarget | null): boolean {
   );
 }
 
-function getVideoElement(): HTMLVideoElement | null {
-  const player = playerComponent.value?.playerElement ?? null;
-  if (!player) return null;
-
-  const direct = player.querySelector('video');
-  if (direct instanceof HTMLVideoElement) return direct;
-
-  const shadow = player.shadowRoot?.querySelector('video');
-  return shadow instanceof HTMLVideoElement ? shadow : null;
-}
-
 // Rotating the picture rather than asking the platform to rotate the screen. An
 // orientation lock is silently refused on iOS and only granted to a fullscreen
 // document on Android, so the button used to do nothing visible and then surprise
 // the viewer with a turned layout later. Turning the stage ourselves always works;
 // the viewer holds the phone sideways.
 function toggleOrientation() {
+  zoom.reset();
   isRotated.value = !isRotated.value;
-}
-
-async function toggleFullscreen() {
-  if (isNativeFullscreen.value || isDocumentFullscreen()) {
-    await exitDocumentFullscreen();
-    isNativeFullscreen.value = false;
-    return;
-  }
-
-  const entered = await requestElementFullscreen(stageElement.value, getVideoElement());
-  isNativeFullscreen.value = entered && isDocumentFullscreen();
-
-  if (!entered) {
-    // No native fullscreen available: the layer already covers the viewport, so
-    // rotating is the only thing left to widen the picture.
-    isRotated.value = true;
-  }
 }
 
 function handleDeleted() {
@@ -261,20 +358,11 @@ async function requestClose() {
   unlockScreenOrientation();
   isRotated.value = false;
 
-  if (isNativeFullscreen.value || isDocumentFullscreen()) {
-    await exitDocumentFullscreen();
-    isNativeFullscreen.value = false;
-  }
-
   store.close(exitState);
 }
 
-function handleFullscreenChange() {
-  isNativeFullscreen.value = isDocumentFullscreen();
-}
-
 function handleKeydown(event: KeyboardEvent) {
-  if (event.key === 'Escape' && !isDocumentFullscreen()) {
+  if (event.key === 'Escape') {
     event.preventDefault();
     void requestClose();
   }
@@ -323,11 +411,10 @@ watch(
   async (isOpen) => {
     if (isOpen) {
       isRotated.value = false;
-      isNativeFullscreen.value = false;
       detailsOpen.value = false;
+      zoom.reset();
       lockScroll();
       document.addEventListener('keydown', handleKeydown);
-      document.addEventListener('fullscreenchange', handleFullscreenChange);
       await nextTick();
       observeLayerSize();
       return;
@@ -336,11 +423,10 @@ watch(
     stopObservingLayerSize();
 
     reset();
+    zoom.reset();
     unlockScroll();
     unlockScreenOrientation();
-    await exitDocumentFullscreen();
     document.removeEventListener('keydown', handleKeydown);
-    document.removeEventListener('fullscreenchange', handleFullscreenChange);
   }
 );
 
@@ -349,7 +435,6 @@ onBeforeUnmount(() => {
   unlockScroll();
   unlockScreenOrientation();
   document.removeEventListener('keydown', handleKeydown);
-  document.removeEventListener('fullscreenchange', handleFullscreenChange);
 });
 </script>
 
@@ -442,11 +527,26 @@ onBeforeUnmount(() => {
   justify-content: center;
   min-height: 0;
   overflow: hidden;
+  /* The immersive layer owns scrub, dismiss and pinch. Leaving this as `auto`
+     lets the browser cancel the pointer stream after a horizontal drag. */
+  touch-action: none;
 }
 
 .immersive-video__player {
   width: 100%;
   height: 100%;
+}
+
+.immersive-video__zoom-frame {
+  width: 100%;
+  height: 100%;
+  transform-origin: center;
+  transition: transform 0.2s ease;
+  will-change: transform;
+}
+
+.immersive-video__zoom-frame--interacting {
+  transition: none;
 }
 
 /* Landscape without touching the device orientation: the whole layer takes the

@@ -103,6 +103,18 @@ describe('useAppStore locale preferences', () => {
     fetchStatusMock.mockReset();
   });
 
+  it('broadcasts every explicit request to enable sound, even when already enabled', () => {
+    const store = useAppStore();
+
+    store.setVideoMuted(false);
+    const firstGeneration = store.videoSoundGeneration;
+    store.setVideoMuted(false);
+
+    expect(store.videoMuted).toBe(false);
+    expect(store.videoSoundGeneration).toBe(firstGeneration + 1);
+    expect(window.localStorage.getItem('foldergram-video-muted')).toBe('false');
+  });
+
   it('initializes locale from localStorage before browser preferences', () => {
     window.localStorage.setItem('foldergram-locale', 'en');
     setNavigatorLocales(['fr-FR'], 'fr-FR');

@@ -154,6 +154,15 @@ export interface ScanRunRecord {
   warning_text: string | null;
 }
 
+export interface ScanChangesSummary {
+  scanned_files: number;
+  new_files: number;
+  updated_files: number;
+  removed_files: number;
+  scan_count: number;
+  latest_finished_at: string | null;
+}
+
 export interface AppSettingRecord {
   key: string;
   value: string;

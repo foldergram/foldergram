@@ -4,10 +4,18 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useAuthStore } from '../stores/auth';
 import { useImmersiveVideoStore } from '../stores/immersive-video';
+import { createPostShareLink } from '../api/gallery';
 import type { FeedItem } from '../types/api';
 import FeedCard from './FeedCard.vue';
 
 vi.mock('vidstack/bundle', () => ({}));
+vi.mock('../api/gallery', async () => {
+  const actual = await vi.importActual<typeof import('../api/gallery')>('../api/gallery');
+  return {
+    ...actual,
+    createPostShareLink: vi.fn()
+  };
+});
 vi.mock('vue-router', async () => {
   const actual = await vi.importActual<typeof import('vue-router')>('vue-router');
 
@@ -150,6 +158,7 @@ const globalStubs = {
 describe('FeedCard', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
+    vi.mocked(createPostShareLink).mockReset();
     vi.stubGlobal(
       'IntersectionObserver',
       class {
@@ -251,6 +260,7 @@ describe('FeedCard', () => {
     expect(immersiveVideoStore.isOpen).toBe(true);
     expect(immersiveVideoStore.target?.id).toBe(805);
     expect(immersiveVideoStore.startTime).toBe(12.5);
+    expect(immersiveVideoStore.startPaused).toBe(false);
     expect(player.paused).toBe(true);
 
     immersiveVideoStore.close({ id: 805, currentTime: 20, paused: false });
@@ -356,10 +366,49 @@ describe('FeedCard', () => {
     expect(downloadLink.attributes('href')).toBe('/api/originals/807?download=1');
     expect(downloadLink.attributes('title')).toBe('Download original file');
 
-    const originalLink = wrapper.get('a[aria-label="Open original file"]');
+    const shareButton = wrapper.get('[data-test="feed-direct-share"]');
+    expect(shareButton.attributes('title')).toBe('Share this post');
+  });
 
-    expect(originalLink.attributes('href')).toBe('/api/originals/807');
-    expect(originalLink.attributes('title')).toBe('Open original file');
+  it('creates and copies a real share link directly from the home action row', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText }
+    });
+    vi.mocked(createPostShareLink).mockResolvedValue({
+      ok: true,
+      shareUrl: 'https://example.test/share/posts/token',
+      sharePath: '/share/posts/token',
+      link: {
+        id: 1,
+        postId: 807,
+        tokenPrefix: 'token',
+        expiresAt: null,
+        revokedAt: null,
+        createdAt: '2026-08-29T00:00:00.000Z',
+        lastUsedAt: null,
+        status: 'active'
+      }
+    });
+
+    const wrapper = mount(FeedCard, {
+      props: {
+        item: createImageItem(807),
+        avatarUrl: null,
+        context: 'home'
+      },
+      global: {
+        stubs: globalStubs
+      }
+    });
+
+    await wrapper.get('[data-test="feed-direct-share"]').trigger('click');
+    await flushPromises();
+
+    expect(createPostShareLink).toHaveBeenCalledWith(807);
+    expect(writeText).toHaveBeenCalledWith('https://example.test/share/posts/token');
+    expect(wrapper.get('[data-test="feed-direct-share"]').attributes('title')).toBe('Link copied');
   });
 
   it('falls back to a readable filename when the caption is not customized', () => {

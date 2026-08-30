@@ -108,6 +108,50 @@ describe.sequential('viewer-safe status payload', () => {
     expect(status.libraryIndex).not.toHaveProperty('pendingDerivativeMigrationRows');
   });
 
+  it('aggregates completed scan changes within an explicit day window', () => {
+    const firstRunId = scanRunRepository.start();
+    scanRunRepository.finish(firstRunId, {
+      finished_at: '2026-03-20T01:00:00.000Z',
+      status: 'completed',
+      scanned_files: 5,
+      new_files: 2,
+      updated_files: 1,
+      removed_files: 0,
+      error_text: null
+    });
+
+    const secondRunId = scanRunRepository.start();
+    scanRunRepository.finish(secondRunId, {
+      finished_at: '2026-03-20T23:00:00.000Z',
+      status: 'completed_with_errors',
+      scanned_files: 3,
+      new_files: 0,
+      updated_files: 2,
+      removed_files: 1,
+      error_text: 'one warning'
+    });
+
+    const outsideRunId = scanRunRepository.start();
+    scanRunRepository.finish(outsideRunId, {
+      finished_at: '2026-03-21T00:00:00.000Z',
+      status: 'completed',
+      scanned_files: 100,
+      new_files: 100,
+      updated_files: 100,
+      removed_files: 100,
+      error_text: null
+    });
+
+    expect(scanRunRepository.completedSummaryBetween('2026-03-20T00:00:00.000Z', '2026-03-21T00:00:00.000Z')).toEqual({
+      scanned_files: 8,
+      new_files: 2,
+      updated_files: 3,
+      removed_files: 1,
+      scan_count: 2,
+      latest_finished_at: '2026-03-20T23:00:00.000Z'
+    });
+  });
+
   it('keeps legacy derivative migration state in the admin-only stats payload', () => {
     const pendingSpy = vi.spyOn(imageRepository, 'countPendingDerivativeMigrationRows').mockReturnValue(14);
 

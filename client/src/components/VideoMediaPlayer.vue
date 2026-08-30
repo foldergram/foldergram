@@ -1,6 +1,7 @@
 <template>
   <div
     class="video-media-player relative h-full w-full overflow-hidden bg-black select-none"
+    :class="{ 'video-media-player--capture-touch-gestures': captureTouchGestures }"
     role="button"
     tabindex="0"
     @click="handleSurfaceClick"
@@ -70,7 +71,7 @@
             >
               <span
                 class="video-media-player__control-icon"
-                :class="effectiveMuted ? 'i-fluent-speaker-mute-16-regular' : 'i-fluent-speaker-2-16-regular'"
+                :class="muted ? 'i-fluent-speaker-mute-16-regular' : 'i-fluent-speaker-2-16-regular'"
                 aria-hidden="true"
               />
             </button>
@@ -114,6 +115,15 @@
         </template>
       </VideoProgressFooter>
     </media-player>
+
+    <img
+      v-if="poster && !hasRenderedFrame"
+      class="video-media-player__first-frame"
+      :src="poster"
+      :alt="alt || title || ''"
+      decoding="async"
+      aria-hidden="true"
+    />
 
     <div
       v-if="showPausedIndicator"
@@ -160,6 +170,7 @@ import {
   type VideoPlaybackMedia
 } from '../utils/video-playback';
 import { useHoldToSpeed } from '../composables/useHoldToSpeed';
+import { resolveGesturePoint } from '../utils/gesture-coordinates';
 import VideoProgressFooter from './VideoProgressFooter.vue';
 
 const props = withDefaults(
@@ -195,10 +206,16 @@ const props = withDefaults(
      */
     surfaceMode?: 'toggle' | 'immersive';
     fullscreenOrientation?: 'none' | 'landscape' | 'portrait';
+    /** Source already active on the surface handing playback to this player. */
+    sourceOverride?: ResolvedVideoSource | null;
     /** Seconds to resume from once metadata is ready. */
     startTime?: number;
     /** Enables press-and-hold fast playback and drag scrubbing on the frame. */
     holdToSeek?: boolean;
+    /** Prevents the browser from cancelling gestures owned by an immersive host. */
+    captureTouchGestures?: boolean;
+    /** Orientation used to map hold/scrub gestures to the video's local axes. */
+    gestureOrientation?: 'normal' | 'rotated';
   }>(),
   {
     media: null,
@@ -221,8 +238,11 @@ const props = withDefaults(
     timeLabel: '',
     surfaceMode: 'toggle',
     fullscreenOrientation: 'none',
+    sourceOverride: null,
     startTime: 0,
-    holdToSeek: false
+    holdToSeek: false,
+    captureTouchGestures: false,
+    gestureOrientation: 'normal'
   }
 );
 
@@ -235,6 +255,8 @@ const emit = defineEmits<{
   'fullscreen-change': [isFullscreen: boolean];
   'loaded-metadata': [payload: { naturalWidth: number; naturalHeight: number; duration: number }];
   'time-update': [payload: { currentTime: number; duration: number }];
+  'surface-gesture-start': [];
+  'surface-gesture-end': [];
 }>();
 
 const { t } = useI18n();
@@ -257,8 +279,32 @@ let pendingRestoreState: { currentTime: number; wasPaused: boolean } | null = nu
 let hidePausedTimer: NodeJS.Timeout | null = null;
 let removeEventListeners: (() => void) | null = null;
 let appliedStartTime = false;
+let autoplayCancelled = false;
+/**
+ * Vidstack tears `<media-poster>` down the moment a provider attaches, which is long
+ * before the first frame of a handover has decoded. Holding our own copy of the
+ * thumbnail until the clock actually moves is what stops the immersive layer from
+ * flashing black over a clip the inline card was already showing.
+ */
+const hasRenderedFrame = ref(false);
 /** A handover lands on a keyframe, so an exact match is not expected. */
 const START_TIME_TOLERANCE_SEC = 1.5;
+
+/**
+ * How far the clock has to move before playback counts as genuinely running.
+ *
+ * "Running" used to mean `currentTime > 0.05`, which is only true for a clip that
+ * starts at zero. A handover opens at the position the inline card reached, so that
+ * test passed the instant the seek landed and the stall retry loop stood down while the
+ * picture was still frozen. Progress is measured against where playback was asked to
+ * begin instead.
+ */
+const PLAYBACK_PROGRESS_EPSILON_SEC = 0.05;
+let playbackBaselineSec = 0;
+
+function hasPlaybackAdvanced(player: MediaPlayerElement): boolean {
+  return (player.currentTime || 0) > playbackBaselineSec + PLAYBACK_PROGRESS_EPSILON_SEC;
+}
 
 // A stream the NAS is still transcoding can refuse to start or stall on its first
 // segments, and it never recovers on its own here: the provider has already committed
@@ -284,7 +330,7 @@ function resetStallRetry() {
 
 function scheduleStallRetry() {
   const player = playerElement.value;
-  if (!player || !props.autoplay || stallRetryTimer !== 0 || stallRetryAttempts >= MAX_STALL_RETRIES) {
+  if (!player || !props.autoplay || autoplayCancelled || stallRetryTimer !== 0 || stallRetryAttempts >= MAX_STALL_RETRIES) {
     return;
   }
 
@@ -293,13 +339,13 @@ function scheduleStallRetry() {
     () => {
       stallRetryTimer = 0;
       const current = playerElement.value;
-      if (!current || !props.autoplay) {
+      if (!current || !props.autoplay || autoplayCancelled) {
         return;
       }
 
       // A viewer-initiated pause must survive the retry loop, so only a player that is
-      // still stuck at the very start is nudged.
-      if (!current.paused && (current.currentTime || 0) > 0.05) {
+      // still stuck where playback was asked to begin is nudged.
+      if (!current.paused && hasPlaybackAdvanced(current)) {
         resetStallRetry();
         return;
       }
@@ -307,7 +353,7 @@ function scheduleStallRetry() {
       void current
         .play()
         .then(() => {
-          if ((current.currentTime || 0) > 0.05) {
+          if (hasPlaybackAdvanced(current)) {
             resetStallRetry();
           } else {
             scheduleStallRetry();
@@ -364,7 +410,13 @@ const holdSpeed = useHoldToSpeed({
   },
   play: () => {
     void playerElement.value?.play().catch(() => {});
-  }
+  },
+  // Measured in the picture's own frame. A host that turns the surface with a CSS
+  // rotation reports `gestureOrientation`, so the sideways drag the viewer makes while
+  // holding the phone sideways still scrubs, and their downward swipe still dismisses.
+  getGesturePoint: (event) => resolveGesturePoint(event, props.gestureOrientation),
+  onGestureStart: () => emit('surface-gesture-start'),
+  onGestureEnd: () => emit('surface-gesture-end')
 });
 
 const scrubLabel = computed(() => {
@@ -404,6 +456,10 @@ const basePreviewUrl = computed<string>(() => {
 const managedPreferredSource = computed<ResolvedVideoSource | null>(() => {
   if (!props.media) {
     return null;
+  }
+
+  if (!isHd.value && props.sourceOverride) {
+    return props.sourceOverride;
   }
 
   return resolveVideoSource(props.media, isHd.value ? 'original' : appStore.videoPlaybackQuality);
@@ -467,19 +523,6 @@ function handleFullscreenChange(event: MediaFullscreenChangeEvent) {
 }
 
 function handleMuteClick() {
-  if (audioBlocked.value) {
-    // The press itself is the gesture the browser was waiting for, so retry audible
-    // playback rather than flipping the stored preference the wrong way.
-    audioBlocked.value = false;
-
-    const player = playerElement.value;
-    if (player && !props.muted) {
-      player.muted = false;
-      void player.play().catch(() => {});
-      return;
-    }
-  }
-
   emit('toggle-mute');
 }
 
@@ -579,6 +622,7 @@ async function togglePlayback() {
   if (!player) return;
 
   if (player.paused) {
+    autoplayCancelled = false;
     // A tap is a user gesture, so an earlier audible rejection no longer applies.
     if (audioBlocked.value) {
       audioBlocked.value = false;
@@ -592,6 +636,7 @@ async function togglePlayback() {
   } else {
     // The pause was asked for, so the retry loop must not undo it.
     resetStallRetry();
+    autoplayCancelled = true;
     player.pause();
     isPaused.value = true;
     showPausedIndicator.value = true;
@@ -609,27 +654,72 @@ async function togglePlayback() {
  * file, while HLS only honours the seek once a segment is attached. The tolerance
  * check keeps it idempotent so an already-applied handover is never re-seeked.
  */
-function applyStartTime(player: MediaPlayerElement) {
+function applyStartTime(player: MediaPlayerElement): boolean {
   if (appliedStartTime || props.startTime <= 0) {
-    return;
+    return appliedStartTime || props.startTime <= 0;
   }
 
   const target = props.startTime;
   const duration = player.duration || 0;
   if (duration > 0 && target >= duration - 0.25) {
     appliedStartTime = true;
-    return;
+    return true;
+  }
+
+  // Progress is judged from here on, so a stall at the handover position is still
+  // recognised as "not playing yet".
+  playbackBaselineSec = target;
+
+  // hls.js was handed the same position through `startPosition`, so the stream usually
+  // opens already parked there. Re-seeking would drop the fragment it just buffered and
+  // reintroduce the stall this path exists to avoid. A clock still sitting at zero is
+  // not a match: that is a provider that ignored the hint.
+  const clock = player.currentTime || 0;
+  if (clock > 0.05 && Math.abs(clock - target) <= START_TIME_TOLERANCE_SEC) {
+    appliedStartTime = true;
+    return true;
   }
 
   try {
     player.currentTime = target;
   } catch {
-    return;
+    return false;
   }
 
   if (Math.abs((player.currentTime || 0) - target) <= START_TIME_TOLERANCE_SEC) {
     appliedStartTime = true;
   }
+
+  return appliedStartTime;
+}
+
+function requestAutoplayAfterReady(player: MediaPlayerElement) {
+  if (!props.autoplay || autoplayCancelled || !player.paused) {
+    return;
+  }
+
+  // Keep ordinary autoplay on the existing delayed retry path. A handoff is different:
+  // the new player has already been positioned at a non-zero start time, so waiting for
+  // a further stall event leaves the immersive layer visibly frozen.
+  if (props.startTime <= 0) {
+    scheduleStallRetry();
+    return;
+  }
+
+  clearStallRetry();
+  void player
+    .play()
+    .then(() => {
+      if (!player.paused && hasPlaybackAdvanced(player)) {
+        resetStallRetry();
+        return;
+      }
+
+      scheduleStallRetry();
+    })
+    .catch(() => {
+      scheduleStallRetry();
+    });
 }
 
 /**
@@ -678,6 +768,7 @@ function setupListeners() {
     }
 
     applyStartTime(player);
+    requestAutoplayAfterReady(player);
   };
 
   const onCanPlay = () => {
@@ -686,10 +777,15 @@ function setupListeners() {
     // media source has no buffered range yet, so confirm the handover once the
     // provider reports it can play.
     applyStartTime(player);
-
-    if (props.autoplay && player.paused) {
-      scheduleStallRetry();
+    // `can-play` means a frame is decoded and on screen, so the thumbnail can go. It is
+    // held back while a handover seek is still outstanding, because the frame currently
+    // showing is the head of the clip rather than the position the viewer came from.
+    // This is also the only path that reveals a clip handed over paused, whose clock
+    // never moves.
+    if (appliedStartTime || props.startTime <= 0) {
+      hasRenderedFrame.value = true;
     }
+    requestAutoplayAfterReady(player);
   };
 
   const onSeeking = () => {
@@ -699,14 +795,15 @@ function setupListeners() {
   };
 
   const onStall = () => {
-    if (props.autoplay && (player.currentTime || 0) <= 0.05) {
+    if (props.autoplay && !autoplayCancelled) {
       scheduleStallRetry();
     }
   };
 
   const onTimeUpdate = () => {
-    if ((player.currentTime || 0) > 0.05) {
+    if (hasPlaybackAdvanced(player)) {
       resetStallRetry();
+      hasRenderedFrame.value = true;
     }
 
     currentTimeSec.value = player.currentTime || 0;
@@ -734,7 +831,13 @@ function setupListeners() {
     switchToFallbackSource();
   };
 
-  const removeHlsLibraryBinding = useBundledHlsLibrary(player);
+  // A handover position has to reach hls.js before it picks its first fragment,
+  // otherwise it buffers the head of the clip and the seek that follows throws that
+  // work away. `appliedStartTime` guards the case where the viewer has already moved
+  // on: a provider re-attach must not drag them back to the handover point.
+  const removeHlsLibraryBinding = useBundledHlsLibrary(player, {
+    getStartPosition: () => (appliedStartTime ? 0 : props.startTime)
+  });
 
   player.addEventListener('loaded-metadata', onLoadedMetadata);
   player.addEventListener('can-play', onCanPlay);
@@ -788,6 +891,9 @@ watch([basePreviewUrl, () => props.media?.id ?? null], () => {
   fallbackSource.value = null;
   pendingRestoreState = null;
   appliedStartTime = false;
+  autoplayCancelled = false;
+  playbackBaselineSec = 0;
+  hasRenderedFrame.value = false;
 });
 
 watch(
@@ -805,8 +911,8 @@ watch(playerElement, () => {
 // The mute button now reports to the owning store instead of flipping the player
 // itself, so the element follows the prop in both directions.
 watch(
-  () => props.muted,
-  (muted) => {
+  () => [props.muted, appStore.videoSoundGeneration] as const,
+  ([muted]) => {
     // Switching the preference to audible is a deliberate act, so it also clears a
     // stale block; if the browser refuses again `handleAutoplayFail` re-arms it.
     if (!muted) {
@@ -832,7 +938,9 @@ defineExpose({
   currentTime: () => playerElement.value?.currentTime ?? 0,
   paused: () => playerElement.value?.paused ?? true,
   play: () => playerElement.value?.play(),
-  pause: () => playerElement.value?.pause()
+  pause: () => playerElement.value?.pause(),
+  cancelHoldGesture: () => holdSpeed.stop(),
+  isHoldGestureActive: () => holdSpeed.isFastForwarding.value || holdSpeed.isScrubbing.value
 });
 </script>
 
@@ -844,6 +952,10 @@ defineExpose({
   -webkit-user-select: none;
   user-select: none;
   touch-action: pan-y;
+}
+
+.video-media-player.video-media-player--capture-touch-gestures {
+  touch-action: none;
 }
 
 .video-media-player__player {
@@ -869,6 +981,18 @@ defineExpose({
   height: 100%;
   object-fit: contain;
   background: black;
+}
+
+.video-media-player__first-frame {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+  pointer-events: none;
 }
 
 .video-media-player__poster {

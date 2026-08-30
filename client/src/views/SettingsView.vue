@@ -1247,6 +1247,7 @@
               </button>
             </div>
           </section>
+
         </template>
 
         <!-- CATEGORY: LIBRARY -->
@@ -1419,6 +1420,33 @@
               <div class="flex flex-col gap-1 py-3 border-b-0">
                 <dt class="m-0 text-muted text-[0.76rem] font-bold tracking-[0.08em] uppercase">{{ t('settings.status.lastScan.changes') }}</dt>
                 <dd class="m-0 text-[1rem] font-medium leading-relaxed whitespace-pre-line">{{ lastScanChangeSummary }}</dd>
+              </div>
+            </dl>
+          </section>
+
+          <section class="card grid gap-[1.15rem] p-8">
+            <div class="flex items-start justify-between gap-4">
+              <div>
+                <h2 class="m-0 text-[1.18rem]">{{ t('settings.status.todayChanges.title') }}</h2>
+                <p class="m-0 mt-[0.35rem] text-muted">{{ t('settings.status.todayChanges.description') }}</p>
+              </div>
+            </div>
+            <dl class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4 m-0 mt-4">
+              <div class="flex flex-col gap-1 py-3 border-b border-border">
+                <dt class="m-0 text-muted text-[0.76rem] font-bold tracking-[0.08em] uppercase">{{ t('settings.status.todayChanges.scans') }}</dt>
+                <dd class="m-0 text-[1.45rem] font-medium tracking-tight">{{ formatCount(adminStats?.todayScanChanges.scan_count ?? 0) }}</dd>
+              </div>
+              <div class="flex flex-col gap-1 py-3 border-b border-border">
+                <dt class="m-0 text-muted text-[0.76rem] font-bold tracking-[0.08em] uppercase">{{ t('settings.status.todayChanges.filesScanned') }}</dt>
+                <dd class="m-0 text-[1.45rem] font-medium tracking-tight">{{ formatCount(adminStats?.todayScanChanges.scanned_files ?? 0) }}</dd>
+              </div>
+              <div class="flex flex-col gap-1 py-3 border-b border-border md:border-b-0">
+                <dt class="m-0 text-muted text-[0.76rem] font-bold tracking-[0.08em] uppercase">{{ t('settings.status.todayChanges.changes') }}</dt>
+                <dd class="m-0 text-[1rem] font-medium leading-relaxed whitespace-pre-line">{{ todayScanChangeSummary }}</dd>
+              </div>
+              <div class="flex flex-col gap-1 py-3 border-b-0">
+                <dt class="m-0 text-muted text-[0.76rem] font-bold tracking-[0.08em] uppercase">{{ t('settings.status.todayChanges.latestFinished') }}</dt>
+                <dd class="m-0 text-[1.2rem] font-medium tracking-tight">{{ formatDateTime(adminStats?.todayScanChanges.latest_finished_at) }}</dd>
               </div>
             </dl>
           </section>
@@ -2469,6 +2497,12 @@ const lastScanChangeSummary = computed(() => {
   }
 
   return `${formatCount(lastCompletedScan.value.new_files)} ${t('settings.status.lastScan.changeValues.new')}\n${formatCount(lastCompletedScan.value.updated_files)} ${t('settings.status.lastScan.changeValues.updated')}\n${formatCount(lastCompletedScan.value.removed_files)} ${t('settings.status.lastScan.changeValues.removed')}`;
+});
+const todayScanChangeSummary = computed(() => {
+  const changes = adminStats.value?.todayScanChanges;
+  return `${formatCount(changes?.new_files ?? 0)} ${t('settings.status.lastScan.changeValues.new')}
+${formatCount(changes?.updated_files ?? 0)} ${t('settings.status.lastScan.changeValues.updated')}
+${formatCount(changes?.removed_files ?? 0)} ${t('settings.status.lastScan.changeValues.removed')}`;
 });
 const showScanErrorNotice = computed(() => {
   if (appStore.isLibraryUnavailable || appStore.isScanning) {

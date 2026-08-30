@@ -117,9 +117,9 @@ const WARM_SEGMENT_SECONDS = 2;
 export function warmVideoStream(
   media: VideoPlaybackMedia,
   quality: VideoPlaybackQuality,
-  options: { fromSeconds?: number; segments?: number } = {}
+  options: { fromSeconds?: number; segments?: number; source?: ResolvedVideoSource | null } = {}
 ): void {
-  const source = resolveVideoSource(media, quality);
+  const source = options.source ?? resolveVideoSource(media, quality);
   if (!source.isStream) {
     return;
   }
@@ -178,7 +178,28 @@ const loadBundledHls = (): Promise<{ default: any }> => {
  * and the tuned config is what makes seeking land on demand instead of waiting
  * for the buffer to walk forward.
  */
-export function useBundledHlsLibrary(player: MediaPlayerElement | null): () => void {
+export interface BundledHlsOptions {
+  /**
+   * Where playback should begin, in seconds. Returning `0` keeps hls.js on its own
+   * default.
+   *
+   * A handover from an inline card resumes mid-file, and without this hls.js buffers
+   * the head of the playlist first, fires `can-play`, and only then gets seeked by
+   * `applyStartTime`. That flushes everything it just built and re-buffers at the real
+   * position, which is exactly the stall the viewer sees after tapping a clip that was
+   * already playing. Handing the position to hls.js up front makes the very first
+   * fragment request land on the segment the viewer is actually watching.
+   *
+   * Read once per hls.js instance, so a later source swap on the same provider still
+   * relies on `applyStartTime` as the fallback.
+   */
+  getStartPosition?: () => number;
+}
+
+export function useBundledHlsLibrary(
+  player: MediaPlayerElement | null,
+  options: BundledHlsOptions = {}
+): () => void {
   if (!player) {
     return () => {};
   }
@@ -189,9 +210,13 @@ export function useBundledHlsLibrary(player: MediaPlayerElement | null): () => v
       return;
     }
 
+    const startPosition = options.getStartPosition?.() ?? 0;
+
     provider.library = loadBundledHls;
     provider.config = {
       ...provider.config,
+      // -1 is the hls.js default and means "start at the beginning of the playlist".
+      startPosition: Number.isFinite(startPosition) && startPosition > 0 ? startPosition : -1,
       // Segments are produced on demand, so a generous timeout avoids aborting a
       // request the NAS is still transcoding.
       fragLoadingTimeOut: 60_000,
@@ -209,6 +234,10 @@ export function useBundledHlsLibrary(player: MediaPlayerElement | null): () => v
       appendErrorMaxRetry: 5,
       startFragPrefetch: true,
       startLevel: -1,
+      // The bandwidth probe loads an extra fragment before playback, and every fragment
+      // here costs the NAS an ffmpeg run. Bandwidth is not the constraint on a LAN, so
+      // that probe is pure added latency on the very first frame.
+      testBandwidth: false,
       lowLatencyMode: false
     };
   };

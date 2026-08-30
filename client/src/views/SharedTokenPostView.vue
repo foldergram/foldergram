@@ -41,11 +41,11 @@
           :poster="detail.thumbnailUrl"
           :alt="detail.filename"
           :title="detail.filename"
-          :muted="muted"
+          :muted="appStore.videoMuted"
           autoplay
           hold-to-seek
           variant="viewer"
-          @toggle-mute="muted = !muted"
+          @toggle-mute="appStore.setVideoMuted(!appStore.videoMuted)"
         />
         <ResilientImage
           v-else
@@ -133,6 +133,7 @@ import CarouselMediaStage from '../components/CarouselMediaStage.vue';
 import ErrorState from '../components/ErrorState.vue';
 import ResilientImage from '../components/ResilientImage.vue';
 import VideoMediaPlayer from '../components/VideoMediaPlayer.vue';
+import { useAppStore } from '../stores/app';
 import type { SharedImageDetail } from '../types/api';
 import { resolveDisplayCaption } from '../utils/caption';
 import { formatMediaDuration } from '../utils/media';
@@ -143,13 +144,13 @@ const props = defineProps<{
 }>();
 
 const { t } = useI18n();
+const appStore = useAppStore();
 const SHARE_LIKES_STORAGE_KEY = 'foldergram-share-likes';
 const detail = ref<SharedImageDetail | null>(null);
 const loading = ref(true);
 const error = ref<string | null>(null);
 const carouselIndex = ref(0);
 const detailsOpen = ref(false);
-const muted = ref(true);
 const liked = ref(false);
 const copied = ref(false);
 let copiedTimer = 0;

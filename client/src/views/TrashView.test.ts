@@ -151,6 +151,111 @@ describe('TrashView', () => {
     deleteImageMock.mockReset();
   });
 
+  it('selects and deselects all loaded trash items', async () => {
+    const appStore = useAppStore();
+    const trashStore = useTrashStore();
+    appStore.$patch({
+      stats: {
+        scan: { isScanning: false, lastCompletedScan: null },
+        storage: { available: true, reason: null },
+        libraryIndex: { rebuildRequired: false, reason: null, ignoredRootMediaCount: 0 },
+        preferences: { nestedFolderTitleFormat: 'folder' }
+      } as never
+    });
+    trashStore.$patch({
+      items: [createTrashItem(81), createTrashItem(82)],
+      initialized: true,
+      loading: false,
+      hasMore: false,
+      error: null
+    });
+    vi.spyOn(trashStore, 'loadInitial').mockResolvedValue(undefined);
+
+    const wrapper = mount(TrashView, {
+      global: {
+        stubs: {
+          RouterLink: { template: '<a><slot /></a>' }
+        }
+      }
+    });
+
+    await flushPromises();
+    const selectAllButton = wrapper.findAll('button').find((button) => button.text() === 'Select all');
+    expect(selectAllButton).toBeDefined();
+
+    await selectAllButton!.trigger('click');
+    expect(wrapper.findAll('input[type="checkbox"]').every((input) => (input.element as HTMLInputElement).checked)).toBe(true);
+    expect(wrapper.text()).toContain('2 selected posts');
+
+    await wrapper.findAll('button').find((button) => button.text() === 'Deselect all')!.trigger('click');
+    expect(wrapper.findAll('input[type="checkbox"]').every((input) => !(input.element as HTMLInputElement).checked)).toBe(true);
+  });
+
+  it('keeps deleting in the background after the dialog closes and reports failures', async () => {
+    const appStore = useAppStore();
+    const trashStore = useTrashStore();
+    const firstDelete = createDeferred();
+
+    appStore.$patch({
+      stats: {
+        scan: { isScanning: false, lastCompletedScan: null },
+        storage: { available: true, reason: null },
+        libraryIndex: { rebuildRequired: false, reason: null, ignoredRootMediaCount: 0 },
+        preferences: { nestedFolderTitleFormat: 'folder' }
+      } as never
+    });
+    trashStore.$patch({
+      items: [createTrashItem(91), createTrashItem(92)],
+      initialized: true,
+      loading: false,
+      hasMore: false,
+      error: null
+    });
+    vi.spyOn(trashStore, 'loadInitial').mockResolvedValue(undefined);
+    vi.spyOn(appStore, 'fetchStats').mockResolvedValue(undefined as never);
+
+    deleteImageMock.mockImplementationOnce(async () => {
+      await firstDelete.promise;
+      return { ok: true };
+    });
+    deleteImageMock.mockImplementationOnce(async () => {
+      throw new Error('Permanent deletion is unavailable while a rebuild is pending');
+    });
+
+    const wrapper = mount(TrashView, {
+      global: {
+        stubs: {
+          RouterLink: { template: '<a><slot /></a>' }
+        }
+      }
+    });
+
+    await flushPromises();
+    await wrapper.findAll('button').find((button) => button.text() === 'Select all')!.trigger('click');
+    await wrapper.findAll('button').find((button) => button.text() === 'Permanently Delete')!.trigger('click');
+    await flushPromises();
+
+    await wrapper.find('[data-test="confirm-button"]').trigger('click');
+    await flushPromises();
+
+    // The dialog closes immediately so the user is free to browse elsewhere while
+    // the store keeps deleting in the background.
+    expect(wrapper.find('[data-test="confirm-dialog"]').exists()).toBe(false);
+    expect(trashStore.deletionActive).toBe(true);
+    expect(wrapper.text()).toContain('Deleting in the background');
+
+    firstDelete.resolve();
+    await flushPromises();
+    await flushPromises();
+
+    expect(deleteImageMock).toHaveBeenCalledTimes(2);
+    expect(trashStore.deletionActive).toBe(false);
+    expect(wrapper.text()).toContain('1 post could not be processed.');
+    expect(wrapper.text()).toContain('Permanent deletion is unavailable while a rebuild is pending');
+    // The successful item is gone while the failed one stays in the list.
+    expect(trashStore.items.map((item) => item.id)).toEqual([92]);
+  });
+
   it('closes the restore dialog without waiting for background refreshes', async () => {
     const appStore = useAppStore();
     const trashStore = useTrashStore();

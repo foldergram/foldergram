@@ -31,6 +31,7 @@ interface AppState {
   theme: 'light' | 'dark';
   locale: SupportedLocale;
   videoMuted: boolean;
+  videoSoundGeneration: number;
   videoPlaybackQualityOverride: VideoPlaybackQuality | null;
   lastOpenedFolderSlug: string | null;
   recentOpenedFolderSlugs: string[];
@@ -105,6 +106,7 @@ export const useAppStore = defineStore('app', {
     theme: 'light',
     locale: DEFAULT_LOCALE,
     videoMuted: true,
+    videoSoundGeneration: 0,
     videoPlaybackQualityOverride: null,
     lastOpenedFolderSlug: null,
     recentOpenedFolderSlugs: [],
@@ -264,6 +266,9 @@ export const useAppStore = defineStore('app', {
 
     setVideoMuted(videoMuted: boolean) {
       this.videoMuted = videoMuted;
+      if (!videoMuted) {
+        this.videoSoundGeneration += 1;
+      }
       window.localStorage.setItem(VIDEO_MUTED_STORAGE_KEY, String(videoMuted));
     },
 

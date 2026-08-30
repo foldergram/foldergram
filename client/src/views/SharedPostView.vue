@@ -39,13 +39,18 @@
               prefer-preview
               loading="eager"
             />
-            <video
+            <VideoMediaPlayer
               v-else-if="shareStore.image.mediaType === 'video'"
               class="max-h-[78vh] w-full bg-black"
               :src="shareStore.image.previewUrl"
               :poster="shareStore.image.thumbnailUrl"
-              controls
-              playsinline
+              :alt="shareStore.image.filename"
+              :title="shareStore.image.filename"
+              :muted="appStore.videoMuted"
+              :loop="false"
+              preload="metadata"
+              variant="viewer"
+              @toggle-mute="appStore.setVideoMuted(!appStore.videoMuted)"
             />
             <ResilientImage
               v-else
@@ -92,6 +97,8 @@ import { RouterLink, useRoute } from 'vue-router';
 import ErrorState from '../components/ErrorState.vue';
 import CarouselMediaStage from '../components/CarouselMediaStage.vue';
 import ResilientImage from '../components/ResilientImage.vue';
+import VideoMediaPlayer from '../components/VideoMediaPlayer.vue';
+import { useAppStore } from '../stores/app';
 import { useShareStore } from '../stores/share';
 import { resolveDisplayCaption } from '../utils/caption';
 import { formatMediaDuration } from '../utils/media';
@@ -104,6 +111,7 @@ const props = defineProps<{
 const { t } = useI18n();
 const route = useRoute();
 const shareStore = useShareStore();
+const appStore = useAppStore();
 const imageId = computed(() => Number(props.id));
 const carouselIndex = ref(0);
 const isCarousel = computed(() => shareStore.image?.postType === 'carousel' && (shareStore.image.mediaItems?.length ?? 0) > 1);

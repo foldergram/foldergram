@@ -29,24 +29,10 @@ export function useVerticalDismiss(options: VerticalDismissOptions = {}) {
   const isDragging = ref(false);
 
   let activePointerId: number | null = null;
-  let capturedElement: Element | null = null;
   let startX = 0;
   let startY = 0;
 
-  function releasePointerCapture() {
-    if (capturedElement && activePointerId !== null) {
-      try {
-        capturedElement.releasePointerCapture(activePointerId);
-      } catch {
-        // The pointer may already be released.
-      }
-    }
-
-    capturedElement = null;
-  }
-
   function reset() {
-    releasePointerCapture();
     activePointerId = null;
     startX = 0;
     startY = 0;
@@ -67,14 +53,6 @@ export function useVerticalDismiss(options: VerticalDismissOptions = {}) {
     startX = event.clientX;
     startY = event.clientY;
 
-    if (event.currentTarget instanceof Element) {
-      try {
-        event.currentTarget.setPointerCapture(event.pointerId);
-        capturedElement = event.currentTarget;
-      } catch {
-        capturedElement = null;
-      }
-    }
   }
 
 /**

@@ -12,11 +12,7 @@
       <p class="reels-view__message">{{ reelsStore.error }}</p>
     </section>
 
-    <section v-else-if="showLoadingState" class="reels-view__message-card">
-      <p class="reels-view__eyebrow">{{ t('nav.reels') }}</p>
-      <h1 class="reels-view__title">{{ t('reels.view.loadingTitle') }}</h1>
-      <p class="reels-view__message">{{ t('reels.view.loadingDescription') }}</p>
-    </section>
+    <div v-else-if="showLoadingState" class="reels-view__loading-canvas" aria-hidden="true" />
 
     <section v-else-if="reelsStore.initialized && reelsStore.items.length === 0" class="reels-view__message-card">
       <p class="reels-view__eyebrow">{{ t('nav.reels') }}</p>
@@ -264,6 +260,12 @@ watch(activeItem, (item) => {
   min-height: 100%;
   background: var(--bg);
   color: var(--text);
+}
+
+.reels-view__loading-canvas {
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
 }
 
 .reels-view__layout {

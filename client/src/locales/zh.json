@@ -648,6 +648,14 @@
           "updated": "已更新",
           "removed": "已移除"
         }
+      },
+      "todayChanges": {
+        "title": "今日变更",
+        "description": "汇总今天所有已完成的全量和增量扫描，不包含仍在进行中的扫描。",
+        "scans": "扫描次数",
+        "filesScanned": "今日扫描文件",
+        "changes": "变更汇总",
+        "latestFinished": "最近完成时间"
       }
     }
   },
@@ -1183,6 +1191,10 @@
     "description": "移到这里的帖子会保留在磁盘上，直到你将其永久删除。",
     "selectedOne": "已选 {count} 条帖子",
     "selectedOther": "已选 {count} 条帖子",
+    "selectAll": "全选",
+    "deselectAll": "取消全选",
+    "processingProgress": "正在处理 {done} / {total}…",
+    "deletionProgress": "正在后台删除 {done} / {total}，可以继续浏览其他页面。",
     "restoreButton": "恢复",
     "deleteButton": "永久删除",
     "libraryUnavailableTitle": "图库存储不可用",

@@ -29,7 +29,10 @@ export function useImmersiveMediaOpen() {
   }
 
   /** Returns false when the caller should fall back to its own navigation. */
-  function openInPlace(item: FeedItem): boolean {
+  function openInPlace(
+    item: FeedItem,
+    options: { startTime?: number; startPaused?: boolean } = {}
+  ): boolean {
     if (!canOpenInPlace(item)) {
       return false;
     }
@@ -43,14 +46,16 @@ export function useImmersiveMediaOpen() {
         width: item.width,
         height: item.height,
         caption: item.caption ?? null,
-        folderSlug: item.folderSlug
+        folderSlug: item.folderSlug,
+        collectionItem: item
       });
       return true;
     }
 
     // Warming the head of the clip before the layer mounts is what removes the stall
     // between the tap and the first frame on a NAS that transcodes on demand.
-    warmVideoStream(item, appStore.videoPlaybackQuality, { fromSeconds: 0, segments: 4 });
+    const startTime = Number.isFinite(options.startTime) ? Math.max(0, options.startTime ?? 0) : 0;
+    warmVideoStream(item, appStore.videoPlaybackQuality, { fromSeconds: startTime, segments: 4 });
 
     immersiveVideoStore.open({
       id: item.id,
@@ -62,8 +67,9 @@ export function useImmersiveMediaOpen() {
       playbackStrategy: item.playbackStrategy,
       width: item.width,
       height: item.height,
-      durationMs: item.durationMs
-    });
+      durationMs: item.durationMs,
+      collectionItem: item
+    }, options);
 
     return true;
   }

@@ -61,7 +61,7 @@
       class="rounded-[0.5rem] border border-border"
       :items="item.mediaItems!"
       :prefer-preview="isHomeContext"
-      :retry-while="appStore.isScanning"
+      :retry-while="appStore.isInitialScan"
       :loading="isHomeContext ? 'eager' : 'lazy'"
       :muted="appStore.videoMuted"
     />
@@ -77,7 +77,7 @@
           :src="item.thumbnailUrl"
           :alt="item.filename"
           loading="lazy"
-          :retry-while="appStore.isScanning"
+          :retry-while="appStore.isInitialScan"
           class="h-full w-full object-cover"
         />
         <div
@@ -102,7 +102,7 @@
         :src="homeImageSrc"
         :alt="item.filename"
         loading="lazy"
-        :retry-while="appStore.isScanning"
+          :retry-while="appStore.isInitialScan"
         class="h-full w-full object-cover"
       />
       <!-- Instagram-style double-tap heart burst, centered inside card -->
@@ -173,7 +173,7 @@
                 <span
                   class="feed-card__player-control-icon"
                   :class="
-                    homeEffectiveMuted
+                    appStore.videoMuted
                       ? 'i-fluent-speaker-mute-16-regular'
                       : 'i-fluent-speaker-2-16-regular'
                   "
@@ -287,25 +287,21 @@
               />
             </svg>
           </a>
-          <a
+          <button
             class="inline-flex items-center justify-center w-8 h-8 border-0 bg-transparent cursor-pointer color-inherit transition-[opacity,transform] duration-180 hover:opacity-72 hover:-translate-y-px"
-            :href="originalMediaUrl"
-            target="_blank"
-            rel="noreferrer"
-            :aria-label="t('post.viewer.openOriginalFile')"
-            :title="t('post.viewer.openOriginalFile')"
+            type="button"
+            data-test="feed-direct-share"
+            :disabled="postShare.sharing.value"
+            :aria-label="postShare.copied.value ? t('share.post.copied') : t('share.post.action')"
+            :title="postShare.copied.value ? t('share.post.copied') : t('share.post.action')"
+            @click="handleDirectShare"
           >
-            <svg class="w-[1.45rem] h-[1.45rem]" viewBox="0 0 24 24" role="presentation">
-              <path
-                d="M14 5h5v5m0-5-7.5 7.5M10 7H7.5A2.5 2.5 0 0 0 5 9.5v7A2.5 2.5 0 0 0 7.5 19h7a2.5 2.5 0 0 0 2.5-2.5V14"
-                fill="none"
-                stroke="currentColor"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="1.8"
-              />
-            </svg>
-          </a>
+            <span
+              class="w-[1.45rem] h-[1.45rem]"
+              :class="postShare.copied.value ? 'i-fluent-checkmark-20-filled' : 'i-fluent-share-20-regular'"
+              aria-hidden="true"
+            />
+          </button>
           <CollectionBookmark
             :item="item"
             placement="feed"
@@ -701,6 +697,24 @@ function openImmersiveImage(mediaIndex = carouselIndex.value) {
   const carouselItem = isCarousel.value ? props.item.mediaItems?.[mediaIndex] : null;
 
   if (carouselItem) {
+    const collectionItem: FeedItem = {
+      ...props.item,
+      id: carouselItem.imageId,
+      filename: carouselItem.filename,
+      mediaType: carouselItem.mediaType,
+      width: carouselItem.width,
+      height: carouselItem.height,
+      durationMs: carouselItem.durationMs,
+      thumbnailUrl: carouselItem.thumbnailUrl,
+      previewUrl: carouselItem.previewUrl,
+      playbackStrategy: carouselItem.playbackStrategy,
+      streamUrl: carouselItem.streamUrl,
+      originalUrl: carouselItem.originalUrl,
+      postType: 'single',
+      mediaItems: undefined,
+      itemCount: undefined
+    };
+
     immersiveImageStore.open({
       id: carouselItem.imageId,
       filename: carouselItem.filename,
@@ -709,7 +723,8 @@ function openImmersiveImage(mediaIndex = carouselIndex.value) {
       width: carouselItem.width,
       height: carouselItem.height,
       caption: caption.value,
-      folderSlug: props.item.folderSlug
+      folderSlug: props.item.folderSlug,
+      collectionItem
     });
     return;
   }
@@ -722,7 +737,8 @@ function openImmersiveImage(mediaIndex = carouselIndex.value) {
     width: props.item.width,
     height: props.item.height,
     caption: caption.value,
-    folderSlug: props.item.folderSlug
+    folderSlug: props.item.folderSlug,
+    collectionItem: props.item
   });
 }
 
@@ -980,6 +996,7 @@ function handleHomeVideoEnded() {
 function openImmersiveVideo() {
   const player = homePlayerElement.value;
   const currentTime = Number.isFinite(player?.currentTime) ? player?.currentTime ?? 0 : 0;
+  const startPaused = player?.paused === true;
 
   // Hand the clip to the fullscreen layer and stop the inline copy so only one
   // decoder is running at a time.
@@ -992,7 +1009,8 @@ function openImmersiveVideo() {
   // removes the stall that used to show up right after the zoom animation.
   warmVideoStream(props.item, appStore.videoPlaybackQuality, {
     fromSeconds: currentTime,
-    segments: 4
+    segments: 4,
+    source: homeActiveVideoSource.value
   });
 
   immersiveVideoStore.open(
@@ -1004,11 +1022,16 @@ function openImmersiveVideo() {
       originalUrl: props.item.originalUrl,
       streamUrl: props.item.streamUrl,
       playbackStrategy: props.item.playbackStrategy,
+      sourceOverride: homeActiveVideoSource.value,
       width: props.item.width,
       height: props.item.height,
-      durationMs: props.item.durationMs
+      durationMs: props.item.durationMs,
+      collectionItem: props.item
     },
-    { startTime: currentTime }
+    {
+      startTime: currentTime,
+      startPaused
+    }
   );
 }
 
@@ -1077,19 +1100,6 @@ function enforceHomeVideoMuted() {
 
 async function toggleHomeVideoSound() {
   const player = homePlayerElement.value;
-
-  // The tap itself is the gesture the browser wanted, so a blocked clip goes audible
-  // again without touching the stored preference.
-  if (homeAudioBlocked.value && !appStore.videoMuted) {
-    homeAudioBlocked.value = false;
-    if (player) {
-      syncHomeVideoMuted(player, false);
-      await player.play().catch(() => {
-        // Ignore play rejections before the provider is ready.
-      });
-    }
-    return;
-  }
 
   const nextMuted = !appStore.videoMuted;
   homeAudioBlocked.value = false;
@@ -1189,6 +1199,13 @@ function openMenu() {
 // unavailable, which is what happens on a plain-http LAN address.
 async function handleShare() {
   await postShare.share(props.item.id);
+}
+
+async function handleDirectShare() {
+  const shareUrl = await postShare.share(props.item.id);
+  if (!shareUrl || (!postShare.copied.value && postShare.shareUrl.value)) {
+    menuOpen.value = true;
+  }
 }
 
 function openOriginal() {
@@ -1320,8 +1337,8 @@ watch(
 );
 
 watch(
-  () => appStore.videoMuted,
-  (videoMuted) => {
+  () => [appStore.videoMuted, appStore.videoSoundGeneration] as const,
+  ([videoMuted]) => {
     if (!videoMuted) {
       homeAudioBlocked.value = false;
     }

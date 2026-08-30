@@ -648,6 +648,14 @@
           "updated": "actualizados",
           "removed": "eliminados"
         }
+      },
+      "todayChanges": {
+        "title": "Cambios de hoy",
+        "description": "Todos los escaneos completos e incrementales terminados hoy, sin incluir los que siguen en curso.",
+        "scans": "Escaneos",
+        "filesScanned": "Archivos escaneados hoy",
+        "changes": "Resumen de cambios",
+        "latestFinished": "Último finalizado"
       }
     }
   },
@@ -1183,6 +1191,10 @@
     "description": "Las publicaciones movidas aquí permanecen en el disco hasta que las elimines de forma permanente.",
     "selectedOne": "{count} publicación seleccionada",
     "selectedOther": "{count} publicaciones seleccionadas",
+    "selectAll": "Seleccionar todo",
+    "deselectAll": "Deseleccionar todo",
+    "processingProgress": "Procesando {done} / {total}...",
+    "deletionProgress": "Eliminando en segundo plano {done} / {total}. Puedes seguir navegando.",
     "restoreButton": "Restaurar",
     "deleteButton": "Eliminar permanentemente",
     "libraryUnavailableTitle": "Almacenamiento de la biblioteca no disponible",

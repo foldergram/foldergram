@@ -1,8 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { useHoldToSpeed } from './useHoldToSpeed';
+import { useHoldToSpeed, type GesturePoint } from './useHoldToSpeed';
 
-function createHarness(options: { currentTime?: number; duration?: number } = {}) {
+function createHarness(options: {
+  currentTime?: number;
+  duration?: number;
+  getGesturePoint?: (event: PointerEvent) => GesturePoint;
+  onGestureEnd?: () => void;
+  onGestureStart?: () => void;
+} = {}) {
   let currentTime = options.currentTime ?? 30;
   let playbackRate = 1;
   let playCalls = 0;
@@ -22,7 +28,10 @@ function createHarness(options: { currentTime?: number; duration?: number } = {}
     },
     play: () => {
       playCalls += 1;
-    }
+    },
+    getGesturePoint: options.getGesturePoint,
+    onGestureStart: options.onGestureStart,
+    onGestureEnd: options.onGestureEnd
   });
 
   // jsdom has no PointerEvent constructor, so the handlers get the shape they read.
@@ -161,6 +170,48 @@ describe('useHoldToSpeed', () => {
     vi.useRealTimers();
   });
 
+  it('notifies the host after a surface scrub fully releases', () => {
+    vi.useFakeTimers();
+    const onGestureEnd = vi.fn();
+    const harness = createHarness({ onGestureEnd });
+
+    harness.press(200, 150);
+    harness.move(300, 150);
+    harness.release(300, 150);
+
+    expect(onGestureEnd).toHaveBeenCalledTimes(1);
+    harness.hold.stop();
+    expect(onGestureEnd).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+  });
+
+  it('notifies the host when horizontal scrub takes ownership', () => {
+    vi.useFakeTimers();
+    const onGestureStart = vi.fn();
+    const harness = createHarness({ onGestureStart });
+
+    harness.press(200, 150);
+    harness.move(300, 150);
+
+    expect(onGestureStart).toHaveBeenCalledTimes(1);
+    harness.release(300, 150);
+    vi.useRealTimers();
+  });
+
+  it('maps a rotated screen drag onto the video horizontal axis', () => {
+    vi.useFakeTimers();
+    const harness = createHarness({
+      getGesturePoint: (event) => ({ x: event.clientY, y: -event.clientX })
+    });
+
+    harness.press(200, 100);
+    harness.move(200, 200);
+    harness.release(200, 200);
+
+    expect(harness.getCurrentTime()).toBeCloseTo(42, 5);
+    vi.useRealTimers();
+  });
+
   it('hands a slow horizontal drag to the scrub instead of fast playback', () => {
     vi.useFakeTimers();
     const harness = createHarness({ currentTime: 30 });
@@ -199,6 +250,23 @@ describe('useHoldToSpeed', () => {
     harness.release(280);
     expect(harness.getPlaybackRate()).toBe(1);
     expect(harness.getCurrentTime()).toBeCloseTo(39.6, 5);
+    vi.useRealTimers();
+  });
+
+  it('hands a vertical drag to dismiss after fast playback has already started', () => {
+    vi.useFakeTimers();
+    const harness = createHarness();
+
+    harness.press(200, 150);
+    vi.advanceTimersByTime(300);
+    expect(harness.hold.isFastForwarding.value).toBe(true);
+    expect(harness.getPlaybackRate()).toBe(2);
+
+    harness.move(205, 230);
+
+    expect(harness.hold.isFastForwarding.value).toBe(false);
+    expect(harness.hold.isScrubbing.value).toBe(false);
+    expect(harness.getPlaybackRate()).toBe(1);
     vi.useRealTimers();
   });
 

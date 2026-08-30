@@ -12,7 +12,7 @@
           :src="item.thumbnailUrl"
           :alt="item.filename"
           loading="lazy"
-          :retry-while="appStore.isScanning"
+          :retry-while="appStore.isInitialScan"
           class="h-full w-full object-cover group-hover:scale-[1.03] group-hover:opacity-90"
           style="transition: transform 0.22s ease, opacity 0.22s ease;"
         />

@@ -36,6 +36,7 @@ import {
 import { libraryRelocationService } from './library-relocation-service.js';
 import {
   maintenanceOperationLock,
+  type MaintenanceOperationContext,
   PERMANENT_DELETION_QUARANTINE_DIRECTORY_NAME
 } from './maintenance-operation-lock.js';
 import { log } from './log-service.js';
@@ -576,6 +577,7 @@ export interface EnqueueScanOptions extends Partial<FullScanOptions> {
 class ScannerService {
   private queue = Promise.resolve<ScanSummary>(createEmptySummary());
   private activeOrQueuedJobs = 0;
+  private maintenanceContext: MaintenanceOperationContext | null = null;
   private progress = createIdleProgress(scanRunRepository.latestCompleted() ?? null);
   private heartbeatTimer: NodeJS.Timeout | null = null;
 
@@ -716,6 +718,45 @@ class ScannerService {
     return scanRunRepository.latest();
   }
 
+  /**
+   * Watcher directory events point at a subtree, not a single media file. Expand
+   * them into the source folders that actually need re-indexing so a new or
+   * removed folder does not require a full library walk.
+   */
+  private async expandDirectoryPathToSourceFolders(
+    relativeDirectoryPath: string,
+    treatStoriesAsFolders: boolean,
+    treatCarouselsAsFolders: boolean,
+    excludedFolderRules: string[]
+  ): Promise<string[]> {
+    const normalizedDirectoryPath = normalizePath(relativeDirectoryPath);
+    const absoluteDirectoryPath = path.join(appConfig.galleryRoot, normalizedDirectoryPath);
+    const directoryStats = await fs.stat(absoluteDirectoryPath).catch(() => null);
+
+    if (!directoryStats?.isDirectory()) {
+      // The directory is gone, so every indexed folder inside it must be cleared.
+      const directoryPrefix = `${normalizedDirectoryPath}/`;
+      return folderRepository
+        .getAll()
+        .map((folder) => normalizePath(folder.folder_path))
+        .filter((folderPath) => folderPath === normalizedDirectoryPath || folderPath.startsWith(directoryPrefix));
+    }
+
+    const discovered: string[] = [];
+    await this.walkMediaSourceFolders(
+      absoluteDirectoryPath,
+      async (sourceFolder) => {
+        discovered.push(sourceFolder.relativePath);
+      },
+      normalizedDirectoryPath,
+      treatStoriesAsFolders,
+      treatCarouselsAsFolders,
+      excludedFolderRules
+    );
+
+    return discovered;
+  }
+
   private async enqueue(job: () => Promise<ScanSummary>, options: EnqueueScanOptions = {}): Promise<ScanSummary> {
     if (options.rejectIfBusy && this.activeOrQueuedJobs > 0) {
       throw new ScanBusyError();
@@ -726,11 +767,23 @@ class ScannerService {
       if (options.beforeEnqueue) {
         options.beforeEnqueue();
       }
-      const runWithMaintenanceLock = () => maintenanceOperationLock.runExclusive(async () => {
-        const { permanentDeletionService } = await import('./permanent-deletion-service.js');
-        await permanentDeletionService.recoverPendingDeletionsWhileLocked();
-        return job();
-      });
+      // Scans hold the maintenance lock for a long time. Run them at background
+      // priority so interactive work (permanent deletion, lazy derivatives) can
+      // preempt at the yield points inside the derivative phase.
+      const runWithMaintenanceLock = () => maintenanceOperationLock.runExclusive(
+        async (maintenanceContext) => {
+          const previousContext = this.maintenanceContext;
+          this.maintenanceContext = maintenanceContext;
+          try {
+            const { permanentDeletionService } = await import('./permanent-deletion-service.js');
+            await permanentDeletionService.recoverPendingDeletionsWhileLocked();
+            return await job();
+          } finally {
+            this.maintenanceContext = previousContext;
+          }
+        },
+        { priority: 'background' }
+      );
       this.queue = this.queue.then(runWithMaintenanceLock, runWithMaintenanceLock);
       return await this.queue;
     } finally {
@@ -2456,6 +2509,19 @@ class ScannerService {
       }
 
       if (!isSupportedMediaFile(path.basename(relativePath))) {
+        if (matchesExcludedFolder(relativePath, excludedFolderRules)) {
+          continue;
+        }
+
+        const directorySourceFolders = await this.expandDirectoryPathToSourceFolders(
+          relativePath,
+          treatStoriesAsFolders,
+          this.shouldTreatCarouselsAsFolders(),
+          excludedFolderRules
+        );
+        for (const sourceFolder of directorySourceFolders) {
+          impactedSourceFolders.add(sourceFolder);
+        }
         continue;
       }
 
@@ -2691,12 +2757,34 @@ class ScannerService {
       }
     };
 
+    // Each job is a natural quiescent point: nothing is mid-write, so the scan can
+    // hand the maintenance lock to interactive work (permanent deletion, lazy
+    // derivatives) instead of blocking it for the whole derivative phase.
+    const runJobWithPreemption = async (job: DerivativeJob) => {
+      const maintenanceContext = this.maintenanceContext;
+      if (maintenanceContext?.isContended()) {
+        await maintenanceContext.yieldToHigherPriority();
+      }
+
+      // A permanent deletion may have removed this media while the scan yielded.
+      // Skipping keeps deletions from surfacing as scan errors.
+      const currentImage = imageRepository.getByRelativePath(job.relativePath);
+      if (!currentImage || currentImage.is_deleted === 1) {
+        this.setProgress({
+          processedDerivativeJobs: this.progress.processedDerivativeJobs + 1
+        });
+        return;
+      }
+
+      await processJob(job);
+    };
+
     if (appConfig.scanMediaErrorMode === 'fail') {
       for (const job of jobs) {
-        await processJob(job);
+        await runJobWithPreemption(job);
       }
     } else {
-      await Promise.all(jobs.map((job) => derivativeLimit(() => processJob(job))));
+      await Promise.all(jobs.map((job) => derivativeLimit(() => runJobWithPreemption(job))));
     }
 
     const summary = {

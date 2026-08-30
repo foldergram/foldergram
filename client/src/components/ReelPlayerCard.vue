@@ -152,13 +152,13 @@
             <button
               class="reel-player-card__sound-button"
               type="button"
-              :aria-label="effectiveMuted ? 'Enable sound' : 'Mute sound'"
+              :aria-label="appStore.videoMuted ? 'Enable sound' : 'Mute sound'"
               @click.stop="toggleSound"
             >
               <span
                 class="reel-player-card__sound-icon"
                 :class="
-                  effectiveMuted
+                  appStore.videoMuted
                     ? 'i-fluent-speaker-mute-16-regular'
                     : 'i-fluent-speaker-2-16-regular'
                 "
@@ -185,6 +185,7 @@ import type { MediaPlayerElement } from 'vidstack/elements';
 import { useHoldToSpeed } from '../composables/useHoldToSpeed';
 import { useLandscapeStage } from '../composables/useLandscapeStage';
 import { reelsLandscapeRotation } from '../composables/useReelsLandscape';
+import { resolveGesturePoint } from '../utils/gesture-coordinates';
 import { useAppStore } from '../stores/app';
 import { useImmersiveVideoStore } from '../stores/immersive-video';
 import type { FeedItem, FolderSummary } from '../types/api';
@@ -253,6 +254,8 @@ const MAX_AUTOPLAY_RETRIES = 3;
 // transcoding can need several seconds before the first segment is playable.
 const MAX_STALL_RETRIES = 12;
 const MAX_STALL_RETRY_DELAY_MS = 1_200;
+const REEL_SCRUB_SECONDS_PER_PIXEL = 0.08;
+const REEL_SCRUB_ACTIVATION_PX = 18;
 
 function clearAutoplayRetry() {
   if (autoplayRetryTimer !== 0) {
@@ -338,6 +341,11 @@ async function syncPlayback() {
   }
 
   syncMuted(player, effectiveMuted.value);
+
+  // Warm the first HLS segments before asking the player to start. This matters
+  // when the user arrives from the home feed, where the reels deck has not had
+  // time to warm its neighbours yet.
+  warmVideoStream(props.item, appStore.videoPlaybackQuality, { segments: 4 });
 
   try {
     await player.play();
@@ -450,19 +458,6 @@ function bindPlayerEventListeners(player: MediaPlayerElement | null) {
 async function toggleSound() {
   const player = playerElement.value;
 
-  // The tap is the gesture the browser was waiting for, so clear the block and go
-  // audible again rather than flipping the stored preference.
-  if (audioBlocked.value && !appStore.videoMuted) {
-    audioBlocked.value = false;
-    if (player && props.active) {
-      syncMuted(player, false);
-      if (player.paused) {
-        await syncPlayback();
-      }
-    }
-    return;
-  }
-
   const nextMuted = !appStore.videoMuted;
   audioBlocked.value = false;
   appStore.setVideoMuted(nextMuted);
@@ -496,6 +491,8 @@ function warmSeekTarget(seconds: number) {
 
 const holdSpeed = useHoldToSpeed({
   canStart: (event) => props.active && !isInteractiveTarget(event.target),
+  secondsPerPixel: REEL_SCRUB_SECONDS_PER_PIXEL,
+  scrubActivationPx: REEL_SCRUB_ACTIVATION_PX,
   getCurrentTime: () => playerElement.value?.currentTime ?? 0,
   getDuration: () => playerElement.value?.duration ?? 0,
   seekTo: (seconds) => {
@@ -529,7 +526,12 @@ const holdSpeed = useHoldToSpeed({
     void playerElement.value?.play().catch(() => {
       // Ignore play rejections before the provider is ready.
     });
-  }
+  },
+  // The deck rotates the card with CSS rather than the device, so the axes the viewer
+  // sees are swapped while landscape is on. Reading the shared rotation flag keeps the
+  // sideways scrub sideways from the viewer's point of view.
+  getGesturePoint: (event) =>
+    resolveGesturePoint(event, reelsLandscapeRotation.value ? 'rotated' : 'normal')
 });
 
 const scrubLabel = computed(() => {
@@ -649,8 +651,8 @@ watch(
 );
 
 watch(
-  () => appStore.videoMuted,
-  (videoMuted) => {
+  () => [appStore.videoMuted, appStore.videoSoundGeneration] as const,
+  ([videoMuted]) => {
     if (!videoMuted) {
       audioBlocked.value = false;
     }

@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 
-import type { VideoPlaybackMedia } from '../utils/video-playback';
+import type { FeedItem } from '../types/api';
+import type { ResolvedVideoSource, VideoPlaybackMedia } from '../utils/video-playback';
 
 /**
  * Everything the immersive layer needs to render a clip without refetching it.
@@ -13,6 +14,9 @@ export interface ImmersiveVideoTarget extends VideoPlaybackMedia {
   width: number;
   height: number;
   durationMs: number | null;
+  collectionItem?: FeedItem;
+  /** Keep the source selected by the inline player during the handoff. */
+  sourceOverride?: ResolvedVideoSource | null;
 }
 
 export interface ImmersiveExitState {

@@ -523,6 +523,23 @@ export interface DeleteImageResult {
   folderSlug: string;
 }
 
+export interface PermanentDeletionJob {
+  active: boolean;
+  total: number;
+  processed: number;
+  remaining: number;
+  failedCount: number;
+  errorMessage: string | null;
+  deletedIds: number[];
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+export interface PermanentDeletionJobResult {
+  ok: boolean;
+  job: PermanentDeletionJob;
+}
+
 export type TrashImageResult = DeleteImageResult;
 export type RestoreImageResult = DeleteImageResult;
 
@@ -556,6 +573,15 @@ export interface ScanRunSummary {
   error_text: string | null;
   warning_count: number;
   warning_text: string | null;
+}
+
+export interface ScanChangesSummary {
+  scanned_files: number;
+  new_files: number;
+  updated_files: number;
+  removed_files: number;
+  scan_count: number;
+  latest_finished_at: string | null;
 }
 
 export interface ScanProgress {
@@ -655,6 +681,7 @@ export interface AppStats extends AppStatus {
     pendingDerivativeMigrationRows: number;
   };
   lastScan: ScanRunSummary | null;
+  todayScanChanges: ScanChangesSummary;
 }
 
 export type AuthRole = 'admin' | 'viewer' | 'anonymous';

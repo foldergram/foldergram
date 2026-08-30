@@ -191,6 +191,14 @@ function buildViewerSafeStorageReason(libraryAvailable: boolean): string | null 
   return libraryAvailable ? null : 'Configured library storage is unavailable.';
 }
 
+function getLocalDayBounds(now = new Date()): { startIso: string; endIso: string } {
+  const start = new Date(now);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+  return { startIso: start.toISOString(), endIso: end.toISOString() };
+}
+
 function parseFeedMode(value: string | null): FeedMode {
   return value === 'recent' || value === 'rediscover' || value === 'random' ? value : 'random';
 }
@@ -2372,6 +2380,8 @@ export const galleryService = {
 
   getStats() {
     const lastCompletedScan = scanRunRepository.latestCompleted() ?? null;
+    const { startIso, endIso } = getLocalDayBounds();
+    const todayScanChanges = scanRunRepository.completedSummaryBetween(startIso, endIso);
     const storageState = storageService.getState();
     const currentGalleryRoot = appConfig.galleryRoot;
     const previousGalleryRoot = appSettingsRepository.get(PREVIOUS_GALLERY_ROOT_SETTING_KEY);
@@ -2402,6 +2412,7 @@ export const galleryService = {
       thumbnailCount: storageState.libraryAvailable ? countDerivativeFilesOnDisk(appConfig.thumbnailsDir) : 0,
       previewCount: storageState.libraryAvailable ? countDerivativeFilesOnDisk(appConfig.previewsDir) : 0,
       lastScan: lastCompletedScan,
+      todayScanChanges,
       scan: this.getAdminScanProgress(),
       storage: {
         available: storageState.libraryAvailable,
@@ -2528,12 +2539,12 @@ export const galleryService = {
   },
 
   async deleteImage(id: number, options: { isLegacyImageAlias?: boolean } = {}) {
-    if (!storageService.getState().libraryAvailable || scannerService.isLibraryRebuildRequired()) {
+    if (!storageService.getState().libraryAvailable) {
       return null;
     }
 
     const post = resolvePostRecord(id, options.isLegacyImageAlias);
-    if (!post) {
+    if (!post || (scannerService.isLibraryRebuildRequired() && post.is_trashed === 0)) {
       return null;
     }
 

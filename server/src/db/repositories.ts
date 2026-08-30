@@ -32,6 +32,7 @@ import type {
   FolderRecord,
   FolderSummaryRecord,
   ScanRunRecord,
+  ScanChangesSummary,
   TrashImage,
   TrashPost,
   TakenAtSource
@@ -3972,5 +3973,34 @@ export const scanRunRepository = {
     return database
       .prepare('SELECT * FROM scan_runs WHERE finished_at IS NOT NULL ORDER BY id DESC LIMIT 1')
       .get() as ScanRunRecord | undefined;
+  },
+
+  completedSummaryBetween(startIso: string, endIso: string): ScanChangesSummary {
+    const row = database
+      .prepare(
+        `
+        SELECT
+          COALESCE(SUM(scanned_files), 0) AS scanned_files,
+          COALESCE(SUM(new_files), 0) AS new_files,
+          COALESCE(SUM(updated_files), 0) AS updated_files,
+          COALESCE(SUM(removed_files), 0) AS removed_files,
+          COUNT(*) AS scan_count,
+          MAX(finished_at) AS latest_finished_at
+        FROM scan_runs
+        WHERE finished_at IS NOT NULL
+          AND finished_at >= ?
+          AND finished_at < ?
+        `
+      )
+      .get(startIso, endIso) as Partial<ScanChangesSummary>;
+
+    return {
+      scanned_files: Number(row.scanned_files ?? 0),
+      new_files: Number(row.new_files ?? 0),
+      updated_files: Number(row.updated_files ?? 0),
+      removed_files: Number(row.removed_files ?? 0),
+      scan_count: Number(row.scan_count ?? 0),
+      latest_finished_at: row.latest_finished_at ?? null
+    };
   }
 };

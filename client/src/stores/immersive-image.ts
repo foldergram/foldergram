@@ -1,5 +1,7 @@
 import { defineStore } from 'pinia';
 
+import type { FeedItem } from '../types/api';
+
 export interface ImmersiveImageTarget {
   id: number;
   filename: string;
@@ -11,6 +13,7 @@ export interface ImmersiveImageTarget {
   height: number;
   caption?: string | null;
   folderSlug?: string;
+  collectionItem?: FeedItem;
 }
 
 interface ImmersiveImageState {

@@ -1,4 +1,4 @@
-import { mount } from '@vue/test-utils';
+import { flushPromises, mount } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 
@@ -28,6 +28,20 @@ describe('VideoMediaPlayer', () => {
     expect(wrapper.find('media-poster').exists()).toBe(true);
     expect(wrapper.find('.video-progress-footer').exists()).toBe(true);
     expect(wrapper.find('.video-progress-footer').attributes('data-swipe-ignore')).toBe('true');
+  });
+
+  it('lets an immersive host capture vertical touch gestures without browser cancellation', () => {
+    const wrapper = mount(VideoMediaPlayer, {
+      props: {
+        src: '/test-video.mp4',
+        captureTouchGestures: true
+      },
+      global: {
+        plugins: [i18n]
+      }
+    });
+
+    expect(wrapper.classes()).toContain('video-media-player--capture-touch-gestures');
   });
 
   it('forwards autoplay to the media player', () => {
@@ -90,11 +104,11 @@ describe('VideoMediaPlayer', () => {
     expect(appStore.videoMuted).toBe(false);
     expect((wrapper.vm as any).audioBlocked).toBe(true);
     expect(wrapper.find('button[data-test="mute-toggle"] span').classes()).toContain(
-      'i-fluent-speaker-mute-16-regular'
+      'i-fluent-speaker-2-16-regular'
     );
   });
 
-  it('retries audible playback on the mute tap that follows a refusal', async () => {
+  it('does not let an autoplay block consume the global mute button tap', async () => {
     const wrapper = mount(VideoMediaPlayer, {
       props: {
         src: '/test-video.mp4',
@@ -113,10 +127,45 @@ describe('VideoMediaPlayer', () => {
 
     await wrapper.find('button[data-test="mute-toggle"]').trigger('click');
 
-    expect((wrapper.vm as any).audioBlocked).toBe(false);
-    expect(playerEl.muted).toBe(false);
-    // The tap is the gesture the browser wanted, so it must not read as "mute me".
-    expect(wrapper.emitted('toggle-mute')).toBeUndefined();
+    expect(wrapper.emitted('toggle-mute')).toHaveLength(1);
+  });
+
+  it('clears autoplay mute blocks in every mounted player when sound is enabled anywhere', async () => {
+    const appStore = useAppStore();
+    appStore.setVideoMuted(false);
+    const mountPlayer = () =>
+      mount(VideoMediaPlayer, {
+        props: {
+          src: '/test-video.mp4',
+          autoplay: true,
+          muted: false
+        },
+        global: {
+          plugins: [i18n]
+        }
+      });
+
+    const first = mountPlayer();
+    const second = mountPlayer();
+    const firstPlayer = first.find('media-player').element as any;
+    const secondPlayer = second.find('media-player').element as any;
+    firstPlayer.play = vi.fn().mockResolvedValue(undefined);
+    secondPlayer.play = vi.fn().mockResolvedValue(undefined);
+    firstPlayer.dispatchEvent(new CustomEvent('auto-play-fail'));
+    secondPlayer.dispatchEvent(new CustomEvent('auto-play-fail'));
+    await vi.waitFor(() => {
+      expect((first.vm as any).audioBlocked).toBe(true);
+      expect((second.vm as any).audioBlocked).toBe(true);
+    });
+
+    appStore.setVideoMuted(false);
+    await flushPromises();
+
+    expect(appStore.videoMuted).toBe(false);
+    expect((first.vm as any).audioBlocked).toBe(false);
+    expect((second.vm as any).audioBlocked).toBe(false);
+    expect(firstPlayer.muted).toBe(false);
+    expect(secondPlayer.muted).toBe(false);
   });
 
   it('evaluates HD eligibility based on playbackStrategy, dimensions, and originalUrl', async () => {
@@ -305,6 +354,144 @@ describe('VideoMediaPlayer', () => {
     currentTime = 25;
     playerEl.dispatchEvent(new Event('can-play'));
     expect(playerEl.currentTime).toBe(25);
+  });
+
+  it('holds the thumbnail until a handover has actually been positioned', async () => {
+    const wrapper = mount(VideoMediaPlayer, {
+      props: {
+        src: '/handover-video.mp4',
+        poster: '/handover-poster.webp',
+        startTime: 30
+      },
+      global: {
+        plugins: [i18n]
+      }
+    });
+
+    const playerEl = wrapper.find('media-player').element as any;
+    let seekable = false;
+    let currentTime = 0;
+    Object.defineProperty(playerEl, 'currentTime', {
+      configurable: true,
+      get: () => currentTime,
+      set: (value: number) => {
+        if (seekable) currentTime = value;
+      }
+    });
+
+    // A frame is decoded but it is the head of the clip, not where the viewer was.
+    playerEl.dispatchEvent(new Event('can-play'));
+    await flushPromises();
+    expect(wrapper.find('.video-media-player__first-frame').exists()).toBe(true);
+
+    seekable = true;
+    playerEl.dispatchEvent(new Event('can-play'));
+    await flushPromises();
+    expect(wrapper.find('.video-media-player__first-frame').exists()).toBe(false);
+  });
+
+  it('keeps nudging a handover that decoded a frame but never advanced', async () => {
+    vi.useFakeTimers();
+
+    const wrapper = mount(VideoMediaPlayer, {
+      props: {
+        src: '/handover-video.mp4',
+        autoplay: true,
+        muted: true,
+        startTime: 20
+      },
+      global: {
+        plugins: [i18n]
+      }
+    });
+
+    const playerEl = wrapper.find('media-player').element as any;
+    // hls.js honoured `startPosition`, so the clock already reads the handover point.
+    // That is not progress, and the old `currentTime > 0.05` test mistook it for
+    // playback and left the retry loop standing down over a frozen frame.
+    Object.defineProperty(playerEl, 'currentTime', { configurable: true, get: () => 20 });
+    Object.defineProperty(playerEl, 'paused', { configurable: true, get: () => true });
+    playerEl.play = vi.fn().mockResolvedValue(undefined);
+
+    playerEl.dispatchEvent(new Event('can-play'));
+    await flushPromises();
+    expect(playerEl.play).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(400);
+    await flushPromises();
+    expect(playerEl.play.mock.calls.length).toBeGreaterThan(1);
+
+    vi.useRealTimers();
+  });
+
+  it('stands down once a handover advances past its start position', async () => {
+    vi.useFakeTimers();
+
+    const wrapper = mount(VideoMediaPlayer, {
+      props: {
+        src: '/handover-video.mp4',
+        autoplay: true,
+        muted: true,
+        startTime: 20
+      },
+      global: {
+        plugins: [i18n]
+      }
+    });
+
+    const playerEl = wrapper.find('media-player').element as any;
+    let currentTime = 20;
+    let paused = true;
+    Object.defineProperty(playerEl, 'currentTime', { configurable: true, get: () => currentTime });
+    Object.defineProperty(playerEl, 'paused', { configurable: true, get: () => paused });
+    playerEl.play = vi.fn().mockImplementation(() => {
+      paused = false;
+      return Promise.resolve(undefined);
+    });
+
+    playerEl.dispatchEvent(new Event('can-play'));
+    await flushPromises();
+
+    currentTime = 21;
+    playerEl.dispatchEvent(new Event('time-update'));
+    const callsAfterProgress = playerEl.play.mock.calls.length;
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    await flushPromises();
+    expect(playerEl.play.mock.calls.length).toBe(callsAfterProgress);
+
+    vi.useRealTimers();
+  });
+
+  it('starts playback after applying a non-zero handover position', async () => {
+    const wrapper = mount(VideoMediaPlayer, {
+      props: {
+        src: '/handover-video.mp4',
+        autoplay: true,
+        muted: true,
+        startTime: 5
+      },
+      global: {
+        plugins: [i18n]
+      }
+    });
+
+    const playerEl = wrapper.find('media-player').element as any;
+    let currentTime = 0;
+    Object.defineProperty(playerEl, 'currentTime', {
+      configurable: true,
+      get: () => currentTime,
+      set: (value: number) => {
+        currentTime = value;
+      }
+    });
+    Object.defineProperty(playerEl, 'paused', { configurable: true, get: () => true });
+    playerEl.play = vi.fn().mockResolvedValue(undefined);
+
+    playerEl.dispatchEvent(new Event('can-play'));
+
+    expect(currentTime).toBe(5);
+    expect(playerEl.play).toHaveBeenCalledTimes(1);
   });
 
   it('retries a stream that can play but refuses to start', async () => {

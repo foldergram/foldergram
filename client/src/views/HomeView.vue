@@ -641,6 +641,22 @@ watch(
       return;
     }
 
+    const completedScan = appStore.stats?.scan.lastCompletedScan;
+    const changedLibrary = Boolean(
+      completedScan &&
+        (completedScan.new_files > 0 || completedScan.updated_files > 0 || completedScan.removed_files > 0)
+    );
+
+    if (changedLibrary) {
+      // Refresh visible caches once after a background watcher scan finishes.
+      await Promise.all([
+        foldersStore.fetchFolders(true),
+        feedStore.loadInitial(true),
+        momentsStore.fetchMoments(true)
+      ]);
+      return;
+    }
+
     await momentsStore.fetchMoments(true);
   }
 );

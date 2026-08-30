@@ -21,6 +21,7 @@ import { createServer } from "node:http";
 import { appConfig } from "./config/env.js";
 import { createApp } from "./app.js";
 import { collectionRepository } from "./db/repositories.js";
+import { deletionJobService } from "./services/deletion-job-service.js";
 import { log } from "./services/log-service.js";
 import { permanentDeletionService } from "./services/permanent-deletion-service.js";
 import { scannerService } from "./services/scanner-service.js";
@@ -50,6 +51,8 @@ function logServerReady(): void {
 
 async function bootstrap(): Promise<void> {
   await permanentDeletionService.recoverPendingDeletions();
+  // A batch deletion that was interrupted by a restart continues on its own.
+  deletionJobService.resumePendingJob();
   const app = createApp();
   const server = createServer(app);
   const portVariableName = appConfig.nodeEnv === "production" ? "SERVER_PORT" : "DEV_SERVER_PORT";
@@ -80,11 +83,10 @@ async function bootstrap(): Promise<void> {
       return;
     }
 
-    if (startupAction === "idle" && appConfig.isDevelopment) {
-      log.info(
-        "Gallery watcher idle until a user-triggered scan or rebuild starts it",
-      );
-    }
+    void watcherService.start().catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      log.error("Gallery watcher failed to start", message);
+    });
   });
 
   async function shutdown(signal: string): Promise<void> {

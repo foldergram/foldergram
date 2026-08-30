@@ -648,6 +648,14 @@
           "updated": "updated",
           "removed": "removed"
         }
+      },
+      "todayChanges": {
+        "title": "Today's Changes",
+        "description": "All completed full and incremental scans from today, excluding scans still in progress.",
+        "scans": "Scans",
+        "filesScanned": "Files scanned today",
+        "changes": "Change summary",
+        "latestFinished": "Latest finished"
       }
     }
   },
@@ -1183,6 +1191,10 @@
     "description": "Posts moved here stay on disk until you permanently delete them.",
     "selectedOne": "{count} selected post",
     "selectedOther": "{count} selected posts",
+    "selectAll": "Select all",
+    "deselectAll": "Deselect all",
+    "processingProgress": "Processing {done} / {total}...",
+    "deletionProgress": "Deleting in the background {done} / {total}. You can keep browsing.",
     "restoreButton": "Restore",
     "deleteButton": "Permanently Delete",
     "libraryUnavailableTitle": "Library storage unavailable",

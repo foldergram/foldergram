@@ -34,7 +34,7 @@
               :src="previousCapsule.coverImage.mediaType === 'video' ? previousCapsule.coverImage.thumbnailUrl : previousCapsule.coverImage.previewUrl"
               :alt="previousCapsule.title"
               loading="lazy"
-              :retry-while="appStore.isScanning"
+              :retry-while="appStore.isInitialScan"
             />
             <div class="story-side-card__shade" />
             <div class="story-side-card__meta">
@@ -179,7 +179,7 @@
               :src="displayImage.previewUrl"
               :alt="displayImage.filename"
               loading="eager"
-              :retry-while="appStore.isScanning"
+              :retry-while="appStore.isInitialScan"
             />
             <div v-else class="story-stage__empty">
               Loading {{ railSingularLabel.toLowerCase() }}…
@@ -240,7 +240,7 @@
               :src="capsule.coverImage.mediaType === 'video' ? capsule.coverImage.thumbnailUrl : capsule.coverImage.previewUrl"
               :alt="capsule.title"
               loading="lazy"
-              :retry-while="appStore.isScanning"
+              :retry-while="appStore.isInitialScan"
             />
             <div class="story-side-card__shade" />
             <div class="story-side-card__meta">
@@ -735,6 +735,16 @@ function syncMediaPlayback() {
     // Ignore autoplay rejections so the viewer can continue advancing.
   });
 }
+
+watch(
+  () => [appStore.videoMuted, appStore.videoSoundGeneration] as const,
+  ([videoMuted]) => {
+    const player = videoElement.value;
+    if (player) {
+      player.muted = videoMuted;
+    }
+  }
+);
 
 function handleStoryVideoLoadedMetadata() {
   syncStoryVideoTiming();

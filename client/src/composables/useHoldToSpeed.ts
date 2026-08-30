@@ -10,6 +10,11 @@ export interface HoldToSpeedPlayer {
   play?: () => void | Promise<void>;
 }
 
+export interface GesturePoint {
+  x: number;
+  y: number;
+}
+
 interface HoldToSpeedOptions extends HoldToSpeedPlayer {
   /** Skip the gesture when the press landed on a control. */
   canStart?: (event: PointerEvent) => boolean;
@@ -25,6 +30,12 @@ interface HoldToSpeedOptions extends HoldToSpeedPlayer {
   scrubActivationPx?: number;
   /** Movement before activation that hands the gesture back to the host. */
   cancelActivationPx?: number;
+  /** Converts screen coordinates into the media's local coordinate system. */
+  getGesturePoint?: (event: PointerEvent) => GesturePoint;
+  /** Notifies a host that this surface has fully released its gesture ownership. */
+  onGestureEnd?: () => void;
+  /** Notifies a host as soon as horizontal scrub owns the pointer. */
+  onGestureStart?: () => void;
 }
 
 const DEFAULT_ACTIVATION_MS = 300;
@@ -115,8 +126,8 @@ export function useHoldToSpeed(options: HoldToSpeedOptions) {
    * would never end and the clip stayed at 2x. Window-level listeners guarantee a
    * release is always observed.
    */
-  function handleWindowRelease() {
-    if (pointerId === null) {
+  function handleWindowRelease(event: PointerEvent) {
+    if (pointerId === null || event.pointerId !== pointerId) {
       return;
     }
 
@@ -129,6 +140,24 @@ export function useHoldToSpeed(options: HoldToSpeedOptions) {
     stop();
   }
 
+  /**
+   * Losing capture only ends the gesture when the surface we captured lost it.
+   *
+   * Taking capture ourselves makes the browser fire `lostpointercapture` at whatever
+   * held the pointer before, and on a video that is the `<video>` element's implicit
+   * capture. Treating that as a release ended every sideways drag a few pixels in: the
+   * seek was committed immediately, the rest of the drag was ignored, and the immersive
+   * layer was left holding a finger it would never see released, which is what killed
+   * swipe-to-dismiss and pinch for the rest of the touch.
+   */
+  function handleCaptureLoss(event: PointerEvent) {
+    if (capturedElement === null || event.target !== capturedElement) {
+      return;
+    }
+
+    handleWindowRelease(event);
+  }
+
   function attachReleaseFallback() {
     if (releaseFallbackAttached || typeof window === 'undefined') {
       return;
@@ -136,7 +165,7 @@ export function useHoldToSpeed(options: HoldToSpeedOptions) {
 
     window.addEventListener('pointerup', handleWindowRelease);
     window.addEventListener('pointercancel', handleWindowRelease);
-    window.addEventListener('lostpointercapture', handleWindowRelease);
+    window.addEventListener('lostpointercapture', handleCaptureLoss);
     releaseFallbackAttached = true;
   }
 
@@ -147,11 +176,12 @@ export function useHoldToSpeed(options: HoldToSpeedOptions) {
 
     window.removeEventListener('pointerup', handleWindowRelease);
     window.removeEventListener('pointercancel', handleWindowRelease);
-    window.removeEventListener('lostpointercapture', handleWindowRelease);
+    window.removeEventListener('lostpointercapture', handleCaptureLoss);
     releaseFallbackAttached = false;
   }
 
   function stop() {
+    const hadActiveGesture = pointerId !== null;
     clearActivationTimer();
     restorePlaybackRate();
     releasePointerCapture();
@@ -159,6 +189,10 @@ export function useHoldToSpeed(options: HoldToSpeedOptions) {
     scrubSeconds.value = null;
     pointerId = null;
     surfaceElement = null;
+
+    if (hadActiveGesture) {
+      options.onGestureEnd?.();
+    }
   }
 
   function capturePointer() {
@@ -183,6 +217,7 @@ export function useHoldToSpeed(options: HoldToSpeedOptions) {
   }
 
   function beginScrub() {
+    options.onGestureStart?.();
     capturePointer();
     clearActivationTimer();
     // Resets the rate whether or not the hold had already fired, and resumes playback
@@ -202,9 +237,10 @@ export function useHoldToSpeed(options: HoldToSpeedOptions) {
       return;
     }
 
+    const point = options.getGesturePoint?.(event) ?? { x: event.clientX, y: event.clientY };
     pointerId = event.pointerId;
-    startX = event.clientX;
-    startY = event.clientY;
+    startX = point.x;
+    startY = point.y;
     // Capture is claimed only once a gesture actually starts: taking it up front
     // would fight the reels deck's native vertical scrolling.
     surfaceElement = event.currentTarget instanceof Element ? event.currentTarget : null;
@@ -222,14 +258,19 @@ export function useHoldToSpeed(options: HoldToSpeedOptions) {
       return;
     }
 
-    const deltaX = event.clientX - startX;
-    const deltaY = event.clientY - startY;
+    const point = options.getGesturePoint?.(event) ?? { x: event.clientX, y: event.clientY };
+    const deltaX = point.x - startX;
+    const deltaY = point.y - startY;
 
     if (scrubSeconds.value === null) {
       // A vertical drag belongs to the host (dismiss or deck navigation). Dropping
       // the pending activation matters most for a slow swipe: the finger would
       // otherwise sit still long enough to trip fast playback mid-scroll.
-      if (activationTimer !== null && Math.abs(deltaY) > cancelActivationPx && Math.abs(deltaY) > Math.abs(deltaX)) {
+      if (
+        (activationTimer !== null || isFastForwarding.value) &&
+        Math.abs(deltaY) > cancelActivationPx &&
+        Math.abs(deltaY) > Math.abs(deltaX)
+      ) {
         stop();
         return;
       }

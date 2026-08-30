@@ -35,6 +35,8 @@
               aria-hidden="true"
             />
           </button>
+          <ImmersiveLikeButton v-if="bookmarkItem" :item="bookmarkItem" />
+          <CollectionBookmark v-if="bookmarkItem" :item="bookmarkItem" placement="viewer" />
           <a
             class="immersive-image__button"
             :href="downloadUrl"
@@ -86,7 +88,7 @@
       >
         <img
           class="immersive-image__media"
-          :class="{ 'immersive-image__media--panning': zoom.isPanning.value }"
+          :class="{ 'immersive-image__media--panning': zoom.isPanning.value || zoom.isPinching.value }"
           :src="displayedSrc"
           :alt="target.filename"
           :style="{ transform: zoom.transform.value }"
@@ -111,8 +113,11 @@ import { useI18n } from 'vue-i18n';
 
 import { useImmersiveImageStore } from '../stores/immersive-image';
 import { usePinchZoom } from '../composables/usePinchZoom';
+import type { FeedItem } from '../types/api';
 import { getOriginalMediaDownloadUrl } from '../utils/original-media';
+import CollectionBookmark from './CollectionBookmark.vue';
 import ImmersiveDetailsPanel from './ImmersiveDetailsPanel.vue';
+import ImmersiveLikeButton from './ImmersiveLikeButton.vue';
 
 const { t } = useI18n();
 const store = useImmersiveImageStore();
@@ -125,6 +130,30 @@ function handleDeleted() {
 }
 
 const target = computed(() => store.target);
+const bookmarkItem = computed<FeedItem | null>(() => {
+  const current = target.value;
+  if (!current) return null;
+  if (current.collectionItem) return current.collectionItem;
+
+  return {
+    id: current.id,
+    folderId: 0,
+    folderSlug: current.folderSlug ?? '',
+    folderName: '',
+    folderPath: '',
+    folderBreadcrumb: null,
+    filename: current.filename,
+    caption: current.caption,
+    width: current.width,
+    height: current.height,
+    mediaType: 'image',
+    durationMs: null,
+    thumbnailUrl: current.thumbnailUrl,
+    previewUrl: current.fullUrl,
+    sortTimestamp: 0,
+    takenAt: null
+  };
+});
 const downloadUrl = computed(() => (target.value ? getOriginalMediaDownloadUrl(target.value.id) : '#'));
 const captionText = computed(() => target.value?.caption?.trim() || '');
 const metaText = computed(() => {
