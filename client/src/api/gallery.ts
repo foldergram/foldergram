@@ -48,6 +48,7 @@ import type {
   MomentsPayload,
   PaginatedFeed,
   PaginatedReels,
+  PermanentDeletionJobResult,
   FolderImagesPayload,
   PlaceDetail,
   PlaceImagesPayload,
@@ -440,6 +441,24 @@ export function restoreImage(id: number) {
 
 export function deleteImage(id: number) {
   return requestJson<DeleteImageResult>(`/api/posts/${id}`, {
+    method: 'DELETE'
+  });
+}
+
+export function enqueuePermanentDeletionBatch(ids: number[]) {
+  return requestJson<PermanentDeletionJobResult>('/api/posts/deletions/batch', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ ids })
+  });
+}
+
+export function fetchPermanentDeletionJob() {
+  return requestJson<PermanentDeletionJobResult>('/api/posts/deletions/batch');
+}
+
+export function acknowledgePermanentDeletionJob() {
+  return requestJson<PermanentDeletionJobResult>('/api/posts/deletions/batch', {
     method: 'DELETE'
   });
 }

@@ -7,6 +7,7 @@ import {
   FOLDER_SHARE_PASSWORD_MIN_LENGTH,
   folderShareService
 } from '../services/folder-share-service.js';
+import { deletionJobService } from '../services/deletion-job-service.js';
 import { galleryService } from '../services/gallery-service.js';
 import { postShareService, type PostShareGrant } from '../services/post-share-service.js';
 import { SHARE_PUBLIC_BASE_URL_SETTING_KEY } from '../constants/app-setting-keys.js';
@@ -139,6 +140,9 @@ const storyIdSchema = z.object({
 
 const imageIdSchema = z.object({
   id: z.coerce.number().int().positive()
+});
+const permanentDeletionBatchBodySchema = z.object({
+  ids: z.array(z.coerce.number().int().positive()).min(1).max(5000)
 });
 const shareLinkIdSchema = z.object({
   linkId: z.coerce.number().int().positive()
@@ -1377,6 +1381,41 @@ router.get('/trash/images', requireCapability('canDeleteMedia', 'Admin access is
   const query = paginationQuerySchema.parse(request.query);
   response.json(galleryService.getTrashImages(query.page, query.limit));
 });
+
+// Batch deletion runs server-side so closing the app does not stop it.
+router.post(
+  '/posts/deletions/batch',
+  requireCapability('canDeleteMedia', 'Admin access is required.'),
+  (request, response) => {
+    const body = permanentDeletionBatchBodySchema.parse(request.body);
+    response.json({
+      ok: true,
+      job: deletionJobService.enqueue(body.ids)
+    });
+  }
+);
+
+router.get(
+  '/posts/deletions/batch',
+  requireCapability('canDeleteMedia', 'Admin access is required.'),
+  (_request, response) => {
+    response.json({
+      ok: true,
+      job: deletionJobService.getSnapshot()
+    });
+  }
+);
+
+router.delete(
+  '/posts/deletions/batch',
+  requireCapability('canDeleteMedia', 'Admin access is required.'),
+  (_request, response) => {
+    response.json({
+      ok: true,
+      job: deletionJobService.acknowledgeFinished()
+    });
+  }
+);
 
 router.get(['/posts/:id', '/images/:id'], (request, response) => {
   const params = imageIdSchema.parse(request.params);
