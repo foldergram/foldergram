@@ -38,6 +38,7 @@
     </div>
 
     <a
+      v-if="appStore.allowDownloads"
       class="reel-action-rail__button"
       :href="downloadOriginalMediaUrl"
       download
@@ -64,6 +65,7 @@ import { useI18n } from 'vue-i18n';
 import { RouterLink } from 'vue-router';
 
 import { useAuthStore } from '../stores/auth';
+import { useAppStore } from '../stores/app';
 import { useLikesStore } from '../stores/likes';
 import type { FeedItem } from '../types/api';
 import { getOriginalMediaDownloadUrl } from '../utils/original-media';
@@ -78,6 +80,7 @@ defineEmits<{
 }>();
 
 const authStore = useAuthStore();
+const appStore = useAppStore();
 const likesStore = useLikesStore();
 const { t } = useI18n();
 const isLiked = computed(() => likesStore.isLiked(props.item.id));

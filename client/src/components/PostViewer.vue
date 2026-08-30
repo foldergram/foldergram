@@ -484,6 +484,7 @@
             </button>
             <!-- Download original -->
             <a
+              v-if="appStore.allowDownloads"
               class="viewer__sidebar-action inline-flex items-center justify-center p-0 border-0 bg-transparent cursor-pointer text-text transition-[opacity,transform] duration-180 hover:opacity-72 hover:-translate-y-px"
               :href="downloadOriginalMediaUrl"
               download

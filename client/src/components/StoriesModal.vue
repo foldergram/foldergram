@@ -102,7 +102,7 @@
 
             <div class="story-stage__controls">
               <a
-                v-if="downloadOriginalMediaUrl"
+                v-if="appStore.allowDownloads && downloadOriginalMediaUrl"
                 class="story-stage__control-button"
                 :href="downloadOriginalMediaUrl"
                 download

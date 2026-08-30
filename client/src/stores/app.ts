@@ -111,6 +111,7 @@ export const useAppStore = defineStore('app', {
     nestedFolderTitleFormat: (state) => state.stats?.preferences.nestedFolderTitleFormat ?? 'folder',
     treatStoriesAsFolders: (state) => state.stats?.preferences.treatStoriesAsFolders === true,
     treatCarouselsAsFolders: (state) => state.stats?.preferences.treatCarouselsAsFolders === true,
+    allowDownloads: (state) => state.stats?.preferences.allowDownloads !== false,
     isCarouselsReconciliationPending: (state) => state.stats?.carouselsMigration?.reconciliationPending === true
   },
   actions: {

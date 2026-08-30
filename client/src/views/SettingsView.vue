@@ -1006,6 +1006,28 @@
                 </button>
               </div>
 
+              <div class="grid gap-3 border-t border-border px-6 py-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+                <div class="min-w-0">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <p class="m-0 text-[0.96rem] font-semibold text-text">{{ t('settings.general.allowDownloads.label') }}</p>
+                  </div>
+                  <p class="m-0 mt-[0.25rem] text-[0.84rem] text-muted">{{ t('settings.general.allowDownloads.description') }}</p>
+                </div>
+                <button
+                  class="inline-flex items-center justify-end border-0 bg-transparent p-0 cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
+                  type="button"
+                  role="switch"
+                  :aria-checked="allowDownloads"
+                  :disabled="savingGeneralSettings || waitingForInitialStatus"
+                  @click="toggleAllowDownloadsSetting"
+                >
+                  <span class="sr-only">{{ t('settings.general.allowDownloads.toggleLabel') }}</span>
+                  <span class="inline-flex h-7 w-12 items-center rounded-full p-[0.15rem] transition-colors duration-180" :class="allowDownloads ? 'bg-accent' : 'bg-[color-mix(in_srgb,var(--border)_88%,var(--surface-alt)_12%)]'">
+                    <span class="h-[1.35rem] w-[1.35rem] rounded-full bg-white shadow-[0_2px_8px_rgba(0,0,0,0.18)] transition-transform duration-180" :class="allowDownloads ? 'translate-x-[1.2rem]' : 'translate-x-0'" />
+                  </span>
+                </button>
+              </div>
+
               <div class="grid gap-4 px-6 py-4">
                 <div class="min-w-0">
                   <div class="flex flex-wrap items-center gap-2">
@@ -1366,7 +1388,8 @@ import {
   updateNestedFolderTitleFormat,
   updateReelsFeedDefault,
   updateStoriesMode,
-  updateCarouselsMode
+  updateCarouselsMode,
+  updateAllowDownloads
 } from '../api/gallery';
 import { SUPPORTED_LOCALES, type SupportedLocale } from '../locales';
 import { useAppStore } from '../stores/app';
@@ -1419,9 +1442,11 @@ const savedLocaleSelection = ref<SupportedLocale | null>(appStore.savedDefaultLo
 const localeSelectionHydrated = ref(false);
 const storiesMode = ref(false);
 const carouselsMode = ref(false);
+const allowDownloads = ref(true);
 const feedDefaultsHydrated = ref(false);
 const storiesModeHydrated = ref(false);
 const carouselsModeHydrated = ref(false);
+const allowDownloadsHydrated = ref(false);
 const activeGeneralSettingsMenu = ref<'home' | 'reels' | 'folder' | 'nestedTitle' | null>(null);
 const showStoriesAnnouncementStructure = ref(false);
 const showCarouselsAnnouncementStructure = ref(false);
@@ -1672,6 +1697,11 @@ function syncCarouselsModeFromSaved() {
   carouselsModeHydrated.value = true;
 }
 
+function syncAllowDownloadsFromSaved() {
+  allowDownloads.value = appStore.allowDownloads;
+  allowDownloadsHydrated.value = true;
+}
+
 function syncExcludedFoldersFromSaved() {
   customExcludedFoldersDraft.value = formatExcludedFolderRules(adminStats.value?.excludedFolders.customExcludedFolders ?? []);
   excludedFoldersHydrated.value = true;
@@ -1760,6 +1790,7 @@ const savedFolderImageOrderDefault = computed(() => appStore.defaultFolderImageO
 const savedNestedFolderTitleFormat = computed(() => appStore.nestedFolderTitleFormat);
 const savedStoriesMode = computed(() => appStore.treatStoriesAsFolders);
 const savedCarouselsMode = computed(() => appStore.treatCarouselsAsFolders);
+const savedAllowDownloads = computed(() => appStore.allowDownloads);
 const savedCustomExcludedFolders = computed(() => adminStats.value?.excludedFolders.customExcludedFolders ?? []);
 const envExcludedFolders = computed(() => adminStats.value?.excludedFolders.envExcludedFolders ?? []);
 const effectiveExcludedFolders = computed(() => adminStats.value?.excludedFolders.effectiveExcludedFolders ?? []);
@@ -1828,6 +1859,7 @@ const feedDefaultsDirty = computed(
 );
 const storiesModeDirty = computed(() => storiesModeHydrated.value && storiesMode.value !== savedStoriesMode.value);
 const carouselsModeDirty = computed(() => carouselsModeHydrated.value && carouselsMode.value !== savedCarouselsMode.value);
+const allowDownloadsDirty = computed(() => allowDownloadsHydrated.value && allowDownloads.value !== savedAllowDownloads.value);
 const storiesScanRequired = computed(() => storiesModeDirty.value || storiesModeRequiresDecision.value);
 const carouselsScanRequired = computed(
   () => carouselsModeDirty.value || carouselsModeRequiresDecision.value || appStore.isCarouselsReconciliationPending
@@ -1851,7 +1883,7 @@ const hasUnsavedFolderRuleChanges = computed(
   () => excludedFoldersDirty.value || hasUnsavedReservedFolderRuleChanges.value
 );
 const generalSettingsDirty = computed(
-  () => localeDirty.value || feedDefaultsDirty.value || storiesModeDirty.value || carouselsModeDirty.value || excludedFoldersDirty.value || storiesModeRequiresDecision.value || carouselsModeRequiresDecision.value
+  () => localeDirty.value || feedDefaultsDirty.value || storiesModeDirty.value || carouselsModeDirty.value || allowDownloadsDirty.value || excludedFoldersDirty.value || storiesModeRequiresDecision.value || carouselsModeRequiresDecision.value
 );
 const showSavedDefaultLocaleNotice = computed(
   () => savedLocaleSelection.value !== null && appStore.locale !== savedLocaleSelection.value
@@ -2701,6 +2733,11 @@ function toggleCarouselsModeSetting() {
   selectCarouselsMode(!carouselsMode.value, showCarouselsMigrationNotice.value);
 }
 
+function toggleAllowDownloadsSetting() {
+  allowDownloads.value = !allowDownloads.value;
+  void saveGeneralSettings();
+}
+
 function chooseCarouselsMigrationMode(value: boolean) {
   selectCarouselsMode(value, true);
 }
@@ -2738,6 +2775,7 @@ async function saveGeneralSettings() {
   const shouldSaveExcludedFolders = excludedFoldersDirty.value;
   const shouldSaveStories = storiesModeDirty.value || storiesModeRequiresDecision.value;
   const shouldSaveCarousels = carouselsModeDirty.value || carouselsModeRequiresDecision.value;
+  const shouldSaveAllowDownloads = allowDownloadsDirty.value;
   const shouldSaveHome = homeFeedDefaultDirty.value;
   const shouldSaveReels = reelsFeedDefaultDirty.value;
   const shouldSaveFolderOrder = folderImageOrderDirty.value;
@@ -2819,6 +2857,15 @@ async function saveGeneralSettings() {
         if (appStore.stats.carouselsMigration) {
           appStore.stats.carouselsMigration.decisionPending = false;
         }
+      }
+    }
+
+    if (shouldSaveAllowDownloads) {
+      const payload = await updateAllowDownloads(allowDownloads.value);
+      savedParts.push(t('settings.general.feedback.parts.allowDownloads'));
+      allowDownloads.value = payload.preferences.allowDownloads;
+      if (appStore.stats) {
+        appStore.stats.preferences.allowDownloads = payload.preferences.allowDownloads;
       }
     }
 
@@ -3049,6 +3096,7 @@ onMounted(async () => {
     syncFeedDefaultsFromSaved();
     syncStoriesModeFromSaved();
     syncCarouselsModeFromSaved();
+    syncAllowDownloadsFromSaved();
   }
   await placesStore.fetchStatus();
   await loadAdminStats().catch(() => {});
@@ -3084,6 +3132,10 @@ watch(
 
     if (!carouselsModeHydrated.value || savingGeneralSettings.value || !carouselsModeDirty.value) {
       syncCarouselsModeFromSaved();
+    }
+
+    if (!allowDownloadsHydrated.value || savingGeneralSettings.value || !allowDownloadsDirty.value) {
+      syncAllowDownloadsFromSaved();
     }
   },
   {
