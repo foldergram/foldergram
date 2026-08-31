@@ -39,7 +39,12 @@
         v-if="showControls"
         :variant="variant"
         :time-label="computedTimeLabel"
+        :seek-orientation="progressOrientation"
+        :current-time="currentTimeSec"
+        :duration="durationSec"
         data-swipe-ignore="true"
+        @seek="seekTo"
+        @seek-preview="previewSeekTo"
       >
         <template #leading>
           <div class="video-media-player__controls-group" data-swipe-ignore="true">
@@ -72,25 +77,6 @@
               <span
                 class="video-media-player__control-icon"
                 :class="muted ? 'i-fluent-speaker-mute-16-regular' : 'i-fluent-speaker-2-16-regular'"
-                aria-hidden="true"
-              />
-            </button>
-
-            <button
-              v-if="hasHdOption"
-              class="video-media-player__control"
-              :class="{ 'video-media-player__control--active': isHd }"
-              type="button"
-              data-test="hd-toggle"
-              :aria-label="isHd ? t('post.viewer.switchToPreviewQuality') : t('post.viewer.switchToHdOriginal')"
-              :aria-pressed="isHd"
-              :title="isHd ? t('post.viewer.previewQuality') : t('post.viewer.hdOriginal')"
-              data-swipe-ignore="true"
-              @click.stop="toggleHd"
-            >
-              <span
-                class="video-media-player__control-icon"
-                :class="isHd ? 'i-fluent-hd-16-filled' : 'i-fluent-hd-16-regular'"
                 aria-hidden="true"
               />
             </button>
@@ -159,7 +145,6 @@ import type { MediaPlayerElement } from 'vidstack/elements';
 import type { MediaFullscreenChangeEvent, MediaLoadingStrategy, PlayerSrc } from 'vidstack';
 
 import { useAppStore } from '../stores/app';
-import { videoPreviewWouldDownscale } from '../utils/media';
 import {
   resolveVideoFallbackSource,
   resolveVideoSource,
@@ -216,6 +201,8 @@ const props = withDefaults(
     captureTouchGestures?: boolean;
     /** Orientation used to map hold/scrub gestures to the video's local axes. */
     gestureOrientation?: 'normal' | 'rotated';
+    /** Enables a transformed-stage-safe seek bar for the immersive player. */
+    progressOrientation?: 'normal' | 'rotated' | null;
   }>(),
   {
     media: null,
@@ -242,14 +229,14 @@ const props = withDefaults(
     startTime: 0,
     holdToSeek: false,
     captureTouchGestures: false,
-    gestureOrientation: 'normal'
+    gestureOrientation: 'normal',
+    progressOrientation: null
   }
 );
 
 const emit = defineEmits<{
   'toggle-mute': [];
   'autoplay-muted': [];
-  'toggle-hd': [isHd: boolean];
   'toggle-playback': [];
   'surface-click': [];
   'fullscreen-change': [isFullscreen: boolean];
@@ -265,15 +252,16 @@ const playerElement = ref<MediaPlayerElement | null>(null);
 const fallbackSource = ref<ResolvedVideoSource | null>(null);
 const durationSec = ref(0);
 const currentTimeSec = ref(0);
+const previewTimeSec = ref<number | null>(null);
 const isPaused = ref(false);
 const showPausedIndicator = ref(false);
-const isHd = ref(false);
 /**
- * Browsers refuse audible autoplay until the page has seen a user gesture. That is a
- * property of this element right now, not a change of preference, so it is recorded
- * locally and cleared on the next gesture instead of being written to the store.
+ * Browsers refuse audible autoplay until the page has seen a user gesture. That
+ * verdict belongs to the document, not to one element, so it is tracked globally in
+ * the app store: every player, feed card and immersive layer then agrees on whether
+ * sound is currently possible. `props.muted` stays the owner's stored preference.
  */
-const audioBlocked = ref(false);
+const audioBlocked = computed(() => appStore.audibleAutoplayBlocked);
 const effectiveMuted = computed(() => props.muted || audioBlocked.value);
 let pendingRestoreState: { currentTime: number; wasPaused: boolean } | null = null;
 let hidePausedTimer: NodeJS.Timeout | null = null;
@@ -378,7 +366,7 @@ function warmSeekTarget(seconds: number) {
     return;
   }
 
-  warmVideoStream(media, isHd.value ? 'original' : appStore.videoPlaybackQuality, {
+  warmVideoStream(media, appStore.videoPlaybackQuality, {
     fromSeconds: seconds,
     segments: 2
   });
@@ -392,6 +380,16 @@ const holdSpeed = useHoldToSpeed({
     const player = playerElement.value;
     if (!player) return;
     warmSeekTarget(seconds);
+    try {
+      player.currentTime = seconds;
+    } catch {
+      // Seeking before the provider is attached is a no-op.
+    }
+  },
+  previewSeek: (seconds) => {
+    const player = playerElement.value;
+    if (!player) return;
+    currentTimeSec.value = seconds;
     try {
       player.currentTime = seconds;
     } catch {
@@ -416,6 +414,7 @@ const holdSpeed = useHoldToSpeed({
   // holding the phone sideways still scrubs, and their downward swipe still dismisses.
   getGesturePoint: (event) => resolveGesturePoint(event, props.gestureOrientation),
   onGestureStart: () => emit('surface-gesture-start'),
+  onScrub: warmSeekTarget,
   onGestureEnd: () => emit('surface-gesture-end')
 });
 
@@ -423,19 +422,6 @@ const scrubLabel = computed(() => {
   const seconds = holdSpeed.scrubSeconds.value;
   if (seconds === null) return '';
   return `${formatTime(seconds)} / ${formatTime(durationSec.value)}`;
-});
-
-const hasHdOption = computed(() => {
-  if (props.media) {
-    // Upgrading only means something when the default source is a transcoded stream.
-    return Boolean(props.media.streamUrl) && (isHd.value || managedPreferredSource.value?.isStream === true);
-  }
-
-  return (
-    props.playbackStrategy === 'original' &&
-    Boolean(props.originalUrl) &&
-    videoPreviewWouldDownscale(props.width, props.height)
-  );
 });
 
 const basePreviewUrl = computed<string>(() => {
@@ -458,11 +444,11 @@ const managedPreferredSource = computed<ResolvedVideoSource | null>(() => {
     return null;
   }
 
-  if (!isHd.value && props.sourceOverride) {
+  if (props.sourceOverride && !props.sourceOverride.isStream) {
     return props.sourceOverride;
   }
 
-  return resolveVideoSource(props.media, isHd.value ? 'original' : appStore.videoPlaybackQuality);
+  return resolveVideoSource(props.media, appStore.videoPlaybackQuality);
 });
 
 const managedActiveSource = computed<ResolvedVideoSource | null>(
@@ -472,9 +458,6 @@ const managedActiveSource = computed<ResolvedVideoSource | null>(
 const activeVideoUrl = computed<string>(() => {
   if (managedActiveSource.value) {
     return managedActiveSource.value.src;
-  }
-  if (isHd.value && props.originalUrl) {
-    return props.originalUrl;
   }
   return basePreviewUrl.value;
 });
@@ -515,7 +498,7 @@ function formatTime(seconds: number): string {
 
 const computedTimeLabel = computed(() => {
   if (props.timeLabel) return props.timeLabel;
-  return `${formatTime(currentTimeSec.value)} / ${formatTime(durationSec.value)}`;
+  return `${formatTime(previewTimeSec.value ?? currentTimeSec.value)} / ${formatTime(durationSec.value)}`;
 });
 
 function handleFullscreenChange(event: MediaFullscreenChangeEvent) {
@@ -530,25 +513,14 @@ async function handleAutoplayFail() {
   const player = playerElement.value;
   if (!player || !props.autoplay || effectiveMuted.value) return;
 
-  // Browsers commonly reject audible autoplay. Fall back to muted playback for this
-  // element only: the stored preference stays audible so the next card (or the next
-  // tap here) can still play with sound.
-  audioBlocked.value = true;
+  // Browsers commonly reject audible autoplay. Record the document-wide verdict and
+  // fall back to muted playback; the stored preference stays audible so the next tap
+  // (which is a user gesture) can still bring the sound back.
+  if (!appStore.reportAudibleAutoplayBlocked()) return;
   player.muted = true;
   emit('autoplay-muted');
   await nextTick();
   await player.play().catch(() => {});
-}
-
-async function toggleHd() {
-  const player = playerElement.value;
-  const current = player?.currentTime ?? 0;
-  const wasPaused = player?.paused ?? true;
-
-  fallbackSource.value = null;
-  isHd.value = !isHd.value;
-  pendingRestoreState = { currentTime: current, wasPaused };
-  emit('toggle-hd', isHd.value);
 }
 
 function isInteractiveTarget(target: EventTarget | null): boolean {
@@ -603,6 +575,28 @@ function seekBy(deltaSeconds: number) {
   }
 }
 
+function seekTo(seconds: number) {
+  const player = playerElement.value;
+  if (!player || !Number.isFinite(seconds)) return;
+
+  const duration = player.duration;
+  const upperBound = Number.isFinite(duration) && duration > 0 ? duration - 0.25 : seconds;
+  const next = Math.min(Math.max(seconds, 0), Math.max(upperBound, 0));
+  previewTimeSec.value = null;
+  currentTimeSec.value = next;
+  warmSeekTarget(next);
+  try {
+    player.currentTime = next;
+  } catch {
+    // Seeking before the provider is attached is a no-op.
+  }
+}
+
+function previewSeekTo(seconds: number) {
+  if (!Number.isFinite(seconds)) return;
+  previewTimeSec.value = seconds;
+}
+
 function handleSurfaceKeydown(event: KeyboardEvent) {
   if (isInteractiveTarget(event.target)) {
     if (event.key === 'ArrowLeft' || event.key === 'ArrowRight' || event.key === 'ArrowUp' || event.key === 'ArrowDown') {
@@ -625,7 +619,7 @@ async function togglePlayback() {
     autoplayCancelled = false;
     // A tap is a user gesture, so an earlier audible rejection no longer applies.
     if (audioBlocked.value) {
-      audioBlocked.value = false;
+      appStore.clearAudibleAutoplayBlock();
       player.muted = props.muted;
     }
 
@@ -886,8 +880,6 @@ watch([basePreviewUrl, () => props.media?.id ?? null], () => {
   // released by the element it started on.
   holdSpeed.stop();
   resetStallRetry();
-  isHd.value = false;
-  audioBlocked.value = false;
   fallbackSource.value = null;
   pendingRestoreState = null;
   appliedStartTime = false;
@@ -911,14 +903,8 @@ watch(playerElement, () => {
 // The mute button now reports to the owning store instead of flipping the player
 // itself, so the element follows the prop in both directions.
 watch(
-  () => [props.muted, appStore.videoSoundGeneration] as const,
+  () => [effectiveMuted.value, appStore.videoSoundGeneration] as const,
   ([muted]) => {
-    // Switching the preference to audible is a deliberate act, so it also clears a
-    // stale block; if the browser refuses again `handleAutoplayFail` re-arms it.
-    if (!muted) {
-      audioBlocked.value = false;
-    }
-
     const player = playerElement.value;
     if (player) {
       player.muted = muted;
@@ -928,13 +914,12 @@ watch(
 
 defineExpose({
   playerElement,
+  getPlayerElement: () => playerElement.value,
   audioBlocked,
   effectiveMuted,
   togglePlayback,
-  toggleHd,
-  isHd,
-  hasHdOption,
   seekBy,
+  seekTo,
   currentTime: () => playerElement.value?.currentTime ?? 0,
   paused: () => playerElement.value?.paused ?? true,
   play: () => playerElement.value?.play(),
@@ -979,7 +964,9 @@ defineExpose({
   display: block;
   width: 100%;
   height: 100%;
-  object-fit: contain;
+  /* Vidstack's provider stylesheet otherwise wins with `cover`, cropping a
+     landscape source when the immersive viewport is portrait. */
+  object-fit: contain !important;
   background: black;
 }
 

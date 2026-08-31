@@ -30,6 +30,21 @@ describe('VideoMediaPlayer', () => {
     expect(wrapper.find('.video-progress-footer').attributes('data-swipe-ignore')).toBe('true');
   });
 
+  it('uses a coordinate-aware progress slider for an immersive rotated stage', () => {
+    const wrapper = mount(VideoMediaPlayer, {
+      props: {
+        src: '/test-video.mp4',
+        progressOrientation: 'rotated'
+      },
+      global: {
+        plugins: [i18n]
+      }
+    });
+
+    expect(wrapper.find('[role="slider"]').exists()).toBe(true);
+    expect(wrapper.find('media-time-slider').exists()).toBe(false);
+  });
+
   it('lets an immersive host capture vertical touch gestures without browser cancellation', () => {
     const wrapper = mount(VideoMediaPlayer, {
       props: {
@@ -168,107 +183,48 @@ describe('VideoMediaPlayer', () => {
     expect(secondPlayer.muted).toBe(false);
   });
 
-  it('evaluates HD eligibility based on playbackStrategy, dimensions, and originalUrl', async () => {
-    // Eligible: playbackStrategy: original, large resolution (downscaled preview), originalUrl present
-    const wrapperEligible = mount(VideoMediaPlayer, {
-      props: {
-        src: '/test-video-preview.mp4',
-        originalUrl: '/test-video-original.mp4',
-        playbackStrategy: 'original',
-        width: 1920,
-        height: 1080
-      },
-      global: {
-        plugins: [i18n]
-      }
-    });
-
-    const hdBtn = wrapperEligible.find('button[data-test="hd-toggle"]');
-    expect(hdBtn.exists()).toBe(true);
-    expect(hdBtn.classes()).not.toContain('video-media-player__control--active');
-
-    // Ineligible: playbackStrategy is preview (not compatible for direct playback)
-    const wrapperIneligibleStrategy = mount(VideoMediaPlayer, {
-      props: {
-        src: '/test-video-preview.mp4',
-        originalUrl: '/test-video-original.mov',
-        playbackStrategy: 'preview',
-        width: 1920,
-        height: 1080
-      },
-      global: {
-        plugins: [i18n]
-      }
-    });
-    expect(wrapperIneligibleStrategy.find('button[data-test="hd-toggle"]').exists()).toBe(false);
-
-    // Ineligible: small resolution that did not downscale
-    const wrapperIneligibleSize = mount(VideoMediaPlayer, {
-      props: {
-        src: '/test-video-preview.mp4',
-        originalUrl: '/test-video-original.mp4',
-        playbackStrategy: 'original',
-        width: 640,
-        height: 480
-      },
-      global: {
-        plugins: [i18n]
-      }
-    });
-    expect(wrapperIneligibleSize.find('button[data-test="hd-toggle"]').exists()).toBe(false);
-  });
-
-  it('toggles HD state and resets when src changes', async () => {
+  it('does not expose a transcoding quality switch in direct-only mode', () => {
     const wrapper = mount(VideoMediaPlayer, {
       props: {
-        src: '/test-video-preview.mp4',
-        originalUrl: '/test-video-original.mp4',
-        playbackStrategy: 'original',
-        width: 1920,
-        height: 1080
+        src: '/test-video.mp4',
+        media: {
+          id: 5,
+          originalUrl: '/api/originals/5',
+          streamUrl: '/api/videos/5/hls/master.m3u8'
+        }
       },
       global: {
         plugins: [i18n]
       }
     });
 
-    const hdBtn = wrapper.find('button[data-test="hd-toggle"]');
-    await hdBtn.trigger('click');
-    expect(wrapper.emitted('toggle-hd')?.[0]).toEqual([true]);
-    expect(wrapper.vm.isHd).toBe(true);
-
-    // Change slide / preview src -> should reset isHd
-    await wrapper.setProps({ src: '/another-video.mp4', originalUrl: '/another-original.mp4' });
-    expect(wrapper.vm.isHd).toBe(false);
+    expect(wrapper.find('button[data-test="hd-toggle"]').exists()).toBe(false);
   });
 
-  it('restores currentTime and playing state after HD toggle when loaded-metadata fires', async () => {
+  it('ignores an HLS handover source and keeps the direct original URL', () => {
     const wrapper = mount(VideoMediaPlayer, {
       props: {
-        src: '/test-video-preview.mp4',
-        originalUrl: '/test-video-original.mp4',
-        playbackStrategy: 'original',
-        width: 1920,
-        height: 1080
+        src: '/test-video.mp4',
+        media: {
+          id: 5,
+          originalUrl: '/api/originals/5',
+          streamUrl: '/api/videos/5/hls/master.m3u8'
+        },
+        sourceOverride: {
+          src: '/api/videos/5/hls/master.m3u8',
+          type: 'application/x-mpegurl',
+          isStream: true
+        }
       },
       global: {
         plugins: [i18n]
       }
     });
 
-    const playerEl = wrapper.find('media-player').element as any;
-    playerEl.currentTime = 42.5;
-    playerEl.paused = false; // playing before toggle
-    playerEl.play = vi.fn().mockResolvedValue(undefined);
-
-    const hdBtn = wrapper.find('button[data-test="hd-toggle"]');
-    await hdBtn.trigger('click');
-
-    // Simulate loaded-metadata event on media player after source changed
-    playerEl.dispatchEvent(new Event('loaded-metadata'));
-
-    expect(playerEl.currentTime).toBe(42.5);
-    expect(playerEl.play).toHaveBeenCalled();
+    expect((wrapper.vm as any).playerElement.src).toEqual({
+      src: '/api/originals/5',
+      type: 'video/mp4'
+    });
   });
 
   it('reports a mute tap to the owner instead of flipping the element itself', async () => {

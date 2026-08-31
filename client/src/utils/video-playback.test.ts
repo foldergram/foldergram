@@ -1,6 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { useBundledHlsLibrary } from './video-playback';
+import {
+  resolveVideoFallbackSource,
+  resolveVideoSource,
+  useBundledHlsLibrary,
+  warmVideoStream
+} from './video-playback';
 
 interface FakeProvider {
   type: string;
@@ -80,5 +85,53 @@ describe('useBundledHlsLibrary', () => {
     dispose();
 
     expect(attachProvider().config.startPosition).toBeUndefined();
+  });
+});
+
+describe('resolveVideoSource', () => {
+  const media = {
+    id: 501,
+    playbackStrategy: 'preview' as const,
+    previewFileUrl: '/previews/ab/clip.mp4',
+    streamUrl: '/api/videos/501/hls/master.m3u8',
+    originalUrl: '/api/originals/501'
+  };
+
+  it('always uses the original file for direct device playback', () => {
+    expect(resolveVideoSource(media, 'auto')).toEqual({
+      src: '/api/originals/501',
+      type: 'video/mp4',
+      isStream: false
+    });
+  });
+
+  it('does not use HLS for a fixed legacy quality selection', () => {
+    expect(resolveVideoSource(media, '720p')).toEqual({
+      src: '/api/originals/501',
+      type: 'video/mp4',
+      isStream: false
+    });
+  });
+
+  it('does not fall back to NAS transcoding when direct playback fails', () => {
+    expect(resolveVideoFallbackSource(media, resolveVideoSource(media, 'auto'))).toBeNull();
+  });
+
+  it('never requests HLS warm-up segments', () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+
+    warmVideoStream(media, 'auto', { fromSeconds: 12, segments: 4 });
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+
+  it('falls back to the original when no preview or stream is advertised', () => {
+    const originalOnly = { id: 7, originalUrl: '/api/originals/7' };
+    expect(resolveVideoSource(originalOnly, 'auto')).toEqual({
+      src: '/api/originals/7',
+      type: 'video/mp4',
+      isStream: false
+    });
   });
 });

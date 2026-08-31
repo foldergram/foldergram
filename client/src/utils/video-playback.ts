@@ -19,6 +19,8 @@ export interface VideoPlaybackMedia {
   streamUrl?: string | null;
   originalUrl?: string;
   previewUrl?: string;
+  /** A generated faststart MP4 that supports efficient HTTP Range seeking. */
+  previewFileUrl?: string | null;
 }
 
 export interface ResolvedVideoSource {
@@ -27,74 +29,34 @@ export interface ResolvedVideoSource {
   isStream: boolean;
 }
 
-function getStreamUrl(media: VideoPlaybackMedia): string | null {
-  return media.streamUrl ?? null;
-}
-
-function getFixedQualityStreamUrl(media: VideoPlaybackMedia, quality: '1080p' | '720p'): string | null {
-  const master = getStreamUrl(media);
-  if (!master) {
-    return null;
-  }
-
-  return master.replace(/\/master\.m3u8$/, `/${quality}/index.m3u8`);
-}
-
 function toDirectSource(url: string): ResolvedVideoSource {
   return { src: url, type: 'video/mp4', isStream: false };
-}
-
-function toStreamSource(url: string): ResolvedVideoSource {
-  return { src: url, type: HLS_MIME_TYPE, isStream: true };
 }
 
 /**
  * Picks what the player should actually load.
  *
- * `auto` prefers the untouched file whenever the server flagged it as directly
- * decodable, because that costs the NAS nothing. A fixed quality always goes
- * through HLS so the requested resolution is honoured, falling back to the
- * original when the server offers no stream for that item.
+ * The browser always receives the original file. If its codec is supported, the
+ * browser can use the device decoder. We intentionally never select HLS here:
+ * starting an HLS stream would make the NAS transcode while the user is watching.
  */
 export function resolveVideoSource(
   media: VideoPlaybackMedia,
-  quality: VideoPlaybackQuality
+  _quality: VideoPlaybackQuality
 ): ResolvedVideoSource {
   const originalUrl = media.originalUrl ?? getOriginalMediaUrl(media.id);
-
-  if (quality === 'original') {
-    return toDirectSource(originalUrl);
-  }
-
-  if (quality === '1080p' || quality === '720p') {
-    const fixed = getFixedQualityStreamUrl(media, quality);
-    return fixed ? toStreamSource(fixed) : toDirectSource(originalUrl);
-  }
-
-  if (media.playbackStrategy === 'original') {
-    return toDirectSource(originalUrl);
-  }
-
-  const master = getStreamUrl(media);
-  return master ? toStreamSource(master) : toDirectSource(originalUrl);
+  return toDirectSource(originalUrl);
 }
 
 /**
- * Fallback order when the chosen source fails to play. Direct playback can fail
- * on codecs the browser does not support, and streaming can fail if ffmpeg
- * cannot handle the file, so each mode falls back to the other.
+ * A direct-play failure is surfaced to the user. Falling back to HLS here would
+ * silently restart the NAS ffmpeg path that direct-only playback disables.
  */
 export function resolveVideoFallbackSource(
-  media: VideoPlaybackMedia,
-  failed: ResolvedVideoSource
+  _media: VideoPlaybackMedia,
+  _failed: ResolvedVideoSource
 ): ResolvedVideoSource | null {
-  if (!failed.isStream) {
-    const master = getStreamUrl(media);
-    return master && master !== failed.src ? toStreamSource(master) : null;
-  }
-
-  const originalUrl = media.originalUrl ?? getOriginalMediaUrl(media.id);
-  return originalUrl !== failed.src ? toDirectSource(originalUrl) : null;
+  return null;
 }
 
 export function toPlayerSrc(source: ResolvedVideoSource): PlayerSrc {
@@ -104,57 +66,13 @@ export function toPlayerSrc(source: ResolvedVideoSource): PlayerSrc {
   };
 }
 
-const warmedStreams = new Set<string>();
-
-/**
- * Asks the NAS to transcode the first segments of a clip before the player needs
- * them. Only streamed sources benefit: a directly playable file is already served
- * straight from disk. Failures are ignored because this is pure optimisation.
- */
-/** Mirrors HLS_SEGMENT_SECONDS on the server; only used to dedupe warm calls. */
-const WARM_SEGMENT_SECONDS = 2;
-
 export function warmVideoStream(
-  media: VideoPlaybackMedia,
-  quality: VideoPlaybackQuality,
-  options: { fromSeconds?: number; segments?: number; source?: ResolvedVideoSource | null } = {}
+  _media: VideoPlaybackMedia,
+  _quality: VideoPlaybackQuality,
+  _options: { fromSeconds?: number; segments?: number; source?: ResolvedVideoSource | null } = {}
 ): void {
-  const source = options.source ?? resolveVideoSource(media, quality);
-  if (!source.isStream) {
-    return;
-  }
-
-  // The prefix is captured rather than assumed: a share link streams from
-  // /api/share/post-links/<token>/videos/... and must warm through that same path.
-  const match = /^(.*)\/(\d+)\/hls\/(?:([^/]+)\/index\.m3u8|master\.m3u8)$/.exec(source.src);
-  if (!match) {
-    return;
-  }
-
-  const basePath = match[1];
-  const streamId = match[2];
-  const streamQuality = match[3] ?? '720p';
-  const fromSeconds = Math.max(0, options.fromSeconds ?? 0);
-  // Segments are two seconds each, so three of them is the same amount of video the
-  // old four-second default covered.
-  const segments = options.segments ?? 3;
-  // Keyed by segment index so resuming at 0:10 still warms segment 2 even though
-  // the head of the same clip was warmed earlier.
-  const segmentIndex = Math.floor(fromSeconds / WARM_SEGMENT_SECONDS);
-  const key = `${basePath}:${streamId}:${streamQuality}:${segmentIndex}`;
-  if (warmedStreams.has(key)) {
-    return;
-  }
-
-  warmedStreams.add(key);
-  const query = `segments=${segments}&from=${fromSeconds.toFixed(3)}`;
-  void fetch(`${basePath}/${streamId}/hls/${streamQuality}/warm?${query}`, {
-    method: 'POST',
-    credentials: 'same-origin',
-    headers: { 'x-foldergram-intent': '1' }
-  }).catch(() => {
-    warmedStreams.delete(key);
-  });
+  // All current playback surfaces retain this call site, but direct original-file
+  // playback has no NAS warm-up endpoint.
 }
 
 let hlsModulePromise: Promise<{ default: unknown }> | null = null;

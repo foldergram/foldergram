@@ -1889,24 +1889,9 @@ const nestedFolderTitleOptions = computed<Array<{ id: NestedFolderTitleFormat; l
 ]);
 const videoPlaybackQualityOptions = computed<Array<{ id: VideoPlaybackQuality; label: string; description: string }>>(() => [
   {
-    id: 'auto',
-    label: t('settings.general.videoPlaybackQuality.options.auto.label'),
-    description: t('settings.general.videoPlaybackQuality.options.auto.description')
-  },
-  {
     id: 'original',
     label: t('settings.general.videoPlaybackQuality.options.original.label'),
     description: t('settings.general.videoPlaybackQuality.options.original.description')
-  },
-  {
-    id: '1080p',
-    label: t('settings.general.videoPlaybackQuality.options.1080p.label'),
-    description: t('settings.general.videoPlaybackQuality.options.1080p.description')
-  },
-  {
-    id: '720p',
-    label: t('settings.general.videoPlaybackQuality.options.720p.label'),
-    description: t('settings.general.videoPlaybackQuality.options.720p.description')
   }
 ]);
 const isLibraryRebuildActive = computed(
