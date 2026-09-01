@@ -6,6 +6,7 @@ function createHarness(options: {
   currentTime?: number;
   duration?: number;
   getGesturePoint?: (event: PointerEvent) => GesturePoint;
+  getScrubPoint?: (event: PointerEvent) => GesturePoint;
   onGestureEnd?: () => void;
   onGestureStart?: () => void;
 } = {}) {
@@ -30,6 +31,7 @@ function createHarness(options: {
       playCalls += 1;
     },
     getGesturePoint: options.getGesturePoint,
+    getScrubPoint: options.getScrubPoint,
     onGestureStart: options.onGestureStart,
     onGestureEnd: options.onGestureEnd
   });
@@ -207,6 +209,22 @@ describe('useHoldToSpeed', () => {
     harness.press(200, 100);
     harness.move(200, 200);
     harness.release(200, 200);
+
+    expect(harness.getCurrentTime()).toBeCloseTo(42, 5);
+    vi.useRealTimers();
+  });
+
+  it('keeps landscape screen-horizontal scrubbing independent from dismiss coordinates', () => {
+    vi.useFakeTimers();
+    const harness = createHarness({
+      getGesturePoint: (event) => ({ x: event.clientY, y: -event.clientX }),
+      getScrubPoint: (event) => ({ x: event.clientX, y: event.clientY })
+    });
+
+    harness.press(200, 100);
+    harness.move(300, 100);
+    expect(harness.hold.scrubSeconds.value).toBeCloseTo(42, 5);
+    harness.release(300, 100);
 
     expect(harness.getCurrentTime()).toBeCloseTo(42, 5);
     vi.useRealTimers();

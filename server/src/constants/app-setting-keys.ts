@@ -8,6 +8,7 @@ export const STALE_DERIVATIVE_GC_LAST_RUN_AT_SETTING_KEY = 'derivatives.stale_gc
 export const AVIF_METADATA_REPAIR_VERSION_SETTING_KEY = 'library.avif_metadata_repair_version';
 export const TREAT_STORIES_AS_FOLDERS_SETTING_KEY = 'library.treat_stories_as_folders';
 export const EXCLUDED_FOLDERS_SETTING_KEY = 'library.excluded_folders';
+export const SCAN_FOLDERS_SETTING_KEY = 'library.scan_folders';
 export const STORIES_MIGRATION_DECISION_SETTING_KEY = 'library.stories_migration_decision';
 export const HOME_FEED_DEFAULT_MODE_SETTING_KEY = 'feed.default_home_mode';
 export const REELS_FEED_DEFAULT_MODE_SETTING_KEY = 'feed.default_reels_mode';

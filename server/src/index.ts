@@ -77,6 +77,11 @@ async function bootstrap(): Promise<void> {
 
   server.listen(appConfig.port, () => {
     logServerReady();
+    if (!appConfig.libraryAutoScanEnabled) {
+      log.info('Automatic library scanning disabled; waiting for a manual scan');
+      return;
+    }
+
     const startupAction = scannerService.handleStartup("startup");
     if (startupAction === "blocked") {
       log.info("Gallery watcher deferred until the library rebuild completes");

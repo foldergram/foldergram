@@ -66,7 +66,7 @@ describe.sequential('video playback strategy mapping', () => {
     ]);
   });
 
-  it('routes videos to the original file or to on-demand HLS instead of a preview file', async () => {
+  it('exposes the generated preview file while retaining HLS for quality selection', async () => {
     const folder = folderRepository.upsert({
       slug: 'clips',
       name: 'Clips',
@@ -83,6 +83,7 @@ describe.sequential('video playback strategy mapping', () => {
 
     expect(feedItems.get(image.id)?.previewUrl).toBe('/previews/clips/photo-1.webp');
     expect(feedItems.get(compatibleVideo.id)?.previewUrl).toBe(`/api/originals/${compatibleVideo.id}`);
+    expect(feedItems.get(compatibleVideo.id)?.previewFileUrl).toBe('/previews/clips/reel-1.mp4');
     // Directly playable videos still expose a stream so a viewer can pick a
     // lower quality by hand.
     expect(feedItems.get(compatibleVideo.id)?.streamUrl).toBe(
@@ -91,12 +92,14 @@ describe.sequential('video playback strategy mapping', () => {
     expect(feedItems.get(transcodedVideo.id)?.previewUrl).toBe(
       `/api/videos/${transcodedVideo.id}/hls/master.m3u8`
     );
+    expect(feedItems.get(transcodedVideo.id)?.previewFileUrl).toBe('/previews/clips/reel-2.mp4');
     expect(feedItems.get(transcodedVideo.id)?.streamUrl).toBe(
       `/api/videos/${transcodedVideo.id}/hls/master.m3u8`
     );
 
     const compatibleVideoDetail = galleryService.getImageDetail(compatibleVideo.id, 'video');
     expect(compatibleVideoDetail?.previewUrl).toBe(`/api/originals/${compatibleVideo.id}`);
+    expect(compatibleVideoDetail?.previewFileUrl).toBe('/previews/clips/reel-1.mp4');
     expect(compatibleVideoDetail?.originalUrl).toBe(`/api/originals/${compatibleVideo.id}`);
     expect(compatibleVideoDetail?.playbackStrategy).toBe('original');
 

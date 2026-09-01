@@ -403,7 +403,10 @@ async function resolveVideoPlaybackStrategy(
 async function readVideoMetadata(sourcePath: string, options: ReadMediaMetadataOptions = {}): Promise<MediaMetadata> {
   const payload = await readMediaProbe(sourcePath);
   const videoStream = payload.streams?.find((stream) => stream.codec_type === 'video');
-  const durationSeconds = parseFfprobeFloat(payload.format?.duration);
+  // Some fragmented or camera-produced containers omit format.duration while
+  // still reporting a valid duration on the video stream.
+  const durationSeconds = parseFfprobeFloat(payload.format?.duration)
+    ?? parseFfprobeFloat(videoStream?.duration);
   const durationMs = durationSeconds !== null ? Math.round(durationSeconds * 1000) : null;
   const takenAt = normalizeTakenAtValue(videoStream?.tags?.creation_time ?? payload.format?.tags?.creation_time ?? null);
   const displayDimensions = resolveVideoDisplayDimensions(videoStream);

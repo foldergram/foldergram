@@ -1,5 +1,5 @@
 import { databaseManager } from './database.js';
-import { SHARE_SESSION_SECRET_SETTING_KEY } from '../constants/app-setting-keys.js';
+import { SCAN_FOLDERS_SETTING_KEY, SHARE_SESSION_SECRET_SETTING_KEY } from '../constants/app-setting-keys.js';
 import { normalizePath, safeJoin } from '../utils/path-utils.js';
 import { resolveUniqueSlug, slugifyFolderName } from '../utils/slug.js';
 import type {
@@ -57,10 +57,32 @@ const COVER_FILENAME_SQL = COVER_FILENAMES.map((name) => `'${name}'`).join(', ')
 const NORMAL_FOLDER_ROLE_SQL = "folders.role = 'normal'";
 const NORMAL_FOLDER_ID_SUBQUERY_SQL = "SELECT id FROM folders WHERE role = 'normal'";
 
+// Scan selection is a visibility scope, not a deletion operation. Keeping this in
+// SQL means old indexed rows stay reusable when a folder is selected again, while
+// every feed/search/collection count hides rows outside the current selection.
+const SELECTED_SCAN_IMAGE_SCOPE_SQL =
+  `(NOT EXISTS (SELECT 1 FROM app_settings WHERE key = '${SCAN_FOLDERS_SETTING_KEY}') OR EXISTS (` +
+  `SELECT 1 FROM app_settings scan_scope, json_each(scan_scope.value) selected ` +
+  `WHERE scan_scope.key = '${SCAN_FOLDERS_SETTING_KEY}' ` +
+  `AND (images.relative_path = selected.value OR images.relative_path LIKE selected.value || '/%')))`;
+const SELECTED_SCAN_FOLDER_SCOPE_SQL =
+  `(NOT EXISTS (SELECT 1 FROM app_settings WHERE key = '${SCAN_FOLDERS_SETTING_KEY}') OR EXISTS (` +
+  `SELECT 1 FROM app_settings scan_scope, json_each(scan_scope.value) selected ` +
+  `WHERE scan_scope.key = '${SCAN_FOLDERS_SETTING_KEY}' ` +
+  `AND (folders.folder_path = selected.value OR folders.folder_path LIKE selected.value || '/%')))`;
+const SELECTED_SCAN_POST_SCOPE_SQL =
+  `(NOT EXISTS (SELECT 1 FROM app_settings WHERE key = '${SCAN_FOLDERS_SETTING_KEY}') OR EXISTS (` +
+  `SELECT 1 FROM post_items scope_items ` +
+  `INNER JOIN images scope_images ON scope_images.id = scope_items.image_id ` +
+  `INNER JOIN app_settings scan_scope ON scan_scope.key = '${SCAN_FOLDERS_SETTING_KEY}' ` +
+  `CROSS JOIN json_each(scan_scope.value) selected ` +
+  `WHERE scope_items.post_id = posts.id ` +
+  `AND (scope_images.relative_path = selected.value OR scope_images.relative_path LIKE selected.value || '/%')))`;
+
 const VISIBLE_IMAGE_WHERE_SQL =
-  `images.is_deleted = 0 AND images.is_trashed = 0 AND LOWER(images.filename) NOT IN (${COVER_FILENAME_SQL}) AND ${NORMAL_FOLDER_ROLE_SQL}`;
+  `images.is_deleted = 0 AND images.is_trashed = 0 AND LOWER(images.filename) NOT IN (${COVER_FILENAME_SQL}) AND ${NORMAL_FOLDER_ROLE_SQL} AND ${SELECTED_SCAN_IMAGE_SCOPE_SQL}`;
 const VISIBLE_IMAGE_WHERE_UNSCOPED_SQL =
-  `is_deleted = 0 AND is_trashed = 0 AND LOWER(filename) NOT IN (${COVER_FILENAME_SQL}) AND folder_id IN (${NORMAL_FOLDER_ID_SUBQUERY_SQL})`;
+  `is_deleted = 0 AND is_trashed = 0 AND LOWER(filename) NOT IN (${COVER_FILENAME_SQL}) AND folder_id IN (${NORMAL_FOLDER_ID_SUBQUERY_SQL}) AND ${SELECTED_SCAN_IMAGE_SCOPE_SQL}`;
 
 const NOT_EXPLICIT_FOLDER_COVER_SQL =
   `NOT EXISTS (` +
@@ -73,9 +95,9 @@ const NOT_EXPLICIT_FOLDER_COVER_SQL =
   `)`;
 
 const VISIBLE_POST_WHERE_SQL =
-  `posts.is_deleted = 0 AND posts.is_trashed = 0 AND ${NORMAL_FOLDER_ROLE_SQL} AND ${NOT_EXPLICIT_FOLDER_COVER_SQL}`;
+  `posts.is_deleted = 0 AND posts.is_trashed = 0 AND ${NORMAL_FOLDER_ROLE_SQL} AND ${NOT_EXPLICIT_FOLDER_COVER_SQL} AND ${SELECTED_SCAN_POST_SCOPE_SQL}`;
 const VISIBLE_POST_WHERE_UNSCOPED_SQL =
-  `is_deleted = 0 AND is_trashed = 0 AND folder_id IN (${NORMAL_FOLDER_ID_SUBQUERY_SQL}) AND ${NOT_EXPLICIT_FOLDER_COVER_SQL}`;
+  `is_deleted = 0 AND is_trashed = 0 AND folder_id IN (${NORMAL_FOLDER_ID_SUBQUERY_SQL}) AND ${NOT_EXPLICIT_FOLDER_COVER_SQL} AND ${SELECTED_SCAN_POST_SCOPE_SQL}`;
 
 /**
  * A post whose cover image has no thumbnail yet cannot be drawn: the feed would show a
@@ -657,7 +679,7 @@ export const folderRepository = {
         `
         SELECT * FROM (
           ${FOLDER_SUMMARY_SELECT_SQL}
-          WHERE folders.role = 'normal'
+          WHERE folders.role = 'normal' AND ${SELECTED_SCAN_FOLDER_SCOPE_SQL}
         ) AS summaries
         WHERE post_count > 0 OR summary_avatar_image_id IS NOT NULL
         ORDER BY latest_image_mtime_ms DESC, name COLLATE NOCASE ASC, folder_path COLLATE NOCASE ASC
@@ -685,7 +707,7 @@ export const folderRepository = {
       .prepare(
         `
         ${FOLDER_SUMMARY_SELECT_SQL}
-        WHERE folders.slug = ? AND folders.role = 'normal'
+        WHERE folders.slug = ? AND folders.role = 'normal' AND ${SELECTED_SCAN_FOLDER_SCOPE_SQL}
         `
       )
       .get(slug) as FolderSummaryRecord | undefined;
@@ -762,6 +784,7 @@ export const folderRepository = {
             SELECT COUNT(*) AS count
             FROM folders
             WHERE folders.role = 'normal'
+              AND ${SELECTED_SCAN_FOLDER_SCOPE_SQL}
               AND (
                 EXISTS (
                   SELECT 1
@@ -1511,9 +1534,10 @@ export const postRepository = {
       `SELECT COUNT(*) AS count
        FROM post_items
        INNER JOIN posts ON posts.id = post_items.post_id
-       WHERE posts.is_deleted = 0
-         AND posts.is_trashed = 0
-         AND posts.folder_id IN (${NORMAL_FOLDER_ID_SUBQUERY_SQL})`
+       INNER JOIN folders ON folders.id = posts.folder_id
+       INNER JOIN images ON images.id = post_items.image_id
+       WHERE ${VISIBLE_POST_WHERE_SQL}
+         AND ${SELECTED_SCAN_IMAGE_SCOPE_SQL}`
     ).get() as { count: number }).count);
   },
 
@@ -1527,11 +1551,10 @@ export const postRepository = {
     return Number((database.prepare(
       `SELECT COUNT(*) AS count
        FROM posts
+       INNER JOIN folders ON folders.id = posts.folder_id
        INNER JOIN post_items ON post_items.post_id = posts.id AND post_items.position = 1
        INNER JOIN images ON images.id = post_items.image_id
-       WHERE posts.is_deleted = 0
-         AND posts.is_trashed = 0
-         AND posts.folder_id IN (${NORMAL_FOLDER_ID_SUBQUERY_SQL})
+       WHERE ${VISIBLE_POST_WHERE_SQL}
          AND posts.post_type = 'single'
          AND images.media_type = 'video'`
     ).get() as { count: number }).count);
@@ -1945,6 +1968,7 @@ export const postRepository = {
       JOIN images ON images.id = post_items.image_id
       LEFT JOIN places ON places.id = posts.place_id
       WHERE posts.id = ? AND posts.is_deleted = 0 AND posts.is_trashed = 0 AND ${NORMAL_FOLDER_ROLE_SQL}
+        AND ${SELECTED_SCAN_POST_SCOPE_SQL}
       `
     ).get(resolvedId) as (Omit<PostDetail, 'nextPostId' | 'previousPostId' | 'nextImageId' | 'previousImageId' | 'exif' | 'mediaItems' | 'itemCount'> & { originalUrl: string; exifJson: string | null }) | undefined;
 
@@ -3930,6 +3954,23 @@ export const folderScanStateRepository = {
     const placeholders = normalizedFolderPaths.map(() => '?').join(', ');
     const statement = database.prepare(`DELETE FROM folder_scan_state WHERE folder_path NOT IN (${placeholders})`);
     const result = statement.run(...normalizedFolderPaths);
+    return Number(result.changes ?? 0);
+  },
+
+  deleteMissingWithin(activeFolderPaths: string[], scopeRoots: string[]): number {
+    if (scopeRoots.length === 0) return 0;
+
+    const active = activeFolderPaths.map((folderPath) => normalizePath(folderPath));
+    const activeClause = active.length > 0 ? `AND folder_path NOT IN (${active.map(() => '?').join(', ')})` : '';
+    const scopeClause = scopeRoots.map(() => '(folder_path = ? OR folder_path LIKE ?)').join(' OR ');
+    const params = [
+      ...scopeRoots.flatMap((root) => {
+        const normalized = normalizePath(root);
+        return [normalized, `${normalized}/%`];
+      }),
+      ...active
+    ];
+    const result = database.prepare(`DELETE FROM folder_scan_state WHERE (${scopeClause}) ${activeClause}`).run(...params);
     return Number(result.changes ?? 0);
   }
 };

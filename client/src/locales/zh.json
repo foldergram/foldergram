@@ -275,7 +275,11 @@
         "options": {
           "auto": {
             "label": "自动",
-            "description": "浏览器能直接播的视频播原片，其余按需转码。"
+            "description": "从 480p 流开始播放，网络足够时自动升清晰度；适合外网。"
+          },
+          "480p": {
+            "label": "480p（外网优先）",
+            "description": "约 0.9 Mbps，适合 2-3 Mbps 的外网连接，起播最快。"
           },
           "original": {
             "label": "原片",
@@ -287,7 +291,7 @@
           },
           "720p": {
             "label": "720p",
-            "description": "按需转码到 720p，最省流量、启动最快。"
+            "description": "约 1.8 Mbps，适合稳定的较快网络。"
           }
         }
       },
@@ -398,6 +402,22 @@
       "scanCard": {
         "title": "扫描图库",
         "description": "在添加文件夹后，或你想刷新已索引媒体时运行一次扫描。"
+      },
+      "scanFolders": {
+        "title": "选择扫描文件夹",
+        "description": "选择运行图库扫描或重新生成缩略图时要处理的文件夹。",
+        "chooseLabel": "展开并选择文件夹",
+        "loading": "正在加载文件夹...",
+        "empty": "图库根目录下没有可用文件夹。",
+        "helper": "选择一个文件夹会包含它下面的所有子文件夹。全部不勾选时扫描整个图库。",
+        "allFolders": "全部文件夹",
+        "selectedCount": "已选择 {count} 个",
+        "hasChildren": "包含子文件夹",
+        "save": "保存扫描范围",
+        "saving": "正在保存...",
+        "saved": "扫描范围已保存。运行“扫描图库”后生效。",
+        "loadError": "无法加载可用文件夹。",
+        "saveError": "无法保存扫描范围。"
       },
       "statusLabel": {
         "storageUnavailable": "存储不可用",
@@ -1195,6 +1215,7 @@
     "deselectAll": "取消全选",
     "processingProgress": "正在处理 {done} / {total}…",
     "deletionProgress": "正在后台删除 {done} / {total}，可以继续浏览其他页面。",
+    "dismissDeletionResult": "知道了",
     "restoreButton": "恢复",
     "deleteButton": "永久删除",
     "libraryUnavailableTitle": "图库存储不可用",

@@ -39,6 +39,9 @@ import FolderGrid from '../components/FolderGrid.vue';
 import { useAppStore } from '../stores/app';
 import { useLikesStore } from '../stores/likes';
 
+// Named explicitly so <KeepAlive include> keeps matching after a minified build.
+defineOptions({ name: 'LikesView' });
+
 const appStore = useAppStore();
 const likesStore = useLikesStore();
 const { t } = useI18n();

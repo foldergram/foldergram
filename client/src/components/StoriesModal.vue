@@ -162,7 +162,7 @@
               class="story-stage__video"
               :src="displayImage.previewUrl"
               :poster="displayImage.thumbnailUrl"
-              :muted="appStore.videoMuted"
+              :muted="appStore.videoEffectivelyMuted"
               autoplay
               playsinline
               preload="metadata"
@@ -724,7 +724,7 @@ function syncMediaPlayback() {
     return;
   }
 
-  player.muted = appStore.videoMuted;
+  syncStoryVideoMuted(player, appStore.videoEffectivelyMuted);
 
   if (isPaused.value) {
     player.pause();
@@ -732,16 +732,32 @@ function syncMediaPlayback() {
   }
 
   void player.play().catch(() => {
-    // Ignore autoplay rejections so the viewer can continue advancing.
+    // An audible autoplay refusal is a document-wide verdict, so it is recorded in
+    // the store and the story retries muted instead of silently staying stuck.
+    if (appStore.videoEffectivelyMuted) {
+      return;
+    }
+
+    appStore.reportAudibleAutoplayBlocked();
+    player.muted = true;
+    void player.play().then(() => {
+      syncStoryVideoMuted(player, appStore.videoEffectivelyMuted);
+    }).catch(() => {
+      // Ignore autoplay rejections so the viewer can continue advancing.
+    });
   });
 }
 
+function syncStoryVideoMuted(player: HTMLVideoElement, muted: boolean) {
+  player.muted = muted;
+}
+
 watch(
-  () => [appStore.videoMuted, appStore.videoSoundGeneration] as const,
-  ([videoMuted]) => {
+  () => [appStore.videoEffectivelyMuted, appStore.videoSoundGeneration] as const,
+  ([effectivelyMuted]) => {
     const player = videoElement.value;
     if (player) {
-      player.muted = videoMuted;
+      syncStoryVideoMuted(player, effectivelyMuted);
     }
   }
 );

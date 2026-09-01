@@ -43,7 +43,10 @@ export const useImmersiveVideoStore = defineStore('immersiveVideo', {
     isOpen: (state) => state.target !== null
   },
   actions: {
-    open(target: ImmersiveVideoTarget, options: { startTime?: number; startPaused?: boolean } = {}) {
+    open(
+      target: ImmersiveVideoTarget,
+      options: { startTime?: number; startPaused?: boolean } = {}
+    ) {
       this.target = target;
       this.startTime = Number.isFinite(options.startTime) ? Math.max(0, options.startTime ?? 0) : 0;
       this.startPaused = options.startPaused === true;

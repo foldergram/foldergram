@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
+vi.mock('../api/http', () => ({
+  requestJson: vi.fn(() => Promise.resolve({ warming: 2 }))
+}));
+
 import {
   resolveVideoFallbackSource,
   resolveVideoSource,
@@ -97,33 +101,39 @@ describe('resolveVideoSource', () => {
     originalUrl: '/api/originals/501'
   };
 
-  it('always uses the original file for direct device playback', () => {
+  it('uses the adaptive HLS playlist by default instead of a legacy preview MP4', () => {
     expect(resolveVideoSource(media, 'auto')).toEqual({
-      src: '/api/originals/501',
-      type: 'video/mp4',
-      isStream: false
+      src: '/api/videos/501/hls/master.m3u8',
+      type: 'application/x-mpegurl',
+      isStream: true
     });
   });
 
-  it('does not use HLS for a fixed legacy quality selection', () => {
-    expect(resolveVideoSource(media, '720p')).toEqual({
-      src: '/api/originals/501',
-      type: 'video/mp4',
-      isStream: false
+  it('uses the selected fixed HLS rendition when requested', () => {
+    expect(resolveVideoSource(media, '480p')).toEqual({
+      src: '/api/videos/501/hls/480p/index.m3u8',
+      type: 'application/x-mpegurl',
+      isStream: true
     });
   });
 
-  it('does not fall back to NAS transcoding when direct playback fails', () => {
-    expect(resolveVideoFallbackSource(media, resolveVideoSource(media, 'auto'))).toBeNull();
+  it('falls back to adaptive HLS when original playback fails', () => {
+    expect(resolveVideoFallbackSource(media, resolveVideoSource(media, 'original'))).toEqual({
+      src: '/api/videos/501/hls/master.m3u8',
+      type: 'application/x-mpegurl',
+      isStream: true
+    });
   });
 
-  it('never requests HLS warm-up segments', () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+  it('warms the 480p entry rendition before playback', async () => {
+    const { requestJson } = await import('../api/http');
 
     warmVideoStream(media, 'auto', { fromSeconds: 12, segments: 4 });
 
-    expect(fetchSpy).not.toHaveBeenCalled();
-    fetchSpy.mockRestore();
+    expect(requestJson).toHaveBeenCalledWith(
+      '/api/videos/501/hls/480p/warm?from=12&segments=4',
+      { method: 'POST' }
+    );
   });
 
   it('falls back to the original when no preview or stream is advertised', () => {
@@ -132,6 +142,19 @@ describe('resolveVideoSource', () => {
       src: '/api/originals/7',
       type: 'video/mp4',
       isStream: false
+    });
+  });
+
+  it('keeps the adaptive HLS path when a preview file has not been generated yet', () => {
+    expect(resolveVideoSource({
+      id: 8,
+      playbackStrategy: 'preview',
+      streamUrl: '/api/videos/8/hls/master.m3u8',
+      originalUrl: '/api/originals/8'
+    }, 'auto')).toEqual({
+      src: '/api/videos/8/hls/master.m3u8',
+      type: 'application/x-mpegurl',
+      isStream: true
     });
   });
 });

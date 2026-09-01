@@ -1,7 +1,7 @@
 import { defineComponent } from 'vue';
 import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { TrashItem } from '../types/api';
 import { useAppStore } from '../stores/app';
@@ -12,9 +12,11 @@ import { useMomentsStore } from '../stores/moments';
 import { useTrashStore } from '../stores/trash';
 import TrashView from './TrashView.vue';
 
-const { restoreImageMock, deleteImageMock } = vi.hoisted(() => ({
+const { restoreImageMock, enqueueBatchMock, fetchJobMock, acknowledgeJobMock } = vi.hoisted(() => ({
   restoreImageMock: vi.fn(),
-  deleteImageMock: vi.fn()
+  enqueueBatchMock: vi.fn(),
+  fetchJobMock: vi.fn(),
+  acknowledgeJobMock: vi.fn()
 }));
 
 vi.mock('../api/gallery', async () => {
@@ -23,7 +25,9 @@ vi.mock('../api/gallery', async () => {
   return {
     ...actual,
     restoreImage: restoreImageMock,
-    deleteImage: deleteImageMock
+    enqueuePermanentDeletionBatch: enqueueBatchMock,
+    fetchPermanentDeletionJob: fetchJobMock,
+    acknowledgePermanentDeletionJob: acknowledgeJobMock
   };
 });
 
@@ -132,6 +136,23 @@ function createTrashItem(id: number): TrashItem {
   };
 }
 
+function createDeletionJob(overrides: Record<string, unknown> = {}) {
+  return {
+    job: {
+      active: true,
+      total: 0,
+      processed: 0,
+      remaining: 0,
+      failedCount: 0,
+      errorMessage: null,
+      deletedIds: [] as number[],
+      startedAt: '2026-08-30T10:00:00.000Z',
+      finishedAt: null,
+      ...overrides
+    }
+  };
+}
+
 function createDeferred() {
   let resolve: (() => void) | null = null;
   const promise = new Promise<void>((nextResolve) => {
@@ -148,7 +169,15 @@ describe('TrashView', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     restoreImageMock.mockReset();
-    deleteImageMock.mockReset();
+    enqueueBatchMock.mockReset();
+    fetchJobMock.mockReset();
+    acknowledgeJobMock.mockReset();
+    fetchJobMock.mockResolvedValue(createDeletionJob({ active: false, startedAt: null }));
+    acknowledgeJobMock.mockResolvedValue(createDeletionJob({ active: false, startedAt: null }));
+  });
+
+  afterEach(() => {
+    useTrashStore().clearDeletionProgress();
   });
 
   it('selects and deselects all loaded trash items', async () => {
@@ -191,10 +220,9 @@ describe('TrashView', () => {
     expect(wrapper.findAll('input[type="checkbox"]').every((input) => !(input.element as HTMLInputElement).checked)).toBe(true);
   });
 
-  it('keeps deleting in the background after the dialog closes and reports failures', async () => {
+  it('hands the batch to the server, closes the dialog and reports failures', async () => {
     const appStore = useAppStore();
     const trashStore = useTrashStore();
-    const firstDelete = createDeferred();
 
     appStore.$patch({
       stats: {
@@ -213,14 +241,10 @@ describe('TrashView', () => {
     });
     vi.spyOn(trashStore, 'loadInitial').mockResolvedValue(undefined);
     vi.spyOn(appStore, 'fetchStats').mockResolvedValue(undefined as never);
+    // Polling is exercised in the store test; here we only drive the view.
+    vi.spyOn(trashStore, 'startDeletionPolling').mockImplementation(() => {});
 
-    deleteImageMock.mockImplementationOnce(async () => {
-      await firstDelete.promise;
-      return { ok: true };
-    });
-    deleteImageMock.mockImplementationOnce(async () => {
-      throw new Error('Permanent deletion is unavailable while a rebuild is pending');
-    });
+    enqueueBatchMock.mockResolvedValue(createDeletionJob({ total: 2, remaining: 2 }));
 
     const wrapper = mount(TrashView, {
       global: {
@@ -238,22 +262,37 @@ describe('TrashView', () => {
     await wrapper.find('[data-test="confirm-button"]').trigger('click');
     await flushPromises();
 
-    // The dialog closes immediately so the user is free to browse elsewhere while
-    // the store keeps deleting in the background.
+    // The dialog closes immediately: the server owns the batch from now on, so the
+    // user can close the app without stopping it.
     expect(wrapper.find('[data-test="confirm-dialog"]').exists()).toBe(false);
+    expect(enqueueBatchMock).toHaveBeenCalledWith([91, 92]);
     expect(trashStore.deletionActive).toBe(true);
     expect(wrapper.text()).toContain('Deleting in the background');
 
-    firstDelete.resolve();
-    await flushPromises();
+    // Simulate the server finishing with one failure.
+    trashStore.applyDeletionJob({
+      active: false,
+      total: 2,
+      processed: 2,
+      remaining: 0,
+      failedCount: 1,
+      errorMessage: 'Permanent deletion is unavailable while a rebuild is pending',
+      deletedIds: [91],
+      startedAt: '2026-08-30T10:00:00.000Z',
+      finishedAt: '2026-08-30T10:01:00.000Z'
+    });
     await flushPromises();
 
-    expect(deleteImageMock).toHaveBeenCalledTimes(2);
-    expect(trashStore.deletionActive).toBe(false);
     expect(wrapper.text()).toContain('1 post could not be processed.');
     expect(wrapper.text()).toContain('Permanent deletion is unavailable while a rebuild is pending');
     // The successful item is gone while the failed one stays in the list.
     expect(trashStore.items.map((item) => item.id)).toEqual([92]);
+
+    await wrapper.findAll('button').find((button) => button.text() === 'Dismiss')!.trigger('click');
+    await flushPromises();
+
+    expect(acknowledgeJobMock).toHaveBeenCalled();
+    expect(wrapper.text()).not.toContain('1 post could not be processed.');
   });
 
   it('closes the restore dialog without waiting for background refreshes', async () => {

@@ -10,7 +10,7 @@ import {
   buildMediaPlaylist,
   getSegment,
   getSegmentCount,
-  getSourceVideoCodec,
+  getSourceVideoDurationMs,
   isStreamQuality,
   resolveOfferedQualities
 } from '../services/video-stream-service.js';
@@ -95,7 +95,7 @@ export function createVideoStreamRouter(options: VideoStreamRouterOptions = {}):
   // so every authorization check would fail and nothing would ever stream.
   const videoStreamRouter = express.Router({ mergeParams: true });
 
-  function resolveAuthorizedVideo(request: express.Request, id: number): StreamableVideo | null {
+  function resolveAuthorizedVideoSync(request: express.Request, id: number): StreamableVideo | null {
     if (authorizeImage && !authorizeImage(request, id)) {
       return null;
     }
@@ -103,9 +103,21 @@ export function createVideoStreamRouter(options: VideoStreamRouterOptions = {}):
     return resolveStreamableVideo(id);
   }
 
-  videoStreamRouter.get('/:id/hls/master.m3u8', (request, response) => {
+  async function resolveAuthorizedVideo(request: express.Request, id: number): Promise<StreamableVideo | null> {
+    const video = resolveAuthorizedVideoSync(request, id);
+    if (!video || video.durationMs !== null) {
+      return video;
+    }
+
+    return {
+      ...video,
+      durationMs: await getSourceVideoDurationMs(video.sourcePath)
+    };
+  }
+
+  videoStreamRouter.get('/:id/hls/master.m3u8', async (request, response) => {
     const params = imageIdParamSchema.parse(request.params);
-    const video = resolveAuthorizedVideo(request, params.id);
+    const video = await resolveAuthorizedVideo(request, params.id);
 
     if (!video) {
       response.status(404).json({ message: 'Video not found' });
@@ -129,7 +141,7 @@ export function createVideoStreamRouter(options: VideoStreamRouterOptions = {}):
     );
   });
 
-  videoStreamRouter.get('/:id/hls/:quality/index.m3u8', (request, response) => {
+  videoStreamRouter.get('/:id/hls/:quality/index.m3u8', async (request, response) => {
     const params = segmentParamSchema.omit({ index: true }).parse(request.params);
 
     if (!isStreamQuality(params.quality)) {
@@ -137,7 +149,7 @@ export function createVideoStreamRouter(options: VideoStreamRouterOptions = {}):
       return;
     }
 
-    const video = resolveAuthorizedVideo(request, params.id);
+    const video = await resolveAuthorizedVideo(request, params.id);
     if (!video) {
       response.status(404).json({ message: 'Video not found' });
       return;
@@ -159,7 +171,7 @@ export function createVideoStreamRouter(options: VideoStreamRouterOptions = {}):
       return;
     }
 
-    const video = resolveAuthorizedVideo(request, params.id);
+    const video = await resolveAuthorizedVideo(request, params.id);
     if (!video) {
       response.status(404).json({ message: 'Video not found' });
       return;
@@ -174,7 +186,6 @@ export function createVideoStreamRouter(options: VideoStreamRouterOptions = {}):
       const payload = await getSegment({
         imageId: video.id,
         sourcePath: video.sourcePath,
-        sourceCodec: await getSourceVideoCodec(video.sourcePath),
         durationMs: video.durationMs,
         width: video.width,
         height: video.height,
@@ -205,7 +216,7 @@ export function createVideoStreamRouter(options: VideoStreamRouterOptions = {}):
    * the time the player asks for them. The response returns immediately: waiting
    * here would just move the stall from the player to this request.
    */
-  videoStreamRouter.post('/:id/hls/:quality/warm', (request, response) => {
+  videoStreamRouter.post('/:id/hls/:quality/warm', async (request, response) => {
     const params = segmentParamSchema.omit({ index: true }).parse(request.params);
 
     if (!isStreamQuality(params.quality)) {
@@ -216,7 +227,7 @@ export function createVideoStreamRouter(options: VideoStreamRouterOptions = {}):
     // Captured before the async closure so the narrowed type survives.
     const quality = params.quality;
 
-    const video = resolveAuthorizedVideo(request, params.id);
+    const video = resolveAuthorizedVideoSync(request, params.id);
     if (!video) {
       response.status(404).json({ message: 'Video not found' });
       return;
@@ -246,7 +257,6 @@ export function createVideoStreamRouter(options: VideoStreamRouterOptions = {}):
           await getSegment({
             imageId: video.id,
             sourcePath: video.sourcePath,
-            sourceCodec: await getSourceVideoCodec(video.sourcePath),
             durationMs: video.durationMs,
             width: video.width,
             height: video.height,

@@ -115,6 +115,47 @@ describe('useAppStore locale preferences', () => {
     expect(window.localStorage.getItem('foldergram-video-muted')).toBe('false');
   });
 
+  it('does not let a later autoplay failure override an explicit sound-on gesture', () => {
+    const store = useAppStore();
+    store.setVideoMuted(false);
+
+    expect(store.reportAudibleAutoplayBlocked()).toBe(false);
+
+    expect(store.videoMuted).toBe(false);
+    expect(store.audibleAutoplayBlocked).toBe(false);
+    expect(store.videoEffectivelyMuted).toBe(false);
+  });
+
+  it('shares the initial autoplay verdict until the viewer explicitly enables sound', () => {
+    const store = useAppStore();
+    window.localStorage.setItem('foldergram-video-muted', 'false');
+    store.initializeVideoMuted();
+
+    expect(store.reportAudibleAutoplayBlocked()).toBe(true);
+    expect(store.audibleAutoplayBlocked).toBe(true);
+    expect(store.videoEffectivelyMuted).toBe(true);
+
+    const generationBeforeGesture = store.videoSoundGeneration;
+    store.setVideoMuted(false);
+
+    expect(store.audibleAutoplayBlocked).toBe(false);
+    expect(store.videoEffectivelyMuted).toBe(false);
+    expect(store.videoSoundGeneration).toBe(generationBeforeGesture + 1);
+  });
+
+  it('keeps videoEffectivelyMuted true while the stored preference is muted', () => {
+    const store = useAppStore();
+    store.setVideoMuted(true);
+
+    expect(store.videoEffectivelyMuted).toBe(true);
+
+    store.clearAudibleAutoplayBlock();
+
+    // Clearing a block never turns the sound on by itself.
+    expect(store.videoEffectivelyMuted).toBe(true);
+    expect(store.videoMuted).toBe(true);
+  });
+
   it('initializes locale from localStorage before browser preferences', () => {
     window.localStorage.setItem('foldergram-locale', 'en');
     setNavigatorLocales(['fr-FR'], 'fr-FR');

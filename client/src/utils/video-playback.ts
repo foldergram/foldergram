@@ -2,10 +2,11 @@ import type { PlayerSrc } from 'vidstack';
 import type { MediaPlayerElement } from 'vidstack/elements';
 
 import { getOriginalMediaUrl } from './original-media';
+import { requestJson } from '../api/http';
 
-export type VideoPlaybackQuality = 'auto' | 'original' | '1080p' | '720p';
+export type VideoPlaybackQuality = 'auto' | 'original' | '1080p' | '720p' | '480p';
 
-export const VIDEO_PLAYBACK_QUALITIES: VideoPlaybackQuality[] = ['auto', 'original', '1080p', '720p'];
+export const VIDEO_PLAYBACK_QUALITIES: VideoPlaybackQuality[] = ['auto', 'original', '1080p', '720p', '480p'];
 
 export const HLS_MIME_TYPE = 'application/x-mpegurl';
 
@@ -19,7 +20,7 @@ export interface VideoPlaybackMedia {
   streamUrl?: string | null;
   originalUrl?: string;
   previewUrl?: string;
-  /** A generated faststart MP4 that supports efficient HTTP Range seeking. */
+  /** Legacy pre-rendered MP4. It is not used for managed video playback. */
   previewFileUrl?: string | null;
 }
 
@@ -36,26 +37,42 @@ function toDirectSource(url: string): ResolvedVideoSource {
 /**
  * Picks what the player should actually load.
  *
- * The browser always receives the original file. If its codec is supported, the
- * browser can use the device decoder. We intentionally never select HLS here:
- * starting an HLS stream would make the NAS transcode while the user is watching.
+ * Managed playback always uses HLS unless the user explicitly asks for original.
+ * Historical preview MP4s can be corrupt and their bitrate is not WAN-safe; HLS gives
+ * us a 480p entry rendition that works on 2-3 Mbps connections and cached seeks.
  */
 export function resolveVideoSource(
   media: VideoPlaybackMedia,
-  _quality: VideoPlaybackQuality
+  quality: VideoPlaybackQuality
 ): ResolvedVideoSource {
+  if (quality !== 'original' && media.streamUrl) {
+    return {
+      src: quality === 'auto' ? media.streamUrl : media.streamUrl.replace('/master.m3u8', `/${quality}/index.m3u8`),
+      type: HLS_MIME_TYPE,
+      isStream: true
+    };
+  }
+
   const originalUrl = media.originalUrl ?? getOriginalMediaUrl(media.id);
   return toDirectSource(originalUrl);
 }
 
 /**
- * A direct-play failure is surfaced to the user. Falling back to HLS here would
- * silently restart the NAS ffmpeg path that direct-only playback disables.
+ * Original playback has an HLS fallback. This also recovers from old preview/original
+ * files that the device cannot decode directly.
  */
 export function resolveVideoFallbackSource(
-  _media: VideoPlaybackMedia,
-  _failed: ResolvedVideoSource
+  media: VideoPlaybackMedia,
+  failed: ResolvedVideoSource
 ): ResolvedVideoSource | null {
+  if (!failed.isStream && media.streamUrl) {
+    return {
+      src: media.streamUrl,
+      type: HLS_MIME_TYPE,
+      isStream: true
+    };
+  }
+
   return null;
 }
 
@@ -67,12 +84,23 @@ export function toPlayerSrc(source: ResolvedVideoSource): PlayerSrc {
 }
 
 export function warmVideoStream(
-  _media: VideoPlaybackMedia,
-  _quality: VideoPlaybackQuality,
-  _options: { fromSeconds?: number; segments?: number; source?: ResolvedVideoSource | null } = {}
+  media: VideoPlaybackMedia,
+  quality: VideoPlaybackQuality,
+  options: { fromSeconds?: number; segments?: number; source?: ResolvedVideoSource | null } = {}
 ): void {
-  // All current playback surfaces retain this call site, but direct original-file
-  // playback has no NAS warm-up endpoint.
+  const source = options.source ?? resolveVideoSource(media, quality);
+  if (!source.isStream) return;
+
+  const warmUrl = source.src.endsWith('/master.m3u8')
+    ? source.src.replace('/master.m3u8', '/480p/warm')
+    : source.src.replace('/index.m3u8', '/warm');
+  const parameters = new URLSearchParams({
+    from: String(Math.max(0, options.fromSeconds ?? 0)),
+    segments: String(Math.max(1, Math.min(4, options.segments ?? 2)))
+  });
+  void requestJson(`${warmUrl}?${parameters.toString()}`, { method: 'POST' }).catch(() => {
+    // Warm-up is optional; direct playback requests still surface real failures.
+  });
 }
 
 let hlsModulePromise: Promise<{ default: unknown }> | null = null;
@@ -151,7 +179,9 @@ export function useBundledHlsLibrary(
       nudgeMaxRetry: 10,
       appendErrorMaxRetry: 5,
       startFragPrefetch: true,
-      startLevel: -1,
+      // Start at the smallest HLS rendition. This gives slow WAN clients a frame
+      // quickly; hls.js can step up after it has measured sustainable throughput.
+      startLevel: 0,
       // The bandwidth probe loads an extra fragment before playback, and every fragment
       // here costs the NAS an ffmpeg run. Bandwidth is not the constraint on a LAN, so
       // that probe is pure added latency on the very first frame.

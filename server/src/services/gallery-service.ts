@@ -235,7 +235,7 @@ function getDefaultFolderImageOrder(): FolderImageOrder {
   return parseFolderImageOrder(appSettingsRepository.get(FOLDER_IMAGE_DEFAULT_ORDER_SETTING_KEY));
 }
 
-const VIDEO_PLAYBACK_QUALITIES: VideoPlaybackQuality[] = ['auto', 'original', '1080p', '720p'];
+const VIDEO_PLAYBACK_QUALITIES: VideoPlaybackQuality[] = ['auto', 'original', '1080p', '720p', '480p'];
 
 function getVideoPlaybackQuality(): VideoPlaybackQuality {
   const stored = appSettingsRepository.get(VIDEO_PLAYBACK_QUALITY_SETTING_KEY);
@@ -386,6 +386,15 @@ function buildPreviewUrl(
   }
 
   return toPublicMediaUrl('/previews', image.previewUrl, version);
+}
+
+function buildVideoPreviewFileUrl(
+  image: { mediaType: MediaType; previewUrl: string },
+  version?: string | null
+): string | null {
+  return image.mediaType === 'video'
+    ? toPublicMediaUrl('/previews', image.previewUrl, version)
+    : null;
 }
 
 function mapPlaceSummaryFromRow(image: PlaceRowFields) {
@@ -598,6 +607,10 @@ function mapFeedImage(image: IndexedFeedImage, derivativeVersion = getDerivative
       previewUrl: rest.previewUrl,
       playbackStrategy
     }, false, derivativeVersion),
+    previewFileUrl: buildVideoPreviewFileUrl({
+      mediaType: rest.mediaType,
+      previewUrl: rest.previewUrl
+    }, derivativeVersion),
     playbackStrategy: rest.mediaType === 'video' ? (playbackStrategy ?? 'preview') : null,
     streamUrl: rest.mediaType === 'video'
       ? resolveVideoPlaybackSource(rest.id, playbackStrategy).streamUrl
@@ -620,6 +633,10 @@ function mapFeedImage(image: IndexedFeedImage, derivativeVersion = getDerivative
         previewUrl: item.previewUrl,
         playbackStrategy: item.playbackStrategy
       }, false, derivativeVersion),
+      previewFileUrl: buildVideoPreviewFileUrl({
+        mediaType: item.mediaType,
+        previewUrl: item.previewUrl
+      }, derivativeVersion),
       originalUrl: buildOriginalUrl(item.imageId),
       playbackStrategy: item.playbackStrategy ?? 'preview',
       streamUrl: item.mediaType === 'video'
@@ -730,6 +747,10 @@ function mapImageDetail(image: IndexedImageDetail, derivativeVersion = getDeriva
       previewUrl: rest.previewUrl,
       playbackStrategy
     }, useOriginalForImages, derivativeVersion),
+    previewFileUrl: buildVideoPreviewFileUrl({
+      mediaType: rest.mediaType,
+      previewUrl: rest.previewUrl
+    }, derivativeVersion),
     originalUrl: buildOriginalUrl(representativeImageId),
     playbackStrategy,
     streamUrl: rest.mediaType === 'video'
@@ -752,6 +773,10 @@ function mapImageDetail(image: IndexedImageDetail, derivativeVersion = getDeriva
         previewUrl: item.previewUrl,
         playbackStrategy: item.playbackStrategy
       }, false, derivativeVersion),
+      previewFileUrl: buildVideoPreviewFileUrl({
+        mediaType: item.mediaType,
+        previewUrl: item.previewUrl
+      }, derivativeVersion),
       originalUrl: buildOriginalUrl(item.imageId),
       playbackStrategy: item.playbackStrategy ?? 'preview',
       streamUrl: item.mediaType === 'video'

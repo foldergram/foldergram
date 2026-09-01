@@ -13,6 +13,8 @@ import {
   PERMANENT_DELETION_QUARANTINE_DIRECTORY_NAME
 } from './maintenance-operation-lock.js';
 import { storageService } from './storage-service.js';
+import { invalidateVideoStreamCache } from './video-stream-service.js';
+import { watcherService } from './watcher-service.js';
 
 const QUARANTINE_DIRECTORY_NAME = PERMANENT_DELETION_QUARANTINE_DIRECTORY_NAME;
 const JOURNAL_VERSION = 1;
@@ -456,7 +458,9 @@ export class PermanentDeletionService {
     if (!post) return null;
     const folderSlug = folderRepository.getById(post.folder_id)?.slug ?? '';
     const operationId = randomUUID();
-    const targets = await this.buildValidatedTargets(operationId, postRepository.listImageRecords(post.id));
+    const images = postRepository.listImageRecords(post.id);
+    const videoImageIds = images.filter((image) => image.media_type === 'video').map((image) => image.id);
+    const targets = await this.buildValidatedTargets(operationId, images);
     const journal: DeletionJournal = {
       version: JOURNAL_VERSION,
       operationId,
@@ -474,6 +478,8 @@ export class PermanentDeletionService {
 
     const journalPath = await this.writeJournal(journal);
     const completedMoves = new Set<number>();
+
+    watcherService.suppressInternalDeletions(images.map((image) => image.relative_path));
 
     try {
       for (const [targetIndex, target] of targets.entries()) {
@@ -509,6 +515,7 @@ export class PermanentDeletionService {
           postId: post.id,
           error
         });
+        void invalidateVideoStreamCache(videoImageIds);
         await this.tryCleanupCommittedJournal(journal, journalPath);
         return { id: post.id, folderSlug };
       }
@@ -534,6 +541,10 @@ export class PermanentDeletionService {
       return deleted;
     }
 
+    // Cache cleanup happens out of band: it is no longer reachable once the post row
+    // is gone, and waiting for a large cache tree would make a bulk delete monopolise
+    // the request path.
+    void invalidateVideoStreamCache(videoImageIds);
     await this.tryCleanupCommittedJournal(journal, journalPath);
     return deleted;
   }

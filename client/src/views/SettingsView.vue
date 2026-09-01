@@ -1309,6 +1309,67 @@
             <p v-if="scanError" class="m-0 px-4 py-[0.85rem] border border-[rgba(214,48,49,0.24)] rounded-[0.9rem] text-[#c0392b] bg-[rgba(214,48,49,0.08)]">{{ scanError }}</p>
           </section>
 
+          <section class="card grid min-w-0 max-w-full gap-[1.15rem] overflow-hidden p-8 max-sm:gap-4 max-sm:p-4">
+            <div class="flex items-start justify-between gap-4 max-sm:flex-col max-sm:gap-2 max-sm:items-stretch">
+              <div>
+                <h2 class="m-0 text-[1.18rem]">{{ t('settings.library.scanFolders.title') }}</h2>
+                <p class="m-0 mt-[0.35rem] max-w-[42rem] text-muted max-sm:text-[0.88rem]">{{ t('settings.library.scanFolders.description') }}</p>
+              </div>
+              <span class="inline-flex w-fit items-center justify-center min-h-8 px-[0.7rem] py-[0.35rem] rounded-full text-[0.76rem] font-bold whitespace-nowrap text-muted bg-surface-alt max-sm:self-start">
+                {{ scanFolderSelectionLabel }}
+              </span>
+            </div>
+
+            <details class="scan-folders-details min-w-0 max-w-full overflow-hidden rounded-[0.95rem] border border-border bg-surface-alt px-4 py-3 max-sm:px-3 max-sm:py-2.5" open>
+              <summary class="min-h-11 cursor-pointer select-none py-2 font-semibold text-text touch-manipulation max-sm:flex max-sm:items-center">{{ t('settings.library.scanFolders.chooseLabel') }}</summary>
+              <div v-if="scanFoldersLoading" class="mt-3 text-muted">{{ t('settings.library.scanFolders.loading') }}</div>
+              <div v-else-if="sortedScanFolders.length === 0" class="mt-3 text-muted">{{ t('settings.library.scanFolders.empty') }}</div>
+              <div v-else class="mt-3 grid max-h-[48dvh] gap-1 overflow-y-auto overscroll-contain pr-1 max-sm:mt-2 max-sm:max-h-[46dvh]">
+                <div
+                  v-for="folderPath in visibleScanFolders"
+                  :key="folderPath"
+                  class="scan-folder-row flex min-h-11 min-w-0 max-w-full items-center gap-1 overflow-hidden rounded-[0.7rem] px-2 transition-colors duration-150 hover:bg-surface-hover touch-manipulation max-sm:px-1.5"
+                  :style="{ '--scan-folder-depth': scanFolderDepth(folderPath) }"
+                >
+                  <button
+                    v-if="hasScanFolderChildren(folderPath)"
+                    class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[0.65rem] border-0 bg-transparent text-muted transition-colors duration-150 hover:bg-surface-hover hover:text-text"
+                    type="button"
+                    :aria-label="isScanFolderExpanded(folderPath) ? t('settings.library.scanFolders.collapse') : t('settings.library.scanFolders.expand')"
+                    :aria-expanded="isScanFolderExpanded(folderPath)"
+                    @click="toggleScanFolderExpanded(folderPath)"
+                  >
+                    <span class="h-4 w-4" :class="isScanFolderExpanded(folderPath) ? 'i-fluent-chevron-down-20-regular' : 'i-fluent-chevron-right-20-regular'" aria-hidden="true" />
+                  </button>
+                  <span v-else class="h-9 w-9 shrink-0" aria-hidden="true" />
+                  <label class="flex min-h-11 min-w-0 flex-1 items-center gap-3 cursor-pointer max-sm:gap-2">
+                    <input
+                      class="h-5 w-5 shrink-0 accent-[var(--accent)]"
+                      type="checkbox"
+                      :checked="isScanFolderSelected(folderPath)"
+                      @change="toggleScanFolder(folderPath, ($event.target as HTMLInputElement).checked)"
+                    />
+                    <span class="i-fluent-folder-20-regular h-5 w-5 shrink-0 text-muted" aria-hidden="true" />
+                    <span class="min-w-0 truncate text-[0.92rem] max-sm:text-[0.88rem]" :title="folderPath">{{ scanFolderName(folderPath) }}</span>
+                    <span v-if="hasScanFolderChildren(folderPath)" class="ml-auto shrink-0 text-[0.72rem] text-muted max-sm:hidden">{{ t('settings.library.scanFolders.hasChildren') }}</span>
+                  </label>
+                </div>
+              </div>
+            </details>
+
+            <p class="m-0 text-[0.86rem] leading-relaxed text-muted max-sm:text-[0.82rem]">{{ t('settings.library.scanFolders.helper') }}</p>
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
+              <button class="btn-primary min-h-11 w-full min-w-[12rem] sm:w-auto" type="button" :disabled="scanFoldersLoading || savingScanFolders" @click="saveScanFolders">
+                {{ savingScanFolders ? t('settings.library.scanFolders.saving') : t('settings.library.scanFolders.save') }}
+              </button>
+              <p
+                v-if="scanFoldersFeedback"
+                class="m-0 text-[0.86rem]"
+                :class="scanFoldersFeedback.tone === 'success' ? 'text-accent-strong' : 'text-[#c0392b]'"
+              >{{ scanFoldersFeedback.message }}</p>
+            </div>
+          </section>
+
           <section class="card grid gap-[1.15rem] p-8">
              <div class="flex items-start justify-between gap-4 max-sm:flex-col max-sm:items-start">
               <div>
@@ -1485,6 +1546,7 @@ import { useRoute } from 'vue-router';
 import ConfirmDialog from '../components/ConfirmDialog.vue';
 import {
   fetchAdminStats,
+  fetchScanFolders,
   triggerLibraryRebuild,
   triggerManualScan,
   triggerThumbnailRebuild,
@@ -1497,7 +1559,8 @@ import {
   updateSharePublicBaseUrl,
   updateVideoPlaybackQuality,
   updateStoriesMode,
-  updateCarouselsMode
+  updateCarouselsMode,
+  updateScanFolders
 } from '../api/gallery';
 import { SUPPORTED_LOCALES, type SupportedLocale } from '../locales';
 import { useAppStore } from '../stores/app';
@@ -1514,6 +1577,7 @@ import type {
   FolderImageOrder,
   NestedFolderTitleFormat,
   ReelsFeedMode,
+  ScanFoldersPayload,
   VideoPlaybackQuality,
   ViewerAccessMode
 } from '../types/api';
@@ -1542,6 +1606,12 @@ const authFeedback = ref<{ tone: 'success' | 'error'; message: string } | null>(
 const viewerFeedback = ref<{ tone: 'success' | 'error'; message: string } | null>(null);
 const generalSettingsFeedback = ref<{ tone: 'success' | 'error'; message: string } | null>(null);
 const adminStats = ref<AppStats | null>(null);
+const scanFolders = ref<ScanFoldersPayload | null>(null);
+const selectedScanFoldersDraft = ref<string[]>([]);
+const scanFoldersLoading = ref(false);
+const savingScanFolders = ref(false);
+const scanFoldersFeedback = ref<{ tone: 'success' | 'error'; message: string } | null>(null);
+const expandedScanFolders = ref<Set<string>>(new Set());
 const showChangePasswordForm = ref(false);
 const showDisablePasswordForm = ref(false);
 const enablePassword = ref('');
@@ -1584,6 +1654,118 @@ const PLACES_ONBOARDING_STORAGE_KEY = 'foldergram:places-onboarding-dismissed:v1
 const EXCLUDED_FOLDER_EDGE_SLASH_PATTERN = /^\/+|\/+$/g;
 const EXCLUDED_FOLDER_UNSUPPORTED_PATTERN = /[*?]/;
 const excludedFoldersHydrated = ref(false);
+
+const sortedScanFolders = computed(() => scanFolders.value?.folders ?? []);
+const scanFoldersWithChildren = computed(() => {
+  const parents = new Set<string>();
+  for (const folderPath of sortedScanFolders.value) {
+    const segments = folderPath.split('/');
+    for (let index = 1; index < segments.length; index += 1) {
+      parents.add(segments.slice(0, index).join('/'));
+    }
+  }
+  return parents;
+});
+const visibleScanFolders = computed(() =>
+  sortedScanFolders.value.filter((folderPath) => {
+    const segments = folderPath.split('/');
+    return segments.slice(1).every((_, index) => {
+      const ancestor = segments.slice(0, index + 1).join('/');
+      return expandedScanFolders.value.has(ancestor);
+    });
+  })
+);
+const scanFolderSelectionLabel = computed(() =>
+  selectedScanFoldersDraft.value.length === 0
+    ? t('settings.library.scanFolders.allFolders')
+    : t('settings.library.scanFolders.selectedCount', { count: selectedScanFoldersDraft.value.length })
+);
+
+function scanFolderName(folderPath: string): string {
+  return folderPath.split('/').at(-1) ?? folderPath;
+}
+
+function scanFolderDepth(folderPath: string): number {
+  return Math.max(0, folderPath.split('/').length - 1);
+}
+
+function isScanFolderSelected(folderPath: string): boolean {
+  return selectedScanFoldersDraft.value.some(
+    (selected) => selected === folderPath || folderPath.startsWith(`${selected}/`)
+  );
+}
+
+function hasScanFolderChildren(folderPath: string): boolean {
+  return scanFoldersWithChildren.value.has(folderPath);
+}
+
+function isScanFolderExpanded(folderPath: string): boolean {
+  return expandedScanFolders.value.has(folderPath);
+}
+
+function toggleScanFolderExpanded(folderPath: string): void {
+  const next = new Set(expandedScanFolders.value);
+  if (next.has(folderPath)) {
+    next.delete(folderPath);
+  } else {
+    next.add(folderPath);
+  }
+  expandedScanFolders.value = next;
+}
+
+function toggleScanFolder(folderPath: string, checked: boolean): void {
+  const next = selectedScanFoldersDraft.value.filter(
+    (selected) =>
+      selected !== folderPath &&
+      !selected.startsWith(`${folderPath}/`) &&
+      !folderPath.startsWith(`${selected}/`)
+  );
+
+  if (checked) {
+    next.push(folderPath);
+  }
+
+  selectedScanFoldersDraft.value = [...new Set(next)].sort();
+  scanFoldersFeedback.value = null;
+}
+
+async function loadScanFolders(): Promise<void> {
+  scanFoldersLoading.value = true;
+  try {
+    scanFolders.value = await fetchScanFolders();
+    selectedScanFoldersDraft.value = [...scanFolders.value.selectedFolders];
+    // Start at the first directory level. Deeper folders are opt-in so a large
+    // library does not expand the entire tree as soon as Settings opens.
+    expandedScanFolders.value = new Set();
+  } catch (error) {
+    scanFoldersFeedback.value = {
+      tone: 'error',
+      message: error instanceof Error ? error.message : t('settings.library.scanFolders.loadError')
+    };
+  } finally {
+    scanFoldersLoading.value = false;
+  }
+}
+
+async function saveScanFolders(): Promise<void> {
+  savingScanFolders.value = true;
+  scanFoldersFeedback.value = null;
+  try {
+    const result = await updateScanFolders(selectedScanFoldersDraft.value);
+    selectedScanFoldersDraft.value = [...result.selectedFolders];
+    if (scanFolders.value) {
+      scanFolders.value = { ...scanFolders.value, selectedFolders: [...result.selectedFolders] };
+    }
+    scanFoldersFeedback.value = { tone: 'success', message: t('settings.library.scanFolders.saved') };
+  } catch (error) {
+    scanFoldersFeedback.value = {
+      tone: 'error',
+      message: error instanceof Error ? error.message : t('settings.library.scanFolders.saveError')
+    };
+  } finally {
+    savingScanFolders.value = false;
+  }
+}
 
 function normalizeExcludedFolderRuleInput(rule: string): string {
   const segments = rule
@@ -1888,6 +2070,26 @@ const nestedFolderTitleOptions = computed<Array<{ id: NestedFolderTitleFormat; l
   }
 ]);
 const videoPlaybackQualityOptions = computed<Array<{ id: VideoPlaybackQuality; label: string; description: string }>>(() => [
+  {
+    id: 'auto',
+    label: t('settings.general.videoPlaybackQuality.options.auto.label'),
+    description: t('settings.general.videoPlaybackQuality.options.auto.description')
+  },
+  {
+    id: '480p',
+    label: t('settings.general.videoPlaybackQuality.options.480p.label'),
+    description: t('settings.general.videoPlaybackQuality.options.480p.description')
+  },
+  {
+    id: '720p',
+    label: t('settings.general.videoPlaybackQuality.options.720p.label'),
+    description: t('settings.general.videoPlaybackQuality.options.720p.description')
+  },
+  {
+    id: '1080p',
+    label: t('settings.general.videoPlaybackQuality.options.1080p.label'),
+    description: t('settings.general.videoPlaybackQuality.options.1080p.description')
+  },
   {
     id: 'original',
     label: t('settings.general.videoPlaybackQuality.options.original.label'),
@@ -3290,7 +3492,10 @@ onMounted(async () => {
     syncCarouselsModeFromSaved();
   }
   await placesStore.fetchStatus();
-  await loadAdminStats().catch(() => {});
+  await Promise.all([
+    loadAdminStats().catch(() => {}),
+    loadScanFolders()
+  ]);
 });
 
 watch(
@@ -3385,3 +3590,15 @@ watch(
   }
 );
 </script>
+
+<style scoped>
+.scan-folder-row {
+  padding-left: calc(0.5rem + (var(--scan-folder-depth) * 1.25rem));
+}
+
+@media (max-width: 768px) {
+  .scan-folder-row {
+    padding-left: calc(0.25rem + (var(--scan-folder-depth) * 0.55rem));
+  }
+}
+</style>

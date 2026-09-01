@@ -18,6 +18,8 @@ interface PersistedDeletionJob {
   errorMessage: string | null;
   startedAt: string;
   finishedAt: string | null;
+  /** Set when the batch stopped early and can still be resumed later. */
+  stalledAt: string | null;
 }
 
 export interface DeletionJobSnapshot {
@@ -30,6 +32,7 @@ export interface DeletionJobSnapshot {
   deletedIds: number[];
   startedAt: string | null;
   finishedAt: string | null;
+  stalled: boolean;
 }
 
 const idleSnapshot: DeletionJobSnapshot = {
@@ -41,7 +44,8 @@ const idleSnapshot: DeletionJobSnapshot = {
   errorMessage: null,
   deletedIds: [],
   startedAt: null,
-  finishedAt: null
+  finishedAt: null,
+  stalled: false
 };
 
 function parsePersistedJob(value: string | null): PersistedDeletionJob | null {
@@ -72,7 +76,8 @@ function parsePersistedJob(value: string | null): PersistedDeletionJob | null {
       failedCount: parsed.failedCount,
       errorMessage: typeof parsed.errorMessage === 'string' ? parsed.errorMessage : null,
       startedAt: parsed.startedAt,
-      finishedAt: typeof parsed.finishedAt === 'string' ? parsed.finishedAt : null
+      finishedAt: typeof parsed.finishedAt === 'string' ? parsed.finishedAt : null,
+      stalledAt: typeof parsed.stalledAt === 'string' ? parsed.stalledAt : null
     };
   } catch {
     return null;
@@ -113,7 +118,7 @@ class DeletionJobService {
     }
 
     return {
-      active: this.job.finishedAt === null,
+      active: this.job.finishedAt === null && this.job.stalledAt === null,
       total: this.job.total,
       processed: this.job.processed,
       remaining: this.job.remainingIds.length,
@@ -121,7 +126,8 @@ class DeletionJobService {
       errorMessage: this.job.errorMessage,
       deletedIds: [...this.job.deletedIds],
       startedAt: this.job.startedAt,
-      finishedAt: this.job.finishedAt
+      finishedAt: this.job.finishedAt,
+      stalled: this.job.stalledAt !== null
     };
   }
 
@@ -133,7 +139,7 @@ class DeletionJobService {
   /** Clears a finished job so its result banner stops being reported. */
   acknowledgeFinished(): DeletionJobSnapshot {
     this.load();
-    if (this.job && this.job.finishedAt !== null) {
+    if (this.job && (this.job.finishedAt !== null || this.job.stalledAt !== null)) {
       this.job = null;
       this.persist();
     }
@@ -149,11 +155,17 @@ class DeletionJobService {
     }
 
     if (this.job && this.job.finishedAt === null) {
-      // Merge into the running job instead of starting a competing one.
+      // Merge into the running (or stalled) job instead of starting a competing one.
+      // remainingIds keeps its head while that item is in flight, so an in-flight id
+      // is still "known" here and never gets queued twice.
       const known = new Set([...this.job.remainingIds, ...this.job.deletedIds]);
       const addedIds = requestedIds.filter((id) => !known.has(id));
       this.job.remainingIds.push(...addedIds);
       this.job.total += addedIds.length;
+      if (this.job.stalledAt !== null) {
+        this.job.stalledAt = null;
+        this.job.errorMessage = null;
+      }
     } else {
       this.job = {
         version: JOB_VERSION,
@@ -164,7 +176,8 @@ class DeletionJobService {
         failedCount: 0,
         errorMessage: null,
         startedAt: new Date().toISOString(),
-        finishedAt: null
+        finishedAt: null,
+        stalledAt: null
       };
     }
 
@@ -182,8 +195,12 @@ class DeletionJobService {
 
     log.info('Resuming interrupted permanent deletion batch', {
       remaining: this.job.remainingIds.length,
-      total: this.job.total
+      total: this.job.total,
+      stalled: this.job.stalledAt !== null
     });
+    this.job.stalledAt = null;
+    this.job.errorMessage = null;
+    this.persist();
     this.startRunner();
   }
 
@@ -204,7 +221,7 @@ class DeletionJobService {
         return;
       }
 
-      const nextId = job.remainingIds.shift();
+      const nextId = job.remainingIds[0];
       if (nextId === undefined) {
         job.finishedAt = new Date().toISOString();
         this.persist();
@@ -217,11 +234,14 @@ class DeletionJobService {
       }
 
       if (!storageService.getState().libraryAvailable) {
-        // Keep the id queued so the batch resumes once storage is back.
-        job.remainingIds.unshift(nextId);
+        // Stall instead of finishing: the ids stay queued so the batch can resume
+        // on the next restart or the next enqueue once storage is back.
         job.errorMessage = 'Configured library storage is unavailable.';
-        job.finishedAt = new Date().toISOString();
+        job.stalledAt = new Date().toISOString();
         this.persist();
+        log.info('Permanent deletion batch stalled: library storage unavailable', {
+          remaining: job.remainingIds.length
+        });
         return;
       }
 
@@ -241,8 +261,14 @@ class DeletionJobService {
         job.errorMessage ??= message;
         log.error('Permanent deletion batch item failed', { postId: nextId, error: message });
       } finally {
+        job.remainingIds.shift();
         job.processed += 1;
         this.persist();
+        // A large deletion is intentionally server-side, but it must still leave the
+        // event loop room to serve video, search and feed requests between posts.
+        if (job.remainingIds.length > 0) {
+          await new Promise<void>((resolve) => setImmediate(resolve));
+        }
       }
     }
   }

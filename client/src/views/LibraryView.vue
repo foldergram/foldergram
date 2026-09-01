@@ -344,6 +344,9 @@
   import type { FolderSummary } from "../types/api"
   import { formatFolderTitle } from "../utils/folder-titles"
 
+  // Named explicitly so <KeepAlive include> keeps matching after a minified build.
+  defineOptions({ name: 'LibraryView' });
+
   type LibrarySort =
     | "recent-desc"
     | "images-desc"

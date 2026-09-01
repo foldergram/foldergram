@@ -66,6 +66,7 @@ describe.sequential('video stream service playlists', () => {
   });
 
   it('scales by the short edge and keeps dimensions even', () => {
+    expect(service.resolveTargetDimensions(1920, 1080, '480p')).toEqual({ width: 852, height: 480 });
     expect(service.resolveTargetDimensions(1920, 1080, '720p')).toEqual({ width: 1280, height: 720 });
     expect(service.resolveTargetDimensions(1080, 1920, '720p')).toEqual({ width: 720, height: 1280 });
     expect(service.resolveTargetDimensions(3840, 2160, '1080p')).toEqual({ width: 1920, height: 1080 });
@@ -74,29 +75,44 @@ describe.sequential('video stream service playlists', () => {
   });
 
   it('leaves sources smaller than the target untouched', () => {
-    expect(service.resolveTargetDimensions(480, 852, '720p')).toEqual({ width: 480, height: 852 });
+    expect(service.resolveTargetDimensions(480, 852, '480p')).toEqual({ width: 480, height: 852 });
     expect(service.resolveTargetDimensions(1280, 720, '720p')).toEqual({ width: 1280, height: 720 });
   });
 
   it('only offers qualities that do not upscale, always keeping one entry', () => {
-    expect(service.resolveOfferedQualities(3840, 2160)).toEqual(['1080p', '720p']);
-    expect(service.resolveOfferedQualities(1920, 1080)).toEqual(['720p']);
-    expect(service.resolveOfferedQualities(480, 852)).toEqual(['720p']);
+    expect(service.resolveOfferedQualities(3840, 2160)).toEqual(['480p', '720p', '1080p']);
+    expect(service.resolveOfferedQualities(1920, 1080)).toEqual(['480p', '720p']);
+    expect(service.resolveOfferedQualities(480, 852)).toEqual(['480p']);
   });
 
   it('lists each offered quality in the master playlist with its scaled resolution', () => {
     const master = service.buildMasterPlaylist(42, 2160, 3840, service.resolveOfferedQualities(2160, 3840));
 
-    expect(master).toContain('RESOLUTION=1080x1920');
-    expect(master).toContain('/api/videos/42/hls/1080p/index.m3u8');
+    expect(master).toContain('RESOLUTION=480x852');
+    expect(master).toContain('/api/videos/42/hls/480p/index.m3u8');
     expect(master).toContain('RESOLUTION=720x1280');
     expect(master).toContain('/api/videos/42/hls/720p/index.m3u8');
   });
 
   it('recognises only the transcodable qualities as stream qualities', () => {
+    expect(service.isStreamQuality('480p')).toBe(true);
     expect(service.isStreamQuality('720p')).toBe(true);
     expect(service.isStreamQuality('1080p')).toBe(true);
     expect(service.isStreamQuality('original')).toBe(false);
     expect(service.isStreamQuality('auto')).toBe(false);
+  });
+
+  it('removes all cached HLS segments for permanently deleted media', async () => {
+    const cacheDirectory = path.join(tempRoot, 'data', 'hls-cache', '42', '720p');
+    const siblingDirectory = path.join(tempRoot, 'data', 'hls-cache', '43', '720p');
+    await fs.mkdir(cacheDirectory, { recursive: true });
+    await fs.mkdir(siblingDirectory, { recursive: true });
+    await fs.writeFile(path.join(cacheDirectory, 'segment-0.ts'), 'stale');
+    await fs.writeFile(path.join(siblingDirectory, 'segment-0.ts'), 'keep');
+
+    await service.invalidateVideoStreamCache([42, 42]);
+
+    await expect(fs.stat(path.join(tempRoot, 'data', 'hls-cache', '42'))).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(fs.readFile(path.join(siblingDirectory, 'segment-0.ts'), 'utf8')).resolves.toBe('keep');
   });
 });

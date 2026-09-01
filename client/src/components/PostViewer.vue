@@ -1007,13 +1007,18 @@
     },
   })
 
-  // A refused audible autoplay applies to this element until the next user gesture,
-  // so it stays local instead of overwriting the stored preference.
-  const viewerAudioBlocked = ref(false)
-  const viewerEffectiveMuted = computed(() => appStore.videoMuted || viewerAudioBlocked.value)
+  // A refused audible autoplay is a document-level verdict, so it lives in the store
+  // and every surface (feed, reels, viewer, stories) reads the same value.
+  const viewerEffectiveMuted = computed(() => appStore.videoEffectivelyMuted)
 
   function syncVideoMuted(player: MediaPlayerElement, muted: boolean) {
     player.muted = muted
+    const videos = [player.querySelector("video"), player.shadowRoot?.querySelector("video")]
+    for (const video of videos) {
+      if (video instanceof HTMLVideoElement) {
+        video.muted = muted
+      }
+    }
   }
 
   // Vidstack re-initialises its own muted state after the provider attaches and
@@ -1023,8 +1028,8 @@
   // un-muting stays an explicit tap.
   function enforceVideoMuted() {
     const player = playerElement.value
-    if (player && viewerEffectiveMuted.value && !player.muted) {
-      player.muted = true
+    if (player) {
+      syncVideoMuted(player, viewerEffectiveMuted.value)
     }
   }
 
@@ -1507,13 +1512,15 @@
       }
     }
 
-    // Audible autoplay was refused. Only this element falls back to muted playback so
-    // the stored preference keeps describing what the viewer actually asked for.
-    viewerAudioBlocked.value = true
+    // Audible autoplay was refused. The verdict holds for the whole document until the
+    // next user gesture, and the stored preference keeps describing what the viewer
+    // actually asked for.
+    appStore.reportAudibleAutoplayBlocked()
     syncVideoMuted(player, true)
 
     try {
       await player.play()
+      syncVideoMuted(player, viewerEffectiveMuted.value)
       isVideoPaused.value = false
     } catch {
       // Ignore autoplay rejections and leave manual controls available.
@@ -1544,7 +1551,8 @@
     const player = playerElement.value
 
     const nextMuted = !appStore.videoMuted
-    viewerAudioBlocked.value = false
+    // Tapping the control is the user gesture that lifts an autoplay block, and
+    // setVideoMuted clears it as part of turning sound back on.
     appStore.setVideoMuted(nextMuted)
 
     if (player) {
@@ -1709,23 +1717,18 @@
   )
 
   watch(
-    () => [appStore.videoMuted, appStore.videoSoundGeneration] as const,
-    ([videoMuted]) => {
-      if (!videoMuted) {
-        viewerAudioBlocked.value = false
-      }
-
+    () => [appStore.videoEffectivelyMuted, appStore.videoSoundGeneration] as const,
+    ([effectivelyMuted]) => {
       const player = playerElement.value
       if (!player) {
         return
       }
 
-      syncVideoMuted(player, videoMuted)
+      syncVideoMuted(player, effectivelyMuted)
     },
   )
 
   watch(playerElement, player => {
-    viewerAudioBlocked.value = false
     videoDurationMs.value = props.image?.durationMs ?? 0
     videoCurrentTimeMs.value = 0
     playerReady = false
@@ -1941,6 +1944,7 @@
         filename: image.filename,
         thumbnailUrl: image.thumbnailUrl,
         previewUrl: image.previewUrl,
+        previewFileUrl: image.previewFileUrl,
         originalUrl: image.originalUrl,
         streamUrl: image.streamUrl,
         playbackStrategy: image.playbackStrategy,
@@ -1948,6 +1952,7 @@
         width: image.width,
         height: image.height,
         durationMs: image.durationMs,
+        collectionItem: image,
       },
       { startTime: currentTime },
     )

@@ -76,6 +76,9 @@ import { useAppStore } from '../stores/app';
 import { useCollectionsStore } from '../stores/collections';
 import type { CollectionSummary } from '../types/api';
 
+// Named explicitly so <KeepAlive include> keeps matching after a minified build.
+defineOptions({ name: 'CollectionsView' });
+
 const appStore = useAppStore();
 const collectionsStore = useCollectionsStore();
 const { t, locale } = useI18n();

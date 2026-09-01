@@ -23,6 +23,8 @@ import type {
   HomeFeedDefaultSetting,
   UpdateCollectionResult,
   UpdateExcludedFoldersSettingResult,
+  ScanFoldersPayload,
+  UpdateScanFoldersResult,
   NestedFolderTitleFormatSetting,
   VideoPlaybackQualitySetting,
   ReelsFeedDefaultSetting,
@@ -491,6 +493,10 @@ export function fetchAdminScanProgress() {
   return requestJson<ScanProgress>('/api/admin/scan-progress');
 }
 
+export function fetchScanFolders() {
+  return requestJson<ScanFoldersPayload>('/api/admin/scan-folders');
+}
+
 export function fetchAuthStatus() {
   return requestJson<AuthStatus>('/api/auth/status');
 }
@@ -659,6 +665,14 @@ export function updateExcludedFolders(rules: string[]) {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ rules })
+  });
+}
+
+export function updateScanFolders(folders: string[]) {
+  return requestJson<UpdateScanFoldersResult>('/api/admin/settings/scan-folders', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ folders })
   });
 }
 

@@ -1,3 +1,5 @@
+import path from 'node:path';
+
 import chokidar, { type FSWatcher } from 'chokidar';
 
 import { appConfig } from '../config/env.js';
@@ -9,6 +11,8 @@ import { log } from './log-service.js';
 import { storageService } from './storage-service.js';
 import { getRelativeGalleryPath, getSourceFolderPathFromRelativePath, isHiddenPath, matchesRelativeRoot } from '../utils/path-utils.js';
 
+const INTERNAL_DELETE_SUPPRESSION_MS = 15_000;
+
 class WatcherService {
   private watcher: FSWatcher | null = null;
   private pendingPaths = new Set<string>();
@@ -17,6 +21,39 @@ class WatcherService {
   private fullRescanRequested = false;
   private scanInFlight = false;
   private watcherReady = false;
+  private internalDeletionSuppressions = new Map<string, number>();
+
+  /**
+   * Permanent deletion moves gallery files through its private quarantine before the
+   * database commit. Those unlink events are internal bookkeeping, not new library
+   * changes, so re-indexing them would wake a scan immediately after a delete.
+   */
+  suppressInternalDeletions(relativePaths: readonly string[]): void {
+    const expiresAt = Date.now() + INTERNAL_DELETE_SUPPRESSION_MS;
+
+    for (const relativePath of relativePaths) {
+      let currentPath = relativePath.replace(/\\/g, '/').replace(/^\/+/, '');
+      while (currentPath && currentPath !== '.') {
+        this.internalDeletionSuppressions.set(currentPath, expiresAt);
+        const parentPath = path.posix.dirname(currentPath);
+        if (parentPath === currentPath) break;
+        currentPath = parentPath;
+      }
+    }
+  }
+
+  private shouldIgnoreInternalDeletion(eventName: string, relativePath: string): boolean {
+    if (eventName !== 'unlink' && eventName !== 'unlinkDir') {
+      return false;
+    }
+
+    const now = Date.now();
+    for (const [pathKey, expiresAt] of this.internalDeletionSuppressions) {
+      if (expiresAt <= now) this.internalDeletionSuppressions.delete(pathKey);
+    }
+
+    return (this.internalDeletionSuppressions.get(relativePath) ?? 0) > now;
+  }
 
   private getEffectiveExcludedFolderRules(): string[] {
     return getEffectiveExcludedFolderRules({
@@ -65,6 +102,10 @@ class WatcherService {
 
       const relativePath = getRelativeGalleryPath(appConfig.galleryRoot, absolutePath);
       if (!relativePath || isHiddenPath(relativePath)) {
+        return;
+      }
+
+      if (this.shouldIgnoreInternalDeletion(eventName, relativePath)) {
         return;
       }
 
@@ -165,6 +206,7 @@ class WatcherService {
     this.pendingPaths.clear();
     this.pendingDirectoryPaths.clear();
     this.fullRescanRequested = false;
+    this.internalDeletionSuppressions.clear();
     this.watcherReady = false;
 
     if (this.watcher) {

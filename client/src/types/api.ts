@@ -4,7 +4,7 @@ export type FeedMode = 'recent' | 'rediscover' | 'random';
 export type ReelsFeedMode = 'recommended' | 'recent' | 'random';
 export type FolderImageOrder = 'newest' | 'oldest';
 export type NestedFolderTitleFormat = 'folder' | 'parent-plus-folder';
-export type VideoPlaybackQuality = 'auto' | 'original' | '1080p' | '720p';
+export type VideoPlaybackQuality = 'auto' | 'original' | '1080p' | '720p' | '480p';
 export type FeedRailKind = 'moments' | 'highlights';
 export type StoryCapsulePresentation = 'avatar' | 'highlight';
 export type MediaType = 'image' | 'video';
@@ -60,6 +60,16 @@ export interface UpdateExcludedFoldersSettingResult extends ExcludedFoldersSetti
   requiresScan: boolean;
 }
 
+export interface ScanFoldersPayload {
+  folders: string[];
+  selectedFolders: string[];
+}
+
+export interface UpdateScanFoldersResult {
+  selectedFolders: string[];
+  requiresScan: boolean;
+}
+
 export type PostType = 'single' | 'carousel';
 
 export interface PostMediaItem {
@@ -73,6 +83,7 @@ export interface PostMediaItem {
   isAnimated: boolean | null;
   thumbnailUrl: string;
   previewUrl: string;
+  previewFileUrl?: string | null;
   playbackStrategy?: 'preview' | 'original' | null;
   streamUrl?: string | null;
   originalUrl?: string;
@@ -102,6 +113,7 @@ export interface FeedItem {
   isAnimated?: boolean | null;
   thumbnailUrl: string;
   previewUrl: string;
+  previewFileUrl?: string | null;
   playbackStrategy?: 'preview' | 'original' | null;
   streamUrl?: string | null;
   originalUrl?: string;
@@ -533,6 +545,8 @@ export interface PermanentDeletionJob {
   deletedIds: number[];
   startedAt: string | null;
   finishedAt: string | null;
+  /** True when the batch stopped early (e.g. storage offline) but can still resume. */
+  stalled: boolean;
 }
 
 export interface PermanentDeletionJobResult {

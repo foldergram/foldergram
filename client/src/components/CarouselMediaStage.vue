@@ -143,7 +143,8 @@ function toVideoPlaybackMedia(item: PostMediaItem): VideoPlaybackMedia {
     playbackStrategy: item.playbackStrategy,
     streamUrl: item.streamUrl,
     originalUrl: item.originalUrl,
-    previewUrl: item.previewUrl
+    previewUrl: item.previewUrl,
+    previewFileUrl: item.previewFileUrl
   };
 }
 

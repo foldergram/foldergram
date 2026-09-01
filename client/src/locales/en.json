@@ -275,7 +275,11 @@
         "options": {
           "auto": {
             "label": "Auto",
-            "description": "Plays the original when the browser can decode it, transcodes on demand otherwise."
+            "description": "Starts from a 480p stream and adapts upward when bandwidth allows; best for WAN use."
+          },
+          "480p": {
+            "label": "480p (WAN first)",
+            "description": "About 0.9 Mbps. Best for a 2-3 Mbps external connection and the fastest start."
           },
           "original": {
             "label": "Original",
@@ -287,7 +291,7 @@
           },
           "720p": {
             "label": "720p",
-            "description": "Transcodes on demand to 720p for the lowest bandwidth and fastest start."
+            "description": "About 1.8 Mbps. Best for a stable, faster connection."
           }
         }
       },
@@ -398,6 +402,22 @@
       "scanCard": {
         "title": "Scan Library",
         "description": "Run a scan after adding folders or when you want to refresh indexed media."
+      },
+      "scanFolders": {
+        "title": "Scan folders",
+        "description": "Choose which folders are included when you run Scan Library or regenerate thumbnails.",
+        "chooseLabel": "Choose folders",
+        "loading": "Loading folders...",
+        "empty": "No folders are available under the gallery root.",
+        "helper": "Selecting a folder includes all of its subfolders. Leave everything unchecked to scan the entire library.",
+        "allFolders": "All folders",
+        "selectedCount": "{count} selected",
+        "hasChildren": "contains subfolders",
+        "save": "Save scan scope",
+        "saving": "Saving...",
+        "saved": "Scan scope saved. Run Scan Library to apply it.",
+        "loadError": "Unable to load available folders.",
+        "saveError": "Unable to save the scan scope."
       },
       "statusLabel": {
         "storageUnavailable": "Storage unavailable",
@@ -1195,6 +1215,7 @@
     "deselectAll": "Deselect all",
     "processingProgress": "Processing {done} / {total}...",
     "deletionProgress": "Deleting in the background {done} / {total}. You can keep browsing.",
+    "dismissDeletionResult": "Dismiss",
     "restoreButton": "Restore",
     "deleteButton": "Permanently Delete",
     "libraryUnavailableTitle": "Library storage unavailable",

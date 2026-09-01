@@ -314,6 +314,15 @@ import { buildLikedCountByFolder, selectHomeRecommendations } from '../utils/hom
 import { usePullToRefresh } from '../composables/usePullToRefresh';
 import { getInitialScanStats, getScanActionLine, getScanPhaseLabel, getScanSummary } from '../utils/scan-progress';
 
+import { provideViewActivation } from '../composables/useViewActivation';
+
+// Named explicitly so <KeepAlive include> keeps matching after a minified build.
+defineOptions({ name: 'HomeView' });
+
+// This view is cached, so its players stay in memory when another tab is showing.
+// Descendants read this flag to pause instead of decoding audio in the background.
+provideViewActivation();
+
 const appStore = useAppStore();
 const authStore = useAuthStore();
 const feedStore = useFeedStore();

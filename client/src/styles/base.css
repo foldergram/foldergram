@@ -790,7 +790,19 @@ img[data-loaded="true"] {
 }
 
 .video-progress-footer--viewer {
-  padding: 0.48rem 0.78rem 0;
+  padding: 0.48rem 0.78rem calc(0.55rem + env(safe-area-inset-bottom, 0px));
+  /* Keep the timeline above the pause/time row explicitly. column-reverse made
+     this depend on flex's reversed main-start and caused the bar to sit at the
+     bottom edge on some mobile browsers. */
+  flex-direction: column;
+}
+
+/* The immersive layer moves the shared feed player instead of creating a second
+   decoder. Give that moved player the viewer layout too; its component variant
+   remains `feed` because the same DOM node returns to the card on close. */
+.immersive-video .video-progress-footer--feed {
+  padding: 0.48rem 0.78rem calc(0.55rem + env(safe-area-inset-bottom, 0px));
+  flex-direction: column;
 }
 
 /* ── meta row (controls + time label) ──────────────────────── */
@@ -804,6 +816,18 @@ img[data-loaded="true"] {
   pointer-events: none;
   /* small bottom gap between controls and the progress bar */
   margin-bottom: 0.28rem;
+}
+
+.video-progress-footer--viewer .video-progress-footer__meta {
+  order: 2;
+  margin-top: 0.28rem;
+  margin-bottom: 0;
+}
+
+.immersive-video .video-progress-footer--feed .video-progress-footer__meta {
+  order: 2;
+  margin-top: 0.28rem;
+  margin-bottom: 0;
 }
 
 .video-progress-footer__slot {
@@ -849,6 +873,12 @@ img[data-loaded="true"] {
 }
 
 .video-progress-footer--viewer .video-progress-footer__timeline-shell {
+  order: 1;
+  margin-inline: -0.78rem;
+}
+
+.immersive-video .video-progress-footer--feed .video-progress-footer__timeline-shell {
+  order: 1;
   margin-inline: -0.78rem;
 }
 
@@ -1066,6 +1096,19 @@ img[data-loaded="true"] {
   height: 100%;
 }
 
+/* Vidstack's provider and poster are siblings. Keeping both in the same absolute
+   stage prevents the empty provider from pushing the poster below the card while a
+   route switch is waiting for the native video element to reattach. */
+.feed-card__player media-provider,
+.feed-card__player media-poster,
+.viewer__player media-provider,
+.viewer__player media-poster,
+.video-media-player__player media-provider,
+.video-media-player__player media-poster {
+  position: absolute;
+  inset: 0;
+}
+
 .feed-card__player video,
 .feed-card__player img {
   object-fit: cover;
@@ -1078,6 +1121,17 @@ img[data-loaded="true"] {
 .feed-card__player[data-fullscreen] video,
 .feed-card__player[data-fullscreen] img {
   object-fit: contain;
+}
+
+/* The home player keeps its feed class while Vue teleports it into the immersive
+   layer. Override the feed's cover crop there so a landscape source remains whole
+   in a portrait fullscreen viewport. Vidstack creates the native video at runtime,
+   so this must be a global selector rather than a component-scoped one. */
+.immersive-video #immersive-video-slot .feed-card__player video,
+.immersive-video #immersive-video-slot .feed-card__player img,
+.immersive-video .video-media-player__player video,
+.immersive-video .video-media-player__player img {
+  object-fit: contain !important;
 }
 
 .feed-card__video-shell--interactive {
@@ -1232,7 +1286,7 @@ img[data-loaded="true"] {
   }
 
   .video-progress-footer--viewer {
-    padding: 0.48rem 0.62rem 0;
+    padding: 0.48rem 0.62rem calc(0.6rem + env(safe-area-inset-bottom, 0px));
   }
 
   .video-progress-footer__timeline-shell {

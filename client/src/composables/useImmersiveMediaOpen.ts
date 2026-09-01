@@ -55,13 +55,14 @@ export function useImmersiveMediaOpen() {
     // Warming the head of the clip before the layer mounts is what removes the stall
     // between the tap and the first frame on a NAS that transcodes on demand.
     const startTime = Number.isFinite(options.startTime) ? Math.max(0, options.startTime ?? 0) : 0;
-    warmVideoStream(item, appStore.videoPlaybackQuality, { fromSeconds: startTime, segments: 4 });
+    warmVideoStream(item, appStore.videoPlaybackQuality, { fromSeconds: startTime, segments: 2 });
 
     immersiveVideoStore.open({
       id: item.id,
       filename: item.filename,
       thumbnailUrl: item.thumbnailUrl,
       previewUrl: item.previewUrl,
+      previewFileUrl: item.previewFileUrl,
       originalUrl: item.originalUrl,
       streamUrl: item.streamUrl,
       playbackStrategy: item.playbackStrategy,

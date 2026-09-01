@@ -1,0 +1,56 @@
+# Do not ingest these as default session context.
+# Query on demand via scripts/ai-search.sh and scripts/ai-symbol.sh.
+
+# --- build / dependency output ---
+node_modules/
+**/dist/
+**/build/
+**/out/
+coverage/
+docs/.vitepress/dist/
+docs/.vitepress/cache/
+docs/.vitepress/.temp/
+
+# --- editor / IDE ---
+.idea/
+.vscode/
+
+# --- runtime media library and database (large, zero code value) ---
+data/
+gallery/
+thumbnails/
+previews/
+**/*.db
+**/*.sqlite
+**/*.sqlite-shm
+**/*.sqlite-wal
+
+# --- large or binary artifacts ---
+**/*.png
+**/*.jpg
+**/*.jpeg
+**/*.webp
+**/*.avif
+**/*.heic
+**/*.gif
+**/*.mp4
+**/*.mov
+**/*.pdf
+**/*.zip
+pnpm-lock.yaml
+**/*.lock
+
+# --- macOS resource-fork noise (external / exFAT disks) ---
+**/._*
+.DS_Store
+
+# --- AI dumps and generated indexes: query on demand, never ambient context ---
+.tmp/
+.ai/
+ai/AI_REPOMIX_CONTEXT.md
+ai/AI_FILE_INDEX.md
+
+# --- secrets ---
+.env
+.env.*
+!.env.example

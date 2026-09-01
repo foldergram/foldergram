@@ -59,6 +59,75 @@ describe('VideoMediaPlayer', () => {
     expect(wrapper.classes()).toContain('video-media-player--capture-touch-gestures');
   });
 
+  it('keeps immersive surface scrubbing anchored to the playback point', async () => {
+    const wrapper = mount(VideoMediaPlayer, {
+      props: {
+        src: '/test-video.mp4',
+        holdToSeek: true,
+        gestureOrientation: 'normal'
+      },
+      global: {
+        plugins: [i18n]
+      }
+    });
+
+    const player = wrapper.find('media-player').element as any;
+    let currentTime = 10;
+    Object.defineProperty(player, 'duration', { configurable: true, value: 100 });
+    Object.defineProperty(player, 'currentTime', {
+      configurable: true,
+      get: () => currentTime,
+      set: (value) => { currentTime = value; }
+    });
+    player.play = vi.fn().mockResolvedValue(undefined);
+    player.dispatchEvent(new Event('time-update'));
+    await flushPromises();
+
+    const surface = wrapper.element;
+    const pointer = (clientX: number) => ({
+      clientX,
+      clientY: 200,
+      isPrimary: true,
+      pointerId: 1,
+      currentTarget: surface,
+      target: surface
+    }) as unknown as PointerEvent;
+
+    (wrapper.vm as any).handleHoldPointerdown(pointer(40));
+    (wrapper.vm as any).handleHoldPointermove(pointer(170));
+
+    await vi.waitFor(() => expect(currentTime).toBeCloseTo(25.6, 5));
+    expect((wrapper.vm as any).holdSpeed.scrubSeconds.value).toBeCloseTo(25.6, 5);
+    expect(wrapper.get('.video-media-player__hold-indicator').text()).toContain('0:25 / 1:40');
+
+    (wrapper.vm as any).handleHoldPointerup(pointer(170));
+    expect(currentTime).toBeCloseTo(25.6, 5);
+  });
+
+  it('treats a double tap as one playback toggle instead of toggling twice', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-31T12:00:00Z'));
+
+    const wrapper = mount(VideoMediaPlayer, {
+      props: { src: '/test-video.mp4' },
+      global: { plugins: [i18n] }
+    });
+
+    const player = wrapper.find('media-player').element as any;
+    let paused = false;
+    Object.defineProperty(player, 'paused', { configurable: true, get: () => paused });
+    player.pause = vi.fn(() => { paused = true; });
+    player.play = vi.fn(async () => { paused = false; });
+
+    await wrapper.trigger('click');
+    vi.advanceTimersByTime(120);
+    await wrapper.trigger('click');
+
+    expect(player.pause).toHaveBeenCalledTimes(1);
+    expect(player.play).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
   it('forwards autoplay to the media player', () => {
     const wrapper = mount(VideoMediaPlayer, {
       props: {
@@ -145,7 +214,7 @@ describe('VideoMediaPlayer', () => {
     expect(wrapper.emitted('toggle-mute')).toHaveLength(1);
   });
 
-  it('clears autoplay mute blocks in every mounted player when sound is enabled anywhere', async () => {
+  it('keeps every mounted player audible after sound is explicitly enabled', async () => {
     const appStore = useAppStore();
     appStore.setVideoMuted(false);
     const mountPlayer = () =>
@@ -168,12 +237,6 @@ describe('VideoMediaPlayer', () => {
     secondPlayer.play = vi.fn().mockResolvedValue(undefined);
     firstPlayer.dispatchEvent(new CustomEvent('auto-play-fail'));
     secondPlayer.dispatchEvent(new CustomEvent('auto-play-fail'));
-    await vi.waitFor(() => {
-      expect((first.vm as any).audioBlocked).toBe(true);
-      expect((second.vm as any).audioBlocked).toBe(true);
-    });
-
-    appStore.setVideoMuted(false);
     await flushPromises();
 
     expect(appStore.videoMuted).toBe(false);
@@ -181,6 +244,25 @@ describe('VideoMediaPlayer', () => {
     expect((second.vm as any).audioBlocked).toBe(false);
     expect(firstPlayer.muted).toBe(false);
     expect(secondPlayer.muted).toBe(false);
+  });
+
+  it('writes the global sound state to the native video after a provider remount', async () => {
+    const appStore = useAppStore();
+    appStore.setVideoMuted(false);
+
+    const wrapper = mount(VideoMediaPlayer, {
+      props: { src: '/test-video.mp4', muted: false },
+      global: { plugins: [i18n] }
+    });
+    const player = wrapper.find('media-player').element as any;
+    const nativeVideo = document.createElement('video');
+    nativeVideo.muted = true;
+    player.append(nativeVideo);
+
+    player.dispatchEvent(new Event('can-play'));
+    await flushPromises();
+
+    expect(nativeVideo.muted).toBe(false);
   });
 
   it('does not expose a transcoding quality switch in direct-only mode', () => {

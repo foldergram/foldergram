@@ -116,7 +116,7 @@ const nestedFolderTitleFormatBodySchema = z.object({
   titleFormat: z.enum(['folder', 'parent-plus-folder'])
 });
 const videoPlaybackQualityBodySchema = z.object({
-  videoPlaybackQuality: z.enum(['auto', 'original', '1080p', '720p'])
+  videoPlaybackQuality: z.enum(['auto', 'original', '1080p', '720p', '480p'])
 });
 const storiesModeBodySchema = z.object({
   treatStoriesAsFolders: z.boolean()
@@ -266,6 +266,9 @@ const submittedSharePasswordBodySchema = z.object({
     .min(1, 'Password is required.')
     .max(FOLDER_SHARE_PASSWORD_MAX_LENGTH, `Password must be at most ${FOLDER_SHARE_PASSWORD_MAX_LENGTH} characters.`)
 });
+const scanFoldersBodySchema = z.object({
+  folders: z.array(z.string().trim().min(1).max(2048)).max(5000)
+});
 
 export const authRequestBodySchemas = {
   login: loginBodySchema,
@@ -284,7 +287,8 @@ export const settingsRequestBodySchemas = {
   nestedFolderTitleFormat: nestedFolderTitleFormatBodySchema,
   storiesMode: storiesModeBodySchema,
   videoPlaybackQuality: videoPlaybackQualityBodySchema,
-  excludedFolders: excludedFoldersBodySchema
+  excludedFolders: excludedFoldersBodySchema,
+  scanFolders: scanFoldersBodySchema
 };
 
 export const routeParamSchemas = {
@@ -583,6 +587,13 @@ router.get('/admin/scan-progress', requireCapability('canAccessSettings', 'Admin
   response.json(galleryService.getAdminScanProgress());
 });
 
+router.get('/admin/scan-folders', requireCapability('canAccessSettings', 'Admin access is required.'), async (_request, response) => {
+  response.json({
+    folders: await scannerService.listAvailableScanFolders(),
+    selectedFolders: scannerService.getSelectedScanFolders()
+  });
+});
+
 router.put(
   '/admin/settings/app-locale',
   requireCapability('canAccessSettings', 'Admin access is required.'),
@@ -661,6 +672,19 @@ router.put(
   (request, response) => {
     const body = excludedFoldersBodySchema.parse(request.body);
     response.json(galleryService.setExcludedFolders(body.rules));
+  }
+);
+
+router.put(
+  '/admin/settings/scan-folders',
+  requireCapability('canManageLibrary', 'Admin access is required.'),
+  (request, response) => {
+    const body = scanFoldersBodySchema.parse(request.body);
+    try {
+      response.json(scannerService.setSelectedScanFolders(body.folders));
+    } catch (error) {
+      response.status(400).json({ message: error instanceof Error ? error.message : 'Invalid scan folders.' });
+    }
   }
 );
 

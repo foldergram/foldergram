@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Foldergram Liquid Glass Preview</title>
+    <style>
+      :root { color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif; }
+      * { box-sizing: border-box; }
+      body { margin: 0; min-height: 100vh; overflow: hidden; color: white; background: #10261d; }
+      .scene { min-height: 100vh; padding: 13vh 8vw; background: radial-gradient(circle at 18% 24%, #286044, transparent 28%), radial-gradient(circle at 82% 68%, #5b306e, transparent 24%), linear-gradient(135deg, #142b21, #0e1716 70%); }
+      .scene::before, .scene::after { position: fixed; width: 18rem; height: 8rem; border: 1px solid rgba(255,255,255,.14); border-radius: 2rem; content: ""; transform: rotate(-12deg); opacity: .42; }
+      .scene::before { top: 22%; right: 13%; background: linear-gradient(110deg, rgba(255,255,255,.14), transparent 58%); }
+      .scene::after { bottom: 27%; left: 11%; background: linear-gradient(110deg, rgba(50,180,255,.12), transparent 58%); transform: rotate(17deg); }
+      .scene h1 { margin: 0; font-size: clamp(2rem, 7vw, 5rem); letter-spacing: -.04em; }
+      .scene p { max-width: 34rem; color: rgba(255,255,255,.66); line-height: 1.6; }
+      .mobile-nav { position: fixed; right: 0; bottom: 0; left: 0; display: block; padding: .7rem 1rem calc(.7rem + env(safe-area-inset-bottom)); background: transparent; pointer-events: none; }
+      .mobile-nav__lens-defs { position: absolute; width: 0; height: 0; pointer-events: none; }
+      .mobile-nav__bar { pointer-events: auto; display: flex; width: fit-content; max-width: calc(100% - .5rem); min-height: 3.7rem; align-items: center; margin: 0 auto; padding: .32rem .62rem; border: 1px solid rgba(255,255,255,.16); border-radius: 1.85rem; background: linear-gradient(118deg, rgba(255,255,255,.16), transparent 34%), rgba(220,235,230,.12); box-shadow: none; backdrop-filter: blur(26px) saturate(160%); }
+      .mobile-nav__links { position: relative; display: flex; align-items: center; gap: .12rem; padding: 0; touch-action: none; }
+      .mobile-nav__item { position: relative; z-index: 1; display: grid; width: 2.9rem; height: 2.8rem; place-items: center; border: 0; border-radius: 1rem; color: rgba(255,255,255,.72); background: transparent; cursor: pointer; }
+      .mobile-nav__item:active { transform: scale(.96); }
+      .mobile-nav__brand svg { width: 1.95rem; height: 1.95rem; color: #2db7d1; }
+      .mobile-nav__icon { width: 1.45rem; height: 1.45rem; }
+      .mobile-nav__item--active { color: white; }
+      .mobile-nav__glass-slider { position: absolute; z-index: 2; top: 0; left: 0; width: 2.9rem; height: 2.8rem; border-radius: 1.15rem; pointer-events: none; will-change: transform; transition: transform .38s cubic-bezier(.22,1.1,.32,1); }
+      .mobile-nav__glass-refraction { position: absolute; inset: 0; border: 1px solid rgba(255,255,255,.3); border-radius: inherit; background: rgba(255,255,255,.04); -webkit-backdrop-filter: blur(2px) saturate(150%) brightness(1.04); backdrop-filter: blur(2px) saturate(150%) brightness(1.04); pointer-events: none; }
+      .mobile-nav--lens .mobile-nav__glass-refraction { background: transparent; -webkit-backdrop-filter: url('#foldergram-nav-lens') saturate(140%) brightness(1.03); backdrop-filter: url('#foldergram-nav-lens') saturate(140%) brightness(1.03); }
+      .hint { position: fixed; right: 1rem; bottom: 6rem; color: rgba(255,255,255,.72); font-size: .85rem; }
+      @media (prefers-reduced-motion: reduce) { .mobile-nav__glass-slider, .mobile-nav__glass-refraction { transition: none; } }
+    </style>
+  </head>
+  <body>
+    <main class="scene"><h1>Liquid Glass</h1><p>点击或拖动底部滑块。它保持原有图标，只改变玻璃材质：透过滑块能看到背景被局部模糊、放大感和色散边缘影响。</p></main>
+    <div class="hint">Click or drag the glass slider</div>
+    <nav class="mobile-nav" id="nav" aria-label="Preview navigation">
+      <svg class="mobile-nav__lens-defs" aria-hidden="true" focusable="false">
+        <filter id="foldergram-nav-lens" x="-25%" y="-25%" width="150%" height="150%" color-interpolation-filters="sRGB">
+          <feImage id="lensMapImage" result="lensMap" x="0" y="0" preserveAspectRatio="none" />
+          <feDisplacementMap in="SourceGraphic" in2="lensMap" scale="26" xChannelSelector="R" yChannelSelector="G" />
+        </filter>
+      </svg>
+      <div class="mobile-nav__bar">
+        <div class="mobile-nav__links" id="links">
+          <span class="mobile-nav__glass-slider" id="slider"><span class="mobile-nav__glass-refraction"></span></span>
+          <button class="mobile-nav__item mobile-nav__brand mobile-nav__item--active" data-i="0" aria-label="Home"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M2 4.5A2.5 2.5 0 0 1 4.5 2h11A2.5 2.5 0 0 1 18 4.5v11a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 2 15.5v-11zM4.5 3A1.5 1.5 0 0 0 3 4.5v11A1.5 1.5 0 0 0 4.5 17h11a1.5 1.5 0 0 0 1.5-1.5v-11A1.5 1.5 0 0 0 15.5 3h-11zM5 6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6zm3 0H6v2h2V6zm-3 6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-2zm3 0H6v2h2v-2zm3-6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-2a1 1 0 0 1-1-1V6zm3 0h-2v2h2V6zm-3 6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-2a1 1 0 0 1-1-1v-2zm3 0h-2v2h2v-2z" fill="currentColor" /></svg></button>
+          <button class="mobile-nav__item" data-i="1" aria-label="Videos"><svg class="mobile-nav__icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M10.856 8.155A1.25 1.25 0 0 0 9 9.248v5.504a1.25 1.25 0 0 0 1.856 1.093l5.757-3.189a.75.75 0 0 0 0-1.312zM12 2C6.477 2 2 6.477 2 12s4.477 10 10 10s10-4.477 10-10S17.523 2 12 2M3.5 12a8.5 8.5 0 1 1 17 0a8.5 8.5 0 0 1-17 0" /></svg></button>
+          <button class="mobile-nav__item" data-i="2" aria-label="Search"><svg class="mobile-nav__icon" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M11.02 11.727a5.5 5.5 0 1 1 .707-.707l3.127 3.126a.5.5 0 0 1-.708.708zM12 7.5a4.5 4.5 0 1 0-9 0a4.5 4.5 0 0 0 9 0" /></svg></button>
+          <button class="mobile-nav__item" data-i="3" aria-label="Folders"><svg class="mobile-nav__icon" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M2 4.5V6h3.586a.5.5 0 0 0 .353-.146L7.293 4.5L5.939 3.146A.5.5 0 0 0 5.586 3H3.5A1.5 1.5 0 0 0 2 4.5m-1 0A2.5 2.5 0 0 1 3.5 2h2.086a1.5 1.5 0 0 1 1.06.44L8.207 4H12.5A2.5 2.5 0 0 1 15 6.5v5a2.5 2.5 0 0 1-2.5 2.5h-9A2.5 2.5 0 0 1 1 11.5V4.5zM2 7v4.5A1.5 1.5 0 0 0 3.5 13h9a1.5 1.5 0 0 0 1.5-1.5v-5A1.5 1.5 0 0 0 12.5 5H8.207l-1.56 1.56A1.5 1.5 0 0 1 5.585 7z" /></svg></button>
+          <button class="mobile-nav__item" data-i="4" aria-label="Likes"><svg class="mobile-nav__icon" viewBox="0 0 20 20" aria-hidden="true"><path fill="currentColor" d="m10.497 16.803l6.244-6.304a4.41 4.41 0 0 0-.017-6.187a4.306 4.306 0 0 0-6.135-.015l-.596.603l-.605-.61l-.1-.099a4.3 4.3 0 0 0-6.027.083c-1.688 1.705-1.68 4.476.016 6.189l6.277 6.34c.26.263.682.263.942 0M11.3 5a3.306 3.306 0 0 1 4.713.016a3.41 3.41 0 0 1 .016 4.78v.002l-6.004 6.06l-6.038-6.099c-1.313-1.326-1.314-3.47-.015-4.782a3.3 3.3 0 0 1 4.706.016l.96.97a.5.5 0 0 0 .711 0z" /></svg></button>
+          <button class="mobile-nav__item" data-i="5" aria-label="Collections"><svg class="mobile-nav__icon" viewBox="0 0 20 20" aria-hidden="true"><path fill="currentColor" d="M4 4.5A2.5 2.5 0 0 1 6.5 2h7A2.5 2.5 0 0 1 16 4.5v13a.5.5 0 0 1-.794.404L10 14.118l-5.206 3.786A.5.5 0 0 1 4 17.5zM6.5 3A1.5 1.5 0 0 1 5 4.5v12.018l4.706-3.422a.5.5 0 0 1 .588 0L15 16.518V4.5A1.5 1.5 0 0 1 13.5 3z" /></svg></button>
+          <button class="mobile-nav__item" data-i="6" aria-label="More"><svg class="mobile-nav__icon" viewBox="0 0 20 20" aria-hidden="true"><path fill="currentColor" d="M2 4.75A.75.75 0 0 1 2.75 4h14.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 4.75m0 5A.75.75 0 0 1 2.75 9h14.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 9.75M2.75 14a.75.75 0 0 0 0 1.5h14.5a.75.75 0 0 0 0-1.5z" /></svg></button>
+        </div>
+      </div>
+    </nav>
+    <script>
+      const links = document.querySelector('#links');
+      const slider = document.querySelector('#slider');
+      const items = [...document.querySelectorAll('[data-i]')];
+      let active = 0;
+      let drag = false;
+
+      function buildLensDisplacementMap() {
+        const size = 128;
+        const canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        const context = canvas.getContext('2d');
+        if (!context) return '';
+        const image = context.createImageData(size, size);
+        const radius = size * 0.28;
+        const half = size / 2;
+        for (let y = 0; y < size; y += 1) {
+          for (let x = 0; x < size; x += 1) {
+            const dx = Math.abs(x - half + 0.5) - (half - radius);
+            const dy = Math.abs(y - half + 0.5) - (half - radius);
+            const outside = Math.hypot(Math.max(dx, 0), Math.max(dy, 0));
+            const distance = outside - radius + Math.min(Math.max(dx, dy), 0);
+            const bevel = Math.min(Math.max(1 - Math.abs(distance) / (size * 0.22), 0), 1) ** 1.6;
+            const length = Math.hypot(x - half + 0.5, y - half + 0.5) || 1;
+            const nx = ((x - half + 0.5) / length) * bevel;
+            const ny = ((y - half + 0.5) / length) * bevel;
+            const offset = (y * size + x) * 4;
+            image.data[offset] = Math.round((nx * 0.5 + 0.5) * 255);
+            image.data[offset + 1] = Math.round((ny * 0.5 + 0.5) * 255);
+            image.data[offset + 2] = 128;
+            image.data[offset + 3] = 255;
+          }
+        }
+        context.putImageData(image, 0, 0);
+        return canvas.toDataURL('image/png');
+      }
+
+      const nav = document.querySelector('#nav');
+      const lensImage = document.querySelector('#lensMapImage');
+      const lensSupported =
+        typeof CSS !== 'undefined' &&
+        typeof CSS.supports === 'function' &&
+        (CSS.supports('backdrop-filter', 'url(#foldergram-nav-lens)') ||
+          CSS.supports('-webkit-backdrop-filter', 'url(#foldergram-nav-lens)'));
+      if (lensSupported) {
+        const map = buildLensDisplacementMap();
+        if (map) {
+          lensImage.setAttribute('href', map);
+          nav.classList.add('mobile-nav--lens');
+        }
+      }
+
+      function move(index, animate = true) {
+        const item = items[index];
+        const linksRect = links.getBoundingClientRect();
+        const itemRect = item.getBoundingClientRect();
+        slider.style.transition = animate ? '' : 'none';
+        slider.style.transform = `translate3d(${itemRect.left - linksRect.left}px, ${itemRect.top - linksRect.top}px, 0) scale(${drag ? 1.04 : 1})`;
+        slider.style.width = `${itemRect.width}px`;
+        slider.style.height = `${itemRect.height}px`;
+        items.forEach((entry) => entry.classList.toggle('mobile-nav__item--active', entry === item));
+        active = index;
+      }
+
+      function nearest(x) {
+        return items.reduce((best, item) => Math.abs(item.getBoundingClientRect().left + item.offsetWidth / 2 - x) < Math.abs(best.getBoundingClientRect().left + best.offsetWidth / 2 - x) ? item : best);
+      }
+
+      move(0, false);
+      window.addEventListener('resize', () => move(active, false));
+      links.addEventListener('pointerdown', (event) => { drag = true; links.setPointerCapture(event.pointerId); slider.style.transition = 'transform .11s cubic-bezier(.33,1,.68,1)'; move(active); });
+      links.addEventListener('pointermove', (event) => { if (!drag) return; const item = nearest(event.clientX); move(Number(item.dataset.i)); });
+      links.addEventListener('pointerup', (event) => { drag = false; slider.style.transition = ''; move(active); links.releasePointerCapture(event.pointerId); });
+      links.addEventListener('pointercancel', () => { drag = false; slider.style.transition = ''; move(active); });
+      items.forEach((item) => item.addEventListener('click', () => move(Number(item.dataset.i))));
+    </script>
+  </body>
+</html>

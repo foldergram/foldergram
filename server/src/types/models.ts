@@ -3,7 +3,7 @@ export type FolderImageOrder = 'newest' | 'oldest';
 export type NestedFolderTitleFormat = 'folder' | 'parent-plus-folder';
 export type TakenAtSource = 'exif' | 'mtime' | 'first_seen' | 'sort_timestamp';
 export type PlaybackStrategy = 'preview' | 'original';
-export type VideoPlaybackQuality = 'auto' | 'original' | '1080p' | '720p';
+export type VideoPlaybackQuality = 'auto' | 'original' | '1080p' | '720p' | '480p';
 export type FolderAvatarSource = 'auto' | 'manual' | 'cover';
 export type FolderRole = 'normal' | 'story_root' | 'story_capsule' | 'carousel_source';
 export type PlaceKind = 'city' | 'approximate_spot' | 'manual';
@@ -247,6 +247,7 @@ export interface PostMediaItem {
   isAnimated: boolean | null;
   thumbnailUrl: string;
   previewUrl: string;
+  previewFileUrl?: string | null;
   originalUrl?: string;
   playbackStrategy?: PlaybackStrategy | null;
   streamUrl?: string | null;
@@ -275,6 +276,7 @@ export interface FeedImage {
   isAnimated?: boolean | null;
   thumbnailUrl: string;
   previewUrl: string;
+  previewFileUrl?: string | null;
   playbackStrategy?: PlaybackStrategy | null;
   streamUrl?: string | null;
   originalUrl?: string;

@@ -226,6 +226,16 @@ describe('FeedCard', () => {
     expect(wrapper.find('.feed-card__first-frame').exists()).toBe(true);
 
     const player = wrapper.get('media-player').element as unknown as FakeMediaPlayerElement;
+    const video = document.createElement('video');
+    Object.defineProperty(video, 'readyState', {
+      configurable: true,
+      value: HTMLMediaElement.HAVE_CURRENT_DATA
+    });
+    Object.defineProperty(video, 'currentTime', {
+      configurable: true,
+      value: 0.4
+    });
+    player.appendChild(video);
     player.currentTime = 0.4;
     player.dispatchEvent(new Event('time-update'));
     await flushPromises();
@@ -233,7 +243,7 @@ describe('FeedCard', () => {
     expect(wrapper.find('.feed-card__first-frame').exists()).toBe(false);
   });
 
-  it('opens the immersive layer from home-feed video clicks and pauses the inline copy', async () => {
+  it('hands home playback to the immersive player and resumes it on return', async () => {
     const immersiveVideoStore = useImmersiveVideoStore();
     const wrapper = mount(FeedCard, {
       props: {
@@ -261,6 +271,7 @@ describe('FeedCard', () => {
     expect(immersiveVideoStore.target?.id).toBe(805);
     expect(immersiveVideoStore.startTime).toBe(12.5);
     expect(immersiveVideoStore.startPaused).toBe(false);
+    // The inline decoder stands down while the one global immersive player owns playback.
     expect(player.paused).toBe(true);
 
     immersiveVideoStore.close({ id: 805, currentTime: 20, paused: false });
@@ -268,6 +279,32 @@ describe('FeedCard', () => {
 
     expect(player.currentTime).toBe(20);
     expect(player.paused).toBe(false);
+  });
+
+  it('starts an inactive feed clip when opening it in the immersive player', async () => {
+    const immersiveVideoStore = useImmersiveVideoStore();
+    const wrapper = mount(FeedCard, {
+      props: {
+        item: createVideoItem(8052),
+        avatarUrl: null,
+        context: 'home',
+        isActiveVideo: false
+      },
+      global: {
+        stubs: globalStubs
+      }
+    });
+
+    await flushPromises();
+    const player = wrapper.get('media-player').element as unknown as FakeMediaPlayerElement;
+    expect(player.paused).toBe(true);
+
+    await wrapper.get('.feed-card__video-shell').trigger('click');
+    await flushPromises();
+
+    expect(immersiveVideoStore.startPaused).toBe(false);
+    expect(immersiveVideoStore.isOpen).toBe(true);
+    expect(player.paused).toBe(true);
   });
 
   it('renders the bottom progress UI and keeps slider clicks from pausing the home video', async () => {

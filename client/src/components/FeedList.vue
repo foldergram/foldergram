@@ -29,7 +29,10 @@ interface HomeVideoVisibilityChange {
   centerOffset: number;
 }
 
-const MIN_HOME_VIDEO_RATIO = 0.55;
+// A video can be partly offset by the top rail or an interleaved image. Keeping the
+// threshold above a small visibility sliver avoids decoding hidden cards, while not
+// leaving the first visible video without an owner during a mixed image/video scroll.
+const MIN_HOME_VIDEO_RATIO = 0.35;
 
 const props = withDefaults(
   defineProps<{

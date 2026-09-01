@@ -136,7 +136,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 
 import ReelActionRail from '../components/ReelActionRail.vue';
@@ -145,6 +145,15 @@ import ReelInfoSidebar from '../components/ReelInfoSidebar.vue';
 import { useAppStore } from '../stores/app';
 import { useFoldersStore } from '../stores/folders';
 import { useReelsStore } from '../stores/reels';
+
+import { provideViewActivation } from '../composables/useViewActivation';
+
+// Named explicitly so <KeepAlive include> keeps matching after a minified build.
+defineOptions({ name: 'ReelsView' });
+
+// This view is cached, so its players stay in memory when another tab is showing.
+// Descendants read this flag to pause instead of decoding audio in the background.
+provideViewActivation();
 
 const appStore = useAppStore();
 const foldersStore = useFoldersStore();
@@ -235,16 +244,36 @@ function handleGlobalWheel(event: WheelEvent) {
   deckElement.value?.navigateByWheel(event.deltaY);
 }
 
-onMounted(async () => {
-  updateViewportMode();
+function addGlobalListeners() {
   window.addEventListener('resize', updateViewportMode);
   window.addEventListener('wheel', handleGlobalWheel, { passive: false });
+}
+
+function removeGlobalListeners() {
+  window.removeEventListener('resize', updateViewportMode);
+  window.removeEventListener('wheel', handleGlobalWheel);
+}
+
+onMounted(async () => {
+  updateViewportMode();
+  addGlobalListeners();
   await reelsStore.loadInitial();
 });
 
+// This route is cached, so it stays mounted behind other dock tabs. The wheel handler
+// hijacks scrolling to advance reels, so it must only be bound while reels is on
+// screen; otherwise scrolling the home feed would page through reels invisibly.
+onActivated(() => {
+  updateViewportMode();
+  addGlobalListeners();
+});
+
+onDeactivated(() => {
+  removeGlobalListeners();
+});
+
 onBeforeUnmount(() => {
-  window.removeEventListener('resize', updateViewportMode);
-  window.removeEventListener('wheel', handleGlobalWheel);
+  removeGlobalListeners();
 });
 
 watch(activeItem, (item) => {

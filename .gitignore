@@ -25,3 +25,9 @@ gallery/*
 thumbnails/*
 previews/*
 .mocks/
+
+# exFAT AppleDouble resource forks are noise
+._*
+# AI index cache and compiled deployment bundle (build artifacts)
+.ai/
+deploy-server-dist/

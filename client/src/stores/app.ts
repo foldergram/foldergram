@@ -52,7 +52,7 @@ const THEME_STORAGE_KEY = 'foldergram-theme';
 const LOCALE_STORAGE_KEY = 'foldergram-locale';
 const VIDEO_MUTED_STORAGE_KEY = 'foldergram-video-muted';
 const VIDEO_PLAYBACK_QUALITY_STORAGE_KEY = 'foldergram-video-playback-quality';
-const VIDEO_PLAYBACK_QUALITIES: VideoPlaybackQuality[] = ['original'];
+const VIDEO_PLAYBACK_QUALITIES: VideoPlaybackQuality[] = ['auto', 'original', '1080p', '720p', '480p'];
 
 function parseStoredVideoPlaybackQuality(value: string | null): VideoPlaybackQuality | null {
   return VIDEO_PLAYBACK_QUALITIES.includes(value as VideoPlaybackQuality)

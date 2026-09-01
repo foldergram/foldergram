@@ -303,6 +303,7 @@ const MAX_STALL_RETRY_DELAY_MS = 1_200;
 const MAX_STALL_RETRIES = 8;
 let stallRetryAttempts = 0;
 let stallRetryTimer = 0;
+let lastSurfaceTapAt = 0;
 
 function clearStallRetry() {
   if (stallRetryTimer !== 0) {
@@ -413,6 +414,10 @@ const holdSpeed = useHoldToSpeed({
   // rotation reports `gestureOrientation`, so the sideways drag the viewer makes while
   // holding the phone sideways still scrubs, and their downward swipe still dismisses.
   getGesturePoint: (event) => resolveGesturePoint(event, props.gestureOrientation),
+  // Scrubbing follows the viewer's physical left/right finger movement. The rotated
+  // point above is only for gesture ownership; using it for scrub would turn a
+  // landscape screen swipe into local vertical movement and prevent seeking.
+  getScrubPoint: (event) => ({ x: event.clientX, y: event.clientY }),
   onGestureStart: () => emit('surface-gesture-start'),
   onScrub: warmSeekTarget,
   onGestureEnd: () => emit('surface-gesture-end')
@@ -516,11 +521,13 @@ async function handleAutoplayFail() {
   // Browsers commonly reject audible autoplay. Record the document-wide verdict and
   // fall back to muted playback; the stored preference stays audible so the next tap
   // (which is a user gesture) can still bring the sound back.
-  if (!appStore.reportAudibleAutoplayBlocked()) return;
-  player.muted = true;
+  appStore.reportAudibleAutoplayBlocked();
+  syncPlayerMuted(player, true);
   emit('autoplay-muted');
   await nextTick();
-  await player.play().catch(() => {});
+  await player.play().then(() => {
+    syncPlayerMuted(player, effectiveMuted.value);
+  }).catch(() => {});
 }
 
 function isInteractiveTarget(target: EventTarget | null): boolean {
@@ -540,7 +547,13 @@ function handleSurfaceClick(event: MouseEvent) {
     return;
   }
 
-  togglePlayback();
+  const now = Date.now();
+  if (now - lastSurfaceTapAt <= 320) {
+    lastSurfaceTapAt = 0;
+    return;
+  }
+  lastSurfaceTapAt = now;
+  void togglePlayback();
 }
 
 function handleHoldPointerdown(event: PointerEvent) {
@@ -727,9 +740,17 @@ function requestAutoplayAfterReady(player: MediaPlayerElement) {
  * decision handled by the prop watcher, which also leaves the muted autoplay
  * fallback intact instead of immediately fighting it.
  */
-function enforceMuted(player: MediaPlayerElement) {
-  if (effectiveMuted.value && !player.muted) {
-    player.muted = true;
+function syncPlayerMuted(player: MediaPlayerElement, muted: boolean) {
+  player.muted = muted;
+
+  const videos = [
+    player.querySelector('video'),
+    player.shadowRoot?.querySelector('video')
+  ];
+  for (const video of videos) {
+    if (video instanceof HTMLVideoElement) {
+      video.muted = muted;
+    }
   }
 }
 
@@ -737,10 +758,10 @@ function setupListeners() {
   const player = playerElement.value;
   if (!player) return;
 
-  enforceMuted(player);
+  syncPlayerMuted(player, effectiveMuted.value);
 
   const onLoadedMetadata = async () => {
-    enforceMuted(player);
+    syncPlayerMuted(player, effectiveMuted.value);
     durationSec.value = player.duration || 0;
     const video = player.querySelector('video');
     emit('loaded-metadata', {
@@ -766,7 +787,7 @@ function setupListeners() {
   };
 
   const onCanPlay = () => {
-    enforceMuted(player);
+    syncPlayerMuted(player, effectiveMuted.value);
     // HLS providers regularly ignore a seek issued at `loaded-metadata` because the
     // media source has no buffered range yet, so confirm the handover once the
     // provider reports it can play.
@@ -818,7 +839,7 @@ function setupListeners() {
   };
 
   const onVolumeChange = () => {
-    enforceMuted(player);
+    syncPlayerMuted(player, effectiveMuted.value);
   };
 
   const onError = () => {
@@ -907,7 +928,7 @@ watch(
   ([muted]) => {
     const player = playerElement.value;
     if (player) {
-      player.muted = muted;
+      syncPlayerMuted(player, muted);
     }
   }
 );

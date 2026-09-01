@@ -1,26 +1,47 @@
 import { createRouter, createWebHistory, type RouteLocationNormalized } from 'vue-router';
 
+// The dock destinations stay eagerly bundled: they are what the first tap hits, and
+// they are the routes kept alive below. Everything else is split out so the initial
+// download is the app shell instead of every screen in the product.
 import HomeView from '../views/HomeView.vue';
 import PostView from '../views/PostView.vue';
 import LibraryView from '../views/LibraryView.vue';
 import LikesView from '../views/LikesView.vue';
 import CollectionsView from '../views/CollectionsView.vue';
-import CollectionView from '../views/CollectionView.vue';
 import ExploreView from '../views/ExploreView.vue';
 import FolderView from '../views/FolderView.vue';
-import MomentView from '../views/MomentView.vue';
-import PlaceView from '../views/PlaceView.vue';
-import PlacesView from '../views/PlacesView.vue';
 import ReelsView from '../views/ReelsView.vue';
-import SharedFolderView from '../views/SharedFolderView.vue';
-import SharedPostView from '../views/SharedPostView.vue';
-import SharedTokenPostView from '../views/SharedTokenPostView.vue';
-import TrashView from '../views/TrashView.vue';
 import { useAppStore } from '../stores/app';
 import { useAuthStore } from '../stores/auth';
 import { pinia } from '../stores/pinia';
-import SettingsView from '../views/SettingsView.vue';
 import type { AuthCapabilities } from '../types/api';
+
+const CollectionView = () => import('../views/CollectionView.vue');
+const MomentView = () => import('../views/MomentView.vue');
+const PlaceView = () => import('../views/PlaceView.vue');
+const PlacesView = () => import('../views/PlacesView.vue');
+const SettingsView = () => import('../views/SettingsView.vue');
+const SharedFolderView = () => import('../views/SharedFolderView.vue');
+const SharedPostView = () => import('../views/SharedPostView.vue');
+const SharedTokenPostView = () => import('../views/SharedTokenPostView.vue');
+const TrashView = () => import('../views/TrashView.vue');
+
+/**
+ * Component names whose instance survives navigation. Leaving the dock destinations
+ * mounted is what removes the rebuild-on-every-tap stall: the grid, the scroll
+ * position and the already-fetched feed are all still there when the user comes back.
+ *
+ * These are component names rather than route names because that is what `KeepAlive`
+ * matches on; Vue infers them from the SFC filename.
+ */
+export const KEPT_ALIVE_VIEW_NAMES = [
+  'HomeView',
+  'ReelsView',
+  'ExploreView',
+  'LibraryView',
+  'LikesView',
+  'CollectionsView'
+] as const;
 
 type RouteCapability = keyof AuthCapabilities;
 

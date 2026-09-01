@@ -17,36 +17,39 @@ const execFileAsync = promisify(execFile);
 // which a LAN NAS can absorb. Every HLS client tolerates this target duration.
 export const HLS_SEGMENT_SECONDS = 2;
 
-const AUDIO_ARGS = ['-c:a', 'aac', '-b:a', '128k', '-ac', '2'];
 // Shorter segments mean more, cheaper ffmpeg invocations, so one more in flight keeps
 // the prefetch queue draining without starving playback of CPU.
 const SEGMENT_CONCURRENCY = Math.max(1, Math.min(4, appConfig.scanDerivativeConcurrency));
 const segmentLimit = pLimit(SEGMENT_CONCURRENCY);
 const inflightSegments = new Map<string, Promise<Buffer>>();
-
-// Jasper Lake (N5105) exposes fixed-function decoders for these codecs only.
-// Anything else (AV1 in particular) has to be decoded on the CPU even though the
-// encode half can still run on the GPU.
-const VAAPI_DECODABLE_CODECS = new Set(['h264', 'hevc', 'vp9', 'vp8', 'mpeg2video', 'vc1', 'mjpeg']);
+const invalidatedImageIds = new Set<number>();
 
 export type VideoStreamQuality = Exclude<VideoPlaybackQuality, 'auto' | 'original'>;
 
-export const STREAM_QUALITIES: VideoStreamQuality[] = ['1080p', '720p'];
+export const STREAM_QUALITIES: VideoStreamQuality[] = ['480p', '720p', '1080p'];
 
 interface QualityProfile {
   shortEdge: number;
-  bandwidth: number;
+  /** Video bit rate in bits per second. */
+  videoBitrate: number;
+  /** Audio bit rate in bits per second. */
+  audioBitrate: number;
 }
 
 const QUALITY_PROFILES: Record<VideoStreamQuality, QualityProfile> = {
-  '1080p': { shortEdge: 1080, bandwidth: 4_500_000 },
-  '720p': { shortEdge: 720, bandwidth: 2_200_000 }
+  // The first rendition must have enough headroom for a variable 2-3 Mbps WAN
+  // connection. The old 720p rendition alone was already too close to that limit.
+  '480p': { shortEdge: 480, videoBitrate: 800_000, audioBitrate: 64_000 },
+  '720p': { shortEdge: 720, videoBitrate: 1_700_000, audioBitrate: 96_000 },
+  '1080p': { shortEdge: 1080, videoBitrate: 3_500_000, audioBitrate: 128_000 }
 };
 
 interface HardwareState {
   mode: 'vaapi' | 'none';
   device: string | null;
 }
+
+const durationCache = new Map<string, number | null>();
 
 let hardwareStatePromise: Promise<HardwareState> | null = null;
 
@@ -175,7 +178,7 @@ export function buildMasterPlaylist(
   for (const quality of qualities) {
     const dimensions = resolveTargetDimensions(width, height, quality);
     lines.push(
-      `#EXT-X-STREAM-INF:BANDWIDTH=${QUALITY_PROFILES[quality].bandwidth},RESOLUTION=${dimensions.width}x${dimensions.height}`
+      `#EXT-X-STREAM-INF:BANDWIDTH=${Math.ceil((QUALITY_PROFILES[quality].videoBitrate + QUALITY_PROFILES[quality].audioBitrate) * 1.12)},RESOLUTION=${dimensions.width}x${dimensions.height}`
     );
     lines.push(buildPlaylistPath(imageId, quality));
   }
@@ -190,20 +193,22 @@ export function buildMasterPlaylist(
 export function resolveOfferedQualities(width: number, height: number): VideoStreamQuality[] {
   const shortEdge = Math.min(width, height);
   const offered = STREAM_QUALITIES.filter((quality) => QUALITY_PROFILES[quality].shortEdge < shortEdge);
-  return offered.length > 0 ? offered : ['720p'];
+  return offered.length > 0 ? offered : ['480p'];
 }
 
 function buildFfmpegArgs(options: {
   sourcePath: string;
-  sourceCodec: string | null;
   startSeconds: number;
   durationSeconds: number;
   target: { width: number; height: number };
+  quality: VideoStreamQuality;
   hardware: HardwareState;
 }): string[] {
-  const { sourcePath, sourceCodec, startSeconds, durationSeconds, target, hardware } = options;
-  const canDecodeOnGpu =
-    hardware.mode === 'vaapi' && sourceCodec !== null && VAAPI_DECODABLE_CODECS.has(sourceCodec);
+  const { sourcePath, startSeconds, durationSeconds, target, quality, hardware } = options;
+  const profile = QUALITY_PROFILES[quality];
+  // Keep decoding on CPU. VAAPI decode is fast but several camera/profile
+  // combinations on the NAS render green frames; hardware encoding remains safe.
+  const canDecodeOnGpu = false;
   const args = ['-hide_banner', '-v', 'error', '-nostdin'];
 
   if (hardware.mode === 'vaapi' && hardware.device) {
@@ -228,15 +233,25 @@ function buildFfmpegArgs(options: {
     const filter = canDecodeOnGpu
       ? `scale_vaapi=w=${target.width}:h=${target.height}`
       : `format=nv12,hwupload,scale_vaapi=w=${target.width}:h=${target.height}`;
-    args.push('-vf', filter, '-c:v', 'h264_vaapi', '-qp', '23');
+    args.push(
+      '-vf', filter,
+      '-c:v', 'h264_vaapi',
+      '-b:v', String(profile.videoBitrate),
+      '-maxrate', String(profile.videoBitrate),
+      '-bufsize', String(profile.videoBitrate * 2)
+    );
   } else {
     args.push(
       '-vf', `scale=${target.width}:${target.height}:flags=fast_bilinear`,
-      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-pix_fmt', 'yuv420p'
+      '-c:v', 'libx264', '-preset', 'veryfast',
+      '-b:v', String(profile.videoBitrate),
+      '-maxrate', String(profile.videoBitrate),
+      '-bufsize', String(profile.videoBitrate * 2),
+      '-pix_fmt', 'yuv420p'
     );
   }
 
-  args.push(...AUDIO_ARGS);
+  args.push('-c:a', 'aac', '-b:a', String(profile.audioBitrate), '-ac', '2');
   // Absolute timestamps keep independently produced segments continuous for the
   // player, which is what makes seeking land cleanly on any segment.
   args.push(
@@ -275,6 +290,26 @@ function getCachePath(imageId: number, quality: VideoStreamQuality, index: numbe
   return path.join(appConfig.hlsCacheDir, String(imageId), quality, `segment-${index}.ts`);
 }
 
+/** Removes every cached HLS segment for media that was permanently deleted. */
+export async function invalidateVideoStreamCache(imageIds: readonly number[]): Promise<void> {
+  const uniqueIds = [...new Set(imageIds)].filter((id) => Number.isSafeInteger(id) && id > 0);
+  if (uniqueIds.length === 0) return;
+
+  for (const imageId of uniqueIds) {
+    invalidatedImageIds.add(imageId);
+  }
+
+  await Promise.all(
+    uniqueIds.map(async (imageId) => {
+      try {
+        await fs.rm(path.join(appConfig.hlsCacheDir, String(imageId)), { recursive: true, force: true });
+      } catch (error) {
+        log.info(`HLS cache invalidation skipped | image ${imageId} | ${error instanceof Error ? error.message : String(error)}`);
+      }
+    })
+  );
+}
+
 async function readCachedSegment(cachePath: string): Promise<Buffer | null> {
   try {
     return await fs.readFile(cachePath);
@@ -297,7 +332,6 @@ async function writeCachedSegment(cachePath: string, payload: Buffer): Promise<v
 export interface TranscodeSegmentInput {
   imageId: number;
   sourcePath: string;
-  sourceCodec: string | null;
   durationMs: number | null;
   width: number;
   height: number;
@@ -330,10 +364,10 @@ export async function getSegment(input: TranscodeSegmentInput): Promise<Buffer> 
     const durationSeconds = getSegmentDuration(input.durationMs, input.index);
     const args = buildFfmpegArgs({
       sourcePath: input.sourcePath,
-      sourceCodec: input.sourceCodec,
       startSeconds,
       durationSeconds,
       target,
+      quality: input.quality,
       hardware
     });
 
@@ -355,16 +389,20 @@ export async function getSegment(input: TranscodeSegmentInput): Promise<Buffer> 
       payload = await runFfmpeg(
         buildFfmpegArgs({
           sourcePath: input.sourcePath,
-          sourceCodec: input.sourceCodec,
           startSeconds,
           durationSeconds,
           target,
+          quality: input.quality,
           hardware: { mode: 'none', device: null }
         })
       );
     }
 
-    await writeCachedSegment(cachePath, payload);
+    // A segment may still finish transcoding after its source was deleted. Never put
+    // that stale result back into the cache after invalidation removed its directory.
+    if (!invalidatedImageIds.has(input.imageId)) {
+      await writeCachedSegment(cachePath, payload);
+    }
     return payload;
   });
 
@@ -403,6 +441,42 @@ export async function getSourceVideoCodec(sourcePath: string): Promise<string | 
 
   codecCache.set(sourcePath, codec);
   return codec;
+}
+
+/** Probe duration on demand for legacy rows whose scan could not read it. */
+export async function getSourceVideoDurationMs(sourcePath: string): Promise<number | null> {
+  if (durationCache.has(sourcePath)) {
+    return durationCache.get(sourcePath) ?? null;
+  }
+
+  let durationMs: number | null = null;
+  try {
+    const { stdout } = await execFileAsync('ffprobe', [
+      '-v', 'error',
+      '-show_entries', 'format=duration:stream=codec_type,duration',
+      '-of', 'json',
+      sourcePath
+    ]);
+    const payload = JSON.parse(stdout) as {
+      format?: { duration?: string };
+      streams?: Array<{ codec_type?: string; duration?: string }>;
+    };
+    const formatDuration = Number.parseFloat(payload.format?.duration ?? '');
+    const videoDuration = Number.parseFloat(
+      payload.streams?.find((stream) => stream.codec_type === 'video')?.duration ?? ''
+    );
+    const seconds = Number.isFinite(formatDuration) && formatDuration > 0
+      ? formatDuration
+      : Number.isFinite(videoDuration) && videoDuration > 0
+        ? videoDuration
+        : null;
+    durationMs = seconds === null ? null : Math.round(seconds * 1000);
+  } catch {
+    durationMs = null;
+  }
+
+  durationCache.set(sourcePath, durationMs);
+  return durationMs;
 }
 
 export function isStreamQuality(value: string): value is VideoStreamQuality {

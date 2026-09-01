@@ -275,7 +275,11 @@
         "options": {
           "auto": {
             "label": "Automatica",
-            "description": "Reproduce el original cuando el navegador puede decodificarlo y transcodifica a demanda en los demas casos."
+            "description": "Empieza con un flujo de 480p y aumenta la calidad cuando la red lo permite; ideal para acceso externo."
+          },
+          "480p": {
+            "label": "480p (prioridad externa)",
+            "description": "Aproximadamente 0.9 Mbps. Ideal para una conexion externa de 2-3 Mbps y el inicio mas rapido."
           },
           "original": {
             "label": "Original",
@@ -287,7 +291,7 @@
           },
           "720p": {
             "label": "720p",
-            "description": "Transcodifica a demanda a 720p para el menor ancho de banda y el arranque mas rapido."
+            "description": "Aproximadamente 1.8 Mbps. Ideal para una conexion estable y mas rapida."
           }
         }
       },
@@ -398,6 +402,22 @@
       "scanCard": {
         "title": "Escanear biblioteca",
         "description": "Ejecuta un escaneo después de añadir carpetas o cuando quieras refrescar los medios indexados."
+      },
+      "scanFolders": {
+        "title": "Carpetas para escanear",
+        "description": "Elige qué carpetas se incluyen al ejecutar Escanear biblioteca o regenerar miniaturas.",
+        "chooseLabel": "Elegir carpetas",
+        "loading": "Cargando carpetas...",
+        "empty": "No hay carpetas disponibles bajo la raíz de la galería.",
+        "helper": "Seleccionar una carpeta incluye todas sus subcarpetas. Deja todo sin marcar para escanear toda la biblioteca.",
+        "allFolders": "Todas las carpetas",
+        "selectedCount": "{count} seleccionadas",
+        "hasChildren": "contiene subcarpetas",
+        "save": "Guardar alcance",
+        "saving": "Guardando...",
+        "saved": "Alcance guardado. Ejecuta Escanear biblioteca para aplicarlo.",
+        "loadError": "No se pudieron cargar las carpetas disponibles.",
+        "saveError": "No se pudo guardar el alcance del escaneo."
       },
       "statusLabel": {
         "storageUnavailable": "Almacenamiento no disponible",
@@ -1195,6 +1215,7 @@
     "deselectAll": "Deseleccionar todo",
     "processingProgress": "Procesando {done} / {total}...",
     "deletionProgress": "Eliminando en segundo plano {done} / {total}. Puedes seguir navegando.",
+    "dismissDeletionResult": "Entendido",
     "restoreButton": "Restaurar",
     "deleteButton": "Eliminar permanentemente",
     "libraryUnavailableTitle": "Almacenamiento de la biblioteca no disponible",

@@ -32,10 +32,18 @@ interface HoldToSpeedOptions extends HoldToSpeedPlayer {
   cancelActivationPx?: number;
   /** Converts screen coordinates into the media's local coordinate system. */
   getGesturePoint?: (event: PointerEvent) => GesturePoint;
+  /** Coordinates used for the full-surface scrub. This stays screen-horizontal in landscape. */
+  getScrubPoint?: (event: PointerEvent) => GesturePoint;
   /** Notifies a host that this surface has fully released its gesture ownership. */
   onGestureEnd?: () => void;
   /** Notifies a host as soon as horizontal scrub owns the pointer. */
   onGestureStart?: () => void;
+  /** Lets the player warm the next segment while the user previews a scrub. */
+  onScrub?: (seconds: number) => void;
+  /** Resolves a direct, finger-to-timeline position for full-surface scrubbing. */
+  scrubPositionFromEvent?: (event: PointerEvent) => number | null;
+  /** Applies the scrub preview on the next paint without waiting for release. */
+  previewSeek?: (seconds: number) => void;
 }
 
 const DEFAULT_ACTIVATION_MS = 300;
@@ -73,15 +81,42 @@ export function useHoldToSpeed(options: HoldToSpeedOptions) {
   let capturedElement: Element | null = null;
   let startX = 0;
   let startY = 0;
+  let scrubStartX = 0;
+  let scrubStartY = 0;
   let scrubOrigin = 0;
   let suppressClick = false;
   let releaseFallbackAttached = false;
+  let previewSeekFrame = 0;
+  let pendingPreviewSeek: number | null = null;
 
   function clearActivationTimer() {
     if (activationTimer !== null) {
       clearTimeout(activationTimer);
       activationTimer = null;
     }
+  }
+
+  function schedulePreviewSeek(seconds: number) {
+    if (!options.previewSeek) return;
+    pendingPreviewSeek = seconds;
+    if (previewSeekFrame !== 0 || typeof requestAnimationFrame === 'undefined') {
+      return;
+    }
+
+    previewSeekFrame = requestAnimationFrame(() => {
+      previewSeekFrame = 0;
+      const target = pendingPreviewSeek;
+      pendingPreviewSeek = null;
+      if (target !== null) options.previewSeek?.(target);
+    });
+  }
+
+  function clearPreviewSeek() {
+    if (previewSeekFrame !== 0 && typeof cancelAnimationFrame !== 'undefined') {
+      cancelAnimationFrame(previewSeekFrame);
+    }
+    previewSeekFrame = 0;
+    pendingPreviewSeek = null;
   }
 
   function releasePointerCapture() {
@@ -183,6 +218,7 @@ export function useHoldToSpeed(options: HoldToSpeedOptions) {
   function stop() {
     const hadActiveGesture = pointerId !== null;
     clearActivationTimer();
+    clearPreviewSeek();
     restorePlaybackRate();
     releasePointerCapture();
     detachReleaseFallback();
@@ -216,7 +252,7 @@ export function useHoldToSpeed(options: HoldToSpeedOptions) {
     void options.play?.();
   }
 
-  function beginScrub() {
+  function beginScrub(event: PointerEvent) {
     options.onGestureStart?.();
     capturePointer();
     clearActivationTimer();
@@ -225,7 +261,9 @@ export function useHoldToSpeed(options: HoldToSpeedOptions) {
     restorePlaybackRate();
     suppressClick = true;
     scrubOrigin = options.getCurrentTime();
-    scrubSeconds.value = scrubOrigin;
+    scrubSeconds.value = options.scrubPositionFromEvent?.(event) ?? scrubOrigin;
+    options.onScrub?.(scrubOrigin);
+    schedulePreviewSeek(scrubSeconds.value);
   }
 
   function onPointerdown(event: PointerEvent) {
@@ -241,6 +279,9 @@ export function useHoldToSpeed(options: HoldToSpeedOptions) {
     pointerId = event.pointerId;
     startX = point.x;
     startY = point.y;
+    const scrubPoint = options.getScrubPoint?.(event) ?? point;
+    scrubStartX = scrubPoint.x;
+    scrubStartY = scrubPoint.y;
     // Capture is claimed only once a gesture actually starts: taking it up front
     // would fight the reels deck's native vertical scrolling.
     surfaceElement = event.currentTarget instanceof Element ? event.currentTarget : null;
@@ -261,6 +302,9 @@ export function useHoldToSpeed(options: HoldToSpeedOptions) {
     const point = options.getGesturePoint?.(event) ?? { x: event.clientX, y: event.clientY };
     const deltaX = point.x - startX;
     const deltaY = point.y - startY;
+    const scrubPoint = options.getScrubPoint?.(event) ?? point;
+    const scrubDeltaX = scrubPoint.x - scrubStartX;
+    const scrubDeltaY = scrubPoint.y - scrubStartY;
 
     if (scrubSeconds.value === null) {
       // A vertical drag belongs to the host (dismiss or deck navigation). Dropping
@@ -268,8 +312,8 @@ export function useHoldToSpeed(options: HoldToSpeedOptions) {
       // otherwise sit still long enough to trip fast playback mid-scroll.
       if (
         (activationTimer !== null || isFastForwarding.value) &&
-        Math.abs(deltaY) > cancelActivationPx &&
-        Math.abs(deltaY) > Math.abs(deltaX)
+        Math.abs(scrubDeltaY) > cancelActivationPx &&
+        Math.abs(scrubDeltaY) > Math.abs(scrubDeltaX)
       ) {
         stop();
         return;
@@ -278,21 +322,25 @@ export function useHoldToSpeed(options: HoldToSpeedOptions) {
       // A sideways drag is a scrub, so the pending hold is dropped before it can fire.
       // Without this a swipe that took longer than `activationMs` to get going turned
       // into fast playback first, and fast playback used to win the gesture for good.
-      if (activationTimer !== null && Math.abs(deltaX) > cancelActivationPx && Math.abs(deltaX) > Math.abs(deltaY)) {
+      if (activationTimer !== null && Math.abs(scrubDeltaX) > cancelActivationPx && Math.abs(scrubDeltaX) > Math.abs(scrubDeltaY)) {
         clearActivationTimer();
       }
 
-      if (Math.abs(deltaX) < scrubActivationPx || Math.abs(deltaX) <= Math.abs(deltaY)) {
+      if (Math.abs(scrubDeltaX) < scrubActivationPx || Math.abs(scrubDeltaX) <= Math.abs(scrubDeltaY)) {
         return;
       }
 
       // Horizontal travel takes the gesture over even when fast playback already
       // started: `beginScrub` drops the rate back to the baseline first, so the clip
       // cannot be left running at 2x for the rest of the drag.
-      beginScrub();
+      beginScrub(event);
     }
 
-    scrubSeconds.value = clampToDuration(scrubOrigin + deltaX * secondsPerPixel);
+    scrubSeconds.value = clampToDuration(
+      options.scrubPositionFromEvent?.(event) ?? scrubOrigin + scrubDeltaX * secondsPerPixel
+    );
+    options.onScrub?.(scrubSeconds.value);
+    schedulePreviewSeek(scrubSeconds.value);
   }
 
   function onPointerup(event: PointerEvent) {

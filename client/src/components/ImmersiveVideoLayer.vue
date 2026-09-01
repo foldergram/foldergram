@@ -1,10 +1,10 @@
 <template>
   <Teleport to="body">
     <div
-      v-if="target"
       ref="layerElement"
       class="immersive-video"
       :class="{
+        'immersive-video--closed': !target,
         'immersive-video--dragging': isDragging,
         'immersive-video--rotated': isRotated
       }"
@@ -31,17 +31,6 @@
         </button>
 
         <div class="immersive-video__toolbar-group">
-          <button
-            class="immersive-video__button"
-            :class="{ 'immersive-video__button--active': isRotated }"
-            type="button"
-            :aria-label="t('post.immersive.rotate')"
-            :title="t('post.immersive.rotate')"
-            :aria-pressed="isRotated"
-            @click.stop="toggleOrientation"
-          >
-            <span class="i-fluent-rotate-left-20-regular h-5 w-5" aria-hidden="true" />
-          </button>
           <ImmersiveLikeButton v-if="bookmarkItem" :item="bookmarkItem" />
           <CollectionBookmark v-if="bookmarkItem" :item="bookmarkItem" placement="viewer" />
           <button
@@ -63,7 +52,7 @@
       </div>
 
       <Transition name="immersive-video-details">
-        <div v-if="detailsOpen" class="immersive-video__details" data-swipe-ignore="true">
+        <div v-if="detailsOpen && target" class="immersive-video__details" data-swipe-ignore="true">
           <ImmersiveDetailsPanel
             :id="target.id"
             media-type="video"
@@ -94,24 +83,27 @@
           :class="{ 'immersive-video__zoom-frame--interacting': zoom.isPanning.value || zoom.isPinching.value }"
           :style="{ transform: zoom.transform.value }"
         >
+          <div ref="sharedPlayerSlot" class="immersive-video__player-slot">
           <VideoMediaPlayer
+          v-if="!hasSharedPlayer"
           ref="playerComponent"
           class="immersive-video__player"
-          :src="target.previewUrl ?? ''"
+          :src="target?.previewUrl ?? ''"
           :media="target"
-          :original-url="target.originalUrl"
-          :playback-strategy="target.playbackStrategy"
-          :source-override="target.sourceOverride"
-          :width="target.width"
-          :height="target.height"
-          :poster="target.thumbnailUrl"
-          :alt="target.filename"
-          :title="target.filename"
+          :original-url="target?.originalUrl"
+          :playback-strategy="target?.playbackStrategy"
+          :source-override="target?.sourceOverride"
+          :width="target?.width"
+          :height="target?.height"
+          :poster="target?.thumbnailUrl"
+          :alt="target?.filename"
+          :title="target?.filename"
           :muted="appStore.videoMuted"
           :autoplay="!store.startPaused"
           preload="auto"
           :start-time="store.startTime"
           :gesture-orientation="gestureOrientation"
+          :progress-orientation="gestureOrientation"
           fullscreen-orientation="landscape"
           hold-to-seek
           capture-touch-gestures
@@ -120,8 +112,22 @@
           @toggle-mute="appStore.setVideoMuted(!appStore.videoMuted)"
           @surface-gesture-start="handleSurfaceGestureStart"
           />
+          </div>
         </div>
       </div>
+      <button
+        class="immersive-video__button immersive-video__orientation-button"
+        :class="{ 'immersive-video__button--active': isRotated }"
+        type="button"
+        data-swipe-ignore="true"
+        :aria-label="t('post.immersive.rotate')"
+        :title="t('post.immersive.rotate')"
+        :aria-pressed="isRotated"
+        @pointerdown.stop
+        @click.stop="toggleOrientation"
+      >
+        <OrientationToggleIcon class="immersive-video__orientation-icon" />
+      </button>
       </div>
     </div>
   </Teleport>
@@ -133,12 +139,14 @@ import { useI18n } from 'vue-i18n';
 
 import { useAppStore } from '../stores/app';
 import { useImmersiveVideoStore } from '../stores/immersive-video';
+import { useSharedVideoSurfaceStore } from '../stores/shared-video-surface';
 import { usePinchZoom } from '../composables/usePinchZoom';
 import { useVerticalDismiss } from '../composables/useVerticalDismiss';
 import { unlockScreenOrientation } from '../utils/fullscreen';
 import { resolveGesturePoint } from '../utils/gesture-coordinates';
 import type { FeedItem } from '../types/api';
 import CollectionBookmark from './CollectionBookmark.vue';
+import OrientationToggleIcon from './OrientationToggleIcon.vue';
 import ImmersiveLikeButton from './ImmersiveLikeButton.vue';
 import ImmersiveDetailsPanel from './ImmersiveDetailsPanel.vue';
 import VideoMediaPlayer from './VideoMediaPlayer.vue';
@@ -146,16 +154,23 @@ import VideoMediaPlayer from './VideoMediaPlayer.vue';
 const { t } = useI18n();
 const appStore = useAppStore();
 const store = useImmersiveVideoStore();
+const sharedVideoSurfaceStore = useSharedVideoSurfaceStore();
 const layerElement = ref<HTMLElement | null>(null);
 const stageElement = ref<HTMLElement | null>(null);
 const layerSize = ref<{ width: number; height: number } | null>(null);
 let layerSizeObserver: ResizeObserver | null = null;
 const playerComponent = ref<InstanceType<typeof VideoMediaPlayer> | null>(null);
+const sharedPlayerSlot = ref<HTMLElement | null>(null);
 const isRotated = ref(false);
 const detailsOpen = ref(false);
 const gestureOrientation = computed<'normal' | 'rotated'>(() => (isRotated.value ? 'rotated' : 'normal'));
 
 const target = computed(() => store.target);
+const hasSharedPlayer = computed(() =>
+  Boolean(target.value) &&
+  sharedVideoSurfaceStore.ownerId === `feed:${target.value?.id}` &&
+  sharedVideoSurfaceStore.isAttached
+);
 const bookmarkItem = computed<FeedItem | null>(() => {
   const current = target.value;
   if (!current) return null;
@@ -175,6 +190,7 @@ const bookmarkItem = computed<FeedItem | null>(() => {
     durationMs: current.durationMs,
     thumbnailUrl: current.thumbnailUrl,
     previewUrl: current.previewUrl ?? '',
+    previewFileUrl: current.previewFileUrl,
     playbackStrategy: current.playbackStrategy,
     streamUrl: current.streamUrl,
     originalUrl: current.originalUrl,
@@ -331,6 +347,7 @@ function isInteractiveTarget(node: EventTarget | null): boolean {
 function toggleOrientation() {
   zoom.reset();
   isRotated.value = !isRotated.value;
+  sharedVideoSurfaceStore.setOrientation(isRotated.value ? 'rotated' : 'normal');
 }
 
 function handleDeleted() {
@@ -340,23 +357,40 @@ function handleDeleted() {
 }
 
 async function requestClose() {
+  const sharedPlayer = sharedVideoSurfaceStore.getPlayer(sharedVideoSurfaceStore.ownerId);
+  const player = sharedPlayer ?? playerComponent.value?.getPlayerElement?.() ?? null;
+  let currentTime = 0;
+  let paused = true;
+
+  // A provider can be between detach and re-attach while a swipe closes the layer.
+  // Reading a custom element getter in that window may throw; closing must never be
+  // blocked by an optional handover snapshot.
+  try {
+    currentTime = Number.isFinite(player?.currentTime) ? player?.currentTime ?? 0 : 0;
+    paused = player?.paused ?? true;
+  } catch {
+    currentTime = playerComponent.value?.currentTime?.() ?? 0;
+    paused = playerComponent.value?.paused?.() ?? true;
+  }
+
   const exitState = target.value
     ? {
         id: target.value.id,
-        currentTime: playerComponent.value?.currentTime() ?? 0,
-        paused: playerComponent.value?.paused() ?? true
+        currentTime,
+        paused
       }
     : null;
 
   // Tearing down a decoding video while the browser is still leaving fullscreen is
   // what made the return to the feed stutter. Stopping playback and releasing
   // fullscreen first leaves only a detach for the frame that unmounts the layer.
-  void Promise.resolve(playerComponent.value?.pause()).catch(() => {
+  if (!sharedPlayer) void Promise.resolve(playerComponent.value?.pause()).catch(() => {
     // Pausing before the provider is attached is a no-op.
   });
 
   unlockScreenOrientation();
   isRotated.value = false;
+  sharedVideoSurfaceStore.release();
 
   store.close(exitState);
 }
@@ -416,6 +450,9 @@ watch(
       lockScroll();
       document.addEventListener('keydown', handleKeydown);
       await nextTick();
+      if (sharedPlayerSlot.value) {
+        sharedVideoSurfaceStore.attach(sharedPlayerSlot.value);
+      }
       observeLayerSize();
       return;
     }
@@ -426,6 +463,7 @@ watch(
     zoom.reset();
     unlockScroll();
     unlockScreenOrientation();
+    sharedVideoSurfaceStore.release();
     document.removeEventListener('keydown', handleKeydown);
   }
 );
@@ -447,6 +485,10 @@ onBeforeUnmount(() => {
   overscroll-behavior: contain;
   touch-action: none;
   transition: transform 0.22s ease, opacity 0.22s ease;
+}
+
+.immersive-video--closed {
+  display: none;
 }
 
 /* Everything the viewer sees lives in here so the toolbar and the details panel turn
@@ -501,11 +543,27 @@ onBeforeUnmount(() => {
   color: #38bdf8;
 }
 
+.immersive-video__orientation-button {
+  position: absolute;
+  right: 0.85rem;
+  bottom: calc(4.9rem + env(safe-area-inset-bottom, 0px));
+  z-index: 4;
+}
+
 .immersive-video__details {
   position: absolute;
-  top: max(3.6rem, calc(env(safe-area-inset-top) + 3.2rem));
-  right: 0.85rem;
+  inset: 0;
   z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  padding: max(3.6rem, calc(env(safe-area-inset-top) + 3.2rem)) 0.85rem max(1rem, env(safe-area-inset-bottom));
+}
+
+.immersive-video__details > * {
+  pointer-events: auto;
+  width: min(22rem, 100%);
 }
 
 .immersive-video-details-enter-active,
@@ -533,6 +591,11 @@ onBeforeUnmount(() => {
 }
 
 .immersive-video__player {
+  width: 100%;
+  height: 100%;
+}
+
+.immersive-video__player-slot {
   width: 100%;
   height: 100%;
 }

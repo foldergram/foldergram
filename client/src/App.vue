@@ -13,7 +13,13 @@
   <RouterView v-else-if="isPublicShareRoute" />
   <AuthGate v-else-if="authStore.requiresLogin" />
   <AppShell v-else>
-    <RouterView :route="displayRoute" />
+    <RouterView v-slot="{ Component }" :route="displayRoute">
+      <!-- The dock destinations stay mounted so switching tabs restores the existing
+           grid and scroll position instead of rebuilding the whole view. -->
+      <KeepAlive :include="keptAliveViewNames">
+        <component :is="Component" />
+      </KeepAlive>
+    </RouterView>
     <div v-if="showImageModal" class="app__image-modal-layer" @click.self="closeImageModal">
       <PostView :id="String(route.params.id ?? '')" modal @close="closeImageModal" />
     </div>
@@ -33,7 +39,7 @@ import AdminUnlockDialog from './components/AdminUnlockDialog.vue';
 import AuthGate from './components/AuthGate.vue';
 import ImmersiveImageLayer from './components/ImmersiveImageLayer.vue';
 import ImmersiveVideoLayer from './components/ImmersiveVideoLayer.vue';
-import { canAccessRoute, routeAllowsPublicShareAccess } from './router';
+import { canAccessRoute, routeAllowsPublicShareAccess, KEPT_ALIVE_VIEW_NAMES } from './router';
 import PostView from './views/PostView.vue';
 import { useAppStore } from './stores/app';
 import { useAuthStore } from './stores/auth';
@@ -107,6 +113,7 @@ const displayRoute = computed<RouteLocationNormalizedLoaded | undefined>(() =>
   showImageModal.value ? modalBackgroundRoute.value ?? undefined : route
 );
 const showAuthLoading = computed(() => !authStore.ready && authStore.loading);
+const keptAliveViewNames = [...KEPT_ALIVE_VIEW_NAMES];
 
 function resetProtectedState() {
   unlockModalScroll();

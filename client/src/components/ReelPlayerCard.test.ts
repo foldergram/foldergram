@@ -239,7 +239,7 @@ describe('ReelPlayerCard', () => {
     expect(rotateButton?.attributes('aria-pressed')).toBe('false');
   });
 
-  it('toggles playback from the dedicated play button', async () => {
+  it('does not render a dedicated play button', async () => {
     const wrapper = mount(ReelPlayerCard, {
       props: {
         item: createFeedItem(22),
@@ -253,21 +253,11 @@ describe('ReelPlayerCard', () => {
 
     await flushPromises();
 
-    const player = getPlayerElement(wrapper);
-    expect(player.paused).toBe(false);
-
-    await wrapper.get('.reel-player-card__playback-button').trigger('click');
-    await flushPromises();
-
-    expect(player.pauseCallCount).toBe(1);
-    expect(player.paused).toBe(true);
-    expect(wrapper.find('.reel-player-card__pause-indicator').exists()).toBe(true);
-
-    await wrapper.get('.reel-player-card__playback-button').trigger('click');
-    await flushPromises();
-
-    expect(player.paused).toBe(false);
-    expect(wrapper.find('.reel-player-card__pause-indicator').exists()).toBe(false);
+    expect(
+      wrapper
+        .findAll('.reel-player-card__playback-button')
+        .filter((button) => button.attributes('aria-label') === 'Toggle playback')
+    ).toHaveLength(0);
   });
 
   it('keeps seek-bar interaction from toggling reel playback', async () => {

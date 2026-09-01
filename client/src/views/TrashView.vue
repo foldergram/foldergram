@@ -29,7 +29,7 @@
         <button
           class="min-h-[2.35rem] px-4 py-[0.6rem] rounded-[0.75rem] border border-transparent bg-[#b42318] text-white font-semibold disabled:opacity-55 disabled:cursor-not-allowed"
           type="button"
-          :disabled="selectedCount === 0 || processing || trashStore.deletionActive"
+          :disabled="selectedCount === 0 || processing"
           @click="permanentConfirmOpen = true"
         >
           {{ t('trashPage.deleteButton') }}
@@ -56,12 +56,19 @@
       >
         {{ deletionProgressLabel }}
       </p>
-      <p
+      <div
         v-else-if="deletionFailureLabel"
-        class="m-0 px-4 py-[0.75rem] rounded-[0.85rem] border border-[rgba(217,48,37,0.24)] text-[0.88rem] text-[#b42318] bg-[rgba(217,48,37,0.08)]"
+        class="m-0 flex items-center justify-between gap-3 px-4 py-[0.75rem] rounded-[0.85rem] border border-[rgba(217,48,37,0.24)] text-[0.88rem] text-[#b42318] bg-[rgba(217,48,37,0.08)] max-sm:flex-col max-sm:items-start"
       >
-        {{ deletionFailureLabel }}
-      </p>
+        <span>{{ deletionFailureLabel }}</span>
+        <button
+          class="min-h-[2rem] px-3 py-[0.4rem] rounded-[0.6rem] border border-[rgba(217,48,37,0.32)] bg-transparent text-[#b42318] font-semibold"
+          type="button"
+          @click="dismissDeletionResult"
+        >
+          {{ t('trashPage.dismissDeletionResult') }}
+        </button>
+      </div>
       <p
         v-if="actionError"
         class="m-0 px-4 py-[0.75rem] rounded-[0.85rem] border border-[rgba(217,48,37,0.24)] text-[0.88rem] text-[#b42318] bg-[rgba(217,48,37,0.08)]"
@@ -269,8 +276,13 @@ const deletionProgressLabel = computed(() => {
   });
 });
 const deletionFailureLabel = computed(() => {
-  if (trashStore.deletionActive || trashStore.deletionFailedCount === 0) {
+  if (trashStore.deletionActive) {
     return null;
+  }
+
+  if (trashStore.deletionFailedCount === 0) {
+    // A stalled batch (for example storage offline) reports a message without failures.
+    return trashStore.deletionErrorMessage;
   }
 
   const count = formatCount(trashStore.deletionFailedCount);
@@ -430,23 +442,26 @@ function handlePermanentDelete() {
     return;
   }
 
-  // Close the dialog and clear the selection right away; the store keeps deleting
-  // in the background so the user is free to browse other pages meanwhile.
+  // Hand the batch to the server and close the dialog right away. The job keeps
+  // running even if this tab is closed, so the user is free to browse elsewhere.
   permanentConfirmOpen.value = false;
   selectedIds.value = [];
   actionError.value = null;
 
-  void trashStore.deletePermanently(ids).then((result) => {
-    if (result.succeededCount > 0) {
-      refreshVisibleDataInBackground();
-    }
-  });
+  void trashStore.deletePermanently(ids);
+}
+
+function dismissDeletionResult() {
+  void trashStore.dismissDeletionResult();
 }
 
 onMounted(async () => {
   if (appStore.isLibraryUnavailable) {
     return;
   }
+
+  // Reconnect to a batch that may still be running from an earlier session.
+  void trashStore.syncDeletionJob();
 
   if (trashStore.initialized) {
     void trashStore.loadInitial(true);
@@ -455,6 +470,17 @@ onMounted(async () => {
 
   await trashStore.loadInitial(true);
 });
+
+// Once the server-side batch settles, refresh the other views so their counts
+// reflect the removed posts.
+watch(
+  () => trashStore.deletionActive,
+  (active, wasActive) => {
+    if (wasActive && !active && trashStore.deletionTotal > 0) {
+      refreshVisibleDataInBackground();
+    }
+  }
+);
 
 watch(
   () => trashStore.items.map((item) => item.id),
