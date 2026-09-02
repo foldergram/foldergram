@@ -49,6 +49,7 @@
               <media-time-slider
                 class="reel-player-card__seekbar"
                 aria-label="Seek video"
+                :noSwipeGesture.prop="true"
                 @click.stop
                 @pointerdown.stop
                 @pointerup.stop
@@ -199,6 +200,13 @@ import {
 import Avatar from './Avatar.vue';
 import OrientationToggleIcon from './OrientationToggleIcon.vue';
 import { usePinchZoom } from '../composables/usePinchZoom';
+import {
+  safeMediaPlayerGetCurrentTime,
+  safeMediaPlayerPause,
+  safeMediaPlayerPlay,
+  safeMediaPlayerSetCurrentTime,
+  safeMediaPlayerSetMuted
+} from '../utils/safe-media-player';
 
 const props = withDefaults(
   defineProps<{
@@ -219,6 +227,9 @@ const immersiveVideoStore = useImmersiveVideoStore();
 const playerElement = ref<MediaPlayerElement | null>(null);
 const stageElement = ref<HTMLElement | null>(null);
 const isPaused = ref(false);
+// Vidstack may report the old clock briefly after a seek. Keep the latest visible
+// scrub target as the next gesture's relative origin until playback catches up.
+const reelScrubPosition = ref<number | null>(null);
 // Vidstack drops its poster as soon as the provider attaches, which is what leaves
 // a black card when the first segment has not decoded yet. Holding our own copy
 // until playback really advances is what keeps a cover on screen.
@@ -253,6 +264,8 @@ const MAX_AUTOPLAY_RETRIES = 3;
 // transcoding can need several seconds before the first segment is playable.
 const MAX_STALL_RETRIES = 12;
 const MAX_STALL_RETRY_DELAY_MS = 1_200;
+const STARTUP_FALLBACK_MS = 2_000;
+let startupFallbackTimer = 0;
 const REEL_SCRUB_SECONDS_PER_PIXEL = 0.08;
 const REEL_SCRUB_ACTIVATION_PX = 18;
 
@@ -266,6 +279,34 @@ function clearAutoplayRetry() {
 function resetAutoplayRetry() {
   clearAutoplayRetry();
   autoplayRetryAttempts = 0;
+}
+
+function clearStartupFallback() {
+  if (startupFallbackTimer !== 0) {
+    window.clearTimeout(startupFallbackTimer);
+    startupFallbackTimer = 0;
+  }
+}
+
+function scheduleStartupFallback() {
+  if (!props.active || immersiveVideoStore.isOpen || fallbackSource.value) {
+    return;
+  }
+
+  clearStartupFallback();
+  startupFallbackTimer = window.setTimeout(() => {
+    startupFallbackTimer = 0;
+    const player = playerElement.value;
+    if (!player || !props.active || immersiveVideoStore.isOpen || fallbackSource.value) {
+      return;
+    }
+
+    if ((player.currentTime ?? 0) > 0.05) {
+      return;
+    }
+
+    switchToFallbackSource();
+  }, STARTUP_FALLBACK_MS);
 }
 
 function scheduleAutoplayRetry() {
@@ -313,13 +354,23 @@ const reelZoom = usePinchZoom({
 let reelZoomClickUntil = 0;
 
 function syncMuted(player: MediaPlayerElement, muted: boolean) {
-  player.muted = muted;
+  safeMediaPlayerSetMuted(player, muted);
   const videos = [player.querySelector('video'), player.shadowRoot?.querySelector('video')];
   for (const video of videos) {
     if (video instanceof HTMLVideoElement) {
       video.muted = muted;
     }
   }
+}
+
+function getNativeVideo(player: MediaPlayerElement): HTMLVideoElement | null {
+  const lightDomVideo = player.querySelector('video');
+  if (lightDomVideo instanceof HTMLVideoElement) {
+    return lightDomVideo;
+  }
+
+  const shadowVideo = player.shadowRoot?.querySelector('video');
+  return shadowVideo instanceof HTMLVideoElement ? shadowVideo : null;
 }
 
 // Vidstack re-initialises its own muted state after the provider attaches and after
@@ -345,9 +396,7 @@ async function syncPlayback() {
   if (!props.active || immersiveVideoStore.isOpen || !isViewActive.value) {
     resetAutoplayRetry();
     isPaused.value = false;
-    void player.pause().catch(() => {
-      // Ignore pause rejections before the provider is ready.
-    });
+    safeMediaPlayerPause(player);
     syncMuted(player, effectiveMuted.value);
     return;
   }
@@ -360,9 +409,20 @@ async function syncPlayback() {
   warmVideoStream(props.item, appStore.videoPlaybackQuality, { segments: 4 });
 
   try {
-    await player.play();
+    if (!(await safeMediaPlayerPlay(player))) {
+      scheduleAutoplayRetry();
+      return;
+    }
+    // Vidstack can resolve its player-level play promise while the provider is
+    // still attaching the native element. Do not treat that as real playback.
+    const nativeVideo = getNativeVideo(player);
+    if (!nativeVideo || nativeVideo.paused) {
+      scheduleAutoplayRetry();
+      return;
+    }
     resetAutoplayRetry();
     isPaused.value = false;
+    scheduleStartupFallback();
     return;
   } catch {
     if (effectiveMuted.value) {
@@ -378,11 +438,14 @@ async function syncPlayback() {
 
   // Audible autoplay was refused. The verdict holds for the whole document until the
   // next user gesture, and it is recorded without overwriting the stored preference.
-  appStore.reportAudibleAutoplayBlocked();
-  syncMuted(player, true);
+  const blocked = appStore.reportAudibleAutoplayBlocked();
+  syncMuted(player, blocked ? true : effectiveMuted.value);
 
   try {
-    await player.play();
+    if (!(await safeMediaPlayerPlay(player))) {
+      scheduleAutoplayRetry();
+      return;
+    }
     syncMuted(player, effectiveMuted.value);
     resetAutoplayRetry();
     isPaused.value = false;
@@ -401,6 +464,11 @@ function bindPlayerEventListeners(player: MediaPlayerElement | null) {
 
   const handleReady = () => {
     void syncPlayback();
+    window.setTimeout(() => {
+      if (props.active && isViewActive.value && !immersiveVideoStore.isOpen) {
+        void syncPlayback();
+      }
+    }, 0);
   };
   const handleVolume = () => {
     enforceMuted();
@@ -411,16 +479,19 @@ function bindPlayerEventListeners(player: MediaPlayerElement | null) {
   const handlePlay = () => {
     isPaused.value = false;
     if (!props.active) {
-      void player.pause().catch(() => {
-        // Ignore pause rejections before the provider is ready.
-      });
+      safeMediaPlayerPause(player);
     }
   };
   const handlePause = () => {
     isPaused.value = props.active;
   };
   const handleProgress = () => {
-    if ((player.currentTime ?? 0) > 0.05) {
+    const currentTime = player.currentTime ?? 0;
+    if (reelScrubPosition.value !== null && Math.abs(currentTime - reelScrubPosition.value) <= 1.5) {
+      reelScrubPosition.value = null;
+    }
+    if (currentTime > 0.05) {
+      clearStartupFallback();
       hasRenderedFrame.value = true;
     }
   };
@@ -440,6 +511,9 @@ function bindPlayerEventListeners(player: MediaPlayerElement | null) {
 
   player.addEventListener('loaded-metadata', handleReady);
   player.addEventListener('can-play', handleReady);
+  player.addEventListener('provider-change', handleReady);
+  player.addEventListener('source-change', handleReady);
+  player.addEventListener('load-start', handleReady);
   player.addEventListener('volume-change', handleVolume);
   player.addEventListener('play', handlePlay);
   player.addEventListener('pause', handlePause);
@@ -453,6 +527,9 @@ function bindPlayerEventListeners(player: MediaPlayerElement | null) {
     removeHlsLibraryBinding();
     player.removeEventListener('loaded-metadata', handleReady);
     player.removeEventListener('can-play', handleReady);
+    player.removeEventListener('provider-change', handleReady);
+    player.removeEventListener('source-change', handleReady);
+    player.removeEventListener('load-start', handleReady);
     player.removeEventListener('volume-change', handleVolume);
     player.removeEventListener('play', handlePlay);
     player.removeEventListener('pause', handlePause);
@@ -482,6 +559,10 @@ async function toggleSound() {
 
   syncMuted(player, nextMuted);
 
+  if (!nextMuted) {
+    void safeMediaPlayerPlay(player);
+  }
+
   if (player.paused) {
     await syncPlayback();
   }
@@ -507,9 +588,10 @@ const holdSpeed = useHoldToSpeed({
   canStart: (event) => props.active && !isInteractiveTarget(event.target),
   secondsPerPixel: REEL_SCRUB_SECONDS_PER_PIXEL,
   scrubActivationPx: REEL_SCRUB_ACTIVATION_PX,
-  getCurrentTime: () => playerElement.value?.currentTime ?? 0,
+  getCurrentTime: () => reelScrubPosition.value ?? (playerElement.value ? safeMediaPlayerGetCurrentTime(playerElement.value) : 0),
   getDuration: () => playerElement.value?.duration ?? 0,
   seekTo: (seconds) => {
+    reelScrubPosition.value = seconds;
     const player = playerElement.value;
     if (!player) {
       return;
@@ -518,10 +600,24 @@ const holdSpeed = useHoldToSpeed({
     warmSeekTarget(seconds);
 
     try {
-      player.currentTime = seconds;
+      safeMediaPlayerSetCurrentTime(player, seconds);
     } catch {
       // Seeking before the provider is attached is a no-op.
     }
+  },
+  // The seek bar reads the media element's currentTime. Updating it during the drag
+  // makes the bar and the central preview label show the same live target.
+  previewSeek: (seconds) => {
+    reelScrubPosition.value = seconds;
+    const player = playerElement.value;
+    if (player) {
+      safeMediaPlayerSetCurrentTime(player, seconds);
+    }
+  },
+  // Keep the central time label on the exact same target as the bottom progress bar,
+  // rather than letting it derive a second position from the gesture origin.
+  onScrub: (seconds) => {
+    reelScrubPosition.value = seconds;
   },
   getPlaybackRate: () => playerElement.value?.playbackRate ?? 1,
   setPlaybackRate: (rate) => {
@@ -537,9 +633,7 @@ const holdSpeed = useHoldToSpeed({
     }
   },
   play: () => {
-    void playerElement.value?.play().catch(() => {
-      // Ignore play rejections before the provider is ready.
-    });
+    if (playerElement.value) void safeMediaPlayerPlay(playerElement.value);
   },
   // The deck rotates the card with CSS rather than the device, so the axes the viewer
   // sees are swapped while landscape is on. Reading the shared rotation flag keeps the
@@ -549,7 +643,7 @@ const holdSpeed = useHoldToSpeed({
 });
 
 const scrubLabel = computed(() => {
-  const seconds = holdSpeed.scrubSeconds.value;
+  const seconds = reelScrubPosition.value ?? holdSpeed.scrubSeconds.value;
   if (seconds === null) {
     return '';
   }
@@ -587,14 +681,16 @@ async function togglePlayback() {
   }
 
   if (player.paused) {
+    // Resuming from the reel surface is a user gesture. Restore the one global
+    // sound preference before the provider starts playback again.
+    appStore.activateVideoSoundFromUserGesture();
+    syncMuted(player, effectiveMuted.value);
     await syncPlayback();
     return;
   }
 
   isPaused.value = true;
-  void player.pause().catch(() => {
-    // Ignore pause rejections before the provider is ready.
-  });
+  safeMediaPlayerPause(player);
 }
 
 function handleSurfaceClick(event?: MouseEvent) {
@@ -730,6 +826,8 @@ watch(
     holdSpeed.stop();
     reelZoom.reset();
     resetAutoplayRetry();
+    clearStartupFallback();
+    reelScrubPosition.value = null;
     fallbackSource.value = null;
     isPaused.value = false;
     hasRenderedFrame.value = false;
@@ -775,7 +873,7 @@ watch(
     const player = playerElement.value;
     if (exitState && player) {
       try {
-        player.currentTime = exitState.currentTime;
+        safeMediaPlayerSetCurrentTime(player, exitState.currentTime);
       } catch {
         // Seeking before the provider is attached is a no-op.
       }
@@ -816,11 +914,10 @@ onBeforeUnmount(() => {
   holdSpeed.stop();
   reelZoom.reset();
   clearAutoplayRetry();
+  clearStartupFallback();
   removePlayerEventListeners?.();
   removePlayerEventListeners = null;
-  void playerElement.value?.pause().catch(() => {
-    // Ignore pause rejections before the provider is ready.
-  });
+  if (playerElement.value) safeMediaPlayerPause(playerElement.value);
 });
 </script>
 

@@ -175,6 +175,7 @@ const playbackMedia = computed<VideoPlaybackMedia | null>(() => {
 
   return {
     id: current.id,
+    filename: current.filename,
     playbackStrategy: current.playbackStrategy ?? null,
     streamUrl: current.streamUrl ?? null,
     originalUrl: current.previewUrl,

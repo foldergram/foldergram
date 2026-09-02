@@ -901,11 +901,11 @@ img[data-loaded="true"] {
 .video-progress-footer__slider .vds-slider-track {
   position: absolute;
   inset-inline: 0;
-  bottom: 0;
-  top: auto;
+  top: 50%;
+  bottom: auto;
   height: 3px;
   border-radius: 0;
-  transform: none;
+  transform: translateY(-50%);
   transition: height 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
 }
 
@@ -951,8 +951,8 @@ img[data-loaded="true"] {
 
 .video-progress-footer__thumb {
   position: absolute;
-  bottom: 0;
-  top: auto;
+  top: 50%;
+  bottom: auto;
   left: var(--slider-fill, 0%);
   z-index: 3;
   width: 0.78rem;
@@ -962,7 +962,7 @@ img[data-loaded="true"] {
   box-shadow: 0 10px 22px rgba(0, 0, 0, 0.32);
   opacity: 0;
   pointer-events: none;
-  transform: translate(-50%, 50%);
+  transform: translate(-50%, -50%);
   transition:
     opacity 0.18s ease,
     transform 0.18s ease;
@@ -975,7 +975,7 @@ img[data-loaded="true"] {
 .video-progress-footer__slider[data-focus] .video-progress-footer__thumb,
 .video-progress-footer__slider:focus-visible .video-progress-footer__thumb {
   opacity: 1;
-  transform: translate(-50%, 40%);
+  transform: translate(-50%, -50%);
 }
 
 .video-progress-footer__slider[data-focus] .video-progress-footer__track,
@@ -1127,11 +1127,24 @@ img[data-loaded="true"] {
    layer. Override the feed's cover crop there so a landscape source remains whole
    in a portrait fullscreen viewport. Vidstack creates the native video at runtime,
    so this must be a global selector rather than a component-scoped one. */
+.immersive-video #immersive-video-slot,
+.immersive-video #immersive-video-slot .feed-card__player,
+.immersive-video #immersive-video-slot media-provider,
 .immersive-video #immersive-video-slot .feed-card__player video,
 .immersive-video #immersive-video-slot .feed-card__player img,
 .immersive-video .video-media-player__player video,
 .immersive-video .video-media-player__player img {
   object-fit: contain !important;
+}
+
+.immersive-video #immersive-video-slot,
+.immersive-video #immersive-video-slot .feed-card__player {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  background: #000;
 }
 
 .feed-card__video-shell--interactive {

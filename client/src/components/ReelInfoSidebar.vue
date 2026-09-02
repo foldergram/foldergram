@@ -360,20 +360,18 @@ watch(
   border-left: 0;
 }
 
-/* Phone presentation: a bottom sheet anchored to the safe area, so the delete button
-   is always inside the sheet instead of being covered by the action rail. */
+/* The reel details are a modal on phones too. Keeping it in the viewport center avoids
+   PWA viewport offsets that previously made this panel appear in the lower-left. */
 .reels-info-sidebar--sheet {
-  position: fixed;
-  inset-inline: 0;
-  bottom: 0;
+  position: relative;
+  inset: auto;
   z-index: 80;
-  width: auto;
-  max-height: 78dvh;
-  padding: 0.4rem 1.1rem calc(1.1rem + env(safe-area-inset-bottom));
-  border: 0;
-  border-top: 1px solid color-mix(in srgb, var(--border) 86%, transparent 14%);
-  border-radius: 1.35rem 1.35rem 0 0;
-  box-shadow: 0 -18px 48px rgba(15, 20, 25, 0.32);
+  width: min(22rem, calc(100vw - 2rem));
+  max-height: min(34rem, calc(100dvh - 2rem));
+  padding: 1rem;
+  border: 1px solid color-mix(in srgb, var(--border) 86%, transparent 14%);
+  border-radius: 1.35rem;
+  box-shadow: 0 22px 48px rgba(15, 20, 25, 0.32);
   overscroll-behavior: contain;
   touch-action: pan-y;
 }

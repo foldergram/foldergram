@@ -3,7 +3,8 @@ import { computed, ref } from 'vue';
 export interface HoldToSpeedPlayer {
   getCurrentTime: () => number;
   getDuration: () => number;
-  seekTo: (seconds: number) => void;
+  /** Resolves once the player has accepted the final scrub target. */
+  seekTo: (seconds: number) => void | Promise<void>;
   getPlaybackRate: () => number;
   setPlaybackRate: (rate: number) => void;
   /** Resumed after a hold so the clip never stays parked on a frame. */
@@ -40,8 +41,6 @@ interface HoldToSpeedOptions extends HoldToSpeedPlayer {
   onGestureStart?: () => void;
   /** Lets the player warm the next segment while the user previews a scrub. */
   onScrub?: (seconds: number) => void;
-  /** Resolves a direct, finger-to-timeline position for full-surface scrubbing. */
-  scrubPositionFromEvent?: (event: PointerEvent) => number | null;
   /** Applies the scrub preview on the next paint without waiting for release. */
   previewSeek?: (seconds: number) => void;
 }
@@ -88,6 +87,7 @@ export function useHoldToSpeed(options: HoldToSpeedOptions) {
   let releaseFallbackAttached = false;
   let previewSeekFrame = 0;
   let pendingPreviewSeek: number | null = null;
+  let committingScrub = false;
 
   function clearActivationTimer() {
     if (activationTimer !== null) {
@@ -161,6 +161,29 @@ export function useHoldToSpeed(options: HoldToSpeedOptions) {
    * would never end and the clip stayed at 2x. Window-level listeners guarantee a
    * release is always observed.
    */
+  function commitScrub(target: number) {
+    if (committingScrub) {
+      return;
+    }
+
+    committingScrub = true;
+    const seekResult = options.seekTo(target);
+    const finish = () => {
+      // A direct or HLS provider can still report the old decoded segment right
+      // after `currentTime` is assigned. Resume only after the final seek itself
+      // has settled, otherwise the clock can snap back on release.
+      void options.play?.();
+      stop();
+    };
+
+    if (seekResult && typeof (seekResult as Promise<void>).then === 'function') {
+      void seekResult.then(finish, stop);
+      return;
+    }
+
+    finish();
+  }
+
   function handleWindowRelease(event: PointerEvent) {
     if (pointerId === null || event.pointerId !== pointerId) {
       return;
@@ -168,8 +191,8 @@ export function useHoldToSpeed(options: HoldToSpeedOptions) {
 
     const target = scrubSeconds.value;
     if (target !== null) {
-      options.seekTo(target);
-      void options.play?.();
+      commitScrub(target);
+      return;
     }
 
     stop();
@@ -225,6 +248,7 @@ export function useHoldToSpeed(options: HoldToSpeedOptions) {
     scrubSeconds.value = null;
     pointerId = null;
     surfaceElement = null;
+    committingScrub = false;
 
     if (hadActiveGesture) {
       options.onGestureEnd?.();
@@ -252,7 +276,7 @@ export function useHoldToSpeed(options: HoldToSpeedOptions) {
     void options.play?.();
   }
 
-  function beginScrub(event: PointerEvent) {
+  function beginScrub() {
     options.onGestureStart?.();
     capturePointer();
     clearActivationTimer();
@@ -261,7 +285,7 @@ export function useHoldToSpeed(options: HoldToSpeedOptions) {
     restorePlaybackRate();
     suppressClick = true;
     scrubOrigin = options.getCurrentTime();
-    scrubSeconds.value = options.scrubPositionFromEvent?.(event) ?? scrubOrigin;
+    scrubSeconds.value = scrubOrigin;
     options.onScrub?.(scrubOrigin);
     schedulePreviewSeek(scrubSeconds.value);
   }
@@ -333,12 +357,10 @@ export function useHoldToSpeed(options: HoldToSpeedOptions) {
       // Horizontal travel takes the gesture over even when fast playback already
       // started: `beginScrub` drops the rate back to the baseline first, so the clip
       // cannot be left running at 2x for the rest of the drag.
-      beginScrub(event);
+      beginScrub();
     }
 
-    scrubSeconds.value = clampToDuration(
-      options.scrubPositionFromEvent?.(event) ?? scrubOrigin + scrubDeltaX * secondsPerPixel
-    );
+    scrubSeconds.value = clampToDuration(scrubOrigin + scrubDeltaX * secondsPerPixel);
     options.onScrub?.(scrubSeconds.value);
     schedulePreviewSeek(scrubSeconds.value);
   }
@@ -350,8 +372,8 @@ export function useHoldToSpeed(options: HoldToSpeedOptions) {
 
     const target = scrubSeconds.value;
     if (target !== null) {
-      options.seekTo(target);
-      void options.play?.();
+      commitScrub(target);
+      return;
     }
 
     stop();

@@ -348,6 +348,7 @@ import type { FolderSummary } from '../types/api';
 import { searchFolders, rankExploreItems } from '../utils/explore';
 import { formatFolderTitle } from '../utils/folder-titles';
 import { buildLikedCountByFolder } from '../utils/home-recommendations';
+import { useRouteScrollMemory } from '../composables/useRouteScrollMemory';
 
 // Named explicitly so <KeepAlive include> keeps matching after a minified build.
 defineOptions({ name: 'ExploreView' });
@@ -360,6 +361,7 @@ const appStore = useAppStore();
 const exploreStore = useExploreStore();
 const foldersStore = useFoldersStore();
 const likesStore = useLikesStore();
+useRouteScrollMemory({ key: 'explore' });
 const route = useRoute();
 const router = useRouter();
 const { t, locale } = useI18n();

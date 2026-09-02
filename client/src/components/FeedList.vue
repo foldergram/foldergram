@@ -29,10 +29,11 @@ interface HomeVideoVisibilityChange {
   centerOffset: number;
 }
 
-// A video can be partly offset by the top rail or an interleaved image. Keeping the
-// threshold above a small visibility sliver avoids decoding hidden cards, while not
-// leaving the first visible video without an owner during a mixed image/video scroll.
-const MIN_HOME_VIDEO_RATIO = 0.35;
+// The card observer reports at 20% increments. Requiring 35% here created a dead
+// zone where a clearly visible clip had no playback owner until fullscreen forced
+// it active. At 20%, the first meaningfully visible video starts while tiny slivers
+// still stay paused.
+const MIN_HOME_VIDEO_RATIO = 0.2;
 
 const props = withDefaults(
   defineProps<{
@@ -76,6 +77,14 @@ const activeVideoId = computed<number | null>(() => {
       activeRatio = metrics.ratio;
       activeCenterOffset = metrics.centerOffset;
     }
+  }
+
+  // IntersectionObserver may report its first entry a frame after the feed has
+  // painted, especially after a PWA reload. Keep the first video as a temporary
+  // owner so refresh never leaves the homepage with every player unbound; the
+  // observer immediately replaces it once real visibility metrics arrive.
+  if (activeId === null) {
+    return props.items.find((item) => item.mediaType === 'video')?.id ?? null;
   }
 
   return activeId;

@@ -10,6 +10,23 @@ function initializeTransientDatabase(database: DatabaseSync): DatabaseSync {
   return database;
 }
 
+function configureConcurrentDatabaseAccess(database: DatabaseSync): void {
+  // Web reads and the scanner worker write concurrently after the production split.
+  // WAL keeps readers from blocking the worker; the timeout absorbs short write bursts.
+  database.exec('PRAGMA busy_timeout = 5000;');
+  try {
+    database.exec('PRAGMA journal_mode = WAL;');
+  } catch (error) {
+    // The companion process can be flipping the journal mode during the first
+    // simultaneous boot. It is enough for one process to complete that durable
+    // setting; retrying on every restart would turn a harmless race into a 502.
+    if (!(error instanceof Error) || !/database is locked/i.test(error.message)) {
+      throw error;
+    }
+  }
+  database.exec('PRAGMA synchronous = NORMAL;');
+}
+
 // Without sqlite_stat1 the planner guesses index selectivity and can pick a
 // disastrous join order (folder summaries measured 15s instead of 10ms).
 // PRAGMA optimize only re-analyses tables whose stats are missing or stale.
@@ -45,6 +62,7 @@ class DatabaseManager {
     } else {
       runStartupMigrations({ databasePath });
       db = new DatabaseSync(databasePath);
+      configureConcurrentDatabaseAccess(db);
       assertNoLegacySchema(db);
       refreshQueryPlannerStatistics(db);
     }

@@ -66,7 +66,7 @@
       :muted="appStore.videoMuted"
     />
 
-    <RouterLink v-else-if="!isHomeContext" custom :to="imageRoute" v-slot="{ href, navigate }">
+      <RouterLink v-else-if="!isHomeContext" custom :to="imageRoute" v-slot="{ href, navigate }">
       <a
         :href="href"
         class="relative block overflow-hidden rounded-[0.5rem] border border-border bg-surface-alt"
@@ -76,6 +76,7 @@
         <ResilientImage
           :src="item.thumbnailUrl"
           :alt="item.filename"
+          :video-src="item.mediaType === 'video' ? getOriginalMediaUrl(item.id) : null"
           loading="lazy"
           :retry-while="appStore.isInitialScan"
           class="h-full w-full object-cover"
@@ -134,13 +135,14 @@
         :muted.prop="homeEffectiveMuted"
         :autoplay.prop="shouldAutoplayHomeVideo"
         :loop.prop="true"
-        :load="props.isActiveVideo ? 'eager' : 'visible'"
+        :load="shouldAutoplayHomeVideo ? 'eager' : 'visible'"
         preload="auto"
         @pointerdown="handleHomeVideoPointerdown"
         @pointermove="handleHomeVideoPointermove"
         @pointerup="handleHomeVideoPointerup"
         @pointercancel="homeHoldSpeed.onPointercancel"
         @fullscreen-change="handleHomeVideoFullscreenChange"
+        @click="handleSharedImmersiveClick"
       >
         <media-provider />
         <media-poster
@@ -211,13 +213,13 @@
       </media-player>
       </Teleport>
 
-      <img
+      <ResilientImage
         v-if="!hasRenderedHomeVideoFrame"
-        class="feed-card__first-frame"
         :src="item.thumbnailUrl"
+        :video-src="getOriginalMediaUrl(item.id)"
         :alt="item.filename"
-        decoding="async"
-        aria-hidden="true"
+        class="feed-card__first-frame"
+        loading="eager"
       />
 
       <div
@@ -432,42 +434,6 @@
       />
     </Teleport>
 
-    <ConfirmDialog
-      v-if="confirmDeleteOpen"
-      :title="t('post.feedCard.delete.title')"
-      :message="deleteDialogMessage"
-      :confirm-label="deleteDialogConfirmLabel"
-      :loading="deleting"
-      @cancel="confirmDeleteOpen = false"
-      @confirm="confirmDelete"
-    >
-      <template #details>
-        <label class="flex items-start gap-3 mt-3 cursor-pointer select-none">
-          <input
-            v-model="deleteOriginalFromDisk"
-            class="mt-[0.2rem]"
-            type="checkbox"
-            :disabled="deleting"
-          />
-          <span class="grid gap-[0.18rem]">
-            <span class="text-[0.92rem] font-semibold text-text">{{ t('post.feedCard.delete.deleteOriginalLabel') }}</span>
-            <span class="text-[0.84rem] text-muted">{{ t('post.feedCard.delete.deleteOriginalDescription') }}</span>
-          </span>
-        </label>
-        <p
-          v-if="deleteOriginalFromDisk"
-          class="m-0 mt-3 px-3 py-[0.8rem] rounded-[0.9rem] border border-[rgba(217,48,37,0.24)] text-[0.84rem] text-[#b42318] bg-[rgba(217,48,37,0.08)]"
-        >
-          {{ t('post.feedCard.delete.deleteOriginalWarning') }}
-        </p>
-        <p
-          v-if="deleteError"
-          class="m-0 mt-3 px-3 py-[0.8rem] rounded-[0.9rem] border border-[rgba(217,48,37,0.24)] text-[0.84rem] text-[#b42318] bg-[rgba(217,48,37,0.08)]"
-        >
-          {{ deleteError }}
-        </p>
-      </template>
-    </ConfirmDialog>
   </article>
 </template>
 
@@ -480,7 +446,7 @@ import { RouterLink, useRoute } from 'vue-router';
 import type { PlayerSrc } from 'vidstack';
 import type { MediaPlayerElement } from 'vidstack/elements';
 
-import { deleteImage, trashImage } from '../api/gallery';
+import { trashImage } from '../api/gallery';
 import { useImageCaptionEditor } from '../composables/useImageCaptionEditor';
 import { usePostShare } from '../composables/usePostShare';
 import { useViewActive } from '../composables/useViewActivation';
@@ -500,18 +466,26 @@ import { formatFolderTitle } from '../utils/folder-titles';
 import { formatMediaDuration, formatVideoTimestamp } from '../utils/media';
 import { resolveFeedAspectRatio } from '../utils/media-layout';
 import { getOriginalMediaDownloadUrl, getOriginalMediaUrl } from '../utils/original-media';
+import { resolveGesturePoint } from '../utils/gesture-coordinates';
 import {
   resolveVideoFallbackSource,
   resolveVideoSource,
+  seekMediaPlayerAndWait,
   toPlayerSrc,
   useBundledHlsLibrary,
   warmVideoStream,
   type ResolvedVideoSource
 } from '../utils/video-playback';
+import {
+  safeMediaPlayerGetCurrentTime,
+  safeMediaPlayerPause,
+  safeMediaPlayerPlay,
+  safeMediaPlayerSetCurrentTime,
+  safeMediaPlayerSetMuted
+} from '../utils/safe-media-player';
 import Avatar from './Avatar.vue';
 import CarouselMediaStage from './CarouselMediaStage.vue';
 import CollectionBookmark from './CollectionBookmark.vue';
-import ConfirmDialog from './ConfirmDialog.vue';
 import PostCaptionModal from './PostCaptionModal.vue';
 import ResilientImage from './ResilientImage.vue';
 import VideoProgressFooter from './VideoProgressFooter.vue';
@@ -559,9 +533,6 @@ const { t, locale } = useI18n();
 const menuOpen = ref(false);
 const postShare = usePostShare();
 const deleting = ref(false);
-const confirmDeleteOpen = ref(false);
-const deleteOriginalFromDisk = ref(false);
-const deleteError = ref<string | null>(null);
 const isEditingCaption = ref(false);
 const homeVideoTarget = ref<HTMLElement | null>(null);
 const homePlayerElement = ref<MediaPlayerElement | null>(null);
@@ -570,6 +541,8 @@ const isHomeVideoPaused = ref(false);
 const isHomeVideoFullscreen = ref(false);
 const homeVideoDurationMs = ref(props.item.durationMs ?? 0);
 const homeVideoCurrentTimeMs = ref(0);
+const pendingHomeVideoSeek = ref<number | null>(null);
+let lastSharedImmersiveTapAt = 0;
 const lastHomeImageTapAt = ref(0);
 let homeImmersiveStartupFallbackTimer: ReturnType<typeof setTimeout> | null = null;
 let homeVideoPlaybackRetryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -636,6 +609,16 @@ const sharedSurfaceTarget = computed(() =>
     ? sharedVideoSurfaceStore.target
     : null
 );
+
+/**
+ * The immersive layer turns the shared player with a CSS rotation instead of asking the
+ * platform for landscape, so every gesture on it has to be measured in the picture's
+ * frame while it is rotated. Portrait, and any card still inline in the feed, stays on
+ * screen coordinates.
+ */
+const homeGestureOrientation = computed<'normal' | 'rotated'>(() =>
+  sharedSurfaceTarget.value && sharedVideoSurfaceStore.orientation === 'rotated' ? 'rotated' : 'normal'
+);
 const homeVideoTimeLabel = computed(() =>
   formatVideoTimestamp(
     homeVideoDurationMs.value > 0 ? homeVideoDurationMs.value : props.item.durationMs,
@@ -646,17 +629,11 @@ const showHomeVideoControls = computed(() => props.isActiveVideo || isHomeVideoF
 const showHomeVideoSurfaceControls = computed(() => props.isActiveVideo || isHomeVideoFullscreen.value);
 const showHomeVideoPausedIndicator = computed(() => showHomeVideoSurfaceControls.value && isHomeVideoPaused.value);
 const shouldAutoplayHomeVideo = computed(
-  () => isViewActive.value && props.isActiveVideo && !immersiveVideoStore.isOpen
+  () =>
+    isViewActive.value &&
+    (props.isActiveVideo || sharedSurfaceTarget.value !== null) &&
+    (!immersiveVideoStore.isOpen || sharedVideoSurfaceStore.ownerId === `feed:${props.item.id}`)
 );
-const deleteDialogMessage = computed(() =>
-  deleteOriginalFromDisk.value
-    ? t('post.feedCard.delete.messagePermanent')
-    : t('post.feedCard.delete.messageTrash')
-);
-const deleteDialogConfirmLabel = computed(() =>
-  deleteOriginalFromDisk.value ? t('post.feedCard.delete.confirmPermanent') : t('post.feedCard.delete.confirm')
-);
-
 function isPrimaryPlainClick(event: MouseEvent) {
   return !event.defaultPrevented && event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
 }
@@ -852,6 +829,16 @@ function getHomeVideoElement(player: MediaPlayerElement | null): HTMLVideoElemen
   return shadowVideo instanceof HTMLVideoElement ? shadowVideo : null;
 }
 
+function homeVideoHasPaintedFrame(player: MediaPlayerElement | null): boolean {
+  const video = getHomeVideoElement(player);
+  return Boolean(
+    video &&
+    video.videoWidth > 0 &&
+    video.videoHeight > 0 &&
+    video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA
+  );
+}
+
 function syncHomeVideoAspectRatio(player: MediaPlayerElement | null = homePlayerElement.value) {
   const video = getHomeVideoElement(player);
   if (!video || video.videoWidth <= 0 || video.videoHeight <= 0) {
@@ -870,9 +857,7 @@ function syncHomeVideoTimelineState(player: MediaPlayerElement | null = homePlay
     homeVideoDurationMs.value = player.duration * 1000;
   }
 
-  if (Number.isFinite(player.currentTime) && player.currentTime >= 0) {
-    homeVideoCurrentTimeMs.value = player.currentTime * 1000;
-  }
+  homeVideoCurrentTimeMs.value = safeMediaPlayerGetCurrentTime(player) * 1000;
 }
 
 function previewHomeVideoTo(seconds: number) {
@@ -882,11 +867,7 @@ function previewHomeVideoTo(seconds: number) {
   }
 
   homeVideoCurrentTimeMs.value = Math.max(0, seconds) * 1000;
-  try {
-    player.currentTime = Math.max(0, seconds);
-  } catch {
-    // The provider may still be attaching; the final seek will retry on release.
-  }
+  safeMediaPlayerSetCurrentTime(player, seconds);
 }
 
 function seekHomeVideoTo(seconds: number) {
@@ -903,11 +884,25 @@ function seekHomeVideoTo(seconds: number) {
     source: homeActiveVideoSource.value
   });
   homeVideoCurrentTimeMs.value = next * 1000;
-  try {
-    player.currentTime = next;
-  } catch {
-    // The provider may still be attaching; the next player event will settle it.
+  pendingHomeVideoSeek.value = next;
+  return seekMediaPlayerAndWait(player, next).finally(() => {
+    if (pendingHomeVideoSeek.value === next) {
+      pendingHomeVideoSeek.value = null;
+    }
+  });
+}
+
+function getHomeScrubStartTime(): number {
+  if (pendingHomeVideoSeek.value !== null) {
+    return pendingHomeVideoSeek.value;
   }
+
+  const displayedTime = homeVideoCurrentTimeMs.value / 1000;
+  if (Number.isFinite(displayedTime) && displayedTime > 0) {
+    return displayedTime;
+  }
+
+  return homePlayerElement.value ? safeMediaPlayerGetCurrentTime(homePlayerElement.value) : 0;
 }
 
 function stopHomeVideoObserver(options: { clearVisibility?: boolean } = {}) {
@@ -951,7 +946,7 @@ const homeEffectiveMuted = computed(() => appStore.videoEffectivelyMuted);
 const isViewActive = useViewActive();
 
 function syncHomeVideoMuted(player: MediaPlayerElement, muted: boolean) {
-  player.muted = muted;
+  safeMediaPlayerSetMuted(player, muted);
   const nativeVideo = player.querySelector('video');
   if (nativeVideo instanceof HTMLVideoElement) {
     nativeVideo.muted = muted;
@@ -959,7 +954,7 @@ function syncHomeVideoMuted(player: MediaPlayerElement, muted: boolean) {
 }
 
 async function playHomeVideo(player: MediaPlayerElement) {
-  await player.play();
+  await safeMediaPlayerPlay(player);
 }
 
 function clearHomeImmersiveStartupFallback() {
@@ -997,9 +992,14 @@ function scheduleHomeVideoStartupFallback(player: MediaPlayerElement) {
 
     // A preview can stall without raising a media error. `play()` resolving alone is
     // not proof of a decoded frame, so check native readiness/progress on both surfaces.
-    const shouldBePlaying = !immersiveVideoStore.isOpen && props.isActiveVideo && isViewActive.value;
+    const ownsSharedImmersivePlayer =
+      immersiveVideoStore.isOpen && sharedVideoSurfaceStore.ownerId === `feed:${props.item.id}`;
+    const shouldBePlaying =
+      props.isActiveVideo &&
+      isViewActive.value &&
+      (!immersiveVideoStore.isOpen || ownsSharedImmersivePlayer);
 
-    if (!shouldBePlaying || ((player.currentTime ?? 0) > 0.05 && !player.paused)) {
+    if (!shouldBePlaying || ((player.currentTime ?? 0) > 0.05 && !player.paused && homeVideoHasPaintedFrame(player))) {
       return;
     }
 
@@ -1017,18 +1017,35 @@ async function syncHomeVideoPlayback() {
     return;
   }
 
+  // LOCKED: 这张卡 Teleport 进沉浸式后仍是同一个解码器，禁止 pause。
+  // 见 docs/player-contract.md。
+  const ownsSharedImmersivePlayer =
+    immersiveVideoStore.isOpen && sharedVideoSurfaceStore.ownerId === `feed:${props.item.id}`;
+
+  if (ownsSharedImmersivePlayer) {
+    syncHomeVideoMuted(player, homeEffectiveMuted.value);
+    // Teleporting the same <media-player> into the immersive slot can leave the
+    // native element paused even though the viewer just opened a playing clip.
+    if (!immersiveVideoStore.startPaused && player.paused) {
+      void playHomeVideo(player).catch(() => {});
+    }
+    return;
+  }
+
   // The immersive layer owns playback while it is open, so the inline copy stays
   // paused instead of decoding the same clip twice. A cached (deactivated) view is
   // still mounted, so it must stand down too or the audio keeps playing on another tab.
-  if ((!props.isActiveVideo && !isHomeVideoFullscreen.value) || immersiveVideoStore.isOpen || !isViewActive.value) {
+  if (
+    (!props.isActiveVideo && !isHomeVideoFullscreen.value) ||
+    immersiveVideoStore.isOpen ||
+    !isViewActive.value
+  ) {
     clearHomeImmersiveStartupFallback();
     isHomeVideoPaused.value = false;
     // Route changes can detach the provider while Vidstack keeps the old clock.
     // Keep the real thumbnail visible until a new native frame is decoded.
     hasRenderedHomeVideoFrame.value = false;
-    void player.pause().catch(() => {
-      // Ignore pause rejections before the provider is ready.
-    });
+    safeMediaPlayerPause(player);
     syncHomeVideoMuted(player, homeEffectiveMuted.value);
     return;
   }
@@ -1044,6 +1061,15 @@ async function syncHomeVideoPlayback() {
 
   try {
     await playHomeVideo(player);
+    const nativeVideo = getHomeVideoElement(player);
+    if (!nativeVideo || nativeVideo.paused || nativeVideo.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+      // Vidstack may resolve play() before the provider has attached/decoded the
+      // native video. Keep the active card retrying instead of showing a dead window.
+      scheduleHomeVideoPlaybackRetry();
+      scheduleHomeVideoStartupFallback(player);
+      return;
+    }
+
     clearHomeVideoPlaybackRetry();
     isHomeVideoPaused.value = false;
     scheduleHomeVideoStartupFallback(player);
@@ -1093,7 +1119,10 @@ function handleHomeVideoDurationChange(event: Event) {
 
 function handleHomeVideoTimeUpdate(event: Event) {
   const nativeVideo = getHomeVideoElement(homePlayerElement.value);
-  if (nativeVideo && nativeVideo.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && nativeVideo.currentTime > 0.05) {
+  if (
+    homeVideoHasPaintedFrame(homePlayerElement.value) ||
+    (nativeVideo && nativeVideo.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && nativeVideo.currentTime > 0.05)
+  ) {
     hasRenderedHomeVideoFrame.value = true;
   }
 
@@ -1104,9 +1133,26 @@ function handleHomeVideoTimeUpdate(event: Event) {
     'currentTime' in event.detail &&
     typeof event.detail.currentTime === 'number'
   ) {
+    if (
+      pendingHomeVideoSeek.value !== null &&
+      Math.abs(event.detail.currentTime - pendingHomeVideoSeek.value) > 1.5
+    ) {
+      return;
+    }
+    pendingHomeVideoSeek.value = null;
     homeVideoCurrentTimeMs.value = event.detail.currentTime * 1000;
     return;
   }
+
+  const currentTime = homePlayerElement.value ? safeMediaPlayerGetCurrentTime(homePlayerElement.value) : 0;
+  if (
+    pendingHomeVideoSeek.value !== null &&
+    typeof currentTime === 'number' &&
+    Math.abs(currentTime - pendingHomeVideoSeek.value) > 1.5
+  ) {
+    return;
+  }
+  pendingHomeVideoSeek.value = null;
 
   syncHomeVideoTimelineState();
 }
@@ -1125,17 +1171,22 @@ function handleHomeVideoEnded() {
 
 function openImmersiveVideo() {
   const player = homePlayerElement.value;
-  const currentTime = Number.isFinite(player?.currentTime) ? player?.currentTime ?? 0 : 0;
-  // Inactive feed cards are paused automatically to save decoders. That is not a
-  // user pause, so opening one must start playback instead of staying at 0:00.
-  const startPaused = isHomeVideoPaused.value;
+  const currentTime = player ? safeMediaPlayerGetCurrentTime(player) : 0;
+  // Only a real user pause should carry into immersive. Inactive cards are paused by
+  // the feed to save decoders; treating that as startPaused made a tap open a frozen frame.
+  const startPaused = showHomeVideoSurfaceControls.value && isHomeVideoPaused.value;
+
+  // Opening the viewer is a direct user action. Preserve the global sound-on choice
+  // before Teleport/provider lifecycle events are allowed to run.
+  appStore.activateVideoSoundFromUserGesture();
+  if (player) {
+    syncHomeVideoMuted(player, homeEffectiveMuted.value);
+  }
 
   // Claim the existing DOM/player before opening the layer. The layer then moves this
   // exact node, keeping its native decoder, buffer and current frame alive.
   if (!sharedVideoSurfaceStore.claim(`feed:${props.item.id}`)) {
-    void player?.pause().catch(() => {
-      // The legacy immersive player remains the safe fallback if this card is not ready.
-    });
+    if (player) safeMediaPlayerPause(player);
   }
 
   // The fullscreen layer resumes at `currentTime`, which usually lands in a
@@ -1184,6 +1235,44 @@ async function handleHomeVideoSurfaceClick(event: MouseEvent) {
   openImmersiveVideo();
 }
 
+async function handleSharedImmersiveClick(event: MouseEvent) {
+  if (!sharedSurfaceTarget.value) {
+    return;
+  }
+
+  if (!isPrimaryPlainClick(event) || isInteractiveTarget(event.target)) {
+    return;
+  }
+
+  if (homeHoldSpeed.shouldSuppressClick()) {
+    event.preventDefault();
+    event.stopPropagation();
+    return;
+  }
+
+  event.stopPropagation();
+  const now = Date.now();
+  if (now - lastSharedImmersiveTapAt > 320) {
+    lastSharedImmersiveTapAt = now;
+    return;
+  }
+
+  lastSharedImmersiveTapAt = 0;
+  const player = homePlayerElement.value;
+  if (!player) {
+    return;
+  }
+
+  if (player.paused) {
+    await playHomeVideo(player).catch(() => {});
+    isHomeVideoPaused.value = false;
+    return;
+  }
+
+  safeMediaPlayerPause(player);
+  isHomeVideoPaused.value = true;
+}
+
 function handleHomeVideoSurfaceKeydown(event: KeyboardEvent) {
   if (isInteractiveTarget(event.target)) {
     return;
@@ -1200,40 +1289,31 @@ function handleHomeVideoSurfaceKeydown(event: KeyboardEvent) {
 const homeHoldSpeed = useHoldToSpeed({
   canStart: (event) => !isInteractiveTarget(event.target),
   secondsPerPixel: 0.1,
-  getCurrentTime: () => homePlayerElement.value?.currentTime ?? 0,
+  getCurrentTime: getHomeScrubStartTime,
   getDuration: () => homePlayerElement.value?.duration ?? 0,
-  seekTo: (seconds) => {
-    const player = homePlayerElement.value;
-    if (!player) return;
-    warmVideoStream(props.item, appStore.videoPlaybackQuality, { fromSeconds: seconds, segments: 2, source: homeActiveVideoSource.value });
-    player.currentTime = seconds;
-  },
+  seekTo: seekHomeVideoTo,
   previewSeek: (seconds) => {
     const player = homePlayerElement.value;
     if (!player) return;
     homeVideoCurrentTimeMs.value = seconds * 1000;
-    player.currentTime = seconds;
+    safeMediaPlayerSetCurrentTime(player, seconds);
   },
   getPlaybackRate: () => homePlayerElement.value?.playbackRate ?? 1,
   setPlaybackRate: (rate) => {
     if (homePlayerElement.value) homePlayerElement.value.playbackRate = rate;
   },
-  play: () => homePlayerElement.value?.play().catch(() => {}),
-  scrubPositionFromEvent: (event) => {
-    // Once the shared player is turned by the immersive layer, its transformed
-    // bounding box no longer represents the screen's horizontal scrub axis. Keep
-    // the inline player's precise absolute mapping in portrait and let the
-    // composable use its continuous delta mapping in the turned view.
-    if (sharedSurfaceTarget.value && sharedVideoSurfaceStore.orientation === 'rotated') {
-      return null;
+  play: () => {
+    if (homePlayerElement.value) {
+      void safeMediaPlayerPlay(homePlayerElement.value);
     }
-
-    const player = homePlayerElement.value;
-    if (!player || !Number.isFinite(player.duration) || player.duration <= 0) return null;
-    const bounds = player.getBoundingClientRect();
-    if (bounds.width <= 0) return null;
-    return Math.min(Math.max((event.clientX - bounds.left) / bounds.width, 0), 1) * player.duration;
-  }
+  },
+  // Gesture ownership is decided in the picture's own frame. Turned a quarter by the
+  // immersive layer, the swipe the viewer reads as sideways arrives as screen-vertical
+  // movement, so without this mapping landscape scrubbing never activated at all.
+  getGesturePoint: (event) => resolveGesturePoint(event, homeGestureOrientation.value),
+  getScrubPoint: (event) => resolveGesturePoint(event, homeGestureOrientation.value),
+  // Relative scrubbing: each drag continues from the time at press, so a second
+  // swipe left/right keeps moving from 5:00 instead of jumping to the finger's X.
 });
 
 function handleHomeVideoPointerdown(event: PointerEvent) {
@@ -1283,7 +1363,7 @@ function enforceHomeVideoMuted() {
     return;
   }
 
-  player.muted = homeEffectiveMuted.value;
+  safeMediaPlayerSetMuted(player, homeEffectiveMuted.value);
   const videos = [player.querySelector('video'), player.shadowRoot?.querySelector('video')];
   for (const video of videos) {
     if (video instanceof HTMLVideoElement) {
@@ -1302,6 +1382,9 @@ async function toggleHomeVideoSound() {
 
   if (player) {
     syncHomeVideoMuted(player, nextMuted);
+    if (!nextMuted) {
+      void playHomeVideo(player).catch(() => {});
+    }
   }
 }
 
@@ -1360,9 +1443,8 @@ function bindHomePlayerEventListeners(player: MediaPlayerElement | null) {
     // browser rejects the underlying audible `<video>`. Retry muted so an active
     // feed card never remains visibly stuck at 0:00 after a page refresh.
     if (!homeEffectiveMuted.value) {
-      if (appStore.reportAudibleAutoplayBlocked()) {
-        syncHomeVideoMuted(player, true);
-      }
+      const blocked = appStore.reportAudibleAutoplayBlocked();
+      syncHomeVideoMuted(player, blocked ? true : homeEffectiveMuted.value);
     }
 
     void playHomeVideo(player).then(() => {
@@ -1370,6 +1452,9 @@ function bindHomePlayerEventListeners(player: MediaPlayerElement | null) {
     }).catch(() => {
       // A manual play button remains available if the browser rejects again.
     });
+  };
+  const handleProviderReady = () => {
+    void syncHomeVideoPlayback();
   };
 
   const removeHlsLibraryBinding = useBundledHlsLibrary(player);
@@ -1384,6 +1469,9 @@ function bindHomePlayerEventListeners(player: MediaPlayerElement | null) {
   player.addEventListener('ended', handleEnded);
   player.addEventListener('error', handleError);
   player.addEventListener('auto-play-fail', handleAutoPlayFail);
+  player.addEventListener('provider-change', handleProviderReady);
+  player.addEventListener('source-change', handleProviderReady);
+  player.addEventListener('load-start', handleProviderReady);
 
   removeHomePlayerEventListeners = () => {
     removeHlsLibraryBinding();
@@ -1397,6 +1485,9 @@ function bindHomePlayerEventListeners(player: MediaPlayerElement | null) {
     player.removeEventListener('ended', handleEnded);
     player.removeEventListener('error', handleError);
     player.removeEventListener('auto-play-fail', handleAutoPlayFail);
+    player.removeEventListener('provider-change', handleProviderReady);
+    player.removeEventListener('source-change', handleProviderReady);
+    player.removeEventListener('load-start', handleProviderReady);
   };
 
   if (player.hasAttribute('data-can-play')) {
@@ -1449,15 +1540,28 @@ async function handleCaptionSave(nextCaption: string | null) {
   }
 }
 
-function handleDelete() {
+async function handleDelete() {
   if (!authStore.canDeleteMedia) {
     return;
   }
 
   menuOpen.value = false;
-  deleteOriginalFromDisk.value = false;
-  deleteError.value = null;
-  confirmDeleteOpen.value = true;
+  deleting.value = true;
+
+  try {
+    // Delete from the feed means move to Trash. Permanent removal is intentionally
+    // confined to Trash, so this tap has no second confirmation step.
+    const deleted = await trashImage(props.item.id);
+    feedStore.removeImage(deleted.id);
+    likesStore.removeImage(deleted.id);
+    const removedFolder = foldersStore.removeImage(deleted.id, deleted.folderSlug, props.item.mediaType);
+    momentsStore.removeImage(deleted.id);
+    appStore.removeIndexedImage(removedFolder ? 1 : 0, props.item.mediaType);
+  } catch {
+    // The post stays in place when the move fails, so the action can be retried.
+  } finally {
+    deleting.value = false;
+  }
 }
 
 async function handleLike() {
@@ -1466,30 +1570,6 @@ async function handleLike() {
   }
 
   await likesStore.toggleLike(props.item);
-}
-
-async function confirmDelete() {
-  if (!authStore.canDeleteMedia) {
-    return;
-  }
-
-  deleting.value = true;
-  deleteError.value = null;
-
-  try {
-    const deleted = deleteOriginalFromDisk.value ? await deleteImage(props.item.id) : await trashImage(props.item.id);
-    feedStore.removeImage(deleted.id);
-    likesStore.removeImage(deleted.id);
-    const removedFolder = foldersStore.removeImage(deleted.id, deleted.folderSlug, props.item.mediaType);
-    momentsStore.removeImage(deleted.id);
-    appStore.removeIndexedImage(removedFolder ? 1 : 0, props.item.mediaType);
-    confirmDeleteOpen.value = false;
-    deleteOriginalFromDisk.value = false;
-  } catch (error) {
-    deleteError.value = error instanceof Error ? error.message : 'Unable to delete post';
-  } finally {
-    deleting.value = false;
-  }
 }
 
 watch(
@@ -1534,11 +1614,15 @@ watch(isViewActive, () => {
 
 watch(
   () => props.isActiveVideo,
-  () => {
+  async () => {
     if (!props.isActiveVideo && !isHomeVideoFullscreen.value) {
       hasRenderedHomeVideoFrame.value = false;
     }
+    await nextTick();
     void syncHomeVideoPlayback();
+    if (props.isActiveVideo) {
+      scheduleHomeVideoPlaybackRetry();
+    }
   }
 );
 
@@ -1550,6 +1634,9 @@ watch(
   () => immersiveVideoStore.isOpen,
   async (isOpen) => {
     if (isOpen) {
+      // Claiming a card changes both its load mode and its Teleport target. Wait
+      // for those DOM/provider changes before asking the native video to play.
+      await nextTick();
       await syncHomeVideoPlayback();
       return;
     }
@@ -1558,7 +1645,7 @@ watch(
     const player = homePlayerElement.value;
     if (exitState && player) {
       try {
-        player.currentTime = exitState.currentTime;
+        safeMediaPlayerSetCurrentTime(player, exitState.currentTime);
       } catch {
         // Seeking before the provider is attached is a no-op.
       }
@@ -1606,9 +1693,7 @@ watch(
 
     stopHomeVideoObserver();
     isHomeVideoPaused.value = false;
-    void homePlayerElement.value?.pause().catch(() => {
-      // Ignore pause rejections before the provider is ready.
-    });
+    if (homePlayerElement.value) safeMediaPlayerPause(homePlayerElement.value);
   }
 );
 
@@ -1628,9 +1713,7 @@ onBeforeUnmount(() => {
   removeHomePlayerEventListeners?.();
   removeHomePlayerEventListeners = null;
   sharedVideoSurfaceStore.unregister(`feed:${props.item.id}`);
-  void homePlayerElement.value?.pause().catch(() => {
-    // Ignore pause rejections before the provider is ready.
-  });
+  if (homePlayerElement.value) safeMediaPlayerPause(homePlayerElement.value);
 });
 </script>
 

@@ -83,7 +83,7 @@
           :class="{ 'immersive-video__zoom-frame--interacting': zoom.isPanning.value || zoom.isPinching.value }"
           :style="{ transform: zoom.transform.value }"
         >
-          <div ref="sharedPlayerSlot" class="immersive-video__player-slot">
+          <div id="immersive-video-slot" ref="sharedPlayerSlot" class="immersive-video__player-slot">
           <VideoMediaPlayer
           v-if="!hasSharedPlayer"
           ref="playerComponent"
@@ -107,6 +107,7 @@
           fullscreen-orientation="landscape"
           hold-to-seek
           capture-touch-gestures
+          surface-mode="immersive"
           :show-fullscreen-control="false"
           variant="viewer"
           @toggle-mute="appStore.setVideoMuted(!appStore.videoMuted)"
@@ -166,10 +167,11 @@ const detailsOpen = ref(false);
 const gestureOrientation = computed<'normal' | 'rotated'>(() => (isRotated.value ? 'rotated' : 'normal'));
 
 const target = computed(() => store.target);
+// LOCKED: claim 成功就必须挡住第二套 VideoMediaPlayer，不能再等 isAttached。
+// 等 Teleport 完成才挡，中间会双解码。见 docs/player-contract.md。
 const hasSharedPlayer = computed(() =>
   Boolean(target.value) &&
-  sharedVideoSurfaceStore.ownerId === `feed:${target.value?.id}` &&
-  sharedVideoSurfaceStore.isAttached
+  sharedVideoSurfaceStore.ownerId === `feed:${target.value?.id}`
 );
 const bookmarkItem = computed<FeedItem | null>(() => {
   const current = target.value;
@@ -598,6 +600,10 @@ onBeforeUnmount(() => {
 .immersive-video__player-slot {
   width: 100%;
   height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #000;
 }
 
 .immersive-video__zoom-frame {

@@ -34,6 +34,10 @@ const envSchema = z.object({
   DERIVATIVE_MODE: z.enum(['eager', 'lazy']).default('eager'),
   VIDEO_HWACCEL: z.enum(['auto', 'vaapi', 'qsv', 'none']).default('auto'),
   VIDEO_HWACCEL_DEVICE: z.string().default('/dev/dri/renderD128'),
+  FOLDERGRAM_RUNTIME: z.enum(['web', 'worker']).default('web'),
+  WORKER_BASE_URL: z.string().url().optional(),
+  WORKER_CONTROL_PORT: z.coerce.number().int().positive().default(4142),
+  MEDIA_ACCEL_REDIRECT_PREFIX: z.string().default(''),
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development')
 });
 
@@ -107,6 +111,11 @@ const logVerbose = parseBooleanFlag(parsed.LOG_VERBOSE);
 const publicDemoMode = parseBooleanFlag(parsed.PUBLIC_DEMO_MODE);
 const csrfTrustedOrigins = parseConfiguredOrigins(parsed.CSRF_TRUSTED_ORIGINS);
 const galleryExcludedFolders = parseExcludedFolderRulesFromEnv(parsed.GALLERY_EXCLUDED_FOLDERS);
+const mediaAccelRedirectPrefix = parsed.MEDIA_ACCEL_REDIRECT_PREFIX.replace(/\/+$/g, '');
+
+if (mediaAccelRedirectPrefix && !mediaAccelRedirectPrefix.startsWith('/')) {
+  throw new Error('MEDIA_ACCEL_REDIRECT_PREFIX must start with /.');
+}
 
 const derivativeDirectoriesOverlap =
   isSameOrWithinPath(thumbnailsDir, previewsDir) || isSameOrWithinPath(previewsDir, thumbnailsDir);
@@ -169,5 +178,9 @@ export const appConfig = {
   imageDetailSource: parsed.IMAGE_DETAIL_SOURCE,
   derivativeMode: parsed.DERIVATIVE_MODE,
   videoHwaccel: parsed.VIDEO_HWACCEL,
-  videoHwaccelDevice: parsed.VIDEO_HWACCEL_DEVICE
+  videoHwaccelDevice: parsed.VIDEO_HWACCEL_DEVICE,
+  runtime: parsed.FOLDERGRAM_RUNTIME,
+  workerBaseUrl: parsed.WORKER_BASE_URL?.replace(/\/+$/g, '') ?? null,
+  workerControlPort: parsed.WORKER_CONTROL_PORT,
+  mediaAccelRedirectPrefix
 };

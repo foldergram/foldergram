@@ -341,6 +341,7 @@
   import { useLikesStore } from "../stores/likes"
   import { useFoldersStore } from "../stores/folders"
   import { useMomentsStore } from "../stores/moments"
+  import { useRouteScrollMemory } from "../composables/useRouteScrollMemory"
   import type { FolderSummary } from "../types/api"
   import { formatFolderTitle } from "../utils/folder-titles"
 
@@ -360,6 +361,7 @@
   const likesStore = useLikesStore()
   const foldersStore = useFoldersStore()
   const momentsStore = useMomentsStore()
+  useRouteScrollMemory({ key: 'library' })
   const router = useRouter()
   const { t, locale } = useI18n()
   const searchQuery = ref("")

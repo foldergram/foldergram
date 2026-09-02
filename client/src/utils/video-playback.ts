@@ -16,6 +16,7 @@ export function isVideoPlaybackQuality(value: unknown): value is VideoPlaybackQu
 
 export interface VideoPlaybackMedia {
   id: number;
+  filename?: string;
   playbackStrategy?: 'preview' | 'original' | null;
   streamUrl?: string | null;
   originalUrl?: string;
@@ -24,10 +25,116 @@ export interface VideoPlaybackMedia {
   previewFileUrl?: string | null;
 }
 
+const DIRECT_PLAY_CONTAINER_RE = /\.(mp4|m4v|mov)$/i;
+
+let cachedHevcSupport: boolean | undefined;
+
+/** Test-only: drop the memo so a stubbed `canPlayType` is re-read. */
+export function resetDirectPlayCapabilityCache(): void {
+  cachedHevcSupport = undefined;
+}
+
+export function isDirectPlayContainer(filename?: string | null): boolean {
+  return typeof filename === 'string' && DIRECT_PLAY_CONTAINER_RE.test(filename);
+}
+
+/**
+ * iOS Safari and recent Chromium report HEVC as playable. The scanner still marks
+ * those files `preview` because it only trusts h264, which is what sent them down
+ * the live-transcode path and made the first card sit at 0:00.
+ */
+export function canDirectPlayHevc(): boolean {
+  if (cachedHevcSupport !== undefined) {
+    return cachedHevcSupport;
+  }
+
+  cachedHevcSupport = probeHevcSupport();
+  return cachedHevcSupport;
+}
+
+function probeHevcSupport(): boolean {
+  if (typeof document === 'undefined') {
+    return false;
+  }
+
+  try {
+    const video = document.createElement('video');
+    return ['video/mp4; codecs="hvc1"', 'video/mp4; codecs="hev1"'].some((type) => {
+      const result = video.canPlayType(type);
+      return result === 'probably' || result === 'maybe';
+    });
+  } catch {
+    return false;
+  }
+}
+
+function shouldDirectPlayOnAuto(media: VideoPlaybackMedia): boolean {
+  if (media.playbackStrategy === 'original') {
+    return true;
+  }
+
+  // Preview-strategy MP4/MOV is almost always HEVC in this library. When the
+  // device can decode it, skip ffmpeg; the existing error fallback still has HLS.
+  return isDirectPlayContainer(media.filename) && canDirectPlayHevc();
+}
+
 export interface ResolvedVideoSource {
   src: string;
   type: typeof HLS_MIME_TYPE | 'video/mp4';
   isStream: boolean;
+}
+
+/** The small subset of a media player needed to commit a final seek. */
+export interface SeekableMediaPlayer {
+  currentTime: number;
+  addEventListener(type: string, listener: EventListener): void;
+  removeEventListener(type: string, listener: EventListener): void;
+}
+
+/**
+ * Sets a final scrub target and waits briefly for the provider to acknowledge it.
+ *
+ * During a full-surface scrub we preview several seeks in rapid succession. Starting
+ * playback immediately after the last assignment can resume the old decoded segment
+ * on a direct file or HLS fragment, so the caller awaits this before calling `play()`.
+ */
+export function seekMediaPlayerAndWait(
+  player: SeekableMediaPlayer,
+  targetSeconds: number,
+  options: { toleranceSeconds?: number; timeoutMs?: number } = {}
+): Promise<void> {
+  const toleranceSeconds = options.toleranceSeconds ?? 1.5;
+  const timeoutMs = options.timeoutMs ?? 750;
+
+  return new Promise((resolve) => {
+    let settled = false;
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      if (timeout !== null) clearTimeout(timeout);
+      player.removeEventListener('seeked', onSettled);
+      player.removeEventListener('time-update', onSettled);
+      resolve();
+    };
+
+    const onSettled = () => {
+      if (Math.abs(player.currentTime - targetSeconds) <= toleranceSeconds) {
+        finish();
+      }
+    };
+
+    player.addEventListener('seeked', onSettled);
+    player.addEventListener('time-update', onSettled);
+    timeout = setTimeout(finish, timeoutMs);
+
+    try {
+      player.currentTime = targetSeconds;
+    } catch {
+      finish();
+    }
+  });
 }
 
 function toDirectSource(url: string): ResolvedVideoSource {
@@ -37,14 +144,27 @@ function toDirectSource(url: string): ResolvedVideoSource {
 /**
  * Picks what the player should actually load.
  *
- * Managed playback always uses HLS unless the user explicitly asks for original.
- * Historical preview MP4s can be corrupt and their bitrate is not WAN-safe; HLS gives
- * us a 480p entry rendition that works on 2-3 Mbps connections and cached seeks.
+ * On `auto`, a post the scanner marked `original` plays straight from the file: the
+ * device decoder handles it, `/api/originals/:id` answers Range requests with 206, and
+ * nothing on the NAS has to run ffmpeg to produce a frame. That is what makes start-up
+ * and seeking immediate instead of waiting on a transcode.
+ *
+ * Preview-strategy MP4/MOV is also direct-played when the device reports HEVC
+ * support. Those files were only marked `preview` because the scanner trusts
+ * h264; on iPhone they decode natively, and live HLS is what made them sit at 0:00.
+ *
+ * Everything else still streams HLS, and a fixed rendition is always HLS so the quality
+ * picker stays a real WAN escape hatch for high-bitrate originals.
  */
 export function resolveVideoSource(
   media: VideoPlaybackMedia,
   quality: VideoPlaybackQuality
 ): ResolvedVideoSource {
+  // LOCKED: auto = 直推原文件（含可硬解 HEVC 的 preview MP4/MOV）。不要改回默认 HLS。
+  if (quality === 'auto' && shouldDirectPlayOnAuto(media)) {
+    return toDirectSource(media.originalUrl ?? getOriginalMediaUrl(media.id));
+  }
+
   if (quality !== 'original' && media.streamUrl) {
     return {
       src: quality === 'auto' ? media.streamUrl : media.streamUrl.replace('/master.m3u8', `/${quality}/index.m3u8`),

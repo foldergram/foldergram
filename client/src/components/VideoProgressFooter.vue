@@ -1,5 +1,13 @@
 <template>
-  <div class="video-progress-footer" :class="`video-progress-footer--${variant}`">
+  <div
+    class="video-progress-footer"
+    :class="`video-progress-footer--${variant}`"
+    data-swipe-ignore="true"
+    @pointerdown.stop
+    @pointermove.stop
+    @pointerup.stop
+    @pointercancel.stop
+  >
     <div class="video-progress-footer__meta">
       <div class="video-progress-footer__slot video-progress-footer__slot--leading">
         <slot name="leading" />

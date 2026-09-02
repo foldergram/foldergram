@@ -1,12 +1,15 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../api/http', () => ({
   requestJson: vi.fn(() => Promise.resolve({ warming: 2 }))
 }));
 
 import {
+  canDirectPlayHevc,
+  resetDirectPlayCapabilityCache,
   resolveVideoFallbackSource,
   resolveVideoSource,
+  seekMediaPlayerAndWait,
   useBundledHlsLibrary,
   warmVideoStream
 } from './video-playback';
@@ -92,17 +95,104 @@ describe('useBundledHlsLibrary', () => {
   });
 });
 
+describe('seekMediaPlayerAndWait', () => {
+  it('waits for the provider to acknowledge the final seek target', async () => {
+    const player = document.createElement('div') as HTMLDivElement & { currentTime: number };
+    player.currentTime = 300;
+
+    const committing = seekMediaPlayerAndWait(player, 312, { timeoutMs: 1_000 });
+    expect(player.currentTime).toBe(312);
+
+    player.dispatchEvent(new Event('seeked'));
+    await expect(committing).resolves.toBeUndefined();
+  });
+});
+
 describe('resolveVideoSource', () => {
+  beforeEach(() => {
+    resetDirectPlayCapabilityCache();
+    vi.restoreAllMocks();
+  });
+
   const media = {
     id: 501,
+    filename: 'clip.mp4',
     playbackStrategy: 'preview' as const,
     previewFileUrl: '/previews/ab/clip.mp4',
     streamUrl: '/api/videos/501/hls/master.m3u8',
     originalUrl: '/api/originals/501'
   };
 
+  function stubHevcSupport(supported: boolean) {
+    resetDirectPlayCapabilityCache();
+    vi.spyOn(HTMLMediaElement.prototype, 'canPlayType').mockImplementation((type: string) => {
+      if (!supported) return '';
+      return type.includes('hvc1') || type.includes('hev1') ? 'probably' : '';
+    });
+  }
+
+  const directMedia = { ...media, playbackStrategy: 'original' as const };
+
+  it('plays a direct-playable post straight from the original file on auto', () => {
+    expect(resolveVideoSource(directMedia, 'auto')).toEqual({
+      src: '/api/originals/501',
+      type: 'video/mp4',
+      isStream: false
+    });
+  });
+
+  it('still honours a hand-picked rendition for a direct-playable post', () => {
+    expect(resolveVideoSource(directMedia, '480p')).toEqual({
+      src: '/api/videos/501/hls/480p/index.m3u8',
+      type: 'application/x-mpegurl',
+      isStream: true
+    });
+  });
+
+  it('falls back to HLS when a direct original refuses to decode', () => {
+    expect(resolveVideoFallbackSource(directMedia, resolveVideoSource(directMedia, 'auto'))).toEqual({
+      src: '/api/videos/501/hls/master.m3u8',
+      type: 'application/x-mpegurl',
+      isStream: true
+    });
+  });
+
+  it('never warms a transcode for a direct-playable post', async () => {
+    const { requestJson } = await import('../api/http');
+    (requestJson as unknown as { mockClear: () => void }).mockClear();
+
+    warmVideoStream(directMedia, 'auto', { fromSeconds: 30 });
+
+    expect(requestJson).not.toHaveBeenCalled();
+  });
+
   it('uses the adaptive HLS playlist by default instead of a legacy preview MP4', () => {
+    stubHevcSupport(false);
     expect(resolveVideoSource(media, 'auto')).toEqual({
+      src: '/api/videos/501/hls/master.m3u8',
+      type: 'application/x-mpegurl',
+      isStream: true
+    });
+  });
+
+  it('direct-plays a preview-strategy MP4 when the device can decode HEVC', () => {
+    stubHevcSupport(true);
+    expect(canDirectPlayHevc()).toBe(true);
+    expect(resolveVideoSource(media, 'auto')).toEqual({
+      src: '/api/originals/501',
+      type: 'video/mp4',
+      isStream: false
+    });
+  });
+
+  it('keeps HLS for a preview-strategy MP4 when the device cannot decode HEVC', () => {
+    stubHevcSupport(false);
+    expect(resolveVideoSource(media, 'auto').isStream).toBe(true);
+  });
+
+  it('does not direct-play a preview-strategy webm even when HEVC is available', () => {
+    stubHevcSupport(true);
+    expect(resolveVideoSource({ ...media, filename: 'clip.webm' }, 'auto')).toEqual({
       src: '/api/videos/501/hls/master.m3u8',
       type: 'application/x-mpegurl',
       isStream: true
@@ -146,6 +236,7 @@ describe('resolveVideoSource', () => {
   });
 
   it('keeps the adaptive HLS path when a preview file has not been generated yet', () => {
+    stubHevcSupport(false);
     expect(resolveVideoSource({
       id: 8,
       playbackStrategy: 'preview',

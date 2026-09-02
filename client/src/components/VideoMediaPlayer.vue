@@ -25,6 +25,7 @@
       :loop.prop="loop"
       :load="load"
       :preload="preload"
+      :keyDisabled.prop="true"
       @fullscreen-change="handleFullscreenChange"
       @auto-play-fail="handleAutoplayFail"
     >
@@ -148,6 +149,7 @@ import { useAppStore } from '../stores/app';
 import {
   resolveVideoFallbackSource,
   resolveVideoSource,
+  seekMediaPlayerAndWait,
   toPlayerSrc,
   useBundledHlsLibrary,
   warmVideoStream,
@@ -157,6 +159,13 @@ import {
 import { useHoldToSpeed } from '../composables/useHoldToSpeed';
 import { resolveGesturePoint } from '../utils/gesture-coordinates';
 import VideoProgressFooter from './VideoProgressFooter.vue';
+import {
+  safeMediaPlayerGetCurrentTime,
+  safeMediaPlayerPause,
+  safeMediaPlayerPlay,
+  safeMediaPlayerSetCurrentTime,
+  safeMediaPlayerSetMuted
+} from '../utils/safe-media-player';
 
 const props = withDefaults(
   defineProps<{
@@ -253,6 +262,7 @@ const fallbackSource = ref<ResolvedVideoSource | null>(null);
 const durationSec = ref(0);
 const currentTimeSec = ref(0);
 const previewTimeSec = ref<number | null>(null);
+const pendingSeekTargetSec = ref<number | null>(null);
 const isPaused = ref(false);
 const showPausedIndicator = ref(false);
 /**
@@ -294,6 +304,33 @@ function hasPlaybackAdvanced(player: MediaPlayerElement): boolean {
   return (player.currentTime || 0) > playbackBaselineSec + PLAYBACK_PROGRESS_EPSILON_SEC;
 }
 
+function nativeVideoHasPaintedFrame(player: MediaPlayerElement): boolean {
+  const videos = [player.querySelector('video'), player.shadowRoot?.querySelector('video')];
+  for (const video of videos) {
+    if (
+      video instanceof HTMLVideoElement &&
+      video.videoWidth > 0 &&
+      video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function markFrameRendered(player: MediaPlayerElement) {
+  // A handover can decode the head of the clip before the seek lands. That frame is
+  // not the one the viewer was watching, so the thumbnail stays until the clock
+  // actually reaches the start position or moves past it.
+  if (props.startTime > 0 && !appliedStartTime) {
+    return;
+  }
+
+  if (hasPlaybackAdvanced(player) || (appliedStartTime && nativeVideoHasPaintedFrame(player)) || (props.startTime <= 0 && nativeVideoHasPaintedFrame(player))) {
+    hasRenderedFrame.value = true;
+  }
+}
+
 // A stream the NAS is still transcoding can refuse to start or stall on its first
 // segments, and it never recovers on its own here: the provider has already committed
 // to a source that is not ready yet. Retrying on a backoff is what the reels deck
@@ -301,8 +338,10 @@ function hasPlaybackAdvanced(player: MediaPlayerElement): boolean {
 const STALL_RETRY_BASE_DELAY_MS = 160;
 const MAX_STALL_RETRY_DELAY_MS = 1_200;
 const MAX_STALL_RETRIES = 8;
+const STARTUP_FALLBACK_MS = 2_000;
 let stallRetryAttempts = 0;
 let stallRetryTimer = 0;
+let startupFallbackTimer = 0;
 let lastSurfaceTapAt = 0;
 
 function clearStallRetry() {
@@ -312,9 +351,40 @@ function clearStallRetry() {
   }
 }
 
+function clearStartupFallback() {
+  if (startupFallbackTimer !== 0) {
+    window.clearTimeout(startupFallbackTimer);
+    startupFallbackTimer = 0;
+  }
+}
+
 function resetStallRetry() {
   clearStallRetry();
   stallRetryAttempts = 0;
+}
+
+function scheduleStartupFallback() {
+  const player = playerElement.value;
+  if (!player || !props.autoplay || autoplayCancelled || fallbackSource.value) {
+    return;
+  }
+
+  clearStartupFallback();
+  startupFallbackTimer = window.setTimeout(() => {
+    startupFallbackTimer = 0;
+    const current = playerElement.value;
+    if (!current || !props.autoplay || autoplayCancelled || fallbackSource.value) {
+      return;
+    }
+
+    // play() can resolve on a source that never paints a frame. That is the black
+    // screen: metadata arrived, the poster was already gone, and no error fired.
+    if (hasPlaybackAdvanced(current) || nativeVideoHasPaintedFrame(current)) {
+      return;
+    }
+
+    switchToFallbackSource();
+  }, STARTUP_FALLBACK_MS);
 }
 
 function scheduleStallRetry() {
@@ -339,9 +409,12 @@ function scheduleStallRetry() {
         return;
       }
 
-      void current
-        .play()
-        .then(() => {
+      void safeMediaPlayerPlay(current)
+        .then((started) => {
+          if (!started) {
+            scheduleStallRetry();
+            return;
+          }
           if (hasPlaybackAdvanced(current)) {
             resetStallRetry();
           } else {
@@ -375,24 +448,15 @@ function warmSeekTarget(seconds: number) {
 
 const holdSpeed = useHoldToSpeed({
   canStart: (event) => !isInteractiveTarget(event.target),
-  getCurrentTime: () => playerElement.value?.currentTime ?? 0,
+  getCurrentTime: getScrubStartTime,
   getDuration: () => playerElement.value?.duration ?? 0,
-  seekTo: (seconds) => {
-    const player = playerElement.value;
-    if (!player) return;
-    warmSeekTarget(seconds);
-    try {
-      player.currentTime = seconds;
-    } catch {
-      // Seeking before the provider is attached is a no-op.
-    }
-  },
+  seekTo,
   previewSeek: (seconds) => {
     const player = playerElement.value;
     if (!player) return;
     currentTimeSec.value = seconds;
     try {
-      player.currentTime = seconds;
+      safeMediaPlayerSetCurrentTime(player, seconds);
     } catch {
       // Seeking before the provider is attached is a no-op.
     }
@@ -408,16 +472,19 @@ const holdSpeed = useHoldToSpeed({
     }
   },
   play: () => {
-    void playerElement.value?.play().catch(() => {});
+    if (playerElement.value) void safeMediaPlayerPlay(playerElement.value);
   },
   // Measured in the picture's own frame. A host that turns the surface with a CSS
   // rotation reports `gestureOrientation`, so the sideways drag the viewer makes while
   // holding the phone sideways still scrubs, and their downward swipe still dismisses.
   getGesturePoint: (event) => resolveGesturePoint(event, props.gestureOrientation),
-  // Scrubbing follows the viewer's physical left/right finger movement. The rotated
-  // point above is only for gesture ownership; using it for scrub would turn a
-  // landscape screen swipe into local vertical movement and prevent seeking.
-  getScrubPoint: (event) => ({ x: event.clientX, y: event.clientY }),
+  // Ownership of the gesture is decided on these deltas, so they have to live in the
+  // same frame as the picture. Reading raw screen coordinates here is what used to make
+  // a landscape sideways drag look vertical, hand the gesture to the host as a dismiss,
+  // and leave the timeline unscrubbable.
+  getScrubPoint: (event) => resolveGesturePoint(event, props.gestureOrientation),
+  // Relative scrubbing from the press time. Absolute finger-to-timeline mapping made
+  // a second swipe restart from the finger's X instead of continuing from 5:00.
   onGestureStart: () => emit('surface-gesture-start'),
   onScrub: warmSeekTarget,
   onGestureEnd: () => emit('surface-gesture-end')
@@ -521,13 +588,15 @@ async function handleAutoplayFail() {
   // Browsers commonly reject audible autoplay. Record the document-wide verdict and
   // fall back to muted playback; the stored preference stays audible so the next tap
   // (which is a user gesture) can still bring the sound back.
-  appStore.reportAudibleAutoplayBlocked();
-  syncPlayerMuted(player, true);
+  const blocked = appStore.reportAudibleAutoplayBlocked();
+  syncPlayerMuted(player, blocked ? true : effectiveMuted.value);
   emit('autoplay-muted');
   await nextTick();
-  await player.play().then(() => {
-    syncPlayerMuted(player, effectiveMuted.value);
-  }).catch(() => {});
+  await safeMediaPlayerPlay(player).then((started) => {
+    if (started) {
+      syncPlayerMuted(player, effectiveMuted.value);
+    }
+  });
 }
 
 function isInteractiveTarget(target: EventTarget | null): boolean {
@@ -542,18 +611,19 @@ function handleSurfaceClick(event: MouseEvent) {
   if (isInteractiveTarget(event.target)) return;
   if (holdSpeed.shouldSuppressClick()) return;
 
-  if (props.surfaceMode === 'immersive') {
-    emit('surface-click');
-    return;
-  }
-
   const now = Date.now();
   if (now - lastSurfaceTapAt <= 320) {
     lastSurfaceTapAt = 0;
+    appStore.activateVideoSoundFromUserGesture();
+    void togglePlayback();
     return;
   }
   lastSurfaceTapAt = now;
-  void togglePlayback();
+
+  if (props.surfaceMode === 'immersive') {
+    appStore.activateVideoSoundFromUserGesture();
+    emit('surface-click');
+  }
 }
 
 function handleHoldPointerdown(event: PointerEvent) {
@@ -582,7 +652,7 @@ function seekBy(deltaSeconds: number) {
   const next = (player.currentTime || 0) + deltaSeconds;
   const upperBound = Number.isFinite(duration) && duration > 0 ? duration - 0.25 : next;
   try {
-    player.currentTime = Math.min(Math.max(next, 0), Math.max(upperBound, 0));
+    safeMediaPlayerSetCurrentTime(player, Math.min(Math.max(next, 0), Math.max(upperBound, 0)));
   } catch {
     // Seeking before the provider is attached is a no-op.
   }
@@ -598,11 +668,28 @@ function seekTo(seconds: number) {
   previewTimeSec.value = null;
   currentTimeSec.value = next;
   warmSeekTarget(next);
-  try {
-    player.currentTime = next;
-  } catch {
-    // Seeking before the provider is attached is a no-op.
+  pendingSeekTargetSec.value = next;
+  return seekMediaPlayerAndWait(player, next).finally(() => {
+    if (pendingSeekTargetSec.value === next) {
+      pendingSeekTargetSec.value = null;
+    }
+  });
+}
+
+function getScrubStartTime(): number {
+  if (pendingSeekTargetSec.value !== null) {
+    return pendingSeekTargetSec.value;
   }
+
+  if (previewTimeSec.value !== null) {
+    return previewTimeSec.value;
+  }
+
+  if (Number.isFinite(currentTimeSec.value) && currentTimeSec.value > 0) {
+    return currentTimeSec.value;
+  }
+
+  return playerElement.value ? safeMediaPlayerGetCurrentTime(playerElement.value) : 0;
 }
 
 function previewSeekTo(seconds: number) {
@@ -630,13 +717,12 @@ async function togglePlayback() {
 
   if (player.paused) {
     autoplayCancelled = false;
-    // A tap is a user gesture, so an earlier audible rejection no longer applies.
-    if (audioBlocked.value) {
-      appStore.clearAudibleAutoplayBlock();
-      player.muted = props.muted;
-    }
+    // Playing from a real tap lifts a previous autoplay-only restriction for every
+    // surface. This is intentionally global, not a local player workaround.
+    appStore.activateVideoSoundFromUserGesture();
+    syncPlayerMuted(player, effectiveMuted.value);
 
-    await player.play().catch(() => {});
+    await safeMediaPlayerPlay(player);
     isPaused.value = false;
     showPausedIndicator.value = false;
     if (hidePausedTimer) clearTimeout(hidePausedTimer);
@@ -644,7 +730,7 @@ async function togglePlayback() {
     // The pause was asked for, so the retry loop must not undo it.
     resetStallRetry();
     autoplayCancelled = true;
-    player.pause();
+    safeMediaPlayerPause(player);
     isPaused.value = true;
     showPausedIndicator.value = true;
     if (hidePausedTimer) clearTimeout(hidePausedTimer);
@@ -681,14 +767,14 @@ function applyStartTime(player: MediaPlayerElement): boolean {
   // opens already parked there. Re-seeking would drop the fragment it just buffered and
   // reintroduce the stall this path exists to avoid. A clock still sitting at zero is
   // not a match: that is a provider that ignored the hint.
-  const clock = player.currentTime || 0;
+  const clock = safeMediaPlayerGetCurrentTime(player);
   if (clock > 0.05 && Math.abs(clock - target) <= START_TIME_TOLERANCE_SEC) {
     appliedStartTime = true;
     return true;
   }
 
   try {
-    player.currentTime = target;
+    safeMediaPlayerSetCurrentTime(player, target);
   } catch {
     return false;
   }
@@ -714,9 +800,12 @@ function requestAutoplayAfterReady(player: MediaPlayerElement) {
   }
 
   clearStallRetry();
-  void player
-    .play()
-    .then(() => {
+  void safeMediaPlayerPlay(player)
+    .then((started) => {
+      if (!started) {
+        scheduleStallRetry();
+        return;
+      }
       if (!player.paused && hasPlaybackAdvanced(player)) {
         resetStallRetry();
         return;
@@ -741,7 +830,7 @@ function requestAutoplayAfterReady(player: MediaPlayerElement) {
  * fallback intact instead of immediately fighting it.
  */
 function syncPlayerMuted(player: MediaPlayerElement, muted: boolean) {
-  player.muted = muted;
+  safeMediaPlayerSetMuted(player, muted);
 
   const videos = [
     player.querySelector('video'),
@@ -774,9 +863,9 @@ function setupListeners() {
       const { currentTime, wasPaused } = pendingRestoreState;
       pendingRestoreState = null;
       try {
-        player.currentTime = currentTime;
+        safeMediaPlayerSetCurrentTime(player, currentTime);
         if (!wasPaused) {
-          await player.play().catch(() => {});
+          await safeMediaPlayerPlay(player);
         }
       } catch {}
       return;
@@ -784,6 +873,7 @@ function setupListeners() {
 
     applyStartTime(player);
     requestAutoplayAfterReady(player);
+    scheduleStartupFallback();
   };
 
   const onCanPlay = () => {
@@ -792,15 +882,12 @@ function setupListeners() {
     // media source has no buffered range yet, so confirm the handover once the
     // provider reports it can play.
     applyStartTime(player);
-    // `can-play` means a frame is decoded and on screen, so the thumbnail can go. It is
-    // held back while a handover seek is still outstanding, because the frame currently
-    // showing is the head of the clip rather than the position the viewer came from.
-    // This is also the only path that reveals a clip handed over paused, whose clock
-    // never moves.
-    if (appliedStartTime || props.startTime <= 0) {
-      hasRenderedFrame.value = true;
-    }
+    // `can-play` is not a painted frame. HEVC and on-demand HLS often report it
+    // while the surface is still black, so the thumbnail stays until the clock
+    // moves or a native video actually has pixels.
+    markFrameRendered(player);
     requestAutoplayAfterReady(player);
+    scheduleStartupFallback();
   };
 
   const onSeeking = () => {
@@ -816,15 +903,24 @@ function setupListeners() {
   };
 
   const onTimeUpdate = () => {
-    if (hasPlaybackAdvanced(player)) {
+    if (hasPlaybackAdvanced(player) || nativeVideoHasPaintedFrame(player)) {
       resetStallRetry();
+      clearStartupFallback();
       hasRenderedFrame.value = true;
     }
 
-    currentTimeSec.value = player.currentTime || 0;
+    const currentTime = player.currentTime || 0;
+    if (
+      pendingSeekTargetSec.value !== null &&
+      Math.abs(currentTime - pendingSeekTargetSec.value) > 1.5
+    ) {
+      return;
+    }
+    pendingSeekTargetSec.value = null;
+    currentTimeSec.value = currentTime;
     durationSec.value = player.duration || 0;
     emit('time-update', {
-      currentTime: player.currentTime || 0,
+      currentTime,
       duration: player.duration || 0
     });
   };
@@ -882,17 +978,19 @@ function setupListeners() {
 
 onMounted(() => {
   setupListeners();
+  scheduleStartupFallback();
 });
 
 onBeforeUnmount(() => {
   if (playerElement.value) {
     try {
-      playerElement.value.pause();
+    safeMediaPlayerPause(playerElement.value);
     } catch {}
   }
   if (removeEventListeners) removeEventListeners();
   if (hidePausedTimer) clearTimeout(hidePausedTimer);
   clearStallRetry();
+  clearStartupFallback();
   holdSpeed.stop();
 });
 
@@ -901,6 +999,7 @@ watch([basePreviewUrl, () => props.media?.id ?? null], () => {
   // released by the element it started on.
   holdSpeed.stop();
   resetStallRetry();
+  clearStartupFallback();
   fallbackSource.value = null;
   pendingRestoreState = null;
   appliedStartTime = false;
@@ -941,10 +1040,10 @@ defineExpose({
   togglePlayback,
   seekBy,
   seekTo,
-  currentTime: () => playerElement.value?.currentTime ?? 0,
+  currentTime: () => playerElement.value ? safeMediaPlayerGetCurrentTime(playerElement.value) : 0,
   paused: () => playerElement.value?.paused ?? true,
-  play: () => playerElement.value?.play(),
-  pause: () => playerElement.value?.pause(),
+  play: () => playerElement.value ? safeMediaPlayerPlay(playerElement.value) : Promise.resolve(false),
+  pause: () => { if (playerElement.value) safeMediaPlayerPause(playerElement.value); },
   cancelHoldGesture: () => holdSpeed.stop(),
   isHoldGestureActive: () => holdSpeed.isFastForwarding.value || holdSpeed.isScrubbing.value
 });

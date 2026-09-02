@@ -140,6 +140,7 @@ const aspectRatio = computed(() =>
 function toVideoPlaybackMedia(item: PostMediaItem): VideoPlaybackMedia {
   return {
     id: item.imageId,
+    filename: item.filename,
     playbackStrategy: item.playbackStrategy,
     streamUrl: item.streamUrl,
     originalUrl: item.originalUrl,

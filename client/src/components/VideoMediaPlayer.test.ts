@@ -104,6 +104,55 @@ describe('VideoMediaPlayer', () => {
     expect(currentTime).toBeCloseTo(25.6, 5);
   });
 
+  it('starts the next scrub from the committed timeline when the provider clock lags', async () => {
+    vi.useFakeTimers();
+
+    const wrapper = mount(VideoMediaPlayer, {
+      props: {
+        src: '/test-video.mp4',
+        holdToSeek: true,
+        gestureOrientation: 'normal'
+      },
+      global: {
+        plugins: [i18n]
+      }
+    });
+
+    const player = wrapper.find('media-player').element as any;
+    Object.defineProperty(player, 'duration', { configurable: true, value: 100 });
+    Object.defineProperty(player, 'currentTime', {
+      configurable: true,
+      get: () => 10,
+      set: () => {
+        // Simulate a direct/HLS provider that reports its old clock during seek.
+      }
+    });
+    player.play = vi.fn().mockResolvedValue(undefined);
+    player.dispatchEvent(new Event('time-update'));
+    await flushPromises();
+
+    const surface = wrapper.element;
+    const pointer = (clientX: number) => ({
+      clientX,
+      clientY: 200,
+      isPrimary: true,
+      pointerId: 1,
+      currentTarget: surface,
+      target: surface
+    }) as unknown as PointerEvent;
+
+    (wrapper.vm as any).handleHoldPointerdown(pointer(40));
+    (wrapper.vm as any).handleHoldPointermove(pointer(170));
+    (wrapper.vm as any).handleHoldPointerup(pointer(170));
+    await vi.advanceTimersByTimeAsync(750);
+
+    (wrapper.vm as any).handleHoldPointerdown(pointer(40));
+    (wrapper.vm as any).handleHoldPointermove(pointer(140));
+
+    expect((wrapper.vm as any).holdSpeed.scrubSeconds.value).toBeCloseTo(37.6, 5);
+    vi.useRealTimers();
+  });
+
   it('treats a double tap as one playback toggle instead of toggling twice', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-08-31T12:00:00Z'));
@@ -120,6 +169,7 @@ describe('VideoMediaPlayer', () => {
     player.play = vi.fn(async () => { paused = false; });
 
     await wrapper.trigger('click');
+    expect(player.pause).not.toHaveBeenCalled();
     vi.advanceTimersByTime(120);
     await wrapper.trigger('click');
 
@@ -246,6 +296,37 @@ describe('VideoMediaPlayer', () => {
     expect(secondPlayer.muted).toBe(false);
   });
 
+  it('restores saved sound after the viewer is opened from a muted-autoplay fallback', async () => {
+    const appStore = useAppStore();
+    window.localStorage.setItem('foldergram-video-muted', 'false');
+    appStore.initializeVideoMuted();
+
+    const wrapper = mount(VideoMediaPlayer, {
+      props: {
+        src: '/test-video.mp4',
+        autoplay: true,
+        muted: false,
+        surfaceMode: 'immersive'
+      },
+      global: { plugins: [i18n] }
+    });
+    const player = wrapper.find('media-player').element as any;
+    player.play = vi.fn().mockResolvedValue(undefined);
+
+    player.dispatchEvent(new CustomEvent('auto-play-fail'));
+    await vi.waitFor(() => expect(appStore.videoEffectivelyMuted).toBe(true));
+
+    await wrapper.trigger('click');
+
+    expect(appStore.videoMuted).toBe(false);
+    expect(appStore.videoEffectivelyMuted).toBe(false);
+    expect(player.muted).toBe(false);
+
+    player.dispatchEvent(new CustomEvent('auto-play-fail'));
+    await flushPromises();
+    expect(player.muted).toBe(false);
+  });
+
   it('writes the global sound state to the native video after a provider remount', async () => {
     const appStore = useAppStore();
     appStore.setVideoMuted(false);
@@ -289,6 +370,8 @@ describe('VideoMediaPlayer', () => {
         src: '/test-video.mp4',
         media: {
           id: 5,
+          // Direct play is only chosen for a post the scanner cleared for it.
+          playbackStrategy: 'original',
           originalUrl: '/api/originals/5',
           streamUrl: '/api/videos/5/hls/master.m3u8'
         },
@@ -425,7 +508,51 @@ describe('VideoMediaPlayer', () => {
     seekable = true;
     playerEl.dispatchEvent(new Event('can-play'));
     await flushPromises();
+    // Seeking to the handover point is still not a painted frame. The overlay
+    // stays until the clock actually moves or a native video reports pixels.
+    expect(wrapper.find('.video-media-player__first-frame').exists()).toBe(true);
+
+    currentTime = 30.2;
+    playerEl.dispatchEvent(new Event('time-update'));
+    await flushPromises();
     expect(wrapper.find('.video-media-player__first-frame').exists()).toBe(false);
+  });
+
+  it('falls back to HLS when autoplay never paints a frame', async () => {
+    vi.useFakeTimers();
+
+    const wrapper = mount(VideoMediaPlayer, {
+      props: {
+        src: '/api/originals/9',
+        autoplay: true,
+        muted: true,
+        media: {
+          id: 9,
+          filename: 'clip.mp4',
+          playbackStrategy: 'preview',
+          streamUrl: '/api/videos/9/hls/master.m3u8',
+          originalUrl: '/api/originals/9'
+        }
+      },
+      global: {
+        plugins: [i18n]
+      }
+    });
+
+    const playerEl = wrapper.find('media-player').element as any;
+    Object.defineProperty(playerEl, 'currentTime', { configurable: true, get: () => 0 });
+    Object.defineProperty(playerEl, 'paused', { configurable: true, get: () => true });
+    playerEl.play = vi.fn().mockResolvedValue(undefined);
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    await flushPromises();
+
+    expect((wrapper.vm as any).playerElement.src).toEqual({
+      src: '/api/videos/9/hls/master.m3u8',
+      type: 'application/x-mpegurl'
+    });
+
+    vi.useRealTimers();
   });
 
   it('keeps nudging a handover that decoded a frame but never advanced', async () => {

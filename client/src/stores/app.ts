@@ -283,13 +283,25 @@ export const useAppStore = defineStore('app', {
     setVideoMuted(videoMuted: boolean) {
       this.videoMuted = videoMuted;
       if (!videoMuted) {
-        // Turning sound on is a user gesture, which is exactly what lifts the
-        // browser's autoplay restriction for the rest of the session.
-        this.audibleAutoplayBlocked = false;
-        this.hasExplicitlyEnabledVideoSound = true;
-        this.videoSoundGeneration += 1;
+        this.activateVideoSoundFromUserGesture();
       }
       window.localStorage.setItem(VIDEO_MUTED_STORAGE_KEY, String(videoMuted));
+    },
+
+    /**
+     * A direct tap that opens or resumes a video is a browser user gesture. Keep that
+     * fact globally so a delayed provider/autoplay event cannot re-mute a player after
+     * the viewer already chose sound on. The persisted preference is deliberately not
+     * changed here: a muted preference always remains muted.
+     */
+    activateVideoSoundFromUserGesture() {
+      if (this.videoMuted) {
+        return;
+      }
+
+      this.audibleAutoplayBlocked = false;
+      this.hasExplicitlyEnabledVideoSound = true;
+      this.videoSoundGeneration += 1;
     },
 
     /**

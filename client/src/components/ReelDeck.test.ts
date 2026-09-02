@@ -83,4 +83,30 @@ describe('ReelDeck', () => {
 
     expect(wrapper.get('.reel-stub').attributes('data-prefetch')).toBe('0');
   });
+
+  it('restores the active reel instead of leaving a kept-alive deck at the first card', async () => {
+    const items = [createFeedItem(1), createFeedItem(2), createFeedItem(3)];
+    const wrapper = mount(ReelDeck, {
+      props: {
+        items,
+        folders: [],
+        activeReelId: 3
+      },
+      global: {
+        stubs: {
+          ReelPlayerCard: true
+        }
+      }
+    });
+
+    const scroller = wrapper.get('.reel-deck').element as HTMLElement;
+    const scrollTo = vi.fn();
+    Object.assign(scroller, { scrollTo });
+    const panels = wrapper.findAll('.reel-deck__panel');
+    Object.defineProperty(panels[2]!.element, 'offsetTop', { configurable: true, value: 960 });
+
+    (wrapper.vm as unknown as { restoreActiveReel: () => void }).restoreActiveReel();
+
+    expect(scrollTo).toHaveBeenCalledWith({ top: 960, behavior: 'auto' });
+  });
 });

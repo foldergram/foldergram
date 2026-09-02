@@ -126,6 +126,22 @@ describe('useAppStore locale preferences', () => {
     expect(store.videoEffectivelyMuted).toBe(false);
   });
 
+  it('treats opening or resuming a saved audible video as a session user gesture', () => {
+    const store = useAppStore();
+    window.localStorage.setItem('foldergram-video-muted', 'false');
+    store.initializeVideoMuted();
+    store.reportAudibleAutoplayBlocked();
+
+    expect(store.videoEffectivelyMuted).toBe(true);
+
+    store.activateVideoSoundFromUserGesture();
+
+    expect(store.videoMuted).toBe(false);
+    expect(store.videoEffectivelyMuted).toBe(false);
+    expect(store.hasExplicitlyEnabledVideoSound).toBe(true);
+    expect(store.reportAudibleAutoplayBlocked()).toBe(false);
+  });
+
   it('shares the initial autoplay verdict until the viewer explicitly enables sound', () => {
     const store = useAppStore();
     window.localStorage.setItem('foldergram-video-muted', 'false');

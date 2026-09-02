@@ -44,6 +44,14 @@ export const KEPT_ALIVE_VIEW_NAMES = [
 ] as const;
 
 type RouteCapability = keyof AuthCapabilities;
+const KEPT_ALIVE_ROUTE_NAMES = new Set(['home', 'reels', 'explore', 'library', 'likes', 'collections']);
+// Dock views are keyed by route name, not fullPath. A query/hash change must not
+// make the same cached view lose its position when the user returns to it.
+const keptRouteScrollPositions = new Map<string, { left: number; top: number }>();
+
+function getKeptRouteScrollKey(route: Pick<RouteLocationNormalized, 'name'>): string | null {
+  return typeof route.name === 'string' && KEPT_ALIVE_ROUTE_NAMES.has(route.name) ? route.name : null;
+}
 
 function shouldPreserveModalScroll(to: RouteLocationNormalized, from: RouteLocationNormalized) {
   const appStore = useAppStore(pinia);
@@ -208,8 +216,40 @@ export const router = createRouter({
       return false;
     }
 
+    if (typeof to.name === 'string' && typeof from.name === 'string' &&
+        KEPT_ALIVE_ROUTE_NAMES.has(to.name) && KEPT_ALIVE_ROUTE_NAMES.has(from.name)) {
+      const rememberedPosition = keptRouteScrollPositions.get(to.name);
+      if (rememberedPosition !== undefined) {
+        return rememberedPosition;
+      }
+      return false;
+    }
+
     return { top: 0 };
   }
+});
+
+router.beforeEach((to, from) => {
+  const key = getKeptRouteScrollKey(from);
+  if (key) {
+    keptRouteScrollPositions.set(key, { left: window.scrollX, top: window.scrollY });
+  }
+
+  return true;
+});
+
+router.afterEach((to) => {
+  const key = getKeptRouteScrollKey(to);
+  const rememberedPosition = key ? keptRouteScrollPositions.get(key) : undefined;
+  if (rememberedPosition === undefined) {
+    return;
+  }
+
+  // The shell and a kept-alive view can finish layout after scrollBehavior. Apply
+  // the remembered position once more after navigation has fully settled.
+  window.setTimeout(() => {
+    window.scrollTo({ ...rememberedPosition, behavior: 'auto' });
+  }, 160);
 });
 
 export function getRouteRequiredCapability(route: Pick<RouteLocationNormalized, 'meta'>): RouteCapability | null {

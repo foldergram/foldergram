@@ -5,6 +5,7 @@ import { useHoldToSpeed, type GesturePoint } from './useHoldToSpeed';
 function createHarness(options: {
   currentTime?: number;
   duration?: number;
+  commitSeek?: (seconds: number, setCurrentTime: (seconds: number) => void) => void | Promise<void>;
   getGesturePoint?: (event: PointerEvent) => GesturePoint;
   getScrubPoint?: (event: PointerEvent) => GesturePoint;
   onGestureEnd?: () => void;
@@ -20,6 +21,12 @@ function createHarness(options: {
     getCurrentTime: () => currentTime,
     getDuration: () => options.duration ?? 120,
     seekTo: (seconds) => {
+      if (options.commitSeek) {
+        return options.commitSeek(seconds, (next) => {
+          currentTime = next;
+        });
+      }
+
       currentTime = seconds;
     },
     getPlaybackRate: () => playbackRate,
@@ -169,6 +176,55 @@ describe('useHoldToSpeed', () => {
     expect(harness.getCurrentTime()).toBeCloseTo(42, 5);
     expect(harness.hold.isScrubbing.value).toBe(false);
     expect(harness.hold.shouldSuppressClick()).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it('waits for the final seek to settle before resuming playback', async () => {
+    const seekSettlers: Array<() => void> = [];
+    const harness = createHarness({
+      currentTime: 300,
+      duration: 600,
+      commitSeek: (seconds, setCurrentTime) =>
+        new Promise<void>((resolve) => {
+          seekSettlers.push(() => {
+            setCurrentTime(seconds);
+            resolve();
+          });
+        })
+    });
+
+    harness.press(200);
+    harness.move(300);
+    harness.release(300);
+
+    // Starting playback before the provider acknowledges its new seek target lets a
+    // direct stream resume on the old decoded segment. This must stay at zero until
+    // the final seek transaction settles.
+    expect(harness.getPlayCalls()).toBe(0);
+    expect(seekSettlers).toHaveLength(1);
+
+    seekSettlers[0]?.();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(harness.getCurrentTime()).toBeCloseTo(312, 5);
+    expect(harness.getPlayCalls()).toBe(1);
+  });
+
+  it('keeps a second swipe relative to the already-scrubbed time, not the finger X', () => {
+    vi.useFakeTimers();
+    const harness = createHarness({ currentTime: 30 });
+
+    harness.press(200);
+    harness.move(300);
+    harness.release(300);
+    expect(harness.getCurrentTime()).toBeCloseTo(42, 5);
+
+    harness.press(50);
+    harness.move(10);
+    harness.release(10);
+
+    expect(harness.getCurrentTime()).toBeCloseTo(37.2, 5);
     vi.useRealTimers();
   });
 
@@ -326,6 +382,39 @@ describe('useHoldToSpeed', () => {
 
     expect(harness.hold.isScrubbing.value).toBe(false);
     harness.release(206, 260);
+    expect(harness.getCurrentTime()).toBe(30);
+    vi.useRealTimers();
+  });
+
+  // The immersive layer turns the stage with `rotate(90deg)`, so the drag the viewer
+  // makes sideways arrives as screen-vertical movement. Both gesture points have to be
+  // mapped into the picture's frame or landscape scrubbing never activates.
+  it('scrubs a rotated stage from the viewer\'s sideways drag', () => {
+    vi.useFakeTimers();
+    const rotated = (event: PointerEvent): GesturePoint => ({ x: event.clientY, y: -event.clientX });
+    const harness = createHarness({ getGesturePoint: rotated, getScrubPoint: rotated });
+
+    harness.press(200, 150);
+    // Screen-vertical travel: in the picture's frame this is a sideways scrub.
+    harness.move(200, 260);
+
+    expect(harness.hold.isScrubbing.value).toBe(true);
+
+    harness.release(200, 260);
+    expect(harness.getCurrentTime()).toBeCloseTo(30 + 110 * 0.12, 5);
+    vi.useRealTimers();
+  });
+
+  it('still dismisses a rotated stage when the viewer swipes along the screen X axis', () => {
+    vi.useFakeTimers();
+    const rotated = (event: PointerEvent): GesturePoint => ({ x: event.clientY, y: -event.clientX });
+    const harness = createHarness({ getGesturePoint: rotated, getScrubPoint: rotated });
+
+    harness.press(200, 150);
+    harness.move(80, 150);
+
+    expect(harness.hold.isScrubbing.value).toBe(false);
+    harness.release(80, 150);
     expect(harness.getCurrentTime()).toBe(30);
     vi.useRealTimers();
   });

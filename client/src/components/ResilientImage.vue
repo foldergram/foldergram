@@ -1,6 +1,6 @@
 <template>
   <img
-    v-if="resolvedSrc"
+    v-if="resolvedSrc && !showVideoFallback"
     :src="resolvedSrc"
     :alt="alt"
     :width="width"
@@ -10,10 +10,12 @@
     @load="handleLoad"
     @error="handleError"
   />
+  <VideoFirstFrame v-else-if="showVideoFallback && videoSrc" :src="videoSrc" :alt="alt" />
 </template>
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import VideoFirstFrame from './VideoFirstFrame.vue';
 
 const props = withDefaults(
   defineProps<{
@@ -26,6 +28,7 @@ const props = withDefaults(
     retryWhile?: boolean;
     maxRetries?: number;
     retryDelayMs?: number;
+    videoSrc?: string | null;
   }>(),
   {
     src: null,
@@ -33,7 +36,8 @@ const props = withDefaults(
     loading: 'lazy',
     retryWhile: false,
     maxRetries: 8,
-    retryDelayMs: 1500
+    retryDelayMs: 1500,
+    videoSrc: null
   }
 );
 
@@ -41,6 +45,7 @@ const attempt = ref(0);
 const loaded = ref(false);
 const hiddenUntilRetry = ref(false);
 const usingFallback = ref(false);
+const showVideoFallback = ref(false);
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
 const activeSrc = computed(() => {
@@ -77,6 +82,7 @@ function resetState() {
   loaded.value = false;
   hiddenUntilRetry.value = false;
   usingFallback.value = false;
+  showVideoFallback.value = !props.src && Boolean(props.videoSrc);
 }
 
 function scheduleRetry() {
@@ -112,6 +118,12 @@ function handleError() {
     return;
   }
 
+  if (props.videoSrc) {
+    clearRetryTimer();
+    showVideoFallback.value = true;
+    return;
+  }
+
   const canRetry = props.retryWhile || attempt.value < props.maxRetries;
   if (!canRetry) {
     hiddenUntilRetry.value = true;
@@ -122,7 +134,7 @@ function handleError() {
   scheduleRetry();
 }
 
-watch(() => [props.src, props.fallbackSrc] as const, resetState);
+watch(() => [props.src, props.fallbackSrc, props.videoSrc] as const, resetState, { immediate: true });
 watch(
   () => props.retryWhile,
   (retryWhile) => {

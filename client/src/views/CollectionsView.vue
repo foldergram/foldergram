@@ -75,12 +75,14 @@ import ResilientImage from '../components/ResilientImage.vue';
 import { useAppStore } from '../stores/app';
 import { useCollectionsStore } from '../stores/collections';
 import type { CollectionSummary } from '../types/api';
+import { useRouteScrollMemory } from '../composables/useRouteScrollMemory';
 
 // Named explicitly so <KeepAlive include> keeps matching after a minified build.
 defineOptions({ name: 'CollectionsView' });
 
 const appStore = useAppStore();
 const collectionsStore = useCollectionsStore();
+useRouteScrollMemory({ key: 'collections' });
 const { t, locale } = useI18n();
 
 function formatCount(value: number) {

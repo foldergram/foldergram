@@ -136,7 +136,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 
 import ReelActionRail from '../components/ReelActionRail.vue';
@@ -147,6 +147,7 @@ import { useFoldersStore } from '../stores/folders';
 import { useReelsStore } from '../stores/reels';
 
 import { provideViewActivation } from '../composables/useViewActivation';
+import { useRouteScrollMemory } from '../composables/useRouteScrollMemory';
 
 // Named explicitly so <KeepAlive include> keeps matching after a minified build.
 defineOptions({ name: 'ReelsView' });
@@ -158,12 +159,17 @@ provideViewActivation();
 const appStore = useAppStore();
 const foldersStore = useFoldersStore();
 const reelsStore = useReelsStore();
-const { t } = useI18n();
 const deckElement = ref<InstanceType<typeof ReelDeck> | null>(null);
+useRouteScrollMemory({
+  key: 'reels',
+  getScroller: () => deckElement.value?.getScrollElement() ?? null
+});
+const { t } = useI18n();
 const isInfoSidebarOpen = ref(false);
 const viewportWidth = ref(typeof window !== 'undefined' ? window.innerWidth : 0);
 const viewportHeight = ref(typeof window !== 'undefined' ? window.innerHeight : 0);
 const isMobileViewport = computed(() => viewportWidth.value <= 768);
+let activeReelRestoreFrame = 0;
 const desktopInfoPanelSide = computed<'left' | 'right'>(() =>
   !isMobileViewport.value && viewportWidth.value > viewportHeight.value ? 'right' : 'left'
 );
@@ -212,6 +218,19 @@ function closeInfoSidebar() {
 function updateViewportMode() {
   viewportWidth.value = window.innerWidth;
   viewportHeight.value = window.innerHeight;
+}
+
+function restoreActiveReelPosition() {
+  if (activeReelRestoreFrame !== 0) {
+    window.cancelAnimationFrame(activeReelRestoreFrame);
+  }
+
+  void nextTick(() => {
+    activeReelRestoreFrame = window.requestAnimationFrame(() => {
+      activeReelRestoreFrame = 0;
+      deckElement.value?.restoreActiveReel();
+    });
+  });
 }
 
 function shouldCaptureGlobalWheel(event: WheelEvent) {
@@ -266,6 +285,7 @@ onMounted(async () => {
 onActivated(() => {
   updateViewportMode();
   addGlobalListeners();
+  restoreActiveReelPosition();
 });
 
 onDeactivated(() => {
@@ -274,6 +294,9 @@ onDeactivated(() => {
 
 onBeforeUnmount(() => {
   removeGlobalListeners();
+  if (activeReelRestoreFrame !== 0) {
+    window.cancelAnimationFrame(activeReelRestoreFrame);
+  }
 });
 
 watch(activeItem, (item) => {
@@ -511,8 +534,18 @@ watch(activeItem, (item) => {
 .reels-view__info-sheet-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 79;
+  z-index: 0;
   background: rgba(0, 0, 0, 0.42);
+}
+
+.reels-view__info-sheet-shell {
+  position: fixed;
+  inset: 0;
+  z-index: 79;
+  display: grid;
+  place-items: center;
+  padding: max(1rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right)) max(1rem, env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left));
+  isolation: isolate;
 }
 
 .reels-info-sheet-enter-active,

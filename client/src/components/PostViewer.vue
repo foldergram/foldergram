@@ -1515,8 +1515,8 @@
     // Audible autoplay was refused. The verdict holds for the whole document until the
     // next user gesture, and the stored preference keeps describing what the viewer
     // actually asked for.
-    appStore.reportAudibleAutoplayBlocked()
-    syncVideoMuted(player, true)
+    const blocked = appStore.reportAudibleAutoplayBlocked()
+    syncVideoMuted(player, blocked ? true : viewerEffectiveMuted.value)
 
     try {
       await player.play()
@@ -1923,6 +1923,8 @@
     if (!image || image.mediaType !== "video") {
       return
     }
+
+    appStore.activateVideoSoundFromUserGesture()
 
     const player = playerElement.value
     const currentTime = Number.isFinite(player?.currentTime) ? player?.currentTime ?? 0 : 0

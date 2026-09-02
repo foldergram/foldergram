@@ -50,6 +50,10 @@ function logServerReady(): void {
 }
 
 async function bootstrap(): Promise<void> {
+  if (appConfig.runtime === 'worker') {
+    throw new Error('The worker runtime must use server/src/worker.ts.');
+  }
+
   await permanentDeletionService.recoverPendingDeletions();
   // A batch deletion that was interrupted by a restart continues on its own.
   deletionJobService.resumePendingJob();
@@ -77,7 +81,10 @@ async function bootstrap(): Promise<void> {
 
   server.listen(appConfig.port, () => {
     logServerReady();
-    if (!appConfig.libraryAutoScanEnabled) {
+    if (!appConfig.libraryAutoScanEnabled || appConfig.workerBaseUrl) {
+      if (appConfig.workerBaseUrl) {
+        log.info('Scan worker configured; web runtime will not start a scanner or gallery watcher');
+      }
       log.info('Automatic library scanning disabled; waiting for a manual scan');
       return;
     }

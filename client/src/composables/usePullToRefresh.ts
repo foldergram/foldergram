@@ -65,6 +65,14 @@ export function usePullToRefresh(options: PullToRefreshOptions) {
       return;
     }
 
+    // A modal/player can open after touchstart. Once another surface owns the
+    // gesture, release pull-to-refresh immediately instead of refreshing the page
+    // when that surface's swipe ends.
+    if (options.isEnabled && !options.isEnabled()) {
+      reset();
+      return;
+    }
+
     const delta = event.touches[0].clientY - startY;
 
     if (delta <= 0 || getScrollTop() > 0) {
@@ -97,6 +105,11 @@ export function usePullToRefresh(options: PullToRefreshOptions) {
 
   async function handleTouchEnd() {
     if (!tracking) {
+      return;
+    }
+
+    if (options.isEnabled && !options.isEnabled()) {
+      reset();
       return;
     }
 

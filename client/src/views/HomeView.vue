@@ -290,7 +290,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onActivated, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { RouterLink } from 'vue-router';
 
@@ -312,6 +312,8 @@ import type { FeedMode } from '../types/api';
 import { formatFolderTitle } from '../utils/folder-titles';
 import { buildLikedCountByFolder, selectHomeRecommendations } from '../utils/home-recommendations';
 import { usePullToRefresh } from '../composables/usePullToRefresh';
+import { useImmersiveVideoStore } from '../stores/immersive-video';
+import { useRouteScrollMemory } from '../composables/useRouteScrollMemory';
 import { getInitialScanStats, getScanActionLine, getScanPhaseLabel, getScanSummary } from '../utils/scan-progress';
 
 import { provideViewActivation } from '../composables/useViewActivation';
@@ -330,6 +332,8 @@ const folderStoriesStore = useFolderStoriesStore();
 const likesStore = useLikesStore();
 const foldersStore = useFoldersStore();
 const momentsStore = useMomentsStore();
+const immersiveVideoStore = useImmersiveVideoStore();
+const homeScrollMemory = useRouteScrollMemory({ key: 'home' });
 const { t } = useI18n();
 const likedCountByFolder = computed(() => buildLikedCountByFolder(likesStore.items));
 const homeRecommendations = computed(() =>
@@ -345,6 +349,40 @@ const isCompactHomeLayout = ref(false);
 const requestingHomeScan = ref(false);
 const homeScanError = ref<string | null>(null);
 const feedStoryError = ref<string | null>(null);
+let homeScrollRestoreFrame = 0;
+let homeScrollRestoreTimer: number | null = null;
+
+function restoreHomeScrollPosition() {
+  if (homeScrollRestoreFrame !== 0) {
+    window.cancelAnimationFrame(homeScrollRestoreFrame);
+  }
+
+  void nextTick(() => {
+    homeScrollRestoreFrame = window.requestAnimationFrame(() => {
+      homeScrollRestoreFrame = 0;
+      void homeScrollMemory.restore();
+    });
+  });
+
+  if (homeScrollRestoreTimer !== null) {
+    window.clearTimeout(homeScrollRestoreTimer);
+  }
+
+  // KeepAlive activation can happen before feed cards finish restoring their
+  // dimensions. A few bounded retries prevent the browser's later layout pass
+  // from clobbering the remembered position without creating a permanent scroll loop.
+  let attempts = 0;
+  const retry = () => {
+    attempts += 1;
+    void homeScrollMemory.restore();
+    if (attempts < 5) {
+      homeScrollRestoreTimer = window.setTimeout(retry, 120);
+    } else {
+      homeScrollRestoreTimer = null;
+    }
+  };
+  homeScrollRestoreTimer = window.setTimeout(retry, 120);
+}
 
 /**
  * Pull-to-refresh swaps in content the viewer has not seen instead of re-rendering the
@@ -352,7 +390,10 @@ const feedStoryError = ref<string | null>(null);
  */
 const pullToRefresh = usePullToRefresh({
   isEnabled: () =>
-    !appStore.isLibraryUnavailable && activeRailViewerId.value === null && activeFeedStoryId.value === null,
+    !appStore.isLibraryUnavailable &&
+    !immersiveVideoStore.isOpen &&
+    activeRailViewerId.value === null &&
+    activeFeedStoryId.value === null,
   onRefresh: async () => {
     await feedStore.refreshWithNewSeed();
     await momentsStore.fetchMoments(true).catch(() => {});
@@ -605,8 +646,11 @@ onMounted(async () => {
     window.addEventListener('resize', updateHomeLayout);
   }
 
-  if (!appStore.stats) {
-    await appStore.fetchStats().catch(() => {});
+  // App.vue begins this request as soon as authentication is ready. Do not start a
+  // duplicate status request or make the first feed wait behind a NAS scan: the
+  // visible posts can load independently while the global scan/status UI catches up.
+  if (!appStore.stats && !appStore.loadingStats) {
+    void appStore.fetchStats().catch(() => {});
   }
 
   if (appStore.isLibraryUnavailable) {
@@ -615,6 +659,10 @@ onMounted(async () => {
 
   feedStore.initializeMode(appStore.defaultHomeFeedMode);
   await Promise.all([feedStore.loadInitial(), momentsStore.fetchMoments()]);
+});
+
+onActivated(() => {
+  restoreHomeScrollPosition();
 });
 
 watch(
@@ -691,6 +739,12 @@ watch(
 );
 
 onUnmounted(() => {
+  if (homeScrollRestoreFrame !== 0) {
+    window.cancelAnimationFrame(homeScrollRestoreFrame);
+  }
+  if (homeScrollRestoreTimer !== null) {
+    window.clearTimeout(homeScrollRestoreTimer);
+  }
   homeLayoutResizeObserver?.disconnect();
   homeLayoutResizeObserver = null;
   window.removeEventListener('resize', updateHomeLayout);

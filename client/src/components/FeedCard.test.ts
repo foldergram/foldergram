@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useAuthStore } from '../stores/auth';
 import { useImmersiveVideoStore } from '../stores/immersive-video';
-import { createPostShareLink } from '../api/gallery';
+import { createPostShareLink, trashImage } from '../api/gallery';
 import type { FeedItem } from '../types/api';
 import FeedCard from './FeedCard.vue';
 
@@ -13,7 +13,8 @@ vi.mock('../api/gallery', async () => {
   const actual = await vi.importActual<typeof import('../api/gallery')>('../api/gallery');
   return {
     ...actual,
-    createPostShareLink: vi.fn()
+    createPostShareLink: vi.fn(),
+    trashImage: vi.fn()
   };
 });
 vi.mock('vue-router', async () => {
@@ -159,6 +160,7 @@ describe('FeedCard', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.mocked(createPostShareLink).mockReset();
+    vi.mocked(trashImage).mockReset();
     vi.stubGlobal(
       'IntersectionObserver',
       class {
@@ -271,8 +273,8 @@ describe('FeedCard', () => {
     expect(immersiveVideoStore.target?.id).toBe(805);
     expect(immersiveVideoStore.startTime).toBe(12.5);
     expect(immersiveVideoStore.startPaused).toBe(false);
-    // The inline decoder stands down while the one global immersive player owns playback.
-    expect(player.paused).toBe(true);
+    // The same decoder is teleported into immersive, so playback must keep running.
+    expect(player.paused).toBe(false);
 
     immersiveVideoStore.close({ id: 805, currentTime: 20, paused: false });
     await flushPromises();
@@ -304,7 +306,7 @@ describe('FeedCard', () => {
 
     expect(immersiveVideoStore.startPaused).toBe(false);
     expect(immersiveVideoStore.isOpen).toBe(true);
-    expect(player.paused).toBe(true);
+    expect(player.paused).toBe(false);
   });
 
   it('renders the bottom progress UI and keeps slider clicks from pausing the home video', async () => {
@@ -521,5 +523,35 @@ describe('FeedCard', () => {
 
     await restrictedWrapper.get('button[aria-label="More options"]').trigger('click');
     expect(restrictedWrapper.text()).not.toContain('Edit caption');
+  });
+
+  it('moves a home post to Trash immediately without a second confirmation dialog', async () => {
+    const item = createImageItem(812);
+    vi.mocked(trashImage).mockResolvedValue({
+      id: item.id,
+      folderSlug: item.folderSlug,
+      trashedAt: '2026-09-01T00:00:00.000Z'
+    });
+
+    const wrapper = mount(FeedCard, {
+      props: {
+        item,
+        avatarUrl: null,
+        context: 'home'
+      },
+      global: {
+        stubs: globalStubs
+      }
+    });
+
+    await wrapper.get('button[aria-label="More options"]').trigger('click');
+    const deleteButton = wrapper.findAll('button').find((button) => button.text().includes('Delete post'));
+    expect(deleteButton).toBeDefined();
+
+    await deleteButton!.trigger('click');
+    await flushPromises();
+
+    expect(trashImage).toHaveBeenCalledWith(item.id);
+    expect(wrapper.find('[data-test="confirm-dialog"]').exists()).toBe(false);
   });
 });

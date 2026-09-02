@@ -28,6 +28,7 @@ import {
   folderRepository,
   folderScanStateRepository,
   imageRepository,
+  libraryStateRepository,
   likeRepository,
   placeRepository,
   postRepository,
@@ -49,6 +50,7 @@ import type {
   PlaybackStrategy,
   PostMediaItem,
   PostRecord,
+  ReelCandidate,
   SharedFeedItem,
   SharedFolderSummary,
   SharedImageDetail,
@@ -171,6 +173,11 @@ interface PlaceRowFields {
 }
 
 type IndexedFeedImage = FeedImage & PlaceRowFields & { playbackStrategy?: PlaybackStrategy | null };
+type ScannerProgress = ReturnType<typeof scannerService.getProgress>;
+type ViewerScanProgress = ScannerProgress & {
+  currentFolder: null;
+  currentFile: null;
+};
 type IndexedImageDetail = ImageDetail & PlaceRowFields & { playbackStrategy?: PlaybackStrategy | null; exifJson?: string | null };
 type IndexedTrashImage = TrashImage & PlaceRowFields & { playbackStrategy?: PlaybackStrategy | null };
 type ScanSummaryRecord = ReturnType<typeof scanRunRepository.latestCompleted>;
@@ -1071,6 +1078,91 @@ function buildStaticCapsuleDefinition(
   };
 }
 
+/**
+ * `countRenderableFeed` scans every visible post, which on the live library is most of
+ * the wait before the first feed card can render, and every page of every mode asks for
+ * it again. The library signature is far cheaper than the count and changes whenever the
+ * answer could, so caching on it is safe.
+ */
+let renderableFeedCountCache: { signature: string; count: number } | null = null;
+
+function countCachedRenderableFeed(): number {
+  const signature = libraryStateRepository.getSignature();
+  if (renderableFeedCountCache?.signature === signature) {
+    return renderableFeedCountCache.count;
+  }
+
+  const count = imageRepository.countRenderableFeed();
+  renderableFeedCountCache = { signature, count };
+  return count;
+}
+
+/**
+ * Reels ranks the entire video catalogue to answer a single page, and the candidate
+ * query itself walks every visible post. Both were being redone on every request and
+ * every page, which is what made opening the reels deck, and paging inside it, wait
+ * hundreds of milliseconds before any clip could even start loading.
+ *
+ * The cache is keyed on the library signature, so a scan, an edit, a deletion or a scan
+ * selection change drops it immediately; nothing here can serve stale content.
+ */
+let reelCandidateCache: { signature: string; candidates: ReelCandidate[] } | null = null;
+
+function listCachedReelCandidates(): ReelCandidate[] {
+  const signature = libraryStateRepository.getSignature();
+  if (reelCandidateCache?.signature === signature) {
+    return reelCandidateCache.candidates;
+  }
+
+  const candidates = imageRepository.listVisibleVideoCandidates();
+  reelCandidateCache = { signature, candidates };
+  return candidates;
+}
+
+/**
+ * Ranking and interleaving the whole catalogue is the expensive half of a reels page,
+ * and paging asks for a strictly longer prefix of the very same ordering. Keeping the
+ * last ordering per (library, mode, seed, affinity) turns page two onwards into a slice.
+ */
+let reelQueueCache:
+  | { key: string; queue: ReelCandidate[]; builtLength: number; isComplete: boolean }
+  | null = null;
+
+function listCachedReelQueue(
+  candidates: ReelCandidate[],
+  mode: 'recommended' | 'random',
+  sessionSeed: number,
+  signals: ReelAffinitySignals,
+  requiredLength: number
+): ReelCandidate[] {
+  const key = [
+    libraryStateRepository.getSignature(),
+    mode,
+    sessionSeed,
+    signals.lastOpenedFolderSlug ?? '',
+    (signals.recentOpenedFolderSlugs ?? []).join(',')
+  ].join('|');
+
+  if (reelQueueCache?.key === key && (reelQueueCache.isComplete || reelQueueCache.builtLength >= requiredLength)) {
+    return reelQueueCache.queue;
+  }
+
+  if (mode === 'random') {
+    const queue = shuffleReelCandidates(candidates, sessionSeed) as ReelCandidate[];
+    reelQueueCache = { key, queue, builtLength: queue.length, isComplete: true };
+    return queue;
+  }
+
+  const queue = buildReelQueue(candidates, sessionSeed, signals, requiredLength) as ReelCandidate[];
+  reelQueueCache = {
+    key,
+    queue,
+    builtLength: requiredLength,
+    isComplete: queue.length < requiredLength
+  };
+  return queue;
+}
+
 function listDiversifiedModeItems(
   total: number,
   page: number,
@@ -1469,7 +1561,7 @@ export const galleryService = {
     if (mode === 'random') {
       // Counting only what the feed will actually return keeps `hasMore` honest while a
       // scan is still producing thumbnails.
-      const total = imageRepository.countRenderableFeed();
+      const total = countCachedRenderableFeed();
       const seed = Number.isFinite(randomSeed)
         ? Number(randomSeed)
         : Number(new Date().toISOString().slice(0, 10).replaceAll('-', ''));
@@ -1498,7 +1590,7 @@ export const galleryService = {
       };
     }
 
-    const total = imageRepository.countRenderableFeed();
+    const total = countCachedRenderableFeed();
     const offset = (page - 1) * limit;
     const items = imageRepository.listRecentCandidates(offset, limit, excludePostIds);
 
@@ -1520,7 +1612,7 @@ export const galleryService = {
       };
     }
 
-    const candidates = imageRepository.listVisibleVideoCandidates();
+    const candidates = listCachedReelCandidates();
     const total = candidates.length;
     if (total === 0) {
       return {
@@ -1544,10 +1636,9 @@ export const galleryService = {
 
             // The greedy interleave is sequential, so a prefix of the full queue is
             // identical to a queue built with that cap. Only building as far as the
-            // requested page keeps reels responsive on large libraries.
-            return mode === 'random'
-              ? shuffleReelCandidates(candidates, sessionSeed)
-              : buildReelQueue(candidates, sessionSeed, signals, offset + limit);
+            // requested page keeps reels responsive on large libraries, and the cache
+            // keeps paging from rebuilding that prefix again on every swipe.
+            return listCachedReelQueue(candidates, mode, sessionSeed, signals, offset + limit);
           })();
 
     return {
@@ -2334,7 +2425,8 @@ export const galleryService = {
     };
   },
 
-  getStatus() {
+  getStatus(scanProgress?: ViewerScanProgress) {
+    const resolvedScanProgress = scanProgress ?? this.getScanProgress();
     const storageState = storageService.getState();
     const rebuildRequired = appSettingsRepository.get(LIBRARY_REBUILD_REQUIRED_SETTING_KEY) === '1';
     const defaultHomeFeedMode = getDefaultHomeFeedMode();
@@ -2356,7 +2448,7 @@ export const galleryService = {
       indexedMediaAssets: storageState.libraryAvailable ? imageRepository.countVisibleMediaAssets() : 0,
       indexedCarousels: storageState.libraryAvailable ? imageRepository.countVisibleCarousels() : 0,
       indexedVideos: storageState.libraryAvailable ? imageRepository.countVisibleSingleVideos() : 0,
-      scan: this.getScanProgress(),
+      scan: resolvedScanProgress,
       storage: {
         available: storageState.libraryAvailable,
         reason: buildViewerSafeStorageReason(storageState.libraryAvailable)
@@ -2381,29 +2473,28 @@ export const galleryService = {
     };
   },
 
-  getScanProgress() {
+  getScanProgress(progress = scannerService.getProgress()) {
     const lastCompletedScan = scanRunRepository.latestCompleted() ?? null;
-    const scanProgress = scannerService.getProgress();
 
     return {
-      ...scanProgress,
+      ...progress,
       currentFolder: null,
       currentFile: null,
       lastCompletedScan: toViewerSafeScanSummary(lastCompletedScan)
     };
   },
 
-  getAdminScanProgress() {
+  getAdminScanProgress(progress = scannerService.getProgress()) {
     const lastCompletedScan = scanRunRepository.latestCompleted() ?? null;
-    const scanProgress = scannerService.getProgress();
 
     return {
-      ...scanProgress,
+      ...progress,
       lastCompletedScan
     };
   },
 
-  getStats() {
+  getStats(scanProgress?: ScannerProgress) {
+    const resolvedScanProgress = scanProgress ?? this.getAdminScanProgress();
     const lastCompletedScan = scanRunRepository.latestCompleted() ?? null;
     const { startIso, endIso } = getLocalDayBounds();
     const todayScanChanges = scanRunRepository.completedSummaryBetween(startIso, endIso);
@@ -2438,7 +2529,7 @@ export const galleryService = {
       previewCount: storageState.libraryAvailable ? countDerivativeFilesOnDisk(appConfig.previewsDir) : 0,
       lastScan: lastCompletedScan,
       todayScanChanges,
-      scan: this.getAdminScanProgress(),
+      scan: resolvedScanProgress,
       storage: {
         available: storageState.libraryAvailable,
         reason: storageState.reason,

@@ -22,4 +22,20 @@ describe('ResilientImage', () => {
 
     expect(wrapper.get('img').attributes('src')).toContain('/api/originals/2770371');
   });
+
+  it('uses a temporary video first-frame probe when the cover is missing', async () => {
+    const wrapper = mount(ResilientImage, {
+      props: {
+        src: '',
+        videoSrc: '/api/originals/91',
+        alt: 'Video without cover',
+        loading: 'eager'
+      }
+    });
+
+    await nextTick();
+
+    expect(wrapper.findComponent({ name: 'VideoFirstFrame' }).exists()).toBe(true);
+    expect(wrapper.find('video').attributes('src')).toBe('/api/originals/91');
+  });
 });

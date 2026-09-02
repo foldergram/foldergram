@@ -1,0 +1,61 @@
+services:
+  foldergram-migrate:
+    image: foldergram:direct-worker-20260901
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["pnpm", "migrate"]
+    volumes:
+      - ${GALLERY_ROOT_HOST_PATH:?Set GALLERY_ROOT_HOST_PATH to the total gallery root}:/app/data/gallery
+      - ${FOLDERGRAM_DATA_HOST_PATH:?Set FOLDERGRAM_DATA_HOST_PATH to the existing Foldergram config mount}:/app/data
+    restart: "no"
+
+  foldergram-web:
+    image: foldergram:direct-worker-20260901
+    command: ["node", "server/dist/index.js"]
+    environment:
+      TZ: Asia/Shanghai
+      FOLDERGRAM_RUNTIME: web
+      WORKER_BASE_URL: http://foldergram-worker:4142
+      MEDIA_ACCEL_REDIRECT_PREFIX: /__foldergram_media
+      LIBRARY_AUTO_SCAN_ENABLED: "false"
+    volumes:
+      - ${GALLERY_ROOT_HOST_PATH:?Set GALLERY_ROOT_HOST_PATH to the total gallery root}:/app/data/gallery
+      - ${FOLDERGRAM_DATA_HOST_PATH:?Set FOLDERGRAM_DATA_HOST_PATH to the existing Foldergram config mount}:/app/data
+    depends_on:
+      foldergram-migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  foldergram-worker:
+    image: foldergram:direct-worker-20260901
+    command: ["node", "server/dist/worker.js"]
+    environment:
+      TZ: Asia/Shanghai
+      FOLDERGRAM_RUNTIME: worker
+      WORKER_CONTROL_PORT: "4142"
+      LIBRARY_AUTO_SCAN_ENABLED: "false"
+      # One probe/derivative at a time: playback owns the NAS while people are using it.
+      SCAN_DISCOVERY_CONCURRENCY: "1"
+      SCAN_DERIVATIVE_CONCURRENCY: "1"
+    volumes:
+      - ${GALLERY_ROOT_HOST_PATH:?Set GALLERY_ROOT_HOST_PATH to the total gallery root}:/app/data/gallery
+      - ${FOLDERGRAM_DATA_HOST_PATH:?Set FOLDERGRAM_DATA_HOST_PATH to the existing Foldergram config mount}:/app/data
+    depends_on:
+      foldergram-migrate:
+        condition: service_completed_successfully
+    cpus: "0.75"
+    restart: unless-stopped
+
+  foldergram-gateway:
+    image: nginx:1.27-alpine
+    container_name: foldergram
+    ports:
+      - "43921:8080"
+    volumes:
+      - ./nginx/foldergram.conf:/etc/nginx/nginx.conf:ro
+      - ${GALLERY_ROOT_HOST_PATH:?Set GALLERY_ROOT_HOST_PATH to the total gallery root}:/app/data/gallery:ro
+    depends_on:
+      foldergram-web:
+        condition: service_started
+    restart: unless-stopped

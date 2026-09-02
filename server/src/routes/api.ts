@@ -1,4 +1,5 @@
 import express from 'express';
+import path from 'node:path';
 import { z } from 'zod';
 
 import { AUTH_PASSWORD_MAX_LENGTH, AUTH_PASSWORD_MIN_LENGTH, authService } from '../services/auth-service.js';
@@ -22,6 +23,9 @@ import { watcherService } from '../services/watcher-service.js';
 import { serveDerivativeForImage } from './lazy-derivatives.js';
 import { applyNoStoreMediaHeaders } from '../utils/media-response.js';
 import { videoStreamRouter } from './video-stream.js';
+import { appConfig } from '../config/env.js';
+import { fetchRemoteScanProgress, isRemoteScanWorkerEnabled, requestRemoteScan } from '../services/scan-worker-client.js';
+import type { ScanProgressSnapshot } from '../services/scanner-service.js';
 
 const router = express.Router();
 
@@ -575,16 +579,25 @@ router.get('/feed/search', (request, response) => {
   response.json(galleryService.searchMedia(query.q, query.page, query.limit));
 });
 
-router.get('/status', (_request, response) => {
-  response.json(galleryService.getStatus());
+async function resolveScanProgress(): Promise<ScanProgressSnapshot> {
+  if (!isRemoteScanWorkerEnabled()) {
+    return scannerService.getProgress();
+  }
+
+  return fetchRemoteScanProgress();
+}
+
+router.get('/status', async (_request, response) => {
+  const progress = await resolveScanProgress();
+  response.json(galleryService.getStatus(galleryService.getScanProgress(progress)));
 });
 
-router.get('/scan-progress', (_request, response) => {
-  response.json(galleryService.getScanProgress());
+router.get('/scan-progress', async (_request, response) => {
+  response.json(galleryService.getScanProgress(await resolveScanProgress()));
 });
 
-router.get('/admin/scan-progress', requireCapability('canAccessSettings', 'Admin access is required.'), (_request, response) => {
-  response.json(galleryService.getAdminScanProgress());
+router.get('/admin/scan-progress', requireCapability('canAccessSettings', 'Admin access is required.'), async (_request, response) => {
+  response.json(galleryService.getAdminScanProgress(await resolveScanProgress()));
 });
 
 router.get('/admin/scan-folders', requireCapability('canAccessSettings', 'Admin access is required.'), async (_request, response) => {
@@ -1612,6 +1625,19 @@ router.get('/originals/:id', (request, response) => {
     return;
   }
 
+  if (appConfig.mediaAccelRedirectPrefix) {
+    const relativePath = path.relative(appConfig.galleryRoot, originalMedia.path);
+    if (!relativePath || relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
+      response.status(404).json({ message: 'Original media not found' });
+      return;
+    }
+
+    const encodedPath = relativePath.split(path.sep).map(encodeURIComponent).join('/');
+    response.setHeader('X-Accel-Redirect', `${appConfig.mediaAccelRedirectPrefix}/${encodedPath}`);
+    response.status(200).end();
+    return;
+  }
+
   response.sendFile(originalMedia.path);
 });
 
@@ -1621,14 +1647,21 @@ const adminMutationRateLimiter = createRateLimiter({
   message: 'Too many administrative requests. Please try again in a minute.'
 });
 
-const requireNoScanInProgress = (_request: express.Request, response: express.Response, next: express.NextFunction) => {
-  if (scannerService.getProgress().isScanning) {
+const requireNoScanInProgress = async (_request: express.Request, response: express.Response, next: express.NextFunction) => {
+  try {
+    if (!(await resolveScanProgress()).isScanning) {
+      next();
+      return;
+    }
+
     response.status(429).json({
       message: 'A scan or rebuild is already in progress.'
     });
-    return;
+  } catch (error) {
+    response.status(503).json({
+      message: error instanceof Error ? error.message : 'The scan worker is unavailable.'
+    });
   }
-  next();
 };
 
 router.post(
@@ -1638,6 +1671,12 @@ router.post(
   requireNoScanInProgress,
   async (_request, response) => {
   try {
+    if (isRemoteScanWorkerEnabled()) {
+      const requested = await requestRemoteScan('manual');
+      response.status(202).json(requested);
+      return;
+    }
+
     if (scannerService.isLibraryRebuildRequired()) {
       response.status(409).json({
         message: LIBRARY_REBUILD_REQUIRED_MESSAGE
@@ -1664,6 +1703,12 @@ router.post(
   adminMutationRateLimiter,
   requireNoScanInProgress,
   async (_request, response) => {
+  if (isRemoteScanWorkerEnabled()) {
+    const requested = await requestRemoteScan('rebuild');
+    response.status(202).json(requested);
+    return;
+  }
+
   await watcherService.stop();
 
   try {
@@ -1683,6 +1728,12 @@ router.post(
   adminMutationRateLimiter,
   requireNoScanInProgress,
   async (_request, response) => {
+  if (isRemoteScanWorkerEnabled()) {
+    const requested = await requestRemoteScan('rebuild-thumbnails');
+    response.status(202).json(requested);
+    return;
+  }
+
   if (scannerService.isLibraryRebuildRequired()) {
     response.status(409).json({
       message: LIBRARY_REBUILD_REQUIRED_MESSAGE
@@ -1771,8 +1822,8 @@ router.post('/admin/settings/carousels-migration-decision', requireCapability('c
   }
 });
 
-router.get('/admin/stats', requireCapability('canAccessSettings', 'Admin access is required.'), (_request, response) => {
-  response.json(galleryService.getStats());
+router.get('/admin/stats', requireCapability('canAccessSettings', 'Admin access is required.'), async (_request, response) => {
+  response.json(galleryService.getStats(galleryService.getAdminScanProgress(await resolveScanProgress())));
 });
 
 export { router as apiRouter };

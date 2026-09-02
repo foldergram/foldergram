@@ -10,6 +10,8 @@
     "migrate": "tsx src/scripts/migrate.ts",
     "migrate:prod": "node dist/scripts/migrate.js",
     "start": "node dist/scripts/migrate.js && node dist/index.js",
+    "start:web": "node dist/index.js",
+    "start:worker": "node dist/worker.js",
     "rescan": "tsx src/scripts/rescan.ts",
     "test": "vitest run --config vitest.config.ts test/"
   },

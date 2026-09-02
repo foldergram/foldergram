@@ -738,8 +738,8 @@ function syncMediaPlayback() {
       return;
     }
 
-    appStore.reportAudibleAutoplayBlocked();
-    player.muted = true;
+    const blocked = appStore.reportAudibleAutoplayBlocked();
+    player.muted = blocked ? true : appStore.videoEffectivelyMuted;
     void player.play().then(() => {
       syncStoryVideoMuted(player, appStore.videoEffectivelyMuted);
     }).catch(() => {
