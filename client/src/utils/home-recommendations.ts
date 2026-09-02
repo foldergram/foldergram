@@ -42,11 +42,14 @@ export function selectHomeRecommendations(
     (lastOpenedFolderSlug ? folders.find((folder) => folder.slug === lastOpenedFolderSlug) ?? null : null) ??
     getFallbackTopFolder(folders, likedCountByFolder);
 
+  // Scores are graded against the start of the local day so the ranking, and the
+  // daily suggestion list built from it, stay identical for every visit that day.
+  const scoringNowMs = getLocalDayStart(now).getTime();
   const rankedCandidates = folders
     .filter((folder) => folder.id !== homeSummaryFolder?.id && folder.imageCount > 0)
     .map((folder) => ({
       folder,
-      score: getRecommendationScore(folder, likedCountByFolder, now.getTime()),
+      score: getRecommendationScore(folder, likedCountByFolder, scoringNowMs),
       likedImageCount: likedCountByFolder.get(folder.slug) ?? 0
     }))
     .sort(compareRankedFolders);
@@ -146,6 +149,10 @@ function compareNumbers(left: number, right: number): number {
 
 function compareText(left: string, right: string): number {
   return left.localeCompare(right, undefined, { sensitivity: 'base' });
+}
+
+function getLocalDayStart(now: Date): Date {
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate());
 }
 
 function createDailySeed(now: Date): string {

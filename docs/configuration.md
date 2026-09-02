@@ -32,6 +32,7 @@ yourself.
 | `DERIVATIVE_MODE` | `eager` | Generate derivatives during scans or lazily on the first protected derivative request. |
 | `LOG_VERBOSE` | `0` | Truthy values are `1`, `true`, `yes`, and `on`. |
 | `SCAN_MEDIA_ERROR_MODE` | `skip` | `skip` reports supported-media scan failures and continues. `fail` aborts on the first such error. |
+| `LIBRARY_AUTO_SCAN_ENABLED` | `true` | When false, startup and watcher scans are disabled; library scans run only from the admin action. |
 | `SCAN_DISCOVERY_CONCURRENCY` | `4` | Discovery concurrency, validated from `1` to `32`. |
 | `SCAN_DERIVATIVE_CONCURRENCY` | `4` | Derivative concurrency, validated from `1` to `32`. |
 | `PUBLIC_DEMO_MODE` | `0` | When enabled, mutating API routes return `403` for read-only demo deployments. |
@@ -148,6 +149,17 @@ The Settings sidebar is split into:
 - `Places` for offline GeoNames preparation status and place-assignment rebuilds
 - `Security & Access` for admin, viewer, and public-mode controls
 - `System Status` for storage, index, and last-scan details
+
+### Selecting scan folders
+
+The `Scan folders` panel under `Settings -> Scan & Library` lets you limit manual library scans and thumbnail regeneration to selected folders below `GALLERY_ROOT`.
+
+- Expand the folder list and select a parent folder to include its entire subtree.
+- Save the selection before running `Scan Library` or `Regenerate Thumbnails`.
+- Leave every folder unchecked to use the default full-library scope.
+- A folder whose stored signature has not changed is skipped by manual scans; only new, changed, or not-yet-indexed folders are processed.
+- Folders outside the selected scope remain indexed and are not marked as removed by a scoped scan.
+- The saved scope is stored in the application database, so it remains after a restart and applies to future manual scans until changed.
 
 ## Path resolution rules
 

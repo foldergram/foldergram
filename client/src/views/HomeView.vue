@@ -13,6 +13,24 @@
         : { left: 'calc(var(--desktop-content-compensation) * -1)' }
     "
   >
+    <!-- Pull-to-refresh indicator: only ever visible while the gesture is active. -->
+    <div
+      v-if="pullToRefresh.isPulling.value || pullToRefresh.isRefreshing.value"
+      class="pointer-events-none fixed inset-x-0 top-0 z-40 flex justify-center"
+      :style="{ transform: `translateY(${pullIndicatorOffset}px)` }"
+      data-test="pull-to-refresh"
+      role="status"
+    >
+      <span class="mt-2 inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1.5 text-[0.78rem] font-semibold text-muted shadow-[var(--shadow)]">
+        <span
+          class="h-4 w-4"
+          :class="pullToRefresh.isRefreshing.value ? 'i-fluent-arrow-sync-16-regular animate-spin' : 'i-fluent-arrow-down-16-regular'"
+          aria-hidden="true"
+        />
+        {{ pullToRefreshLabel }}
+      </span>
+    </div>
+
     <!-- Main feed column -->
     <div class="min-w-0">
       <section
@@ -272,7 +290,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onActivated, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { RouterLink } from 'vue-router';
 
@@ -293,7 +311,19 @@ import { useMomentsStore } from '../stores/moments';
 import type { FeedMode } from '../types/api';
 import { formatFolderTitle } from '../utils/folder-titles';
 import { buildLikedCountByFolder, selectHomeRecommendations } from '../utils/home-recommendations';
+import { usePullToRefresh } from '../composables/usePullToRefresh';
+import { useImmersiveVideoStore } from '../stores/immersive-video';
+import { useRouteScrollMemory } from '../composables/useRouteScrollMemory';
 import { getInitialScanStats, getScanActionLine, getScanPhaseLabel, getScanSummary } from '../utils/scan-progress';
+
+import { provideViewActivation } from '../composables/useViewActivation';
+
+// Named explicitly so <KeepAlive include> keeps matching after a minified build.
+defineOptions({ name: 'HomeView' });
+
+// This view is cached, so its players stay in memory when another tab is showing.
+// Descendants read this flag to pause instead of decoding audio in the background.
+provideViewActivation();
 
 const appStore = useAppStore();
 const authStore = useAuthStore();
@@ -302,6 +332,8 @@ const folderStoriesStore = useFolderStoriesStore();
 const likesStore = useLikesStore();
 const foldersStore = useFoldersStore();
 const momentsStore = useMomentsStore();
+const immersiveVideoStore = useImmersiveVideoStore();
+const homeScrollMemory = useRouteScrollMemory({ key: 'home' });
 const { t } = useI18n();
 const likedCountByFolder = computed(() => buildLikedCountByFolder(likesStore.items));
 const homeRecommendations = computed(() =>
@@ -317,6 +349,68 @@ const isCompactHomeLayout = ref(false);
 const requestingHomeScan = ref(false);
 const homeScanError = ref<string | null>(null);
 const feedStoryError = ref<string | null>(null);
+let homeScrollRestoreFrame = 0;
+let homeScrollRestoreTimer: number | null = null;
+
+function restoreHomeScrollPosition() {
+  if (homeScrollRestoreFrame !== 0) {
+    window.cancelAnimationFrame(homeScrollRestoreFrame);
+  }
+
+  void nextTick(() => {
+    homeScrollRestoreFrame = window.requestAnimationFrame(() => {
+      homeScrollRestoreFrame = 0;
+      void homeScrollMemory.restore();
+    });
+  });
+
+  if (homeScrollRestoreTimer !== null) {
+    window.clearTimeout(homeScrollRestoreTimer);
+  }
+
+  // KeepAlive activation can happen before feed cards finish restoring their
+  // dimensions. A few bounded retries prevent the browser's later layout pass
+  // from clobbering the remembered position without creating a permanent scroll loop.
+  let attempts = 0;
+  const retry = () => {
+    attempts += 1;
+    void homeScrollMemory.restore();
+    if (attempts < 5) {
+      homeScrollRestoreTimer = window.setTimeout(retry, 120);
+    } else {
+      homeScrollRestoreTimer = null;
+    }
+  };
+  homeScrollRestoreTimer = window.setTimeout(retry, 120);
+}
+
+/**
+ * Pull-to-refresh swaps in content the viewer has not seen instead of re-rendering the
+ * same rows, which is what the feed did before when a page was reloaded.
+ */
+const pullToRefresh = usePullToRefresh({
+  isEnabled: () =>
+    !appStore.isLibraryUnavailable &&
+    !immersiveVideoStore.isOpen &&
+    activeRailViewerId.value === null &&
+    activeFeedStoryId.value === null,
+  onRefresh: async () => {
+    await feedStore.refreshWithNewSeed();
+    await momentsStore.fetchMoments(true).catch(() => {});
+  }
+});
+const pullIndicatorOffset = computed(() =>
+  pullToRefresh.isRefreshing.value ? pullToRefresh.threshold : pullToRefresh.pullDistance.value
+);
+const pullToRefreshLabel = computed(() => {
+  if (pullToRefresh.isRefreshing.value) {
+    return t('app.pullToRefresh.refreshing');
+  }
+
+  return pullToRefresh.pullDistance.value >= pullToRefresh.threshold
+    ? t('app.pullToRefresh.release')
+    : t('app.pullToRefresh.pull');
+});
 
 function formatDisplayFolderTitle(folder: NonNullable<typeof homeSummaryFolder.value> | (typeof recommendedFolders.value)[number]) {
   return formatFolderTitle(folder, appStore.nestedFolderTitleFormat);
@@ -552,8 +646,11 @@ onMounted(async () => {
     window.addEventListener('resize', updateHomeLayout);
   }
 
-  if (!appStore.stats) {
-    await appStore.fetchStats().catch(() => {});
+  // App.vue begins this request as soon as authentication is ready. Do not start a
+  // duplicate status request or make the first feed wait behind a NAS scan: the
+  // visible posts can load independently while the global scan/status UI catches up.
+  if (!appStore.stats && !appStore.loadingStats) {
+    void appStore.fetchStats().catch(() => {});
   }
 
   if (appStore.isLibraryUnavailable) {
@@ -562,6 +659,10 @@ onMounted(async () => {
 
   feedStore.initializeMode(appStore.defaultHomeFeedMode);
   await Promise.all([feedStore.loadInitial(), momentsStore.fetchMoments()]);
+});
+
+onActivated(() => {
+  restoreHomeScrollPosition();
 });
 
 watch(
@@ -597,6 +698,22 @@ watch(
       return;
     }
 
+    const completedScan = appStore.stats?.scan.lastCompletedScan;
+    const changedLibrary = Boolean(
+      completedScan &&
+        (completedScan.new_files > 0 || completedScan.updated_files > 0 || completedScan.removed_files > 0)
+    );
+
+    if (changedLibrary) {
+      // Refresh visible caches once after a background watcher scan finishes.
+      await Promise.all([
+        foldersStore.fetchFolders(true),
+        feedStore.loadInitial(true),
+        momentsStore.fetchMoments(true)
+      ]);
+      return;
+    }
+
     await momentsStore.fetchMoments(true);
   }
 );
@@ -622,6 +739,12 @@ watch(
 );
 
 onUnmounted(() => {
+  if (homeScrollRestoreFrame !== 0) {
+    window.cancelAnimationFrame(homeScrollRestoreFrame);
+  }
+  if (homeScrollRestoreTimer !== null) {
+    window.clearTimeout(homeScrollRestoreTimer);
+  }
   homeLayoutResizeObserver?.disconnect();
   homeLayoutResizeObserver = null;
   window.removeEventListener('resize', updateHomeLayout);

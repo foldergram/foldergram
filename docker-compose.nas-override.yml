@@ -1,0 +1,8 @@
+services:
+  foldergram:
+    image: foldergram:gpu-hls
+    volumes:
+      - /tmp/zfsv3/sata14/18523520567/data/adminroot/艾薇:/app/data/gallery
+    environment:
+      LIBRARY_AUTO_SCAN_ENABLED: "false"
+

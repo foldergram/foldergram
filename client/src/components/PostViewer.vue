@@ -138,7 +138,7 @@
           class="viewer__media-shell"
           :items="image.mediaItems!"
           prefer-preview
-          :retry-while="appStore.isScanning"
+          :retry-while="appStore.isInitialScan"
           loading="eager"
           :muted="appStore.videoMuted"
           autoplay
@@ -147,20 +147,24 @@
           <div
             class="viewer__media-shell viewer__media-shell--video viewer__media-shell--video-interactive"
             :style="mediaShellStyle"
-            :aria-label="t('post.viewer.togglePlayback')"
+            :aria-label="t('post.immersive.open')"
             role="button"
             tabindex="0"
             @click="handleVideoSurfaceClick"
             @keydown="handleVideoSurfaceKeydown"
+            @pointercancel="holdSpeed.onPointercancel"
+            @pointerdown="holdSpeed.onPointerdown"
+            @pointermove="holdSpeed.onPointermove"
+            @pointerup="holdSpeed.onPointerup"
           >
             <media-player
               ref="playerElement"
               class="viewer__player"
               :src.prop="videoSource"
               :title.prop="image.filename"
-              :fullscreenOrientation.prop="'none'"
+              :fullscreenOrientation.prop="'landscape'"
               :playsInline.prop="true"
-              :muted.prop="appStore.videoMuted"
+              :muted.prop="viewerEffectiveMuted"
               :loop.prop="true"
               load="eager"
               preload="metadata"
@@ -195,19 +199,22 @@
                 </template>
                 <template #trailing>
                   <div class="viewer__player-controls-group">
-                    <media-mute-button
+                    <button
                       class="viewer__player-control"
+                      type="button"
                       :aria-label="t('post.viewer.toggleSound')"
+                      @click.stop="toggleViewerSound"
                     >
                       <span
-                        class="viewer__player-control-icon viewer__player-mute-icon viewer__player-mute-icon--on i-fluent-speaker-2-16-regular"
+                        class="viewer__player-control-icon"
+                        :class="
+                          appStore.videoMuted
+                            ? 'i-fluent-speaker-mute-16-regular'
+                            : 'i-fluent-speaker-2-16-regular'
+                        "
                         aria-hidden="true"
                       />
-                      <span
-                        class="viewer__player-control-icon viewer__player-mute-icon viewer__player-mute-icon--off i-fluent-speaker-mute-16-regular"
-                        aria-hidden="true"
-                      />
-                    </media-mute-button>
+                    </button>
                     <button
                       v-if="showHdButton"
                       class="viewer__player-control"
@@ -257,6 +264,21 @@
             >
               <span class="viewer__pause-icon i-fluent-play-20-filled" />
             </div>
+            <div
+              v-if="holdSpeed.isFastForwarding.value"
+              class="viewer__hold-indicator"
+              aria-hidden="true"
+            >
+              <span class="viewer__hold-icon i-fluent-fast-forward-20-filled" />
+              <span>{{ holdSpeed.rate }}x</span>
+            </div>
+            <div
+              v-else-if="holdSpeed.isScrubbing.value"
+              class="viewer__hold-indicator"
+              aria-hidden="true"
+            >
+              <span>{{ videoScrubLabel }}</span>
+            </div>
           </div>
         </template>
         <div
@@ -265,14 +287,15 @@
           :style="mediaShellStyle"
         >
           <ResilientImage
-            class="viewer__media-image"
+            class="viewer__media-image viewer__media-image--zoomable"
             :src="image.previewUrl"
             :fallback-src="image.originalUrl"
             :alt="image.filename"
             :width="image.width"
             :height="image.height"
             loading="eager"
-            :retry-while="appStore.isScanning"
+            :retry-while="appStore.isInitialScan"
+            @click="openImmersiveImage"
           />
         </div>
       </div>
@@ -596,6 +619,7 @@
   import type { PlayerSrc } from "vidstack"
   import type { MediaPlayerElement } from "vidstack/elements"
 
+  import { useHoldToSpeed } from "../composables/useHoldToSpeed"
   import { useHorizontalSwipe } from "../composables/useHorizontalSwipe"
   import { useImageCaptionEditor } from "../composables/useImageCaptionEditor"
   import type { ImageDetail, FolderSummary } from "../types/api"
@@ -603,16 +627,26 @@
   import { useAuthStore } from "../stores/auth"
   import { useLikesStore } from "../stores/likes"
   import { useFoldersStore } from "../stores/folders"
+  import { useImmersiveImageStore } from "../stores/immersive-image"
+  import { useImmersiveVideoStore } from "../stores/immersive-video"
   import { resolveDisplayCaption } from "../utils/caption"
   import { formatFolderTitle } from "../utils/folder-titles"
   import { getOriginalMediaDownloadUrl, getOriginalMediaUrl } from "../utils/original-media"
+  import {
+    resolveVideoFallbackSource,
+    resolveVideoSource,
+    toPlayerSrc,
+    useBundledHlsLibrary,
+    warmVideoStream,
+    type ResolvedVideoSource,
+  } from "../utils/video-playback"
   import Avatar from "./Avatar.vue"
   import CarouselMediaStage from "./CarouselMediaStage.vue"
   import CollectionBookmark from "./CollectionBookmark.vue"
   import PostCaptionModal from "./PostCaptionModal.vue"
   import ResilientImage from "./ResilientImage.vue"
   import VideoProgressFooter from "./VideoProgressFooter.vue"
-  import { formatMediaDuration, formatVideoTimestamp, videoPreviewWouldDownscale } from "../utils/media"
+  import { formatMediaDuration, formatVideoTimestamp } from "../utils/media"
 
   const props = defineProps<{
     image: ImageDetail | null
@@ -630,6 +664,8 @@
   const appStore = useAppStore()
   const authStore = useAuthStore()
   const foldersStore = useFoldersStore()
+  const immersiveImageStore = useImmersiveImageStore()
+  const immersiveVideoStore = useImmersiveVideoStore()
   const route = useRoute()
   const router = useRouter()
   const { locale, t } = useI18n()
@@ -687,7 +723,6 @@
     value: string
   }
 
-  let videoMuteSyncToken = 0
   let playerReady = false
   let pendingVideoRestore: { currentTime: number; wasPaused: boolean } | null = null
   let removePlayerEventListeners: (() => void) | null = null
@@ -710,11 +745,13 @@
     return `${megabytes.toFixed(2)} MB`
   })
 
+  // Only worth offering when the default source is a transcoded stream; there is
+  // nothing to upgrade to when the browser is already playing the original file.
   const showHdButton = computed(
     () =>
       props.image?.mediaType === 'video' &&
-      props.image?.playbackStrategy === 'original' &&
-      videoPreviewWouldDownscale(props.image.width, props.image.height),
+      Boolean(props.image?.streamUrl) &&
+      (isPlayingHd.value || preferredVideoSource.value?.isStream === true),
   )
   const showVideoPausedIndicator = computed(
     () => props.image?.mediaType === 'video' && isVideoPaused.value,
@@ -726,26 +763,27 @@
     ),
   )
 
-  const videoSrc = computed(() => {
+  const videoFallbackSource = ref<ResolvedVideoSource | null>(null)
+  const preferredVideoSource = computed<ResolvedVideoSource | null>(() => {
     if (!props.image || props.image.mediaType !== 'video') {
-      return props.image?.previewUrl ?? ''
+      return null
     }
 
-    if (isPlayingHd.value && props.image.originalUrl) {
-      return props.image.originalUrl
-    }
-
-    return props.image.previewUrl
+    // The HD toggle is a per-playback override that forces the untouched file.
+    const quality = isPlayingHd.value ? 'original' : appStore.videoPlaybackQuality
+    return resolveVideoSource(props.image, quality)
   })
+  const activeVideoSource = computed<ResolvedVideoSource | null>(
+    () => videoFallbackSource.value ?? preferredVideoSource.value,
+  )
+  const videoSrc = computed(() => activeVideoSource.value?.src ?? '')
   const videoSource = computed<PlayerSrc>(() => {
-    if (!props.image || props.image.mediaType !== "video") {
-      return { src: props.image?.previewUrl ?? "", type: "video/mp4" }
+    const source = activeVideoSource.value
+    if (!source) {
+      return { src: "", type: "video/mp4" }
     }
 
-    return {
-      src: videoSrc.value,
-      type: "video/mp4",
-    }
+    return toPlayerSrc(source)
   })
   const mediaShellStyle = computed(() => {
     if (!props.image) {
@@ -969,15 +1007,30 @@
     },
   })
 
-  function syncVideoMuted(player: MediaPlayerElement, muted: boolean) {
-    const token = ++videoMuteSyncToken
-    player.muted = muted
+  // A refused audible autoplay is a document-level verdict, so it lives in the store
+  // and every surface (feed, reels, viewer, stories) reads the same value.
+  const viewerEffectiveMuted = computed(() => appStore.videoEffectivelyMuted)
 
-    requestAnimationFrame(() => {
-      if (videoMuteSyncToken === token) {
-        videoMuteSyncToken = 0
+  function syncVideoMuted(player: MediaPlayerElement, muted: boolean) {
+    player.muted = muted
+    const videos = [player.querySelector("video"), player.shadowRoot?.querySelector("video")]
+    for (const video of videos) {
+      if (video instanceof HTMLVideoElement) {
+        video.muted = muted
       }
-    })
+    }
+  }
+
+  // Vidstack re-initialises its own muted state after the provider attaches and
+  // after a source swap, so the element is pushed back onto the stored preference
+  // whenever it drifts.
+  // One-directional: only ever mutes, so the muted autoplay fallback survives and
+  // un-muting stays an explicit tap.
+  function enforceVideoMuted() {
+    const player = playerElement.value
+    if (player) {
+      syncVideoMuted(player, viewerEffectiveMuted.value)
+    }
   }
 
   function isPrimaryPlainClick(event: MouseEvent) {
@@ -1445,24 +1498,29 @@
       return
     }
 
-    syncVideoMuted(player, appStore.videoMuted)
+    syncVideoMuted(player, viewerEffectiveMuted.value)
 
     try {
       await player.play()
       isVideoPaused.value = false
       return
     } catch {
-      if (appStore.videoMuted) {
+      if (viewerEffectiveMuted.value) {
         // Ignore autoplay rejections and leave manual controls available.
         isVideoPaused.value = true
         return
       }
     }
 
-    syncVideoMuted(player, true)
+    // Audible autoplay was refused. The verdict holds for the whole document until the
+    // next user gesture, and the stored preference keeps describing what the viewer
+    // actually asked for.
+    const blocked = appStore.reportAudibleAutoplayBlocked()
+    syncVideoMuted(player, blocked ? true : viewerEffectiveMuted.value)
 
     try {
       await player.play()
+      syncVideoMuted(player, viewerEffectiveMuted.value)
       isVideoPaused.value = false
     } catch {
       // Ignore autoplay rejections and leave manual controls available.
@@ -1476,7 +1534,7 @@
       return
     }
 
-    syncVideoMuted(player, appStore.videoMuted)
+    syncVideoMuted(player, viewerEffectiveMuted.value)
 
     try {
       await player.play()
@@ -1486,17 +1544,19 @@
     }
   }
 
-  function handlePlayerVolumeChange() {
+  // Only an explicit tap writes the muted preference. Mirroring vidstack's
+  // `volume-change` back into the store also captured its own `muted=false`
+  // initialisation on every source swap, which un-muted the library silently.
+  async function toggleViewerSound() {
     const player = playerElement.value
-    // Ignore volume-change events that fire before the player has fully initialized.
-    // Vidstack can emit these during its own setup with muted=false, which would
-    // overwrite the persisted muted preference read from localStorage.
-    if (!player || !playerReady || videoMuteSyncToken !== 0) {
-      return
-    }
 
-    if (player.muted !== appStore.videoMuted) {
-      appStore.setVideoMuted(player.muted)
+    const nextMuted = !appStore.videoMuted
+    // Tapping the control is the user gesture that lifts an autoplay block, and
+    // setVideoMuted clears it as part of turning sound back on.
+    appStore.setVideoMuted(nextMuted)
+
+    if (player) {
+      syncVideoMuted(player, nextMuted)
     }
   }
 
@@ -1512,7 +1572,23 @@
       currentTime: savedTime,
       wasPaused: player.paused
     }
+    videoFallbackSource.value = null
     isPlayingHd.value = !isPlayingHd.value
+  }
+
+  function switchVideoToFallbackSource() {
+    const image = props.image
+    const failed = activeVideoSource.value
+    if (!image || !failed || videoFallbackSource.value) {
+      return
+    }
+
+    const fallback = resolveVideoFallbackSource(image, failed)
+    if (!fallback) {
+      return
+    }
+
+    videoFallbackSource.value = fallback
   }
 
   async function handlePlayerReadyForPlayback(): Promise<void> {
@@ -1555,9 +1631,6 @@
       isVideoPaused.value = props.image?.mediaType === "video"
       syncVideoTimelineState(player)
     }
-    const handleVolume = () => {
-      handlePlayerVolumeChange()
-    }
     const handleDuration = (event: Event) => {
       if (event instanceof CustomEvent && typeof event.detail === "number" && event.detail > 0) {
         videoDurationMs.value = event.detail * 1000
@@ -1582,25 +1655,36 @@
     const handleEnded = () => {
       videoCurrentTimeMs.value = videoDurationMs.value
     }
+    const handleVolume = () => {
+      enforceVideoMuted()
+    }
+    const handleError = () => {
+      switchVideoToFallbackSource()
+    }
+
+    const removeHlsLibraryBinding = useBundledHlsLibrary(player)
 
     player.addEventListener("loaded-metadata", handleReady)
     player.addEventListener("can-play", handleReady)
+    player.addEventListener("volume-change", handleVolume)
     player.addEventListener("play", handlePlay)
     player.addEventListener("pause", handlePause)
-    player.addEventListener("volume-change", handleVolume)
     player.addEventListener("duration-change", handleDuration)
     player.addEventListener("time-update", handleTimeUpdate)
     player.addEventListener("ended", handleEnded)
+    player.addEventListener("error", handleError)
 
     removePlayerEventListeners = () => {
+      removeHlsLibraryBinding()
       player.removeEventListener("loaded-metadata", handleReady)
       player.removeEventListener("can-play", handleReady)
+      player.removeEventListener("volume-change", handleVolume)
       player.removeEventListener("play", handlePlay)
       player.removeEventListener("pause", handlePause)
-      player.removeEventListener("volume-change", handleVolume)
       player.removeEventListener("duration-change", handleDuration)
       player.removeEventListener("time-update", handleTimeUpdate)
       player.removeEventListener("ended", handleEnded)
+      player.removeEventListener("error", handleError)
     }
 
     if (player.hasAttribute("data-can-play")) {
@@ -1619,20 +1703,28 @@
       isVideoPaused.value = false
       videoDurationMs.value = props.image?.durationMs ?? 0
       videoCurrentTimeMs.value = 0
+      videoFallbackSource.value = null
       pendingVideoRestore = null
       void attemptVideoPlayback()
     },
   )
 
   watch(
-    () => appStore.videoMuted,
-    videoMuted => {
+    () => appStore.videoPlaybackQuality,
+    () => {
+      videoFallbackSource.value = null
+    },
+  )
+
+  watch(
+    () => [appStore.videoEffectivelyMuted, appStore.videoSoundGeneration] as const,
+    ([effectivelyMuted]) => {
       const player = playerElement.value
       if (!player) {
         return
       }
 
-      syncVideoMuted(player, videoMuted)
+      syncVideoMuted(player, effectivelyMuted)
     },
   )
 
@@ -1754,12 +1846,132 @@
     })
   }
 
-  async function handleVideoSurfaceClick(event: MouseEvent) {
+  const holdSpeed = useHoldToSpeed({
+    canStart: event => !isPlayerInteractiveTarget(event.target),
+    getCurrentTime: () => playerElement.value?.currentTime ?? 0,
+    getDuration: () => playerElement.value?.duration ?? 0,
+    seekTo: seconds => {
+      const player = playerElement.value
+      if (!player) {
+        return
+      }
+
+      try {
+        player.currentTime = seconds
+      } catch {
+        // Seeking before the provider is attached is a no-op.
+      }
+    },
+    getPlaybackRate: () => playerElement.value?.playbackRate ?? 1,
+    setPlaybackRate: rate => {
+      const player = playerElement.value
+      if (!player) {
+        return
+      }
+
+      try {
+        player.playbackRate = rate
+      } catch {
+        // Rate changes before the provider is attached are a no-op.
+      }
+    },
+    play: () => {
+      void playerElement.value?.play().catch(() => {
+        // Ignore play rejections before the provider is ready.
+      })
+    },
+  })
+
+  // Ending the gesture before the provider changes: a hold that outlives its own
+  // element never receives `pointerup` there, which used to leave the clip at 2x.
+  watch([videoSource, () => props.image?.id ?? null], () => {
+    holdSpeed.stop()
+  })
+
+  const videoScrubLabel = computed(() => {
+    const seconds = holdSpeed.scrubSeconds.value
+    if (seconds === null) {
+      return ""
+    }
+
+    return formatVideoTimestamp(
+      videoDurationMs.value > 0 ? videoDurationMs.value : props.image?.durationMs,
+      seconds * 1000,
+    )
+  })
+
+  function openImmersiveImage() {
+    const image = props.image
+    if (!image || image.mediaType !== "image") {
+      return
+    }
+
+    immersiveImageStore.open({
+      id: image.id,
+      filename: image.filename,
+      thumbnailUrl: image.thumbnailUrl,
+      fullUrl: image.originalUrl ?? getOriginalMediaUrl(image.id),
+      width: image.width,
+      height: image.height,
+      caption: caption.value,
+      folderSlug: image.folderSlug,
+    })
+  }
+
+  function openImmersiveVideo() {
+    const image = props.image
+    if (!image || image.mediaType !== "video") {
+      return
+    }
+
+    appStore.activateVideoSoundFromUserGesture()
+
+    const player = playerElement.value
+    const currentTime = Number.isFinite(player?.currentTime) ? player?.currentTime ?? 0 : 0
+
+    void player?.pause().catch(() => {
+      // Ignore pause rejections before the provider is ready.
+    })
+
+    // The layer resumes at `currentTime`, which usually lands in a segment the NAS has
+    // not transcoded yet; warming it removes the stall right after the zoom.
+    warmVideoStream(image, appStore.videoPlaybackQuality, {
+      fromSeconds: currentTime ?? 0,
+      segments: 4,
+    })
+
+    immersiveVideoStore.open(
+      {
+        id: image.id,
+        filename: image.filename,
+        thumbnailUrl: image.thumbnailUrl,
+        previewUrl: image.previewUrl,
+        previewFileUrl: image.previewFileUrl,
+        originalUrl: image.originalUrl,
+        streamUrl: image.streamUrl,
+        playbackStrategy: image.playbackStrategy,
+        sourceOverride: activeVideoSource.value,
+        width: image.width,
+        height: image.height,
+        durationMs: image.durationMs,
+        collectionItem: image,
+      },
+      { startTime: currentTime },
+    )
+  }
+
+  function handleVideoSurfaceClick(event: MouseEvent) {
     if (!isPrimaryPlainClick(event) || isPlayerInteractiveTarget(event.target)) {
       return
     }
 
-    await toggleVideoSurfacePlayback()
+    if (holdSpeed.shouldSuppressClick()) {
+      return
+    }
+
+    // Tapping the frame opens the immersive layer, matching how social apps behave.
+    // The footer play button keeps the pause/resume role.
+    openImmersiveVideo()
   }
 
   function handleVideoSurfaceKeydown(event: KeyboardEvent) {
@@ -1796,6 +2008,7 @@
   })
 
   onUnmounted(() => {
+    holdSpeed.stop()
     resetSidebarSheetGesture()
     resetMediaSheetRevealGesture()
     window.removeEventListener("resize", updateSidebarLayout)
@@ -1813,6 +2026,43 @@
       }
 
       closeCaptionEditor()
+    },
+  )
+
+  watch(
+    () => immersiveVideoStore.isOpen,
+    async isOpen => {
+      const image = props.image
+      if (!image || image.mediaType !== "video") {
+        return
+      }
+
+      // Only one decoder should run at a time, so the inline player waits while the
+      // immersive layer is up and then resumes where that layer stopped.
+      if (isOpen) {
+        isVideoPaused.value = true
+        void playerElement.value?.pause().catch(() => {
+          // Ignore pause rejections before the provider is ready.
+        })
+        return
+      }
+
+      const exitState = immersiveVideoStore.consumeExitState(image.id)
+      const player = playerElement.value
+      if (exitState && player) {
+        try {
+          player.currentTime = exitState.currentTime
+        } catch {
+          // Seeking before the provider is attached is a no-op.
+        }
+
+        if (exitState.paused) {
+          isVideoPaused.value = true
+          return
+        }
+      }
+
+      await resumeVideoPlayback()
     },
   )
 </script>

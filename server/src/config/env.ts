@@ -24,6 +24,7 @@ const envSchema = z.object({
   PREVIEWS_DIR: z.string().optional(),
   LOG_VERBOSE: z.string().optional(),
   SCAN_MEDIA_ERROR_MODE: z.enum(['skip', 'fail']).default('skip'),
+  LIBRARY_AUTO_SCAN_ENABLED: z.string().default('true'),
   SCAN_DISCOVERY_CONCURRENCY: z.coerce.number().int().min(1).max(32).default(4),
   SCAN_DERIVATIVE_CONCURRENCY: z.coerce.number().int().min(1).max(32).default(4),
   PUBLIC_DEMO_MODE: z.string().optional(),
@@ -31,6 +32,12 @@ const envSchema = z.object({
   GALLERY_EXCLUDED_FOLDERS: z.string().optional(),
   IMAGE_DETAIL_SOURCE: z.enum(['preview', 'original']).default('preview'),
   DERIVATIVE_MODE: z.enum(['eager', 'lazy']).default('eager'),
+  VIDEO_HWACCEL: z.enum(['auto', 'vaapi', 'qsv', 'none']).default('auto'),
+  VIDEO_HWACCEL_DEVICE: z.string().default('/dev/dri/renderD128'),
+  FOLDERGRAM_RUNTIME: z.enum(['web', 'worker']).default('web'),
+  WORKER_BASE_URL: z.string().url().optional(),
+  WORKER_CONTROL_PORT: z.coerce.number().int().positive().default(4142),
+  MEDIA_ACCEL_REDIRECT_PREFIX: z.string().default(''),
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development')
 });
 
@@ -99,10 +106,16 @@ const geodataDir = path.join(dataRoot, 'geodata');
 const thumbnailsDir = resolveConfiguredPath(parsed.THUMBNAILS_DIR, path.join(dataRoot, 'thumbnails'));
 const previewsDir = resolveConfiguredPath(parsed.PREVIEWS_DIR, path.join(dataRoot, 'previews'));
 const scanErrorReportDir = path.join(dataRoot, 'scan-errors');
+const hlsCacheDir = path.join(dataRoot, 'hls-cache');
 const logVerbose = parseBooleanFlag(parsed.LOG_VERBOSE);
 const publicDemoMode = parseBooleanFlag(parsed.PUBLIC_DEMO_MODE);
 const csrfTrustedOrigins = parseConfiguredOrigins(parsed.CSRF_TRUSTED_ORIGINS);
 const galleryExcludedFolders = parseExcludedFolderRulesFromEnv(parsed.GALLERY_EXCLUDED_FOLDERS);
+const mediaAccelRedirectPrefix = parsed.MEDIA_ACCEL_REDIRECT_PREFIX.replace(/\/+$/g, '');
+
+if (mediaAccelRedirectPrefix && !mediaAccelRedirectPrefix.startsWith('/')) {
+  throw new Error('MEDIA_ACCEL_REDIRECT_PREFIX must start with /.');
+}
 
 const derivativeDirectoriesOverlap =
   isSameOrWithinPath(thumbnailsDir, previewsDir) || isSameOrWithinPath(previewsDir, thumbnailsDir);
@@ -130,7 +143,7 @@ if (isSameOrWithinPath(previewsDir, galleryRoot)) {
 }
 
 const managedGalleryRelativeIgnores = uniq(
-  [dbDir, thumbnailsDir, previewsDir, scanErrorReportDir]
+  [dbDir, thumbnailsDir, previewsDir, scanErrorReportDir, hlsCacheDir]
     .map((directoryPath) => getRelativePathWithinRoot(galleryRoot, directoryPath))
     .filter((value): value is string => typeof value === 'string' && value.length > 0)
     .map((value) => normalizePath(value))
@@ -149,10 +162,12 @@ export const appConfig = {
   thumbnailsDir,
   previewsDir,
   scanErrorReportDir,
+  hlsCacheDir,
   managedGalleryRelativeIgnores,
   galleryExcludedFolders,
   logVerbose,
   scanMediaErrorMode: parsed.SCAN_MEDIA_ERROR_MODE,
+  libraryAutoScanEnabled: parseBooleanFlag(parsed.LIBRARY_AUTO_SCAN_ENABLED),
   publicDemoMode,
   csrfTrustedOrigins,
   scanDiscoveryConcurrency: parsed.SCAN_DISCOVERY_CONCURRENCY,
@@ -161,5 +176,11 @@ export const appConfig = {
   geodataPath: path.join(geodataDir, 'geonames-cities500.sqlite'),
   geodataMetadataPath: path.join(geodataDir, 'geonames-cities500.meta.json'),
   imageDetailSource: parsed.IMAGE_DETAIL_SOURCE,
-  derivativeMode: parsed.DERIVATIVE_MODE
+  derivativeMode: parsed.DERIVATIVE_MODE,
+  videoHwaccel: parsed.VIDEO_HWACCEL,
+  videoHwaccelDevice: parsed.VIDEO_HWACCEL_DEVICE,
+  runtime: parsed.FOLDERGRAM_RUNTIME,
+  workerBaseUrl: parsed.WORKER_BASE_URL?.replace(/\/+$/g, '') ?? null,
+  workerControlPort: parsed.WORKER_CONTROL_PORT,
+  mediaAccelRedirectPrefix
 };

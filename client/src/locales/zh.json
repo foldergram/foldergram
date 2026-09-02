@@ -24,10 +24,19 @@
     }
   },
   "app": {
+    "scanBanner": {
+      "collapse": "收起扫描进度",
+      "expand": "展开扫描进度"
+    },
     "authLoading": {
       "eyebrow": "访问保护",
       "title": "正在检查访问权限",
       "description": "正在加载当前密码保护状态。"
+    },
+    "pullToRefresh": {
+      "pull": "下拉刷新",
+      "release": "松开刷新",
+      "refreshing": "正在载入新内容..."
     }
   },
   "auth": {
@@ -257,6 +266,41 @@
           }
         }
       },
+      "videoPlaybackQuality": {
+        "label": "视频播放画质",
+        "description": "选择动态流和帖子中的视频以什么画质播放。非“原片”的选项会在 NAS 上按需转码。",
+        "closeMenuAria": "关闭视频播放画质菜单",
+        "deviceOverride": "本设备已单独设置为 {value}。",
+        "useLibraryDefault": "跟随图库默认",
+        "options": {
+          "auto": {
+            "label": "自动",
+            "description": "从 480p 流开始播放，网络足够时自动升清晰度；适合外网。"
+          },
+          "480p": {
+            "label": "480p（外网优先）",
+            "description": "约 0.9 Mbps，适合 2-3 Mbps 的外网连接，起播最快。"
+          },
+          "original": {
+            "label": "原片",
+            "description": "始终播放原始文件，不做任何转码。"
+          },
+          "1080p": {
+            "label": "1080p",
+            "description": "按需转码到 1080p，画质与流量的平衡点。"
+          },
+          "720p": {
+            "label": "720p",
+            "description": "约 1.8 Mbps，适合稳定的较快网络。"
+          }
+        }
+      },
+      "sharePublicBaseUrl": {
+        "label": "外网分享地址",
+        "description": "从外网访问时生成的分享链接使用这个地址。局域网访问时始终使用当前的局域网地址。",
+        "fieldLabel": "公网基础地址",
+        "helper": "留空则外网链接回落到当前访问地址。填写完整地址，例如 https://gallery.example.com。"
+      },
       "storiesMode": {
         "label": "将 stories 文件夹视为普通应用文件夹",
         "scanRequired": "需要扫描",
@@ -295,6 +339,7 @@
         "reelsOnly": "这会更新此应用打开短片时使用的队列样式。访问者无法从短片页面切换模式。",
         "folderOnly": "这会更新应用文件夹网格使用的默认照片顺序。",
         "nestedFolderTitleOnly": "这会更新整个应用中嵌套应用文件夹的标签显示方式。",
+        "sharePublicBaseUrlOnly": "这会更新从外网访问时分享链接使用的地址前缀。",
         "carouselReconciliation": "轮播文件夹模式已保存。请完成上方提示的图库操作，将其应用到索引。",
         "idle": "这些是当前适用于语言、首页、短片、应用文件夹、嵌套文件夹标题、stories 文件夹、轮播文件夹和排除文件夹的全局默认项。"
       },
@@ -322,6 +367,7 @@
         "reelsSaved": "短片现在会以 {label} 打开。",
         "folderOrderSaved": "应用文件夹现在会以 {label} 打开。",
         "nestedFolderTitleSaved": "嵌套应用文件夹现在使用 {label}。",
+        "videoPlaybackQualitySaved": "视频现在以 {label} 播放。",
         "parts": {
           "appLanguage": "应用语言",
           "excludedFolders": "排除文件夹",
@@ -330,8 +376,11 @@
           "homeFeedDefault": "首页动态默认项",
           "reelsFeedDefault": "短片默认项",
           "appFolderOrder": "应用文件夹顺序",
-          "nestedFolderTitles": "嵌套文件夹标题"
-        }
+          "nestedFolderTitles": "嵌套文件夹标题",
+          "videoPlaybackQuality": "视频播放画质",
+          "sharePublicBaseUrl": "外网分享地址"
+        },
+        "sharePublicBaseUrlSaved": "外网分享地址已保存。"
       },
       "errors": {
         "validateExcludedFolders": "无法验证已排除文件夹规则。",
@@ -353,6 +402,22 @@
       "scanCard": {
         "title": "扫描图库",
         "description": "在添加文件夹后，或你想刷新已索引媒体时运行一次扫描。"
+      },
+      "scanFolders": {
+        "title": "选择扫描文件夹",
+        "description": "选择运行图库扫描或重新生成缩略图时要处理的文件夹。",
+        "chooseLabel": "展开并选择文件夹",
+        "loading": "正在加载文件夹...",
+        "empty": "图库根目录下没有可用文件夹。",
+        "helper": "选择一个文件夹会包含它下面的所有子文件夹。全部不勾选时扫描整个图库。",
+        "allFolders": "全部文件夹",
+        "selectedCount": "已选择 {count} 个",
+        "hasChildren": "包含子文件夹",
+        "save": "保存扫描范围",
+        "saving": "正在保存...",
+        "saved": "扫描范围已保存。运行“扫描图库”后生效。",
+        "loadError": "无法加载可用文件夹。",
+        "saveError": "无法保存扫描范围。"
       },
       "statusLabel": {
         "storageUnavailable": "存储不可用",
@@ -603,6 +668,14 @@
           "updated": "已更新",
           "removed": "已移除"
         }
+      },
+      "todayChanges": {
+        "title": "今日变更",
+        "description": "汇总今天所有已完成的全量和增量扫描，不包含仍在进行中的扫描。",
+        "scans": "扫描次数",
+        "filesScanned": "今日扫描文件",
+        "changes": "变更汇总",
+        "latestFinished": "最近完成时间"
       }
     }
   },
@@ -817,7 +890,18 @@
     "errorTitle": "无法打开文件夹共享",
     "errorDescription": "无法加载此文件夹共享。",
     "backToFolder": "返回共享文件夹",
-    "postErrorTitle": "无法加载共享帖子"
+    "postErrorTitle": "无法加载共享帖子",
+    "post": {
+      "action": "分享这条内容",
+      "copied": "链接已复制",
+      "creating": "正在生成链接...",
+      "createError": "无法生成分享链接。",
+      "copyManually": "手动复制这个链接：",
+      "notFoundTitle": "分享链接不可用",
+      "notFoundDescription": "这个链接可能已过期、已撤销或无效。",
+      "loadingTitle": "正在打开分享内容",
+      "badge": "分享内容"
+    }
   },
   "reels": {
     "view": {
@@ -852,7 +936,8 @@
       "format": "格式",
       "loading": "正在加载短片详情...",
       "folderPath": "文件夹路径",
-      "mimeType": "MIME 类型"
+      "mimeType": "MIME 类型",
+      "deleteVideo": "删除到回收站"
     }
   },
   "post": {
@@ -862,6 +947,19 @@
       "previousItem": "上一个轮播项目",
       "nextItem": "下一个轮播项目",
       "open": "打开包含 {count} 项的轮播帖子"
+    },
+    "immersive": {
+      "label": "沉浸式视频播放器",
+      "close": "返回",
+      "rotate": "切换横屏",
+      "fullscreen": "切换全屏",
+      "open": "打开沉浸式播放器",
+      "exitHint": "下滑关闭",
+      "imageLabel": "沉浸式图片查看器",
+      "zoom": "切换缩放",
+      "details": "详情",
+      "hideDetails": "隐藏详情",
+      "deleteVideo": "删除到回收站"
     },
     "captionModal": {
       "title": "编辑说明",
@@ -1113,6 +1211,11 @@
     "description": "移到这里的帖子会保留在磁盘上，直到你将其永久删除。",
     "selectedOne": "已选 {count} 条帖子",
     "selectedOther": "已选 {count} 条帖子",
+    "selectAll": "全选",
+    "deselectAll": "取消全选",
+    "processingProgress": "正在处理 {done} / {total}…",
+    "deletionProgress": "正在后台删除 {done} / {total}，可以继续浏览其他页面。",
+    "dismissDeletionResult": "知道了",
     "restoreButton": "恢复",
     "deleteButton": "永久删除",
     "libraryUnavailableTitle": "图库存储不可用",

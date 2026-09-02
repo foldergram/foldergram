@@ -196,6 +196,12 @@ export const useExploreStore = defineStore('explore', {
       this.searchItems = updateCaptionInItems(this.searchItems, id, caption);
     },
 
+    /** Deleting from a search result has to drop the tile too, not just the feed copy. */
+    removeImage(id: number) {
+      this.items = this.items.filter((item) => item.id !== id);
+      this.searchItems = this.searchItems.filter((item) => item.id !== id);
+    },
+
     async loadInitial(force = false) {
       if (this.loading) {
         return;

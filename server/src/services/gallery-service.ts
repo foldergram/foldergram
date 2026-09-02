@@ -16,7 +16,9 @@ import {
   REELS_FEED_DEFAULT_MODE_SETTING_KEY,
   STORIES_MIGRATION_DECISION_SETTING_KEY,
   TREAT_CAROUSELS_AS_FOLDERS_SETTING_KEY,
-  TREAT_STORIES_AS_FOLDERS_SETTING_KEY
+  TREAT_STORIES_AS_FOLDERS_SETTING_KEY,
+  VIDEO_PLAYBACK_QUALITY_SETTING_KEY,
+  SHARE_PUBLIC_BASE_URL_SETTING_KEY
 } from '../constants/app-setting-keys.js';
 import { appConfig } from '../config/env.js';
 import {
@@ -26,6 +28,7 @@ import {
   folderRepository,
   folderScanStateRepository,
   imageRepository,
+  libraryStateRepository,
   likeRepository,
   placeRepository,
   postRepository,
@@ -47,10 +50,12 @@ import type {
   PlaybackStrategy,
   PostMediaItem,
   PostRecord,
+  ReelCandidate,
   SharedFeedItem,
   SharedFolderSummary,
   SharedImageDetail,
-  TrashImage
+  TrashImage,
+  VideoPlaybackQuality
 } from '../types/models.js';
 import {
   getEffectiveExcludedFolderRules,
@@ -63,6 +68,7 @@ import { shouldPreferMomentRail, type FeedRailKind } from '../utils/feed-rail-ut
 import { parseNestedFolderTitleFormatSetting, serializeNestedFolderTitleFormatSetting } from '../utils/folder-title-format.js';
 import { countSupportedRootMediaFiles } from '../utils/gallery-root-utils.js';
 import { resolveOriginalPath } from '../utils/media-paths.js';
+import { normalizePublicBaseUrl } from '../utils/share-url.js';
 import { getLeafPathName, getParentRelativePath, getPathBreadcrumb } from '../utils/path-utils.js';
 import { buildReelQueue, shuffleReelCandidates, type ReelAffinitySignals } from '../utils/reels-utils.js';
 import { parseTreatStoriesAsFoldersSetting, serializeTreatStoriesAsFoldersSetting } from '../utils/stories-utils.js';
@@ -167,6 +173,11 @@ interface PlaceRowFields {
 }
 
 type IndexedFeedImage = FeedImage & PlaceRowFields & { playbackStrategy?: PlaybackStrategy | null };
+type ScannerProgress = ReturnType<typeof scannerService.getProgress>;
+type ViewerScanProgress = ScannerProgress & {
+  currentFolder: null;
+  currentFile: null;
+};
 type IndexedImageDetail = ImageDetail & PlaceRowFields & { playbackStrategy?: PlaybackStrategy | null; exifJson?: string | null };
 type IndexedTrashImage = TrashImage & PlaceRowFields & { playbackStrategy?: PlaybackStrategy | null };
 type ScanSummaryRecord = ReturnType<typeof scanRunRepository.latestCompleted>;
@@ -185,6 +196,14 @@ function toViewerSafeScanSummary(scan: ScanSummaryRecord | null) {
 
 function buildViewerSafeStorageReason(libraryAvailable: boolean): string | null {
   return libraryAvailable ? null : 'Configured library storage is unavailable.';
+}
+
+function getLocalDayBounds(now = new Date()): { startIso: string; endIso: string } {
+  const start = new Date(now);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+  return { startIso: start.toISOString(), endIso: end.toISOString() };
 }
 
 function parseFeedMode(value: string | null): FeedMode {
@@ -221,6 +240,15 @@ function parseFolderImageOrder(value: string | null): FolderImageOrder {
 
 function getDefaultFolderImageOrder(): FolderImageOrder {
   return parseFolderImageOrder(appSettingsRepository.get(FOLDER_IMAGE_DEFAULT_ORDER_SETTING_KEY));
+}
+
+const VIDEO_PLAYBACK_QUALITIES: VideoPlaybackQuality[] = ['auto', 'original', '1080p', '720p', '480p'];
+
+function getVideoPlaybackQuality(): VideoPlaybackQuality {
+  const stored = appSettingsRepository.get(VIDEO_PLAYBACK_QUALITY_SETTING_KEY);
+  return VIDEO_PLAYBACK_QUALITIES.includes(stored as VideoPlaybackQuality)
+    ? (stored as VideoPlaybackQuality)
+    : 'auto';
 }
 
 function getNestedFolderTitleFormat(): NestedFolderTitleFormat {
@@ -290,6 +318,36 @@ function buildOriginalUrl(id: number): string {
   return `/api/originals/${id}`;
 }
 
+function buildStreamUrl(id: number): string {
+  return `/api/videos/${id}/hls/master.m3u8`;
+}
+
+interface VideoPlaybackSource {
+  previewUrl: string;
+  streamUrl: string | null;
+}
+
+/**
+ * Videos are never served from a pre-rendered preview file. Sources the browser
+ * can decode as-is play straight from the original, and everything else is
+ * transcoded on demand into HLS segments so playback starts immediately and
+ * seeking only pays for the segment being watched.
+ *
+ * Every video still advertises a stream URL even when the original is directly
+ * playable, because that is what lets a viewer pick a lower quality by hand.
+ */
+function resolveVideoPlaybackSource(
+  id: number,
+  playbackStrategy: PlaybackStrategy | null | undefined
+): VideoPlaybackSource {
+  const streamUrl = buildStreamUrl(id);
+
+  return {
+    previewUrl: playbackStrategy === 'original' ? buildOriginalUrl(id) : streamUrl,
+    streamUrl
+  };
+}
+
 function appendVersion(url: string, version?: string | null): string {
   if (!version) {
     return url;
@@ -298,12 +356,22 @@ function appendVersion(url: string, version?: string | null): string {
   return `${url}?v=${encodeURIComponent(version)}`;
 }
 
-function buildShareThumbnailUrl(id: number, version?: string | null): string {
-  return appendVersion(`/api/share/images/${id}/thumbnail`, version);
+const FOLDER_SHARE_ASSET_BASE_PATH = '/api/share/images';
+
+function buildShareThumbnailUrl(
+  id: number,
+  version?: string | null,
+  assetBasePath: string = FOLDER_SHARE_ASSET_BASE_PATH
+): string {
+  return appendVersion(`${assetBasePath}/${id}/thumbnail`, version);
 }
 
-function buildSharePreviewUrl(id: number, version?: string | null): string {
-  return appendVersion(`/api/share/images/${id}/preview`, version);
+function buildSharePreviewUrl(
+  id: number,
+  version?: string | null,
+  assetBasePath: string = FOLDER_SHARE_ASSET_BASE_PATH
+): string {
+  return appendVersion(`${assetBasePath}/${id}/preview`, version);
 }
 
 function buildPreviewUrl(
@@ -311,15 +379,29 @@ function buildPreviewUrl(
     id: number;
     mediaType: MediaType;
     previewUrl: string;
+    playbackStrategy?: PlaybackStrategy | null;
   },
   useOriginalForImages = false,
   version?: string | null
 ): string {
+  if (image.mediaType === 'video') {
+    return resolveVideoPlaybackSource(image.id, image.playbackStrategy).previewUrl;
+  }
+
   if (useOriginalForImages && image.mediaType === 'image') {
     return buildOriginalUrl(image.id);
   }
 
   return toPublicMediaUrl('/previews', image.previewUrl, version);
+}
+
+function buildVideoPreviewFileUrl(
+  image: { mediaType: MediaType; previewUrl: string },
+  version?: string | null
+): string | null {
+  return image.mediaType === 'video'
+    ? toPublicMediaUrl('/previews', image.previewUrl, version)
+    : null;
 }
 
 function mapPlaceSummaryFromRow(image: PlaceRowFields) {
@@ -354,6 +436,10 @@ function resolveOriginalMediaFile(id: number): { path: string; filename: string 
   }
 
   if (!resolvedPath || !fs.existsSync(resolvedPath)) {
+    // The index outlived the file. Soft deleting here keeps the feed from
+    // handing out the same dead post on every reload, instead of waiting for
+    // the next full scan to notice.
+    imageRepository.markDeleted(detail.relative_path);
     return null;
   }
 
@@ -495,15 +581,17 @@ function isSameOrDescendantFolderPath(rootFolderPath: string, candidateFolderPat
   return candidateFolderPath === rootFolderPath || candidateFolderPath.startsWith(`${rootFolderPath}/`);
 }
 
-function getParentFolderDisplayName(folderPath: string): string | null {
+function getParentFolderDisplayName(folderPath: string, folderNamesByPath?: Map<string, string>): string | null {
   const parentFolderPath = getParentRelativePath(folderPath);
   if (!parentFolderPath) {
     return null;
   }
 
-  const parentFolder = folderRepository.getByFolderPath(parentFolderPath);
-  if (parentFolder?.name.trim()) {
-    return parentFolder.name.trim();
+  const parentName = folderNamesByPath
+    ? folderNamesByPath.get(parentFolderPath)
+    : folderRepository.getByFolderPath(parentFolderPath)?.name;
+  if (parentName?.trim()) {
+    return parentName.trim();
   }
 
   return getLeafPathName(parentFolderPath);
@@ -523,8 +611,18 @@ function mapFeedImage(image: IndexedFeedImage, derivativeVersion = getDerivative
     previewUrl: buildPreviewUrl({
       id: rest.id,
       mediaType: rest.mediaType,
-      previewUrl: rest.previewUrl
+      previewUrl: rest.previewUrl,
+      playbackStrategy
     }, false, derivativeVersion),
+    previewFileUrl: buildVideoPreviewFileUrl({
+      mediaType: rest.mediaType,
+      previewUrl: rest.previewUrl
+    }, derivativeVersion),
+    playbackStrategy: rest.mediaType === 'video' ? (playbackStrategy ?? 'preview') : null,
+    streamUrl: rest.mediaType === 'video'
+      ? resolveVideoPlaybackSource(rest.id, playbackStrategy).streamUrl
+      : null,
+    originalUrl: buildOriginalUrl(rest.id),
     place: mapPlaceSummaryFromRow({ placeId, placeSlug, placeName, placeKind, placeIsApproximate }),
     mediaItems: (mediaItems ?? []).map((item: any) => ({
       imageId: item.imageId,
@@ -539,10 +637,18 @@ function mapFeedImage(image: IndexedFeedImage, derivativeVersion = getDerivative
       previewUrl: buildPreviewUrl({
         id: item.imageId,
         mediaType: item.mediaType,
-        previewUrl: item.previewUrl
+        previewUrl: item.previewUrl,
+        playbackStrategy: item.playbackStrategy
       }, false, derivativeVersion),
+      previewFileUrl: buildVideoPreviewFileUrl({
+        mediaType: item.mediaType,
+        previewUrl: item.previewUrl
+      }, derivativeVersion),
       originalUrl: buildOriginalUrl(item.imageId),
       playbackStrategy: item.playbackStrategy ?? 'preview',
+      streamUrl: item.mediaType === 'video'
+        ? resolveVideoPlaybackSource(item.imageId, item.playbackStrategy).streamUrl
+        : null,
       mimeType: item.mimeType,
       fileSize: item.fileSize,
       relativePath: item.relativePath,
@@ -563,7 +669,28 @@ function isCoverPost(postId: number): boolean {
   return postRepository.isExplicitFolderCover(postId);
 }
 
-function mapSharedMediaItem(item: PostMediaItem, derivativeVersion: string | null): PostMediaItem {
+/**
+ * Where a share response should point its media. Folder shares use the shared
+ * `/api/share/images` routes; a single-post token gets its own prefix so the token
+ * itself carries the authorization and nothing else in the library is reachable.
+ */
+interface ShareAssetContext {
+  assetBasePath: string;
+  /** Set only for token shares, which can also stream HLS. */
+  streamBasePath?: string;
+}
+
+const FOLDER_SHARE_ASSET_CONTEXT: ShareAssetContext = { assetBasePath: FOLDER_SHARE_ASSET_BASE_PATH };
+
+function buildShareStreamUrl(context: ShareAssetContext, imageId: number): string | null {
+  return context.streamBasePath ? `${context.streamBasePath}/${imageId}/hls/master.m3u8` : null;
+}
+
+function mapSharedMediaItem(
+  item: PostMediaItem,
+  derivativeVersion: string | null,
+  context: ShareAssetContext = FOLDER_SHARE_ASSET_CONTEXT
+): PostMediaItem {
   return {
     imageId: item.imageId,
     position: item.position,
@@ -573,8 +700,9 @@ function mapSharedMediaItem(item: PostMediaItem, derivativeVersion: string | nul
     height: item.height,
     durationMs: item.durationMs,
     isAnimated: Boolean(item.isAnimated),
-    thumbnailUrl: buildShareThumbnailUrl(item.imageId, derivativeVersion),
-    previewUrl: buildSharePreviewUrl(item.imageId, derivativeVersion),
+    thumbnailUrl: buildShareThumbnailUrl(item.imageId, derivativeVersion, context.assetBasePath),
+    previewUrl: buildSharePreviewUrl(item.imageId, derivativeVersion, context.assetBasePath),
+    streamUrl: item.mediaType === 'video' ? buildShareStreamUrl(context, item.imageId) : null,
     playbackStrategy: item.playbackStrategy ?? 'preview',
     mimeType: item.mimeType,
     fileSize: item.fileSize
@@ -623,10 +751,18 @@ function mapImageDetail(image: IndexedImageDetail, derivativeVersion = getDeriva
     previewUrl: buildPreviewUrl({
       id: representativeImageId,
       mediaType: rest.mediaType,
-      previewUrl: rest.previewUrl
+      previewUrl: rest.previewUrl,
+      playbackStrategy
     }, useOriginalForImages, derivativeVersion),
+    previewFileUrl: buildVideoPreviewFileUrl({
+      mediaType: rest.mediaType,
+      previewUrl: rest.previewUrl
+    }, derivativeVersion),
     originalUrl: buildOriginalUrl(representativeImageId),
     playbackStrategy,
+    streamUrl: rest.mediaType === 'video'
+      ? resolveVideoPlaybackSource(representativeImageId, playbackStrategy).streamUrl
+      : null,
     place: mapPlaceSummaryFromRow({ placeId, placeSlug, placeName, placeKind, placeIsApproximate }),
     mediaItems: (mediaItems ?? []).map((item: any) => ({
       imageId: item.imageId,
@@ -641,10 +777,18 @@ function mapImageDetail(image: IndexedImageDetail, derivativeVersion = getDeriva
       previewUrl: buildPreviewUrl({
         id: item.imageId,
         mediaType: item.mediaType,
-        previewUrl: item.previewUrl
+        previewUrl: item.previewUrl,
+        playbackStrategy: item.playbackStrategy
       }, false, derivativeVersion),
+      previewFileUrl: buildVideoPreviewFileUrl({
+        mediaType: item.mediaType,
+        previewUrl: item.previewUrl
+      }, derivativeVersion),
       originalUrl: buildOriginalUrl(item.imageId),
       playbackStrategy: item.playbackStrategy ?? 'preview',
+      streamUrl: item.mediaType === 'video'
+        ? resolveVideoPlaybackSource(item.imageId, item.playbackStrategy).streamUrl
+        : null,
       mimeType: item.mimeType,
       fileSize: item.fileSize,
       relativePath: item.relativePath,
@@ -654,7 +798,11 @@ function mapImageDetail(image: IndexedImageDetail, derivativeVersion = getDeriva
   };
 }
 
-function mapSharedImageDetail(image: IndexedImageDetail, derivativeVersion = getDerivativeAssetVersion()): SharedImageDetail {
+function mapSharedImageDetail(
+  image: IndexedImageDetail,
+  derivativeVersion = getDerivativeAssetVersion(),
+  context: ShareAssetContext = FOLDER_SHARE_ASSET_CONTEXT
+): SharedImageDetail {
   const mediaItems = image.mediaItems ?? [];
   const representativeImageId = mediaItems[0]?.imageId ?? image.id;
   return {
@@ -671,14 +819,16 @@ function mapSharedImageDetail(image: IndexedImageDetail, derivativeVersion = get
     height: image.height,
     durationMs: image.durationMs,
     isAnimated: Boolean(image.isAnimated),
-    thumbnailUrl: buildShareThumbnailUrl(representativeImageId, derivativeVersion),
-    previewUrl: buildSharePreviewUrl(representativeImageId, derivativeVersion),
+    thumbnailUrl: buildShareThumbnailUrl(representativeImageId, derivativeVersion, context.assetBasePath),
+    previewUrl: buildSharePreviewUrl(representativeImageId, derivativeVersion, context.assetBasePath),
+    streamUrl: image.mediaType === 'video' ? buildShareStreamUrl(context, representativeImageId) : null,
+    playbackStrategy: (image as { playbackStrategy?: PlaybackStrategy | null }).playbackStrategy ?? null,
     sortTimestamp: image.sortTimestamp,
     nextImageId: image.nextImageId,
     previousImageId: image.previousImageId,
     postType: image.postType ?? 'single',
     itemCount: image.itemCount ?? (mediaItems.length || 1),
-    mediaItems: mediaItems.map((item) => mapSharedMediaItem(item, derivativeVersion))
+    mediaItems: mediaItems.map((item) => mapSharedMediaItem(item, derivativeVersion, context))
   };
 }
 
@@ -690,8 +840,22 @@ function mapTrashImage(image: IndexedTrashImage, derivativeVersion = getDerivati
   };
 }
 
-function buildFolderSummary(folder: FolderSummaryRecord) {
-  const derivativeVersion = getDerivativeAssetVersion();
+interface FolderSummaryContext {
+  /** Resolved once per list so scan_runs is not queried per folder. */
+  derivativeVersion: string | null;
+  /** Prebuilt folder_path -> name map so parents are not looked up per folder. */
+  folderNamesByPath: Map<string, string>;
+}
+
+function createFolderSummaryContext(): FolderSummaryContext {
+  return {
+    derivativeVersion: getDerivativeAssetVersion(),
+    folderNamesByPath: new Map(folderRepository.listPathNames().map((row) => [row.folder_path, row.name]))
+  };
+}
+
+function buildFolderSummary(folder: FolderSummaryRecord, context?: FolderSummaryContext) {
+  const derivativeVersion = context ? context.derivativeVersion : getDerivativeAssetVersion();
   const hasPreloadedAvatarSummary =
     Object.hasOwn(folder, 'summary_avatar_image_id') || Object.hasOwn(folder, 'summary_avatar_thumbnail_path');
 
@@ -701,7 +865,7 @@ function buildFolderSummary(folder: FolderSummaryRecord) {
       slug: folder.slug,
       name: folder.name,
       description: folder.description,
-      parentFolderName: getParentFolderDisplayName(folder.folder_path),
+      parentFolderName: getParentFolderDisplayName(folder.folder_path, context?.folderNamesByPath),
       folderPath: folder.folder_path,
       breadcrumb: getPathBreadcrumb(folder.folder_path),
       imageCount: folder.image_count,
@@ -729,7 +893,7 @@ function buildFolderSummary(folder: FolderSummaryRecord) {
     slug: folder.slug,
     name: folder.name,
     description: folder.description,
-    parentFolderName: getParentFolderDisplayName(folder.folder_path),
+    parentFolderName: getParentFolderDisplayName(folder.folder_path, context?.folderNamesByPath),
     folderPath: folder.folder_path,
     breadcrumb: getPathBreadcrumb(folder.folder_path),
     imageCount: folder.image_count,
@@ -912,6 +1076,91 @@ function buildStaticCapsuleDefinition(
     count: () => cappedItems.length,
     list: (page, limit) => sliceItemsForPage(cappedItems, page, limit)
   };
+}
+
+/**
+ * `countRenderableFeed` scans every visible post, which on the live library is most of
+ * the wait before the first feed card can render, and every page of every mode asks for
+ * it again. The library signature is far cheaper than the count and changes whenever the
+ * answer could, so caching on it is safe.
+ */
+let renderableFeedCountCache: { signature: string; count: number } | null = null;
+
+function countCachedRenderableFeed(): number {
+  const signature = libraryStateRepository.getSignature();
+  if (renderableFeedCountCache?.signature === signature) {
+    return renderableFeedCountCache.count;
+  }
+
+  const count = imageRepository.countRenderableFeed();
+  renderableFeedCountCache = { signature, count };
+  return count;
+}
+
+/**
+ * Reels ranks the entire video catalogue to answer a single page, and the candidate
+ * query itself walks every visible post. Both were being redone on every request and
+ * every page, which is what made opening the reels deck, and paging inside it, wait
+ * hundreds of milliseconds before any clip could even start loading.
+ *
+ * The cache is keyed on the library signature, so a scan, an edit, a deletion or a scan
+ * selection change drops it immediately; nothing here can serve stale content.
+ */
+let reelCandidateCache: { signature: string; candidates: ReelCandidate[] } | null = null;
+
+function listCachedReelCandidates(): ReelCandidate[] {
+  const signature = libraryStateRepository.getSignature();
+  if (reelCandidateCache?.signature === signature) {
+    return reelCandidateCache.candidates;
+  }
+
+  const candidates = imageRepository.listVisibleVideoCandidates();
+  reelCandidateCache = { signature, candidates };
+  return candidates;
+}
+
+/**
+ * Ranking and interleaving the whole catalogue is the expensive half of a reels page,
+ * and paging asks for a strictly longer prefix of the very same ordering. Keeping the
+ * last ordering per (library, mode, seed, affinity) turns page two onwards into a slice.
+ */
+let reelQueueCache:
+  | { key: string; queue: ReelCandidate[]; builtLength: number; isComplete: boolean }
+  | null = null;
+
+function listCachedReelQueue(
+  candidates: ReelCandidate[],
+  mode: 'recommended' | 'random',
+  sessionSeed: number,
+  signals: ReelAffinitySignals,
+  requiredLength: number
+): ReelCandidate[] {
+  const key = [
+    libraryStateRepository.getSignature(),
+    mode,
+    sessionSeed,
+    signals.lastOpenedFolderSlug ?? '',
+    (signals.recentOpenedFolderSlugs ?? []).join(',')
+  ].join('|');
+
+  if (reelQueueCache?.key === key && (reelQueueCache.isComplete || reelQueueCache.builtLength >= requiredLength)) {
+    return reelQueueCache.queue;
+  }
+
+  if (mode === 'random') {
+    const queue = shuffleReelCandidates(candidates, sessionSeed) as ReelCandidate[];
+    reelQueueCache = { key, queue, builtLength: queue.length, isComplete: true };
+    return queue;
+  }
+
+  const queue = buildReelQueue(candidates, sessionSeed, signals, requiredLength) as ReelCandidate[];
+  reelQueueCache = {
+    key,
+    queue,
+    builtLength: requiredLength,
+    isComplete: queue.length < requiredLength
+  };
+  return queue;
 }
 
 function listDiversifiedModeItems(
@@ -1293,7 +1542,11 @@ function listFallbackAvatarStoryItems(
 }
 
 export const galleryService = {
-  getFeed(page: number, limit: number, mode: FeedMode = 'random', randomSeed?: number) {
+  /**
+   * `excludePostIds` backs pull-to-refresh: the client hands back what it has already
+   * shown so the next batch is genuinely new instead of the same rows in a new order.
+   */
+  getFeed(page: number, limit: number, mode: FeedMode = 'random', randomSeed?: number, excludePostIds?: number[]) {
     if (!storageService.getState().libraryAvailable) {
       return {
         mode,
@@ -1306,14 +1559,21 @@ export const galleryService = {
     }
 
     if (mode === 'random') {
-      const total = imageRepository.countFeed();
+      // Counting only what the feed will actually return keeps `hasMore` honest while a
+      // scan is still producing thumbnails.
+      const total = countCachedRenderableFeed();
       const seed = Number.isFinite(randomSeed)
         ? Number(randomSeed)
         : Number(new Date().toISOString().slice(0, 10).replaceAll('-', ''));
 
       return {
         mode,
-        ...buildPaginatedPayload(mapFeedItems(imageRepository.listRandom(page, limit, seed)), page, limit, total)
+        ...buildPaginatedPayload(
+          mapFeedItems(imageRepository.listRandom(page, limit, seed, excludePostIds)),
+          page,
+          limit,
+          total
+        )
       };
     }
 
@@ -1330,9 +1590,9 @@ export const galleryService = {
       };
     }
 
-    const total = imageRepository.countFeed();
+    const total = countCachedRenderableFeed();
     const offset = (page - 1) * limit;
-    const items = imageRepository.listRecentCandidates(offset, limit);
+    const items = imageRepository.listRecentCandidates(offset, limit, excludePostIds);
 
     return {
       mode,
@@ -1352,7 +1612,7 @@ export const galleryService = {
       };
     }
 
-    const candidates = imageRepository.listVisibleVideoCandidates();
+    const candidates = listCachedReelCandidates();
     const total = candidates.length;
     if (total === 0) {
       return {
@@ -1365,6 +1625,7 @@ export const galleryService = {
       };
     }
 
+    const offset = (page - 1) * limit;
     const orderedCandidates =
       mode === 'recent'
         ? candidates
@@ -1373,9 +1634,12 @@ export const galleryService = {
               ? Number(seed)
               : Number(new Date().toISOString().slice(0, 10).replaceAll('-', ''));
 
-            return mode === 'random' ? shuffleReelCandidates(candidates, sessionSeed) : buildReelQueue(candidates, sessionSeed, signals);
+            // The greedy interleave is sequential, so a prefix of the full queue is
+            // identical to a queue built with that cap. Only building as far as the
+            // requested page keeps reels responsive on large libraries, and the cache
+            // keeps paging from rebuilding that prefix again on every swipe.
+            return listCachedReelQueue(candidates, mode, sessionSeed, signals, offset + limit);
           })();
-    const offset = (page - 1) * limit;
 
     return {
       mode,
@@ -1474,7 +1738,8 @@ export const galleryService = {
       return [];
     }
 
-    return folderRepository.getAllSummaries().map(buildFolderSummary);
+    const context = createFolderSummaryContext();
+    return folderRepository.getAllSummaries().map((folder) => buildFolderSummary(folder, context));
   },
 
   listPlaces() {
@@ -1767,6 +2032,39 @@ export const galleryService = {
     }
 
     return mapSharedImageDetail(detail, getDerivativeAssetVersion());
+  },
+
+  /**
+   * Detail payload for a single-post share token. Media URLs are rewritten onto the
+   * token's own prefix, and videos additionally get an HLS master so a phone on a slow
+   * link is not forced to pull the untouched original.
+   */
+  getTokenSharedPostDetail(postId: number, assetBasePath: string, streamBasePath: string) {
+    if (!storageService.getState().libraryAvailable) {
+      return null;
+    }
+
+    const post = resolvePostRecord(postId);
+    if (!post || post.is_deleted || post.is_trashed) {
+      return null;
+    }
+
+    const detail = imageRepository.getImageDetail(post.id, undefined, false, getDefaultFolderImageOrder());
+    if (!detail) {
+      return null;
+    }
+
+    const mapped = mapSharedImageDetail(detail, getDerivativeAssetVersion(), {
+      assetBasePath,
+      streamBasePath
+    });
+
+    // A token unlocks exactly one post, so neighbour navigation must not leak ids.
+    return {
+      ...mapped,
+      nextImageId: null,
+      previousImageId: null
+    };
   },
 
   getShareDerivativeImage(id: number): ImageRecord | null {
@@ -2127,7 +2425,8 @@ export const galleryService = {
     };
   },
 
-  getStatus() {
+  getStatus(scanProgress?: ViewerScanProgress) {
+    const resolvedScanProgress = scanProgress ?? this.getScanProgress();
     const storageState = storageService.getState();
     const rebuildRequired = appSettingsRepository.get(LIBRARY_REBUILD_REQUIRED_SETTING_KEY) === '1';
     const defaultHomeFeedMode = getDefaultHomeFeedMode();
@@ -2135,6 +2434,7 @@ export const galleryService = {
     const defaultReelsFeedMode = getDefaultReelsFeedMode();
     const defaultFolderImageOrder = getDefaultFolderImageOrder();
     const nestedFolderTitleFormat = getNestedFolderTitleFormat();
+    const videoPlaybackQuality = getVideoPlaybackQuality();
     const treatStoriesAsFolders = getTreatStoriesAsFolders();
     const storiesMigration = getStoriesMigrationStatus();
     const treatCarouselsAsFolders = getTreatCarouselsAsFolders();
@@ -2148,7 +2448,7 @@ export const galleryService = {
       indexedMediaAssets: storageState.libraryAvailable ? imageRepository.countVisibleMediaAssets() : 0,
       indexedCarousels: storageState.libraryAvailable ? imageRepository.countVisibleCarousels() : 0,
       indexedVideos: storageState.libraryAvailable ? imageRepository.countVisibleSingleVideos() : 0,
-      scan: this.getScanProgress(),
+      scan: resolvedScanProgress,
       storage: {
         available: storageState.libraryAvailable,
         reason: buildViewerSafeStorageReason(storageState.libraryAvailable)
@@ -2165,37 +2465,39 @@ export const galleryService = {
         defaultFolderImageOrder,
         nestedFolderTitleFormat,
         treatStoriesAsFolders,
-        treatCarouselsAsFolders
+        treatCarouselsAsFolders,
+        videoPlaybackQuality
       },
       storiesMigration,
       carouselsMigration
     };
   },
 
-  getScanProgress() {
+  getScanProgress(progress = scannerService.getProgress()) {
     const lastCompletedScan = scanRunRepository.latestCompleted() ?? null;
-    const scanProgress = scannerService.getProgress();
 
     return {
-      ...scanProgress,
+      ...progress,
       currentFolder: null,
       currentFile: null,
       lastCompletedScan: toViewerSafeScanSummary(lastCompletedScan)
     };
   },
 
-  getAdminScanProgress() {
+  getAdminScanProgress(progress = scannerService.getProgress()) {
     const lastCompletedScan = scanRunRepository.latestCompleted() ?? null;
-    const scanProgress = scannerService.getProgress();
 
     return {
-      ...scanProgress,
+      ...progress,
       lastCompletedScan
     };
   },
 
-  getStats() {
+  getStats(scanProgress?: ScannerProgress) {
+    const resolvedScanProgress = scanProgress ?? this.getAdminScanProgress();
     const lastCompletedScan = scanRunRepository.latestCompleted() ?? null;
+    const { startIso, endIso } = getLocalDayBounds();
+    const todayScanChanges = scanRunRepository.completedSummaryBetween(startIso, endIso);
     const storageState = storageService.getState();
     const currentGalleryRoot = appConfig.galleryRoot;
     const previousGalleryRoot = appSettingsRepository.get(PREVIOUS_GALLERY_ROOT_SETTING_KEY);
@@ -2207,11 +2509,13 @@ export const galleryService = {
     const defaultReelsFeedMode = getDefaultReelsFeedMode();
     const defaultFolderImageOrder = getDefaultFolderImageOrder();
     const nestedFolderTitleFormat = getNestedFolderTitleFormat();
+    const videoPlaybackQuality = getVideoPlaybackQuality();
     const treatStoriesAsFolders = getTreatStoriesAsFolders();
     const storiesMigration = getStoriesMigrationStatus();
     const treatCarouselsAsFolders = getTreatCarouselsAsFolders();
     const carouselsMigration = getCarouselsMigrationStatus();
     const excludedFolders = getExcludedFolderSettings();
+    const sharePublicBaseUrl = normalizePublicBaseUrl(appSettingsRepository.get(SHARE_PUBLIC_BASE_URL_SETTING_KEY));
 
     return {
       folders: storageState.libraryAvailable ? folderRepository.count() : 0,
@@ -2224,7 +2528,8 @@ export const galleryService = {
       thumbnailCount: storageState.libraryAvailable ? countDerivativeFilesOnDisk(appConfig.thumbnailsDir) : 0,
       previewCount: storageState.libraryAvailable ? countDerivativeFilesOnDisk(appConfig.previewsDir) : 0,
       lastScan: lastCompletedScan,
-      scan: this.getAdminScanProgress(),
+      todayScanChanges,
+      scan: resolvedScanProgress,
       storage: {
         available: storageState.libraryAvailable,
         reason: storageState.reason,
@@ -2247,7 +2552,9 @@ export const galleryService = {
         defaultFolderImageOrder,
         nestedFolderTitleFormat,
         treatStoriesAsFolders,
-        treatCarouselsAsFolders
+        treatCarouselsAsFolders,
+        videoPlaybackQuality,
+        sharePublicBaseUrl
       },
       storiesMigration,
       carouselsMigration,
@@ -2284,6 +2591,23 @@ export const galleryService = {
 
     return {
       defaultOrder: order
+    };
+  },
+
+  setSharePublicBaseUrl(publicBaseUrl: string | null) {
+    const normalized = normalizePublicBaseUrl(publicBaseUrl);
+    appSettingsRepository.set(SHARE_PUBLIC_BASE_URL_SETTING_KEY, normalized ?? '');
+
+    return {
+      sharePublicBaseUrl: normalized
+    };
+  },
+
+  setVideoPlaybackQuality(videoPlaybackQuality: VideoPlaybackQuality) {
+    appSettingsRepository.set(VIDEO_PLAYBACK_QUALITY_SETTING_KEY, videoPlaybackQuality);
+
+    return {
+      videoPlaybackQuality
     };
   },
 
@@ -2331,12 +2655,12 @@ export const galleryService = {
   },
 
   async deleteImage(id: number, options: { isLegacyImageAlias?: boolean } = {}) {
-    if (!storageService.getState().libraryAvailable || scannerService.isLibraryRebuildRequired()) {
+    if (!storageService.getState().libraryAvailable) {
       return null;
     }
 
     const post = resolvePostRecord(id, options.isLegacyImageAlias);
-    if (!post) {
+    if (!post || (scannerService.isLibraryRebuildRequired() && post.is_trashed === 0)) {
       return null;
     }
 

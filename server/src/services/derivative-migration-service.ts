@@ -449,6 +449,15 @@ class DerivativeMigrationService {
     };
   }
 
+  /**
+   * Videos are played from the original file or from on-demand HLS segments, so
+   * no preview file is expected for them. Counting one as missing would keep the
+   * migration reporting thousands of gaps it can never fill.
+   */
+  private expectsPreviewFile(mediaType: string): boolean {
+    return mediaType !== 'video';
+  }
+
   private async migrateRow(
     row: ImageRecord,
     callbacks: {
@@ -490,7 +499,7 @@ class DerivativeMigrationService {
       missingFiles += 1;
     }
 
-    if (!nextPreviewExists) {
+    if (!nextPreviewExists && this.expectsPreviewFile(mediaType)) {
       missingFiles += 1;
     }
 
@@ -644,7 +653,10 @@ class DerivativeMigrationService {
     const thumbnailExistsBeforeGenerate = await fileExists(thumbnailAbsolutePath);
     const previewExistsBeforeGenerate = await fileExists(previewAbsolutePath);
 
-    if ((!thumbnailExistsBeforeGenerate || !previewExistsBeforeGenerate) && sourcePath && sourceExists) {
+    const previewRequired = this.expectsPreviewFile(mediaType);
+    const needsGeneration = !thumbnailExistsBeforeGenerate || (previewRequired && !previewExistsBeforeGenerate);
+
+    if (needsGeneration && sourcePath && sourceExists) {
       try {
         const derivatives = await generateDerivatives(sourcePath, row.relative_path, false, {
           thumbnailPath: targetThumbnailPath,
@@ -678,7 +690,7 @@ class DerivativeMigrationService {
       missingFiles += 1;
     }
 
-    if (!(await fileExists(safeJoin(appConfig.previewsDir, resolvedPreviewPath)))) {
+    if (previewRequired && !(await fileExists(safeJoin(appConfig.previewsDir, resolvedPreviewPath)))) {
       missingFiles += 1;
     }
 

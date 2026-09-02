@@ -38,9 +38,14 @@ import ErrorState from '../components/ErrorState.vue';
 import FolderGrid from '../components/FolderGrid.vue';
 import { useAppStore } from '../stores/app';
 import { useLikesStore } from '../stores/likes';
+import { useRouteScrollMemory } from '../composables/useRouteScrollMemory';
+
+// Named explicitly so <KeepAlive include> keeps matching after a minified build.
+defineOptions({ name: 'LikesView' });
 
 const appStore = useAppStore();
 const likesStore = useLikesStore();
+useRouteScrollMemory({ key: 'likes' });
 const { t } = useI18n();
 
 onMounted(async () => {

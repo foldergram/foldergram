@@ -105,7 +105,15 @@ function createAppStats(): AppStats {
       pendingDerivativeMigrationRows: 0,
       ignoredRootMediaCount: 0
     },
-    lastScan: null
+    lastScan: null,
+    todayScanChanges: {
+      scanned_files: 0,
+      new_files: 0,
+      updated_files: 0,
+      removed_files: 0,
+      scan_count: 0,
+      latest_finished_at: null
+    }
   };
 }
 

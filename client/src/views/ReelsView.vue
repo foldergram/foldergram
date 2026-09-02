@@ -12,11 +12,7 @@
       <p class="reels-view__message">{{ reelsStore.error }}</p>
     </section>
 
-    <section v-else-if="showLoadingState" class="reels-view__message-card">
-      <p class="reels-view__eyebrow">{{ t('nav.reels') }}</p>
-      <h1 class="reels-view__title">{{ t('reels.view.loadingTitle') }}</h1>
-      <p class="reels-view__message">{{ t('reels.view.loadingDescription') }}</p>
-    </section>
+    <div v-else-if="showLoadingState" class="reels-view__loading-canvas" aria-hidden="true" />
 
     <section v-else-if="reelsStore.initialized && reelsStore.items.length === 0" class="reels-view__message-card">
       <p class="reels-view__eyebrow">{{ t('nav.reels') }}</p>
@@ -44,17 +40,28 @@
               @toggle-info="handleInfoToggle"
             >
               <template #info-panel>
-                <Transition name="reels-info-popup">
-                  <div v-if="isInfoSidebarOpen" data-test="info-shell" class="reels-view__info-shell">
-                    <ReelInfoSidebar
-                      :item="item"
-                      :folder="activeFolder"
-                      anchor="right"
-                      :open="isInfoSidebarOpen"
-                      @close="closeInfoSidebar"
-                    />
-                  </div>
-                </Transition>
+                <!-- Teleported out of the rail: the reel card is transformed when rotated,
+                     which would make a fixed sheet inside it position against the card
+                     instead of the viewport. -->
+                <Teleport to="body">
+                  <Transition name="reels-info-sheet">
+                    <div
+                      v-if="isInfoSidebarOpen"
+                      data-test="info-shell"
+                      class="reels-view__info-sheet-shell"
+                    >
+                      <div class="reels-view__info-sheet-backdrop" @click="closeInfoSidebar" />
+                      <ReelInfoSidebar
+                        :item="item"
+                        :folder="activeFolder"
+                        anchor="right"
+                        variant="sheet"
+                        :open="isInfoSidebarOpen"
+                        @close="closeInfoSidebar"
+                      />
+                    </div>
+                  </Transition>
+                </Teleport>
               </template>
             </ReelActionRail>
           </template>
@@ -129,7 +136,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 
 import ReelActionRail from '../components/ReelActionRail.vue';
@@ -139,15 +146,30 @@ import { useAppStore } from '../stores/app';
 import { useFoldersStore } from '../stores/folders';
 import { useReelsStore } from '../stores/reels';
 
+import { provideViewActivation } from '../composables/useViewActivation';
+import { useRouteScrollMemory } from '../composables/useRouteScrollMemory';
+
+// Named explicitly so <KeepAlive include> keeps matching after a minified build.
+defineOptions({ name: 'ReelsView' });
+
+// This view is cached, so its players stay in memory when another tab is showing.
+// Descendants read this flag to pause instead of decoding audio in the background.
+provideViewActivation();
+
 const appStore = useAppStore();
 const foldersStore = useFoldersStore();
 const reelsStore = useReelsStore();
-const { t } = useI18n();
 const deckElement = ref<InstanceType<typeof ReelDeck> | null>(null);
+useRouteScrollMemory({
+  key: 'reels',
+  getScroller: () => deckElement.value?.getScrollElement() ?? null
+});
+const { t } = useI18n();
 const isInfoSidebarOpen = ref(false);
 const viewportWidth = ref(typeof window !== 'undefined' ? window.innerWidth : 0);
 const viewportHeight = ref(typeof window !== 'undefined' ? window.innerHeight : 0);
 const isMobileViewport = computed(() => viewportWidth.value <= 768);
+let activeReelRestoreFrame = 0;
 const desktopInfoPanelSide = computed<'left' | 'right'>(() =>
   !isMobileViewport.value && viewportWidth.value > viewportHeight.value ? 'right' : 'left'
 );
@@ -198,6 +220,19 @@ function updateViewportMode() {
   viewportHeight.value = window.innerHeight;
 }
 
+function restoreActiveReelPosition() {
+  if (activeReelRestoreFrame !== 0) {
+    window.cancelAnimationFrame(activeReelRestoreFrame);
+  }
+
+  void nextTick(() => {
+    activeReelRestoreFrame = window.requestAnimationFrame(() => {
+      activeReelRestoreFrame = 0;
+      deckElement.value?.restoreActiveReel();
+    });
+  });
+}
+
 function shouldCaptureGlobalWheel(event: WheelEvent) {
   if (event.defaultPrevented || Math.abs(event.deltaY) < 0.5) {
     return false;
@@ -228,16 +263,40 @@ function handleGlobalWheel(event: WheelEvent) {
   deckElement.value?.navigateByWheel(event.deltaY);
 }
 
-onMounted(async () => {
-  updateViewportMode();
+function addGlobalListeners() {
   window.addEventListener('resize', updateViewportMode);
   window.addEventListener('wheel', handleGlobalWheel, { passive: false });
+}
+
+function removeGlobalListeners() {
+  window.removeEventListener('resize', updateViewportMode);
+  window.removeEventListener('wheel', handleGlobalWheel);
+}
+
+onMounted(async () => {
+  updateViewportMode();
+  addGlobalListeners();
   await reelsStore.loadInitial();
 });
 
+// This route is cached, so it stays mounted behind other dock tabs. The wheel handler
+// hijacks scrolling to advance reels, so it must only be bound while reels is on
+// screen; otherwise scrolling the home feed would page through reels invisibly.
+onActivated(() => {
+  updateViewportMode();
+  addGlobalListeners();
+  restoreActiveReelPosition();
+});
+
+onDeactivated(() => {
+  removeGlobalListeners();
+});
+
 onBeforeUnmount(() => {
-  window.removeEventListener('resize', updateViewportMode);
-  window.removeEventListener('wheel', handleGlobalWheel);
+  removeGlobalListeners();
+  if (activeReelRestoreFrame !== 0) {
+    window.cancelAnimationFrame(activeReelRestoreFrame);
+  }
 });
 
 watch(activeItem, (item) => {
@@ -253,6 +312,12 @@ watch(activeItem, (item) => {
   min-height: 100%;
   background: var(--bg);
   color: var(--text);
+}
+
+.reels-view__loading-canvas {
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
 }
 
 .reels-view__layout {
@@ -464,5 +529,42 @@ watch(activeItem, (item) => {
 .reels-info-popup-enter-from,
 .reels-info-popup-leave-to {
   opacity: 0;
+}
+
+.reels-view__info-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background: rgba(0, 0, 0, 0.42);
+}
+
+.reels-view__info-sheet-shell {
+  position: fixed;
+  inset: 0;
+  z-index: 79;
+  display: grid;
+  place-items: center;
+  padding: max(1rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right)) max(1rem, env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left));
+  isolation: isolate;
+}
+
+.reels-info-sheet-enter-active,
+.reels-info-sheet-leave-active {
+  transition: opacity 0.2s ease;
+}
+
+.reels-info-sheet-enter-active :deep(.reels-info-sidebar--sheet),
+.reels-info-sheet-leave-active :deep(.reels-info-sidebar--sheet) {
+  transition: transform 0.24s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.reels-info-sheet-enter-from,
+.reels-info-sheet-leave-to {
+  opacity: 0;
+}
+
+.reels-info-sheet-enter-from :deep(.reels-info-sidebar--sheet),
+.reels-info-sheet-leave-to :deep(.reels-info-sidebar--sheet) {
+  transform: translateY(100%);
 }
 </style>

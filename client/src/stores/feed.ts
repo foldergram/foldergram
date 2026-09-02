@@ -16,7 +16,19 @@ interface FeedState {
   initialized: boolean;
   randomSeed: number | null;
   reloadRequested: boolean;
+  /**
+   * Post ids already shown in this session. Pull-to-refresh sends them so the next
+   * batch is genuinely new content instead of a reshuffle of the same rows.
+   */
+  seenIds: number[];
+  refreshing: boolean;
 }
+
+/**
+ * Server-side cap. Sending more than this would grow the SQL `NOT IN (...)` without
+ * bound, and past that point rotating the seed already reshuffles enough.
+ */
+const MAX_EXCLUDED_IDS = 500;
 
 function createRandomSeed(): number {
   const cryptoObject = globalThis.crypto;
@@ -39,8 +51,14 @@ export const useFeedStore = defineStore('feed', {
     error: null,
     initialized: false,
     randomSeed: null,
-    reloadRequested: false
+    reloadRequested: false,
+    seenIds: [],
+    refreshing: false
   }),
+  getters: {
+    /** Newest ids first, so the cap keeps what the viewer saw most recently. */
+    excludedIds: (state): number[] => state.seenIds.slice(-MAX_EXCLUDED_IDS)
+  },
   actions: {
     initializeMode(mode: FeedMode = 'random') {
       this.mode = mode;
@@ -66,7 +84,51 @@ export const useFeedStore = defineStore('feed', {
 
       this.mode = mode;
       this.randomSeed = mode === 'random' ? createRandomSeed() : null;
+      this.seenIds = [];
       await this.loadInitial(true);
+    },
+
+    rememberSeenIds(items: FeedItem[]) {
+      if (items.length === 0) {
+        return;
+      }
+
+      const known = new Set(this.seenIds);
+      const additions = items.map((item) => item.id).filter((id) => !known.has(id));
+      if (additions.length === 0) {
+        return;
+      }
+
+      this.seenIds = [...this.seenIds, ...additions].slice(-MAX_EXCLUDED_IDS * 2);
+    },
+
+    /**
+     * Pull-to-refresh. Rotates the shuffle seed and asks the server to skip everything
+     * already shown, so the top of the feed is new rather than reordered.
+     */
+    async refreshWithNewSeed() {
+      if (this.refreshing || this.loading) {
+        return;
+      }
+
+      this.refreshing = true;
+
+      try {
+        if (this.mode === 'random') {
+          this.randomSeed = createRandomSeed();
+        }
+
+        await this.loadInitial(true);
+
+        // A library smaller than the exclusion list would come back empty, which reads
+        // as breakage. Dropping the memory and retrying gives the viewer content again.
+        if (this.items.length === 0 && this.seenIds.length > 0) {
+          this.seenIds = [];
+          await this.loadInitial(true);
+        }
+      } finally {
+        this.refreshing = false;
+      }
     },
 
     removeImage(id: number) {
@@ -84,6 +146,7 @@ export const useFeedStore = defineStore('feed', {
     resetForRebuild() {
       this.loadedMode = null;
       this.items = [];
+      this.seenIds = [];
       this.page = 1;
       this.hasMore = true;
       this.loading = false;
@@ -126,9 +189,12 @@ export const useFeedStore = defineStore('feed', {
       const requestMode = this.mode;
       const requestPage = this.page;
       const requestSeed = requestMode === 'random' ? this.ensureRandomSeed() : undefined;
+      // Only the refreshed first page excludes: later pages already paginate past them,
+      // and excluding there would shift the offsets under the query.
+      const requestExcludedIds = this.refreshing && requestPage === 1 ? this.excludedIds : undefined;
 
       try {
-        const payload = await fetchFeed(requestPage, this.limit, requestMode, requestSeed);
+        const payload = await fetchFeed(requestPage, this.limit, requestMode, requestSeed, requestExcludedIds);
 
         const modeChanged = this.mode !== requestMode;
         const seedChanged = requestMode === 'random' && this.randomSeed !== requestSeed;
@@ -139,6 +205,7 @@ export const useFeedStore = defineStore('feed', {
         }
 
         this.items.push(...payload.items);
+        this.rememberSeenIds(payload.items);
         this.loadedMode = payload.mode ?? requestMode;
         this.page += 1;
         this.hasMore = payload.hasMore;

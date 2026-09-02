@@ -3,6 +3,7 @@ export type FolderImageOrder = 'newest' | 'oldest';
 export type NestedFolderTitleFormat = 'folder' | 'parent-plus-folder';
 export type TakenAtSource = 'exif' | 'mtime' | 'first_seen' | 'sort_timestamp';
 export type PlaybackStrategy = 'preview' | 'original';
+export type VideoPlaybackQuality = 'auto' | 'original' | '1080p' | '720p' | '480p';
 export type FolderAvatarSource = 'auto' | 'manual' | 'cover';
 export type FolderRole = 'normal' | 'story_root' | 'story_capsule' | 'carousel_source';
 export type PlaceKind = 'city' | 'approximate_spot' | 'manual';
@@ -153,6 +154,15 @@ export interface ScanRunRecord {
   warning_text: string | null;
 }
 
+export interface ScanChangesSummary {
+  scanned_files: number;
+  new_files: number;
+  updated_files: number;
+  removed_files: number;
+  scan_count: number;
+  latest_finished_at: string | null;
+}
+
 export interface AppSettingRecord {
   key: string;
   value: string;
@@ -207,6 +217,17 @@ export interface FolderShareLinkRecord {
   last_used_at: string | null;
 }
 
+export interface PostShareLinkRecord {
+  id: number;
+  post_id: number;
+  token_hash: string;
+  token_prefix: string | null;
+  expires_at: string | null;
+  revoked_at: string | null;
+  created_at: string;
+  last_used_at: string | null;
+}
+
 export interface FolderSharePasswordRecord {
   folder_id: number;
   password_hash: string;
@@ -226,8 +247,10 @@ export interface PostMediaItem {
   isAnimated: boolean | null;
   thumbnailUrl: string;
   previewUrl: string;
+  previewFileUrl?: string | null;
   originalUrl?: string;
   playbackStrategy?: PlaybackStrategy | null;
+  streamUrl?: string | null;
   exif?: ImageExifData | null;
   mimeType?: string;
   fileSize?: number;
@@ -253,6 +276,10 @@ export interface FeedImage {
   isAnimated?: boolean | null;
   thumbnailUrl: string;
   previewUrl: string;
+  previewFileUrl?: string | null;
+  playbackStrategy?: PlaybackStrategy | null;
+  streamUrl?: string | null;
+  originalUrl?: string;
   sortTimestamp: number;
   takenAt: number | null;
   isSaved: boolean;
@@ -365,6 +392,10 @@ export interface SharedImageDetail {
   isAnimated?: boolean | null;
   thumbnailUrl: string;
   previewUrl: string;
+  /** Only set for videos, and only on token-scoped share links. */
+  streamUrl?: string | null;
+  originalUrl?: string;
+  playbackStrategy?: PlaybackStrategy | null;
   sortTimestamp: number;
   nextImageId: number | null;
   previousImageId: number | null;

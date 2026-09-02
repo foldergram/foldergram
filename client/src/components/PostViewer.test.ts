@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FeedItem, ImageDetail } from '../types/api';
 import { useAppStore } from '../stores/app';
 import { useFoldersStore } from '../stores/folders';
+import { useImmersiveVideoStore } from '../stores/immersive-video';
 import { useLikesStore } from '../stores/likes';
 import PostViewer from './PostViewer.vue';
 
@@ -161,10 +162,15 @@ function createVideoDetail(id: number): ImageDetail {
   };
 }
 
+/**
+ * A clip the browser cannot decode directly, so the default source is the HLS
+ * stream and the HD control can offer the untouched file as an upgrade.
+ */
 function createHdVideoDetail(id: number): ImageDetail {
   return {
     ...createVideoDetail(id),
-    playbackStrategy: 'original'
+    playbackStrategy: 'preview',
+    streamUrl: `/api/videos/${id}/hls/master.m3u8`
   };
 }
 
@@ -269,7 +275,7 @@ describe('PostViewer', () => {
     expect(originalLink.attributes('title')).toBe('Open original file');
   });
 
-  it('toggles video playback from stage clicks and shows the paused indicator', async () => {
+  it('opens the immersive layer from stage clicks and pauses the inline player', async () => {
     const wrapper = mount(PostViewer, {
       props: {
         image: createVideoDetail(22),
@@ -282,24 +288,27 @@ describe('PostViewer', () => {
 
     await flushPromises();
 
+    const immersiveVideoStore = useImmersiveVideoStore();
     const player = wrapper.get('media-player').element as unknown as FakeMediaPlayerElement;
     expect(player.playCallCount).toBeGreaterThanOrEqual(1);
     expect(player.paused).toBe(false);
     expect(wrapper.find('.viewer__pause-indicator').exists()).toBe(false);
 
+    player.currentTime = 6.5;
     await wrapper.get('.viewer__media-shell--video').trigger('click');
     await flushPromises();
 
-    expect(player.pauseCallCount).toBe(1);
+    expect(immersiveVideoStore.isOpen).toBe(true);
+    expect(immersiveVideoStore.target?.id).toBe(22);
+    expect(immersiveVideoStore.startTime).toBe(6.5);
     expect(player.paused).toBe(true);
-    expect(wrapper.find('.viewer__pause-indicator').exists()).toBe(true);
 
-    await wrapper.get('.viewer__media-shell--video').trigger('click');
+    immersiveVideoStore.close({ id: 22, currentTime: 11, paused: false });
     await flushPromises();
 
+    expect(player.currentTime).toBe(11);
     expect(player.playCallCount).toBeGreaterThanOrEqual(2);
     expect(player.paused).toBe(false);
-    expect(wrapper.find('.viewer__pause-indicator').exists()).toBe(false);
   });
 
   it('renders the bottom progress UI and keeps slider clicks from toggling viewer playback', async () => {
@@ -340,7 +349,7 @@ describe('PostViewer', () => {
     expect(wrapper.get('.video-progress-footer__time').text()).toBe('0:09 / 0:09');
   });
 
-  it('preserves the playback position when switching between preview and HD sources', async () => {
+  it('preserves the playback position when switching between the stream and the HD original', async () => {
     const wrapper = mount(PostViewer, {
       props: {
         image: createHdVideoDetail(25),

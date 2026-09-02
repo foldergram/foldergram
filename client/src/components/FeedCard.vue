@@ -45,7 +45,7 @@
         type="button"
         :aria-label="t('post.feedCard.moreOptions')"
         :title="t('post.feedCard.moreOptions')"
-        @click="menuOpen = true"
+        @click="openMenu"
       >
         <svg class="w-[1.15rem] h-[1.15rem]" viewBox="0 0 24 24" role="presentation">
           <circle cx="6.5" cy="12" r="1.5" fill="currentColor" />
@@ -61,12 +61,12 @@
       class="rounded-[0.5rem] border border-border"
       :items="item.mediaItems!"
       :prefer-preview="isHomeContext"
-      :retry-while="appStore.isScanning"
+      :retry-while="appStore.isInitialScan"
       :loading="isHomeContext ? 'eager' : 'lazy'"
       :muted="appStore.videoMuted"
     />
 
-    <RouterLink v-else-if="!isHomeContext" custom :to="imageRoute" v-slot="{ href, navigate }">
+      <RouterLink v-else-if="!isHomeContext" custom :to="imageRoute" v-slot="{ href, navigate }">
       <a
         :href="href"
         class="relative block overflow-hidden rounded-[0.5rem] border border-border bg-surface-alt"
@@ -76,8 +76,9 @@
         <ResilientImage
           :src="item.thumbnailUrl"
           :alt="item.filename"
+          :video-src="item.mediaType === 'video' ? getOriginalMediaUrl(item.id) : null"
           loading="lazy"
-          :retry-while="appStore.isScanning"
+          :retry-while="appStore.isInitialScan"
           class="h-full w-full object-cover"
         />
         <div
@@ -102,7 +103,7 @@
         :src="homeImageSrc"
         :alt="item.filename"
         loading="lazy"
-        :retry-while="appStore.isScanning"
+          :retry-while="appStore.isInitialScan"
         class="h-full w-full object-cover"
       />
       <!-- Instagram-style double-tap heart burst, centered inside card -->
@@ -114,27 +115,34 @@
     <div
       v-else
       ref="homeVideoTarget"
-      class="feed-card__video-shell relative block overflow-hidden rounded-[0.5rem] border border-border bg-surface-alt"
-      :class="{ 'feed-card__video-shell--interactive': showHomeVideoSurfaceControls }"
+      class="feed-card__video-shell feed-card__video-shell--interactive relative block overflow-hidden rounded-[0.5rem] border border-border bg-surface-alt"
       :style="{ aspectRatio: homeVideoAspectRatio }"
-      :aria-label="showHomeVideoSurfaceControls ? 'Toggle playback' : undefined"
-      :role="showHomeVideoSurfaceControls ? 'button' : undefined"
-      :tabindex="showHomeVideoSurfaceControls ? 0 : -1"
+      :aria-label="t('post.immersive.open')"
+      role="button"
+      tabindex="0"
       @click="handleHomeVideoSurfaceClick"
+      @contextmenu.prevent
       @keydown="handleHomeVideoSurfaceKeydown"
     >
+      <Teleport :to="sharedSurfaceTarget ?? 'body'" :disabled="sharedSurfaceTarget === null">
       <media-player
         ref="homePlayerElement"
         class="feed-card__player"
         :src.prop="homeVideoSource"
         :title.prop="item.filename"
-        :fullscreenOrientation.prop="'none'"
+        :fullscreenOrientation.prop="'landscape'"
         :playsInline.prop="true"
-        :muted.prop="appStore.videoMuted"
+        :muted.prop="homeEffectiveMuted"
+        :autoplay.prop="shouldAutoplayHomeVideo"
         :loop.prop="true"
-        load="visible"
-        preload="metadata"
+        :load="shouldAutoplayHomeVideo ? 'eager' : 'visible'"
+        preload="auto"
+        @pointerdown="handleHomeVideoPointerdown"
+        @pointermove="handleHomeVideoPointermove"
+        @pointerup="handleHomeVideoPointerup"
+        @pointercancel="homeHoldSpeed.onPointercancel"
         @fullscreen-change="handleHomeVideoFullscreenChange"
+        @click="handleSharedImmersiveClick"
       >
         <media-provider />
         <media-poster
@@ -142,8 +150,13 @@
           :alt.prop="item.filename"
         />
         <VideoProgressFooter
-          variant="feed"
+          :variant="sharedSurfaceTarget ? 'viewer' : 'feed'"
+          :seek-orientation="sharedSurfaceTarget ? sharedVideoSurfaceStore.orientation : null"
+          :current-time="homeVideoCurrentTimeMs / 1000"
+          :duration="homeVideoDurationMs / 1000"
           :time-label="homeVideoTimeLabel"
+          @seek="seekHomeVideoTo"
+          @seek-preview="previewHomeVideoTo"
         >
           <template #leading>
             <div v-if="showHomeVideoControls" class="feed-card__player-controls-group">
@@ -164,19 +177,22 @@
           </template>
           <template #trailing>
             <div v-if="showHomeVideoControls" class="feed-card__player-controls-group">
-              <media-mute-button
+              <button
                 class="feed-card__player-control"
+                type="button"
                 aria-label="Toggle sound"
+                @click.stop="toggleHomeVideoSound"
               >
                 <span
-                  class="feed-card__player-control-icon feed-card__player-mute-icon feed-card__player-mute-icon--on i-fluent-speaker-2-16-regular"
+                  class="feed-card__player-control-icon"
+                  :class="
+                    appStore.videoMuted
+                      ? 'i-fluent-speaker-mute-16-regular'
+                      : 'i-fluent-speaker-2-16-regular'
+                  "
                   aria-hidden="true"
                 />
-                <span
-                  class="feed-card__player-control-icon feed-card__player-mute-icon feed-card__player-mute-icon--off i-fluent-speaker-mute-16-regular"
-                  aria-hidden="true"
-                />
-              </media-mute-button>
+              </button>
               <media-fullscreen-button
                 class="feed-card__player-control"
                 aria-label="Toggle fullscreen"
@@ -195,6 +211,17 @@
           </template>
         </VideoProgressFooter>
       </media-player>
+      </Teleport>
+
+      <ResilientImage
+        v-if="!hasRenderedHomeVideoFrame"
+        :src="item.thumbnailUrl"
+        :video-src="getOriginalMediaUrl(item.id)"
+        :alt="item.filename"
+        class="feed-card__first-frame"
+        loading="eager"
+      />
+
       <div
         v-if="showHomeVideoPausedIndicator"
         class="feed-card__pause-indicator"
@@ -230,7 +257,7 @@
               class="inline-flex items-center justify-center w-8 h-8 border-0 bg-transparent cursor-pointer color-inherit transition-[opacity,transform] duration-180 hover:opacity-72 hover:-translate-y-px"
               :aria-label="openMediaLabel"
               :title="openMediaLabel"
-              @click="handleImageNavigation($event, navigate)"
+              @click="handleMediaButtonClick($event, navigate)"
             >
               <svg class="w-[1.45rem] h-[1.45rem]" viewBox="0 0 24 24" role="presentation">
                 <path
@@ -274,25 +301,21 @@
               />
             </svg>
           </a>
-          <a
+          <button
             class="inline-flex items-center justify-center w-8 h-8 border-0 bg-transparent cursor-pointer color-inherit transition-[opacity,transform] duration-180 hover:opacity-72 hover:-translate-y-px"
-            :href="originalMediaUrl"
-            target="_blank"
-            rel="noreferrer"
-            :aria-label="t('post.viewer.openOriginalFile')"
-            :title="t('post.viewer.openOriginalFile')"
+            type="button"
+            data-test="feed-direct-share"
+            :disabled="postShare.sharing.value"
+            :aria-label="postShare.copied.value ? t('share.post.copied') : t('share.post.action')"
+            :title="postShare.copied.value ? t('share.post.copied') : t('share.post.action')"
+            @click="handleDirectShare"
           >
-            <svg class="w-[1.45rem] h-[1.45rem]" viewBox="0 0 24 24" role="presentation">
-              <path
-                d="M14 5h5v5m0-5-7.5 7.5M10 7H7.5A2.5 2.5 0 0 0 5 9.5v7A2.5 2.5 0 0 0 7.5 19h7a2.5 2.5 0 0 0 2.5-2.5V14"
-                fill="none"
-                stroke="currentColor"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="1.8"
-              />
-            </svg>
-          </a>
+            <span
+              class="w-[1.45rem] h-[1.45rem]"
+              :class="postShare.copied.value ? 'i-fluent-checkmark-20-filled' : 'i-fluent-share-20-regular'"
+              aria-hidden="true"
+            />
+          </button>
           <CollectionBookmark
             :item="item"
             placement="feed"
@@ -320,6 +343,30 @@
           <span class="i-fluent-edit-16-regular w-[1.15rem] h-[1.15rem] shrink-0" aria-hidden="true" />
           <span>{{ t('post.viewer.editCaption') }}</span>
         </button>
+        <button
+          class="flex items-center gap-[0.8rem] w-full px-4 py-[0.95rem] border-0 border-b border-border text-text bg-transparent cursor-pointer text-left disabled:opacity-70 disabled:cursor-wait"
+          type="button"
+          data-test="feed-share"
+          :disabled="postShare.sharing.value"
+          @click="handleShare"
+        >
+          <span class="i-fluent-share-20-regular w-[1.15rem] h-[1.15rem] shrink-0" aria-hidden="true" />
+          <span>{{ postShare.sharing.value ? t('share.post.creating') : postShare.copied.value ? t('share.post.copied') : t('share.post.action') }}</span>
+        </button>
+        <p
+          v-if="postShare.error.value"
+          class="m-0 px-4 py-2 border-b border-border text-[0.82rem] text-[#d93025]"
+          role="status"
+        >
+          {{ postShare.error.value }}
+        </p>
+        <p
+          v-else-if="postShare.shareUrl.value && !postShare.copied.value"
+          class="m-0 px-4 py-2 border-b border-border text-[0.8rem] text-muted break-words"
+        >
+          {{ t('share.post.copyManually') }}
+          <span class="block mt-[0.1rem] font-semibold text-text">{{ postShare.shareUrl.value }}</span>
+        </p>
         <button
           class="flex items-center gap-[0.8rem] w-full px-4 py-[0.95rem] border-0 border-b border-border text-text bg-transparent cursor-pointer text-left"
           type="button"
@@ -387,42 +434,6 @@
       />
     </Teleport>
 
-    <ConfirmDialog
-      v-if="confirmDeleteOpen"
-      :title="t('post.feedCard.delete.title')"
-      :message="deleteDialogMessage"
-      :confirm-label="deleteDialogConfirmLabel"
-      :loading="deleting"
-      @cancel="confirmDeleteOpen = false"
-      @confirm="confirmDelete"
-    >
-      <template #details>
-        <label class="flex items-start gap-3 mt-3 cursor-pointer select-none">
-          <input
-            v-model="deleteOriginalFromDisk"
-            class="mt-[0.2rem]"
-            type="checkbox"
-            :disabled="deleting"
-          />
-          <span class="grid gap-[0.18rem]">
-            <span class="text-[0.92rem] font-semibold text-text">{{ t('post.feedCard.delete.deleteOriginalLabel') }}</span>
-            <span class="text-[0.84rem] text-muted">{{ t('post.feedCard.delete.deleteOriginalDescription') }}</span>
-          </span>
-        </label>
-        <p
-          v-if="deleteOriginalFromDisk"
-          class="m-0 mt-3 px-3 py-[0.8rem] rounded-[0.9rem] border border-[rgba(217,48,37,0.24)] text-[0.84rem] text-[#b42318] bg-[rgba(217,48,37,0.08)]"
-        >
-          {{ t('post.feedCard.delete.deleteOriginalWarning') }}
-        </p>
-        <p
-          v-if="deleteError"
-          class="m-0 mt-3 px-3 py-[0.8rem] rounded-[0.9rem] border border-[rgba(217,48,37,0.24)] text-[0.84rem] text-[#b42318] bg-[rgba(217,48,37,0.08)]"
-        >
-          {{ deleteError }}
-        </p>
-      </template>
-    </ConfirmDialog>
   </article>
 </template>
 
@@ -435,13 +446,19 @@ import { RouterLink, useRoute } from 'vue-router';
 import type { PlayerSrc } from 'vidstack';
 import type { MediaPlayerElement } from 'vidstack/elements';
 
-import { deleteImage, trashImage } from '../api/gallery';
+import { trashImage } from '../api/gallery';
 import { useImageCaptionEditor } from '../composables/useImageCaptionEditor';
+import { usePostShare } from '../composables/usePostShare';
+import { useViewActive } from '../composables/useViewActivation';
+import { useHoldToSpeed } from '../composables/useHoldToSpeed';
 import { useAppStore } from '../stores/app';
 import { useAuthStore } from '../stores/auth';
 import { useFeedStore } from '../stores/feed';
 import { useFoldersStore } from '../stores/folders';
 import { useLikesStore } from '../stores/likes';
+import { useImmersiveImageStore } from '../stores/immersive-image';
+import { useImmersiveVideoStore } from '../stores/immersive-video';
+import { useSharedVideoSurfaceStore } from '../stores/shared-video-surface';
 import { useMomentsStore } from '../stores/moments';
 import type { FeedItem } from '../types/api';
 import { resolveDisplayCaption } from '../utils/caption';
@@ -449,10 +466,26 @@ import { formatFolderTitle } from '../utils/folder-titles';
 import { formatMediaDuration, formatVideoTimestamp } from '../utils/media';
 import { resolveFeedAspectRatio } from '../utils/media-layout';
 import { getOriginalMediaDownloadUrl, getOriginalMediaUrl } from '../utils/original-media';
+import { resolveGesturePoint } from '../utils/gesture-coordinates';
+import {
+  resolveVideoFallbackSource,
+  resolveVideoSource,
+  seekMediaPlayerAndWait,
+  toPlayerSrc,
+  useBundledHlsLibrary,
+  warmVideoStream,
+  type ResolvedVideoSource
+} from '../utils/video-playback';
+import {
+  safeMediaPlayerGetCurrentTime,
+  safeMediaPlayerPause,
+  safeMediaPlayerPlay,
+  safeMediaPlayerSetCurrentTime,
+  safeMediaPlayerSetMuted
+} from '../utils/safe-media-player';
 import Avatar from './Avatar.vue';
 import CarouselMediaStage from './CarouselMediaStage.vue';
 import CollectionBookmark from './CollectionBookmark.vue';
-import ConfirmDialog from './ConfirmDialog.vue';
 import PostCaptionModal from './PostCaptionModal.vue';
 import ResilientImage from './ResilientImage.vue';
 import VideoProgressFooter from './VideoProgressFooter.vue';
@@ -492,13 +525,14 @@ const feedStore = useFeedStore();
 const likesStore = useLikesStore();
 const foldersStore = useFoldersStore();
 const momentsStore = useMomentsStore();
+const immersiveImageStore = useImmersiveImageStore();
+const immersiveVideoStore = useImmersiveVideoStore();
+const sharedVideoSurfaceStore = useSharedVideoSurfaceStore();
 const route = useRoute();
 const { t, locale } = useI18n();
 const menuOpen = ref(false);
+const postShare = usePostShare();
 const deleting = ref(false);
-const confirmDeleteOpen = ref(false);
-const deleteOriginalFromDisk = ref(false);
-const deleteError = ref<string | null>(null);
 const isEditingCaption = ref(false);
 const homeVideoTarget = ref<HTMLElement | null>(null);
 const homePlayerElement = ref<MediaPlayerElement | null>(null);
@@ -507,13 +541,19 @@ const isHomeVideoPaused = ref(false);
 const isHomeVideoFullscreen = ref(false);
 const homeVideoDurationMs = ref(props.item.durationMs ?? 0);
 const homeVideoCurrentTimeMs = ref(0);
+const pendingHomeVideoSeek = ref<number | null>(null);
+let lastSharedImmersiveTapAt = 0;
 const lastHomeImageTapAt = ref(0);
+let homeImmersiveStartupFallbackTimer: ReturnType<typeof setTimeout> | null = null;
+let homeVideoPlaybackRetryTimer: ReturnType<typeof setTimeout> | null = null;
+let homeVideoPlaybackRetryCount = 0;
+const homeVideoFallbackHistory = new Set<string>();
 const heartBurstEl = ref<HTMLElement | null>(null);
 const carouselIndex = ref(0);
 
 let homeImageTapResetTimer: ReturnType<typeof setTimeout> | null = null;
+let homeImageOpenTimer: ReturnType<typeof setTimeout> | null = null;
 let homeVideoObserver: IntersectionObserver | null = null;
-let homeVideoMuteSyncToken = 0;
 let homePlayerReady = false;
 let removeHomePlayerEventListeners: (() => void) | null = null;
 const {
@@ -556,10 +596,29 @@ const activeMediaImageId = computed(() =>
 );
 const originalMediaUrl = computed(() => getOriginalMediaUrl(activeMediaImageId.value));
 const downloadOriginalMediaUrl = computed(() => getOriginalMediaDownloadUrl(activeMediaImageId.value));
-const homeVideoSource = computed<PlayerSrc>(() => ({
-  src: props.item.previewUrl,
-  type: 'video/mp4'
-}));
+const homeVideoFallbackSource = ref<ResolvedVideoSource | null>(null);
+const homePreferredVideoSource = computed<ResolvedVideoSource>(() =>
+  resolveVideoSource(props.item, appStore.videoPlaybackQuality)
+);
+const homeActiveVideoSource = computed<ResolvedVideoSource>(
+  () => homeVideoFallbackSource.value ?? homePreferredVideoSource.value
+);
+const homeVideoSource = computed<PlayerSrc>(() => toPlayerSrc(homeActiveVideoSource.value));
+const sharedSurfaceTarget = computed(() =>
+  sharedVideoSurfaceStore.ownerId === `feed:${props.item.id}`
+    ? sharedVideoSurfaceStore.target
+    : null
+);
+
+/**
+ * The immersive layer turns the shared player with a CSS rotation instead of asking the
+ * platform for landscape, so every gesture on it has to be measured in the picture's
+ * frame while it is rotated. Portrait, and any card still inline in the feed, stays on
+ * screen coordinates.
+ */
+const homeGestureOrientation = computed<'normal' | 'rotated'>(() =>
+  sharedSurfaceTarget.value && sharedVideoSurfaceStore.orientation === 'rotated' ? 'rotated' : 'normal'
+);
 const homeVideoTimeLabel = computed(() =>
   formatVideoTimestamp(
     homeVideoDurationMs.value > 0 ? homeVideoDurationMs.value : props.item.durationMs,
@@ -569,15 +628,12 @@ const homeVideoTimeLabel = computed(() =>
 const showHomeVideoControls = computed(() => props.isActiveVideo || isHomeVideoFullscreen.value);
 const showHomeVideoSurfaceControls = computed(() => props.isActiveVideo || isHomeVideoFullscreen.value);
 const showHomeVideoPausedIndicator = computed(() => showHomeVideoSurfaceControls.value && isHomeVideoPaused.value);
-const deleteDialogMessage = computed(() =>
-  deleteOriginalFromDisk.value
-    ? t('post.feedCard.delete.messagePermanent')
-    : t('post.feedCard.delete.messageTrash')
+const shouldAutoplayHomeVideo = computed(
+  () =>
+    isViewActive.value &&
+    (props.isActiveVideo || sharedSurfaceTarget.value !== null) &&
+    (!immersiveVideoStore.isOpen || sharedVideoSurfaceStore.ownerId === `feed:${props.item.id}`)
 );
-const deleteDialogConfirmLabel = computed(() =>
-  deleteOriginalFromDisk.value ? t('post.feedCard.delete.confirmPermanent') : t('post.feedCard.delete.confirm')
-);
-
 function isPrimaryPlainClick(event: MouseEvent) {
   return !event.defaultPrevented && event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
 }
@@ -594,6 +650,11 @@ function clearHomeImageTapResetTimer() {
   if (homeImageTapResetTimer) {
     clearTimeout(homeImageTapResetTimer);
     homeImageTapResetTimer = null;
+  }
+
+  if (homeImageOpenTimer) {
+    clearTimeout(homeImageOpenTimer);
+    homeImageOpenTimer = null;
   }
 }
 
@@ -637,6 +698,85 @@ function handleImageNavigation(event: MouseEvent, navigate: () => void) {
   navigate();
 }
 
+function openImmersiveImage(mediaIndex = carouselIndex.value) {
+  const carouselItem = isCarousel.value ? props.item.mediaItems?.[mediaIndex] : null;
+
+  if (carouselItem) {
+    const collectionItem: FeedItem = {
+      ...props.item,
+      id: carouselItem.imageId,
+      filename: carouselItem.filename,
+      mediaType: carouselItem.mediaType,
+      width: carouselItem.width,
+      height: carouselItem.height,
+      durationMs: carouselItem.durationMs,
+      thumbnailUrl: carouselItem.thumbnailUrl,
+      previewUrl: carouselItem.previewUrl,
+      previewFileUrl: carouselItem.previewFileUrl,
+      playbackStrategy: carouselItem.playbackStrategy,
+      streamUrl: carouselItem.streamUrl,
+      originalUrl: carouselItem.originalUrl,
+      postType: 'single',
+      mediaItems: undefined,
+      itemCount: undefined
+    };
+
+    immersiveImageStore.open({
+      id: carouselItem.imageId,
+      filename: carouselItem.filename,
+      thumbnailUrl: carouselItem.thumbnailUrl,
+      fullUrl: carouselItem.originalUrl ?? getOriginalMediaUrl(carouselItem.imageId),
+      width: carouselItem.width,
+      height: carouselItem.height,
+      caption: caption.value,
+      folderSlug: props.item.folderSlug,
+      collectionItem
+    });
+    return;
+  }
+
+  immersiveImageStore.open({
+    id: props.item.id,
+    filename: props.item.filename,
+    thumbnailUrl: props.item.thumbnailUrl,
+    fullUrl: props.item.originalUrl ?? getOriginalMediaUrl(props.item.id),
+    width: props.item.width,
+    height: props.item.height,
+    caption: caption.value,
+    folderSlug: props.item.folderSlug,
+    collectionItem: props.item
+  });
+}
+
+/**
+ * The rail button next to the heart opens media in place. Images and carousels go to
+ * the zoomable layer, videos to the immersive player; anything else falls back to
+ * the post route so deep links keep working.
+ */
+function handleMediaButtonClick(event: MouseEvent, navigate: () => void) {
+  if (!isPrimaryPlainClick(event)) {
+    return;
+  }
+
+  const activeMediaType = isCarousel.value
+    ? props.item.mediaItems?.[carouselIndex.value]?.mediaType ?? props.item.mediaType
+    : props.item.mediaType;
+
+  if (activeMediaType === 'image') {
+    event.preventDefault();
+    openImmersiveImage();
+    return;
+  }
+
+  if (activeMediaType === 'video' && !isCarousel.value) {
+    event.preventDefault();
+    openImmersiveVideo();
+    return;
+  }
+
+  handleImageNavigation(event, navigate);
+}
+
 function handleHomeImageClick(event: MouseEvent) {
   if (!isHomeContext.value || props.item.mediaType !== 'image' || !isPrimaryPlainClick(event)) {
     return;
@@ -653,6 +793,14 @@ function handleHomeImageClick(event: MouseEvent) {
 
   lastHomeImageTapAt.value = now;
   queueHomeImageTapReset();
+
+  // A single tap opens the zoomable viewer. The double-tap branch above clears this
+  // timer, so it must not also test `lastHomeImageTapAt`: the reset timer shares the
+  // same delay and is registered first, which would swallow every single tap.
+  homeImageOpenTimer = setTimeout(() => {
+    homeImageOpenTimer = null;
+    openImmersiveImage();
+  }, HOME_IMAGE_DOUBLE_TAP_WINDOW_MS);
 }
 
 function emitHomeVideoVisibility(ratio: number, centerOffset = Number.POSITIVE_INFINITY) {
@@ -681,6 +829,16 @@ function getHomeVideoElement(player: MediaPlayerElement | null): HTMLVideoElemen
   return shadowVideo instanceof HTMLVideoElement ? shadowVideo : null;
 }
 
+function homeVideoHasPaintedFrame(player: MediaPlayerElement | null): boolean {
+  const video = getHomeVideoElement(player);
+  return Boolean(
+    video &&
+    video.videoWidth > 0 &&
+    video.videoHeight > 0 &&
+    video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA
+  );
+}
+
 function syncHomeVideoAspectRatio(player: MediaPlayerElement | null = homePlayerElement.value) {
   const video = getHomeVideoElement(player);
   if (!video || video.videoWidth <= 0 || video.videoHeight <= 0) {
@@ -699,9 +857,52 @@ function syncHomeVideoTimelineState(player: MediaPlayerElement | null = homePlay
     homeVideoDurationMs.value = player.duration * 1000;
   }
 
-  if (Number.isFinite(player.currentTime) && player.currentTime >= 0) {
-    homeVideoCurrentTimeMs.value = player.currentTime * 1000;
+  homeVideoCurrentTimeMs.value = safeMediaPlayerGetCurrentTime(player) * 1000;
+}
+
+function previewHomeVideoTo(seconds: number) {
+  const player = homePlayerElement.value;
+  if (!player || !Number.isFinite(seconds)) {
+    return;
   }
+
+  homeVideoCurrentTimeMs.value = Math.max(0, seconds) * 1000;
+  safeMediaPlayerSetCurrentTime(player, seconds);
+}
+
+function seekHomeVideoTo(seconds: number) {
+  const player = homePlayerElement.value;
+  if (!player || !Number.isFinite(seconds)) {
+    return;
+  }
+
+  const duration = Number.isFinite(player.duration) && player.duration > 0 ? player.duration : seconds;
+  const next = Math.min(Math.max(seconds, 0), Math.max(duration - 0.25, 0));
+  warmVideoStream(props.item, appStore.videoPlaybackQuality, {
+    fromSeconds: next,
+    segments: 2,
+    source: homeActiveVideoSource.value
+  });
+  homeVideoCurrentTimeMs.value = next * 1000;
+  pendingHomeVideoSeek.value = next;
+  return seekMediaPlayerAndWait(player, next).finally(() => {
+    if (pendingHomeVideoSeek.value === next) {
+      pendingHomeVideoSeek.value = null;
+    }
+  });
+}
+
+function getHomeScrubStartTime(): number {
+  if (pendingHomeVideoSeek.value !== null) {
+    return pendingHomeVideoSeek.value;
+  }
+
+  const displayedTime = homeVideoCurrentTimeMs.value / 1000;
+  if (Number.isFinite(displayedTime) && displayedTime > 0) {
+    return displayedTime;
+  }
+
+  return homePlayerElement.value ? safeMediaPlayerGetCurrentTime(homePlayerElement.value) : 0;
 }
 
 function stopHomeVideoObserver(options: { clearVisibility?: boolean } = {}) {
@@ -738,15 +939,72 @@ function startHomeVideoObserver() {
   homeVideoObserver.observe(homeVideoTarget.value);
 }
 
-function syncHomeVideoMuted(player: MediaPlayerElement, muted: boolean) {
-  const token = ++homeVideoMuteSyncToken;
-  player.muted = muted;
+// A refused audible autoplay is a document-level verdict, so it lives in the store
+// and every surface (feed, reels, viewer, stories) reads the same value.
+const homeEffectiveMuted = computed(() => appStore.videoEffectivelyMuted);
+// False while the enclosing route is cached behind another dock tab.
+const isViewActive = useViewActive();
 
-  requestAnimationFrame(() => {
-    if (homeVideoMuteSyncToken === token) {
-      homeVideoMuteSyncToken = 0;
+function syncHomeVideoMuted(player: MediaPlayerElement, muted: boolean) {
+  safeMediaPlayerSetMuted(player, muted);
+  const nativeVideo = player.querySelector('video');
+  if (nativeVideo instanceof HTMLVideoElement) {
+    nativeVideo.muted = muted;
+  }
+}
+
+async function playHomeVideo(player: MediaPlayerElement) {
+  await safeMediaPlayerPlay(player);
+}
+
+function clearHomeImmersiveStartupFallback() {
+  if (homeImmersiveStartupFallbackTimer !== null) {
+    clearTimeout(homeImmersiveStartupFallbackTimer);
+    homeImmersiveStartupFallbackTimer = null;
+  }
+}
+
+function clearHomeVideoPlaybackRetry() {
+  if (homeVideoPlaybackRetryTimer !== null) {
+    clearTimeout(homeVideoPlaybackRetryTimer);
+    homeVideoPlaybackRetryTimer = null;
+  }
+  homeVideoPlaybackRetryCount = 0;
+}
+
+function scheduleHomeVideoPlaybackRetry() {
+  if (homeVideoPlaybackRetryTimer !== null || homeVideoPlaybackRetryCount >= 8) {
+    return;
+  }
+
+  const retryNumber = ++homeVideoPlaybackRetryCount;
+  homeVideoPlaybackRetryTimer = setTimeout(() => {
+    homeVideoPlaybackRetryTimer = null;
+    void syncHomeVideoPlayback();
+  }, Math.min(150 * retryNumber, 750));
+}
+
+function scheduleHomeVideoStartupFallback(player: MediaPlayerElement) {
+  clearHomeImmersiveStartupFallback();
+
+  homeImmersiveStartupFallbackTimer = setTimeout(() => {
+    homeImmersiveStartupFallbackTimer = null;
+
+    // A preview can stall without raising a media error. `play()` resolving alone is
+    // not proof of a decoded frame, so check native readiness/progress on both surfaces.
+    const ownsSharedImmersivePlayer =
+      immersiveVideoStore.isOpen && sharedVideoSurfaceStore.ownerId === `feed:${props.item.id}`;
+    const shouldBePlaying =
+      props.isActiveVideo &&
+      isViewActive.value &&
+      (!immersiveVideoStore.isOpen || ownsSharedImmersivePlayer);
+
+    if (!shouldBePlaying || ((player.currentTime ?? 0) > 0.05 && !player.paused && homeVideoHasPaintedFrame(player))) {
+      return;
     }
-  });
+
+    switchHomeVideoToFallbackSource();
+  }, 2_000);
 }
 
 async function syncHomeVideoPlayback() {
@@ -759,32 +1017,83 @@ async function syncHomeVideoPlayback() {
     return;
   }
 
-  if (!props.isActiveVideo && !isHomeVideoFullscreen.value) {
-    isHomeVideoPaused.value = false;
-    void player.pause().catch(() => {
-      // Ignore pause rejections before the provider is ready.
-    });
-    syncHomeVideoMuted(player, appStore.videoMuted);
+  // LOCKED: 这张卡 Teleport 进沉浸式后仍是同一个解码器，禁止 pause。
+  // 见 docs/player-contract.md。
+  const ownsSharedImmersivePlayer =
+    immersiveVideoStore.isOpen && sharedVideoSurfaceStore.ownerId === `feed:${props.item.id}`;
+
+  if (ownsSharedImmersivePlayer) {
+    syncHomeVideoMuted(player, homeEffectiveMuted.value);
+    // Teleporting the same <media-player> into the immersive slot can leave the
+    // native element paused even though the viewer just opened a playing clip.
+    if (!immersiveVideoStore.startPaused && player.paused) {
+      void playHomeVideo(player).catch(() => {});
+    }
     return;
   }
 
-  syncHomeVideoMuted(player, appStore.videoMuted);
+  // The immersive layer owns playback while it is open, so the inline copy stays
+  // paused instead of decoding the same clip twice. A cached (deactivated) view is
+  // still mounted, so it must stand down too or the audio keeps playing on another tab.
+  if (
+    (!props.isActiveVideo && !isHomeVideoFullscreen.value) ||
+    immersiveVideoStore.isOpen ||
+    !isViewActive.value
+  ) {
+    clearHomeImmersiveStartupFallback();
+    isHomeVideoPaused.value = false;
+    // Route changes can detach the provider while Vidstack keeps the old clock.
+    // Keep the real thumbnail visible until a new native frame is decoded.
+    hasRenderedHomeVideoFrame.value = false;
+    safeMediaPlayerPause(player);
+    syncHomeVideoMuted(player, homeEffectiveMuted.value);
+    return;
+  }
+
+  syncHomeVideoMuted(player, homeEffectiveMuted.value);
+  warmVideoStream(props.item, appStore.videoPlaybackQuality, {
+    segments: 2,
+    source: homeActiveVideoSource.value
+  });
+  // Do not wait for play() to resolve: the provider can remain unready forever for
+  // a broken preview file, which used to bypass the stalled-source fallback.
+  scheduleHomeVideoStartupFallback(player);
 
   try {
-    await player.play();
+    await playHomeVideo(player);
+    const nativeVideo = getHomeVideoElement(player);
+    if (!nativeVideo || nativeVideo.paused || nativeVideo.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+      // Vidstack may resolve play() before the provider has attached/decoded the
+      // native video. Keep the active card retrying instead of showing a dead window.
+      scheduleHomeVideoPlaybackRetry();
+      scheduleHomeVideoStartupFallback(player);
+      return;
+    }
+
+    clearHomeVideoPlaybackRetry();
     isHomeVideoPaused.value = false;
+    scheduleHomeVideoStartupFallback(player);
     return;
   } catch {
-    if (appStore.videoMuted) {
+    if (!player.hasAttribute('data-can-play')) {
+      scheduleHomeVideoPlaybackRetry();
+      return;
+    }
+    if (homeEffectiveMuted.value) {
       // Ignore autoplay rejections and leave manual controls available when focused.
       return;
     }
   }
 
+  // The browser refused audible autoplay. The verdict holds for the whole document
+  // until the next user gesture, and it is recorded without touching the stored
+  // "sound on" preference so the icon keeps reflecting what the viewer chose.
+  if (!appStore.reportAudibleAutoplayBlocked()) return;
   syncHomeVideoMuted(player, true);
 
   try {
-    await player.play();
+    await playHomeVideo(player);
+    syncHomeVideoMuted(player, homeEffectiveMuted.value);
   } catch {
     // Ignore autoplay rejections and leave manual controls available when focused.
   }
@@ -793,12 +1102,6 @@ async function syncHomeVideoPlayback() {
 function handleHomeVideoPlay() {
   isHomeVideoPaused.value = false;
   syncHomeVideoTimelineState();
-
-  if (!props.isActiveVideo && !isHomeVideoFullscreen.value) {
-    void homePlayerElement.value?.pause().catch(() => {
-      // Ignore pause rejections before the provider is ready.
-    });
-  }
 }
 
 function handleHomeVideoPause() {
@@ -815,6 +1118,14 @@ function handleHomeVideoDurationChange(event: Event) {
 }
 
 function handleHomeVideoTimeUpdate(event: Event) {
+  const nativeVideo = getHomeVideoElement(homePlayerElement.value);
+  if (
+    homeVideoHasPaintedFrame(homePlayerElement.value) ||
+    (nativeVideo && nativeVideo.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && nativeVideo.currentTime > 0.05)
+  ) {
+    hasRenderedHomeVideoFrame.value = true;
+  }
+
   if (
     event instanceof CustomEvent &&
     typeof event.detail === 'object' &&
@@ -822,36 +1133,144 @@ function handleHomeVideoTimeUpdate(event: Event) {
     'currentTime' in event.detail &&
     typeof event.detail.currentTime === 'number'
   ) {
+    if (
+      pendingHomeVideoSeek.value !== null &&
+      Math.abs(event.detail.currentTime - pendingHomeVideoSeek.value) > 1.5
+    ) {
+      return;
+    }
+    pendingHomeVideoSeek.value = null;
     homeVideoCurrentTimeMs.value = event.detail.currentTime * 1000;
     return;
   }
 
+  const currentTime = homePlayerElement.value ? safeMediaPlayerGetCurrentTime(homePlayerElement.value) : 0;
+  if (
+    pendingHomeVideoSeek.value !== null &&
+    typeof currentTime === 'number' &&
+    Math.abs(currentTime - pendingHomeVideoSeek.value) > 1.5
+  ) {
+    return;
+  }
+  pendingHomeVideoSeek.value = null;
+
   syncHomeVideoTimelineState();
 }
+
+/**
+ * Vidstack removes `<media-poster>` as soon as the provider attaches, long before the
+ * first frame has decoded, which is what makes deep-scrolled cards go black for a
+ * moment. Holding our own copy of the thumbnail until the clock actually moves keeps a
+ * picture on screen the whole time.
+ */
+const hasRenderedHomeVideoFrame = ref(false);
 
 function handleHomeVideoEnded() {
   homeVideoCurrentTimeMs.value = homeVideoDurationMs.value;
 }
 
+function openImmersiveVideo() {
+  const player = homePlayerElement.value;
+  const currentTime = player ? safeMediaPlayerGetCurrentTime(player) : 0;
+  // Only a real user pause should carry into immersive. Inactive cards are paused by
+  // the feed to save decoders; treating that as startPaused made a tap open a frozen frame.
+  const startPaused = showHomeVideoSurfaceControls.value && isHomeVideoPaused.value;
+
+  // Opening the viewer is a direct user action. Preserve the global sound-on choice
+  // before Teleport/provider lifecycle events are allowed to run.
+  appStore.activateVideoSoundFromUserGesture();
+  if (player) {
+    syncHomeVideoMuted(player, homeEffectiveMuted.value);
+  }
+
+  // Claim the existing DOM/player before opening the layer. The layer then moves this
+  // exact node, keeping its native decoder, buffer and current frame alive.
+  if (!sharedVideoSurfaceStore.claim(`feed:${props.item.id}`)) {
+    if (player) safeMediaPlayerPause(player);
+  }
+
+  // The fullscreen layer resumes at `currentTime`, which usually lands in a
+  // segment the NAS has not transcoded yet. Warming it before the player asks
+  // removes the stall that used to show up right after the zoom animation.
+  warmVideoStream(props.item, appStore.videoPlaybackQuality, {
+    fromSeconds: currentTime,
+    segments: 2,
+    source: homeActiveVideoSource.value
+  });
+
+  immersiveVideoStore.open(
+    {
+      id: props.item.id,
+      filename: props.item.filename,
+      thumbnailUrl: props.item.thumbnailUrl,
+      previewUrl: props.item.previewUrl,
+      previewFileUrl: props.item.previewFileUrl,
+      originalUrl: props.item.originalUrl,
+      streamUrl: props.item.streamUrl,
+      playbackStrategy: props.item.playbackStrategy,
+      sourceOverride: homeActiveVideoSource.value,
+      width: props.item.width,
+      height: props.item.height,
+      durationMs: props.item.durationMs,
+      collectionItem: props.item
+    },
+    {
+      startTime: currentTime,
+      startPaused
+    }
+  );
+}
+
 async function handleHomeVideoSurfaceClick(event: MouseEvent) {
-  if (!showHomeVideoSurfaceControls.value || !isPrimaryPlainClick(event) || isInteractiveTarget(event.target)) {
+  if (!isPrimaryPlainClick(event) || isInteractiveTarget(event.target)) {
     return;
   }
 
+  if (props.item.mediaType !== 'video') {
+    return;
+  }
+
+  // Tapping the picture behaves like a social app: it opens the immersive layer.
+  // Pausing stays on the dedicated play button in the footer.
+  openImmersiveVideo();
+}
+
+async function handleSharedImmersiveClick(event: MouseEvent) {
+  if (!sharedSurfaceTarget.value) {
+    return;
+  }
+
+  if (!isPrimaryPlainClick(event) || isInteractiveTarget(event.target)) {
+    return;
+  }
+
+  if (homeHoldSpeed.shouldSuppressClick()) {
+    event.preventDefault();
+    event.stopPropagation();
+    return;
+  }
+
+  event.stopPropagation();
+  const now = Date.now();
+  if (now - lastSharedImmersiveTapAt > 320) {
+    lastSharedImmersiveTapAt = now;
+    return;
+  }
+
+  lastSharedImmersiveTapAt = 0;
   const player = homePlayerElement.value;
   if (!player) {
     return;
   }
 
   if (player.paused) {
-    await syncHomeVideoPlayback();
+    await playHomeVideo(player).catch(() => {});
+    isHomeVideoPaused.value = false;
     return;
   }
 
+  safeMediaPlayerPause(player);
   isHomeVideoPaused.value = true;
-  void player.pause().catch(() => {
-    // Ignore pause rejections before the provider is ready.
-  });
 }
 
 function handleHomeVideoSurfaceKeydown(event: KeyboardEvent) {
@@ -865,6 +1284,48 @@ function handleHomeVideoSurfaceKeydown(event: KeyboardEvent) {
 
   event.preventDefault();
   void handleHomeVideoSurfaceClick(new MouseEvent('click', { button: 0 }));
+}
+
+const homeHoldSpeed = useHoldToSpeed({
+  canStart: (event) => !isInteractiveTarget(event.target),
+  secondsPerPixel: 0.1,
+  getCurrentTime: getHomeScrubStartTime,
+  getDuration: () => homePlayerElement.value?.duration ?? 0,
+  seekTo: seekHomeVideoTo,
+  previewSeek: (seconds) => {
+    const player = homePlayerElement.value;
+    if (!player) return;
+    homeVideoCurrentTimeMs.value = seconds * 1000;
+    safeMediaPlayerSetCurrentTime(player, seconds);
+  },
+  getPlaybackRate: () => homePlayerElement.value?.playbackRate ?? 1,
+  setPlaybackRate: (rate) => {
+    if (homePlayerElement.value) homePlayerElement.value.playbackRate = rate;
+  },
+  play: () => {
+    if (homePlayerElement.value) {
+      void safeMediaPlayerPlay(homePlayerElement.value);
+    }
+  },
+  // Gesture ownership is decided in the picture's own frame. Turned a quarter by the
+  // immersive layer, the swipe the viewer reads as sideways arrives as screen-vertical
+  // movement, so without this mapping landscape scrubbing never activated at all.
+  getGesturePoint: (event) => resolveGesturePoint(event, homeGestureOrientation.value),
+  getScrubPoint: (event) => resolveGesturePoint(event, homeGestureOrientation.value),
+  // Relative scrubbing: each drag continues from the time at press, so a second
+  // swipe left/right keeps moving from 5:00 instead of jumping to the finger's X.
+});
+
+function handleHomeVideoPointerdown(event: PointerEvent) {
+  homeHoldSpeed.onPointerdown(event);
+}
+
+function handleHomeVideoPointermove(event: PointerEvent) {
+  homeHoldSpeed.onPointermove(event);
+}
+
+function handleHomeVideoPointerup(event: PointerEvent) {
+  homeHoldSpeed.onPointerup(event);
 }
 
 function handleHomeVideoFullscreenChange(event: Event) {
@@ -886,18 +1347,58 @@ function handleHomeVideoFullscreenChange(event: Event) {
   void syncHomeVideoPlayback();
 }
 
-function handleHomeVideoVolumeChange() {
+// The store is the single source of truth for the muted preference: only an
+// explicit tap writes to it. Listening to `volume-change` used to feed vidstack's
+// own `muted=false` initialisation (new card, source swap, fallback) straight back
+// into the store, which silently un-muted the whole feed a few swipes later.
+// Vidstack re-initialises its own `muted` state after the provider attaches and
+// after a source swap, which is how a card ended up audible while the store and the
+// icon still said muted. Enforcing the store's value on every volume-change makes
+// the element follow the preference instead of inventing its own.
+// One-directional on purpose: it only mutes. Un-muting is an explicit tap handled by
+// `toggleHomeVideoSound`, so the muted autoplay fallback is never fought either.
+function enforceHomeVideoMuted() {
   const player = homePlayerElement.value;
-  // Ignore volume-change events that fire before the player has fully initialized.
-  // Vidstack can emit these during its own setup with muted=false, which would
-  // overwrite the persisted muted preference read from localStorage.
-  if (!player || !homePlayerReady || homeVideoMuteSyncToken !== 0) {
+  if (!player) {
     return;
   }
 
-  if (player.muted !== appStore.videoMuted) {
-    appStore.setVideoMuted(player.muted);
+  safeMediaPlayerSetMuted(player, homeEffectiveMuted.value);
+  const videos = [player.querySelector('video'), player.shadowRoot?.querySelector('video')];
+  for (const video of videos) {
+    if (video instanceof HTMLVideoElement) {
+      video.muted = homeEffectiveMuted.value;
+    }
   }
+}
+
+async function toggleHomeVideoSound() {
+  const player = homePlayerElement.value;
+
+  const nextMuted = !appStore.videoMuted;
+  // Tapping the control is the user gesture that lifts an autoplay block, and
+  // setVideoMuted clears it as part of turning sound back on.
+  appStore.setVideoMuted(nextMuted);
+
+  if (player) {
+    syncHomeVideoMuted(player, nextMuted);
+    if (!nextMuted) {
+      void playHomeVideo(player).catch(() => {});
+    }
+  }
+}
+
+function switchHomeVideoToFallbackSource() {
+  const failed = homeActiveVideoSource.value;
+  homeVideoFallbackHistory.add(failed.src);
+
+  const fallback = resolveVideoFallbackSource(props.item, failed);
+  if (!fallback || homeVideoFallbackHistory.has(fallback.src)) {
+    return;
+  }
+
+  homeVideoFallbackSource.value = fallback;
+  clearHomeImmersiveStartupFallback();
 }
 
 function bindHomePlayerEventListeners(player: MediaPlayerElement | null) {
@@ -908,14 +1409,16 @@ function bindHomePlayerEventListeners(player: MediaPlayerElement | null) {
     return;
   }
 
+  const handleVolume = () => {
+    enforceHomeVideoMuted();
+  };
   const handleReady = () => {
+    clearHomeVideoPlaybackRetry();
+    clearHomeImmersiveStartupFallback();
     homePlayerReady = true;
     syncHomeVideoAspectRatio(player);
     syncHomeVideoTimelineState(player);
     void syncHomeVideoPlayback();
-  };
-  const handleVolume = () => {
-    handleHomeVideoVolumeChange();
   };
   const handlePlay = () => {
     handleHomeVideoPlay();
@@ -932,6 +1435,29 @@ function bindHomePlayerEventListeners(player: MediaPlayerElement | null) {
   const handleEnded = () => {
     handleHomeVideoEnded();
   };
+  const handleError = () => {
+    switchHomeVideoToFallbackSource();
+  };
+  const handleAutoPlayFail = () => {
+    // Vidstack can report a successful player-level play transition while the
+    // browser rejects the underlying audible `<video>`. Retry muted so an active
+    // feed card never remains visibly stuck at 0:00 after a page refresh.
+    if (!homeEffectiveMuted.value) {
+      const blocked = appStore.reportAudibleAutoplayBlocked();
+      syncHomeVideoMuted(player, blocked ? true : homeEffectiveMuted.value);
+    }
+
+    void playHomeVideo(player).then(() => {
+      syncHomeVideoMuted(player, homeEffectiveMuted.value);
+    }).catch(() => {
+      // A manual play button remains available if the browser rejects again.
+    });
+  };
+  const handleProviderReady = () => {
+    void syncHomeVideoPlayback();
+  };
+
+  const removeHlsLibraryBinding = useBundledHlsLibrary(player);
 
   player.addEventListener('loaded-metadata', handleReady);
   player.addEventListener('can-play', handleReady);
@@ -941,8 +1467,14 @@ function bindHomePlayerEventListeners(player: MediaPlayerElement | null) {
   player.addEventListener('duration-change', handleDuration);
   player.addEventListener('time-update', handleTimeUpdate);
   player.addEventListener('ended', handleEnded);
+  player.addEventListener('error', handleError);
+  player.addEventListener('auto-play-fail', handleAutoPlayFail);
+  player.addEventListener('provider-change', handleProviderReady);
+  player.addEventListener('source-change', handleProviderReady);
+  player.addEventListener('load-start', handleProviderReady);
 
   removeHomePlayerEventListeners = () => {
+    removeHlsLibraryBinding();
     player.removeEventListener('loaded-metadata', handleReady);
     player.removeEventListener('can-play', handleReady);
     player.removeEventListener('volume-change', handleVolume);
@@ -951,11 +1483,34 @@ function bindHomePlayerEventListeners(player: MediaPlayerElement | null) {
     player.removeEventListener('duration-change', handleDuration);
     player.removeEventListener('time-update', handleTimeUpdate);
     player.removeEventListener('ended', handleEnded);
+    player.removeEventListener('error', handleError);
+    player.removeEventListener('auto-play-fail', handleAutoPlayFail);
+    player.removeEventListener('provider-change', handleProviderReady);
+    player.removeEventListener('source-change', handleProviderReady);
+    player.removeEventListener('load-start', handleProviderReady);
   };
 
   if (player.hasAttribute('data-can-play')) {
     syncHomeVideoAspectRatio(player);
     void syncHomeVideoPlayback();
+  }
+}
+
+function openMenu() {
+  postShare.reset();
+  menuOpen.value = true;
+}
+
+// The menu stays open so the fallback line can show the URL when the clipboard is
+// unavailable, which is what happens on a plain-http LAN address.
+async function handleShare() {
+  await postShare.share(props.item.id);
+}
+
+async function handleDirectShare() {
+  const shareUrl = await postShare.share(props.item.id);
+  if (!shareUrl || (!postShare.copied.value && postShare.shareUrl.value)) {
+    menuOpen.value = true;
   }
 }
 
@@ -985,15 +1540,28 @@ async function handleCaptionSave(nextCaption: string | null) {
   }
 }
 
-function handleDelete() {
+async function handleDelete() {
   if (!authStore.canDeleteMedia) {
     return;
   }
 
   menuOpen.value = false;
-  deleteOriginalFromDisk.value = false;
-  deleteError.value = null;
-  confirmDeleteOpen.value = true;
+  deleting.value = true;
+
+  try {
+    // Delete from the feed means move to Trash. Permanent removal is intentionally
+    // confined to Trash, so this tap has no second confirmation step.
+    const deleted = await trashImage(props.item.id);
+    feedStore.removeImage(deleted.id);
+    likesStore.removeImage(deleted.id);
+    const removedFolder = foldersStore.removeImage(deleted.id, deleted.folderSlug, props.item.mediaType);
+    momentsStore.removeImage(deleted.id);
+    appStore.removeIndexedImage(removedFolder ? 1 : 0, props.item.mediaType);
+  } catch {
+    // The post stays in place when the move fails, so the action can be retried.
+  } finally {
+    deleting.value = false;
+  }
 }
 
 async function handleLike() {
@@ -1002,30 +1570,6 @@ async function handleLike() {
   }
 
   await likesStore.toggleLike(props.item);
-}
-
-async function confirmDelete() {
-  if (!authStore.canDeleteMedia) {
-    return;
-  }
-
-  deleting.value = true;
-  deleteError.value = null;
-
-  try {
-    const deleted = deleteOriginalFromDisk.value ? await deleteImage(props.item.id) : await trashImage(props.item.id);
-    feedStore.removeImage(deleted.id);
-    likesStore.removeImage(deleted.id);
-    const removedFolder = foldersStore.removeImage(deleted.id, deleted.folderSlug, props.item.mediaType);
-    momentsStore.removeImage(deleted.id);
-    appStore.removeIndexedImage(removedFolder ? 1 : 0, props.item.mediaType);
-    confirmDeleteOpen.value = false;
-    deleteOriginalFromDisk.value = false;
-  } catch (error) {
-    deleteError.value = error instanceof Error ? error.message : 'Unable to delete post';
-  } finally {
-    deleting.value = false;
-  }
 }
 
 watch(
@@ -1043,13 +1587,42 @@ watch(
     isHomeVideoPaused.value = false;
     homeVideoDurationMs.value = props.item.durationMs ?? 0;
     homeVideoCurrentTimeMs.value = 0;
+    homeVideoFallbackSource.value = null;
+    homeVideoFallbackHistory.clear();
   }
 );
 
 watch(
-  () => props.isActiveVideo,
+  () => appStore.videoPlaybackQuality,
   () => {
+    homeVideoFallbackSource.value = null;
+    homeVideoFallbackHistory.clear();
+  }
+);
+
+// A fallback swaps the media source without changing the card's visibility. Start
+// the new source immediately so a second stalled candidate can advance to HLS too.
+watch(homeActiveVideoSource, () => {
+  void syncHomeVideoPlayback();
+});
+
+// A cached view keeps its players mounted, so activation has to drive playback the
+// same way visibility does.
+watch(isViewActive, () => {
+  void syncHomeVideoPlayback();
+});
+
+watch(
+  () => props.isActiveVideo,
+  async () => {
+    if (!props.isActiveVideo && !isHomeVideoFullscreen.value) {
+      hasRenderedHomeVideoFrame.value = false;
+    }
+    await nextTick();
     void syncHomeVideoPlayback();
+    if (props.isActiveVideo) {
+      scheduleHomeVideoPlaybackRetry();
+    }
   }
 );
 
@@ -1058,24 +1631,53 @@ watch(isHomeVideoFullscreen, () => {
 });
 
 watch(
-  () => appStore.videoMuted,
-  (videoMuted) => {
+  () => immersiveVideoStore.isOpen,
+  async (isOpen) => {
+    if (isOpen) {
+      // Claiming a card changes both its load mode and its Teleport target. Wait
+      // for those DOM/provider changes before asking the native video to play.
+      await nextTick();
+      await syncHomeVideoPlayback();
+      return;
+    }
+
+    const exitState = immersiveVideoStore.consumeExitState(props.item.id);
+    const player = homePlayerElement.value;
+    if (exitState && player) {
+      try {
+        safeMediaPlayerSetCurrentTime(player, exitState.currentTime);
+      } catch {
+        // Seeking before the provider is attached is a no-op.
+      }
+    }
+
+    await syncHomeVideoPlayback();
+  }
+);
+
+watch(
+  () => [appStore.videoEffectivelyMuted, appStore.videoSoundGeneration] as const,
+  ([effectivelyMuted]) => {
     const player = homePlayerElement.value;
     if (!player) {
       return;
     }
 
-    syncHomeVideoMuted(player, videoMuted);
+    syncHomeVideoMuted(player, effectivelyMuted);
   }
 );
 
 watch(homePlayerElement, (player) => {
+  hasRenderedHomeVideoFrame.value = false;
   loadedHomeVideoAspectRatio.value = null;
   isHomeVideoPaused.value = false;
   homeVideoDurationMs.value = props.item.durationMs ?? 0;
   homePlayerReady = false;
   homeVideoCurrentTimeMs.value = 0;
   bindHomePlayerEventListeners(player);
+  if (player) {
+    sharedVideoSurfaceStore.register(`feed:${props.item.id}`, player);
+  }
 });
 
 watch(
@@ -1091,9 +1693,7 @@ watch(
 
     stopHomeVideoObserver();
     isHomeVideoPaused.value = false;
-    void homePlayerElement.value?.pause().catch(() => {
-      // Ignore pause rejections before the provider is ready.
-    });
+    if (homePlayerElement.value) safeMediaPlayerPause(homePlayerElement.value);
   }
 );
 
@@ -1106,13 +1706,14 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   clearHomeImageTapResetTimer();
+  clearHomeImmersiveStartupFallback();
+  clearHomeVideoPlaybackRetry();
   stopHomeVideoObserver();
   isHomeVideoPaused.value = false;
   removeHomePlayerEventListeners?.();
   removeHomePlayerEventListeners = null;
-  void homePlayerElement.value?.pause().catch(() => {
-    // Ignore pause rejections before the provider is ready.
-  });
+  sharedVideoSurfaceStore.unregister(`feed:${props.item.id}`);
+  if (homePlayerElement.value) safeMediaPlayerPause(homePlayerElement.value);
 });
 </script>
 

@@ -24,10 +24,19 @@
     }
   },
   "app": {
+    "scanBanner": {
+      "collapse": "Ocultar el progreso del escaneo",
+      "expand": "Mostrar el progreso del escaneo"
+    },
     "authLoading": {
       "eyebrow": "Protección de acceso",
       "title": "Verificando acceso",
       "description": "Cargando el estado actual de la protección con contraseña."
+    },
+    "pullToRefresh": {
+      "pull": "Desliza para actualizar",
+      "release": "Suelta para actualizar",
+      "refreshing": "Cargando publicaciones nuevas..."
     }
   },
   "auth": {
@@ -257,6 +266,41 @@
           }
         }
       },
+      "videoPlaybackQuality": {
+        "label": "Calidad de reproduccion de video",
+        "description": "Elige la calidad con la que se reproducen los videos en reels y publicaciones. Cualquier opcion distinta de Original se transcodifica a demanda en el NAS.",
+        "closeMenuAria": "Cerrar el menu de calidad de reproduccion de video",
+        "deviceOverride": "Este dispositivo esta configurado en {value} por separado.",
+        "useLibraryDefault": "Seguir el valor por defecto de la biblioteca",
+        "options": {
+          "auto": {
+            "label": "Automatica",
+            "description": "Empieza con un flujo de 480p y aumenta la calidad cuando la red lo permite; ideal para acceso externo."
+          },
+          "480p": {
+            "label": "480p (prioridad externa)",
+            "description": "Aproximadamente 0.9 Mbps. Ideal para una conexion externa de 2-3 Mbps y el inicio mas rapido."
+          },
+          "original": {
+            "label": "Original",
+            "description": "Siempre reproduce el archivo original sin transcodificar."
+          },
+          "1080p": {
+            "label": "1080p",
+            "description": "Transcodifica a demanda a 1080p, equilibrando detalle y ancho de banda."
+          },
+          "720p": {
+            "label": "720p",
+            "description": "Aproximadamente 1.8 Mbps. Ideal para una conexion estable y mas rapida."
+          }
+        }
+      },
+      "sharePublicBaseUrl": {
+        "label": "Direccion publica para compartir",
+        "description": "Los enlaces creados desde fuera de la red local usan esta direccion. Dentro de la red local siempre se usa la direccion local.",
+        "fieldLabel": "URL base publica",
+        "helper": "Dejalo vacio para usar la direccion actual. Escribe una URL completa, por ejemplo https://gallery.example.com."
+      },
       "storiesMode": {
         "label": "Tratar las carpetas stories como carpetas normales de la app",
         "scanRequired": "Requiere escaneo",
@@ -295,6 +339,7 @@
         "reelsOnly": "Esto actualiza el estilo de cola usado cuando se abre Reels para esta app. Los visitantes no pueden cambiar de modo desde la página de Reels.",
         "folderOnly": "Esto actualiza el orden de fotos predeterminado usado por las cuadrículas de carpetas de la app.",
         "nestedFolderTitleOnly": "Esto actualiza cómo se etiquetan las carpetas anidadas de la app en toda la aplicación.",
+        "sharePublicBaseUrlOnly": "Esto actualiza el prefijo de direccion que usan los enlaces creados desde fuera de la red local.",
         "carouselReconciliation": "El modo de las carpetas de carrusel está guardado. Completa la acción de biblioteca indicada arriba para aplicarlo al índice.",
         "idle": "Estos son los valores actuales de toda la app para idioma, Inicio, Reels, carpetas de la app, títulos de carpetas anidadas, carpetas stories, carpetas de carrusel y carpetas excluidas."
       },
@@ -322,6 +367,7 @@
         "reelsSaved": "Reels ahora se abre con {label}.",
         "folderOrderSaved": "Las carpetas de la app ahora se abren con {label}.",
         "nestedFolderTitleSaved": "Las carpetas anidadas de la app ahora usan {label}.",
+        "videoPlaybackQualitySaved": "Los videos ahora se reproducen en {label}.",
         "parts": {
           "appLanguage": "idioma de la app",
           "excludedFolders": "carpetas excluidas",
@@ -330,8 +376,11 @@
           "homeFeedDefault": "predeterminado del feed de Inicio",
           "reelsFeedDefault": "predeterminado de Reels",
           "appFolderOrder": "orden de las carpetas de la app",
-          "nestedFolderTitles": "títulos de carpetas anidadas"
-        }
+          "nestedFolderTitles": "títulos de carpetas anidadas",
+          "videoPlaybackQuality": "calidad de reproduccion de video",
+          "sharePublicBaseUrl": "direccion publica para compartir"
+        },
+        "sharePublicBaseUrlSaved": "Direccion publica para compartir guardada."
       },
       "errors": {
         "validateExcludedFolders": "No se pudieron validar las reglas de carpetas excluidas.",
@@ -353,6 +402,22 @@
       "scanCard": {
         "title": "Escanear biblioteca",
         "description": "Ejecuta un escaneo después de añadir carpetas o cuando quieras refrescar los medios indexados."
+      },
+      "scanFolders": {
+        "title": "Carpetas para escanear",
+        "description": "Elige qué carpetas se incluyen al ejecutar Escanear biblioteca o regenerar miniaturas.",
+        "chooseLabel": "Elegir carpetas",
+        "loading": "Cargando carpetas...",
+        "empty": "No hay carpetas disponibles bajo la raíz de la galería.",
+        "helper": "Seleccionar una carpeta incluye todas sus subcarpetas. Deja todo sin marcar para escanear toda la biblioteca.",
+        "allFolders": "Todas las carpetas",
+        "selectedCount": "{count} seleccionadas",
+        "hasChildren": "contiene subcarpetas",
+        "save": "Guardar alcance",
+        "saving": "Guardando...",
+        "saved": "Alcance guardado. Ejecuta Escanear biblioteca para aplicarlo.",
+        "loadError": "No se pudieron cargar las carpetas disponibles.",
+        "saveError": "No se pudo guardar el alcance del escaneo."
       },
       "statusLabel": {
         "storageUnavailable": "Almacenamiento no disponible",
@@ -603,6 +668,14 @@
           "updated": "actualizados",
           "removed": "eliminados"
         }
+      },
+      "todayChanges": {
+        "title": "Cambios de hoy",
+        "description": "Todos los escaneos completos e incrementales terminados hoy, sin incluir los que siguen en curso.",
+        "scans": "Escaneos",
+        "filesScanned": "Archivos escaneados hoy",
+        "changes": "Resumen de cambios",
+        "latestFinished": "Último finalizado"
       }
     }
   },
@@ -817,7 +890,18 @@
     "errorTitle": "No se pudo abrir la carpeta compartida",
     "errorDescription": "No se pudo cargar esta carpeta compartida.",
     "backToFolder": "Volver a la carpeta compartida",
-    "postErrorTitle": "No se pudo cargar la publicación compartida"
+    "postErrorTitle": "No se pudo cargar la publicación compartida",
+    "post": {
+      "action": "Compartir esta publicacion",
+      "copied": "Enlace copiado",
+      "creating": "Creando enlace...",
+      "createError": "No se pudo crear el enlace para compartir.",
+      "copyManually": "Copia este enlace manualmente:",
+      "notFoundTitle": "Este enlace no esta disponible",
+      "notFoundDescription": "El enlace puede estar vencido, revocado o no ser valido.",
+      "loadingTitle": "Abriendo publicacion compartida",
+      "badge": "Publicacion compartida"
+    }
   },
   "reels": {
     "view": {
@@ -852,7 +936,8 @@
       "format": "Formato",
       "loading": "Cargando detalles del reel...",
       "folderPath": "Ruta de la carpeta",
-      "mimeType": "Tipo MIME"
+      "mimeType": "Tipo MIME",
+      "deleteVideo": "Mover a la Papelera"
     }
   },
   "post": {
@@ -862,6 +947,19 @@
       "previousItem": "Elemento anterior del carrusel",
       "nextItem": "Elemento siguiente del carrusel",
       "open": "Abrir carrusel con {count} elementos"
+    },
+    "immersive": {
+      "label": "Reproductor de video inmersivo",
+      "close": "Volver",
+      "rotate": "Girar a horizontal",
+      "fullscreen": "Alternar pantalla completa",
+      "open": "Abrir reproductor inmersivo",
+      "exitHint": "Desliza hacia abajo para cerrar",
+      "imageLabel": "Visor de fotos inmersivo",
+      "zoom": "Alternar zoom",
+      "details": "Detalles",
+      "hideDetails": "Ocultar detalles",
+      "deleteVideo": "Mover a la Papelera"
     },
     "captionModal": {
       "title": "Editar descripción",
@@ -1113,6 +1211,11 @@
     "description": "Las publicaciones movidas aquí permanecen en el disco hasta que las elimines de forma permanente.",
     "selectedOne": "{count} publicación seleccionada",
     "selectedOther": "{count} publicaciones seleccionadas",
+    "selectAll": "Seleccionar todo",
+    "deselectAll": "Deseleccionar todo",
+    "processingProgress": "Procesando {done} / {total}...",
+    "deletionProgress": "Eliminando en segundo plano {done} / {total}. Puedes seguir navegando.",
+    "dismissDeletionResult": "Entendido",
     "restoreButton": "Restaurar",
     "deleteButton": "Eliminar permanentemente",
     "libraryUnavailableTitle": "Almacenamiento de la biblioteca no disponible",

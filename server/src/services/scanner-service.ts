@@ -13,6 +13,7 @@ import {
   LAST_SUCCESSFUL_GALLERY_ROOT_SETTING_KEY,
   LIBRARY_REBUILD_REQUIRED_SETTING_KEY,
   PREVIOUS_GALLERY_ROOT_SETTING_KEY,
+  SCAN_FOLDERS_SETTING_KEY,
   TREAT_STORIES_AS_FOLDERS_SETTING_KEY,
   TREAT_CAROUSELS_AS_FOLDERS_SETTING_KEY
 } from '../constants/app-setting-keys.js';
@@ -36,6 +37,7 @@ import {
 import { libraryRelocationService } from './library-relocation-service.js';
 import {
   maintenanceOperationLock,
+  type MaintenanceOperationContext,
   PERMANENT_DELETION_QUARANTINE_DIRECTORY_NAME
 } from './maintenance-operation-lock.js';
 import { log } from './log-service.js';
@@ -57,6 +59,7 @@ import {
   matchesRelativeRoot,
   getSourceFolderPathFromRelativePath,
   isHiddenPath,
+  isWithinRelativeRoot,
   normalizePath
 } from '../utils/path-utils.js';
 import {
@@ -573,9 +576,23 @@ export interface EnqueueScanOptions extends Partial<FullScanOptions> {
   beforeEnqueue?: () => void;
 }
 
+function normalizeSelectedFolderPath(value: string): string {
+  const normalized = normalizePath(value).replace(/^\/+|\/+$/g, '');
+  if (!normalized || normalized.split('/').some((segment) => segment === '.' || segment === '..')) {
+    throw new Error('Scan folder paths must be relative to the gallery root.');
+  }
+  return normalized;
+}
+
+function compactSelectedFolderPaths(paths: string[]): string[] {
+  const normalized = [...new Set(paths.map(normalizeSelectedFolderPath))].sort((a, b) => a.length - b.length);
+  return normalized.filter((candidate, index) => !normalized.slice(0, index).some((root) => isWithinRelativeRoot(candidate, root)));
+}
+
 class ScannerService {
   private queue = Promise.resolve<ScanSummary>(createEmptySummary());
   private activeOrQueuedJobs = 0;
+  private maintenanceContext: MaintenanceOperationContext | null = null;
   private progress = createIdleProgress(scanRunRepository.latestCompleted() ?? null);
   private heartbeatTimer: NodeJS.Timeout | null = null;
 
@@ -584,6 +601,54 @@ class ScannerService {
       ...this.progress,
       lastCompletedScan: this.progress.lastCompletedScan ? { ...this.progress.lastCompletedScan } : null
     };
+  }
+
+  getSelectedScanFolders(): string[] {
+    const raw = appSettingsRepository.get(SCAN_FOLDERS_SETTING_KEY);
+    if (!raw) return [];
+
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed)
+        ? compactSelectedFolderPaths(parsed.filter((value): value is string => typeof value === 'string'))
+        : [];
+    } catch {
+      return [];
+    }
+  }
+
+  setSelectedScanFolders(paths: string[]) {
+    const selectedFolders = compactSelectedFolderPaths(paths);
+    if (selectedFolders.length > 0) {
+      appSettingsRepository.set(SCAN_FOLDERS_SETTING_KEY, JSON.stringify(selectedFolders));
+    } else {
+      appSettingsRepository.remove(SCAN_FOLDERS_SETTING_KEY);
+    }
+    return { selectedFolders, requiresScan: true };
+  }
+
+  async listAvailableScanFolders(): Promise<string[]> {
+    const folders: string[] = [];
+    const excludedFolderRules = this.getEffectiveExcludedFolderRules();
+
+    const visit = async (absolutePath: string, relativePath: string | null): Promise<void> => {
+      const entries = await fs.readdir(absolutePath, { withFileTypes: true }).catch(() => []);
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const childPath = relativePath ? `${relativePath}/${entry.name}` : entry.name;
+        const normalized = normalizePath(childPath);
+        if (isHiddenPath(normalized) || this.isManagedGalleryPath(normalized) || matchesExcludedFolder(normalized, excludedFolderRules)) {
+          continue;
+        }
+        folders.push(normalized);
+        await visit(path.join(absolutePath, entry.name), normalized);
+      }
+    };
+
+    if (storageService.refreshAvailability().libraryAvailable) {
+      await visit(appConfig.galleryRoot, null);
+    }
+    return folders.sort((left, right) => left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' }));
   }
 
   isLibraryRebuildRequired(): boolean {
@@ -683,6 +748,9 @@ class ScannerService {
 
   async scanAll(reason = 'manual', options: EnqueueScanOptions = {}): Promise<ScanRunRecord | undefined> {
     const resolvedOptions = resolveFullScanOptions({
+      // Manual scans are incremental by default: unchanged folders can use
+      // their stored signature instead of re-reading every indexed media row.
+      ...(reason === 'manual' ? { repairUnchangedDerivatives: false } : {}),
       allowDerivativeMigration: reason !== 'startup' && !reason.startsWith('watcher'),
       ...options
     });
@@ -716,6 +784,45 @@ class ScannerService {
     return scanRunRepository.latest();
   }
 
+  /**
+   * Watcher directory events point at a subtree, not a single media file. Expand
+   * them into the source folders that actually need re-indexing so a new or
+   * removed folder does not require a full library walk.
+   */
+  private async expandDirectoryPathToSourceFolders(
+    relativeDirectoryPath: string,
+    treatStoriesAsFolders: boolean,
+    treatCarouselsAsFolders: boolean,
+    excludedFolderRules: string[]
+  ): Promise<string[]> {
+    const normalizedDirectoryPath = normalizePath(relativeDirectoryPath);
+    const absoluteDirectoryPath = path.join(appConfig.galleryRoot, normalizedDirectoryPath);
+    const directoryStats = await fs.stat(absoluteDirectoryPath).catch(() => null);
+
+    if (!directoryStats?.isDirectory()) {
+      // The directory is gone, so every indexed folder inside it must be cleared.
+      const directoryPrefix = `${normalizedDirectoryPath}/`;
+      return folderRepository
+        .getAll()
+        .map((folder) => normalizePath(folder.folder_path))
+        .filter((folderPath) => folderPath === normalizedDirectoryPath || folderPath.startsWith(directoryPrefix));
+    }
+
+    const discovered: string[] = [];
+    await this.walkMediaSourceFolders(
+      absoluteDirectoryPath,
+      async (sourceFolder) => {
+        discovered.push(sourceFolder.relativePath);
+      },
+      normalizedDirectoryPath,
+      treatStoriesAsFolders,
+      treatCarouselsAsFolders,
+      excludedFolderRules
+    );
+
+    return discovered;
+  }
+
   private async enqueue(job: () => Promise<ScanSummary>, options: EnqueueScanOptions = {}): Promise<ScanSummary> {
     if (options.rejectIfBusy && this.activeOrQueuedJobs > 0) {
       throw new ScanBusyError();
@@ -726,11 +833,23 @@ class ScannerService {
       if (options.beforeEnqueue) {
         options.beforeEnqueue();
       }
-      const runWithMaintenanceLock = () => maintenanceOperationLock.runExclusive(async () => {
-        const { permanentDeletionService } = await import('./permanent-deletion-service.js');
-        await permanentDeletionService.recoverPendingDeletionsWhileLocked();
-        return job();
-      });
+      // Scans hold the maintenance lock for a long time. Run them at background
+      // priority so interactive work (permanent deletion, lazy derivatives) can
+      // preempt at the yield points inside the derivative phase.
+      const runWithMaintenanceLock = () => maintenanceOperationLock.runExclusive(
+        async (maintenanceContext) => {
+          const previousContext = this.maintenanceContext;
+          this.maintenanceContext = maintenanceContext;
+          try {
+            const { permanentDeletionService } = await import('./permanent-deletion-service.js');
+            await permanentDeletionService.recoverPendingDeletionsWhileLocked();
+            return await job();
+          } finally {
+            this.maintenanceContext = previousContext;
+          }
+        },
+        { priority: 'background' }
+      );
       this.queue = this.queue.then(runWithMaintenanceLock, runWithMaintenanceLock);
       return await this.queue;
     } finally {
@@ -1971,7 +2090,10 @@ class ScannerService {
     );
 
     try {
-      const indexedImages = imageRepository.listActive();
+      const selectedScanFolders = this.getSelectedScanFolders();
+      const indexedImages = imageRepository.listActive().filter(
+        (image) => selectedScanFolders.length === 0 || matchesRelativeRoot(normalizePath(image.relative_path), selectedScanFolders)
+      );
       const indexedFolders = new Set(
         indexedImages
           .map((image) => getSourceFolderPathFromRelativePath(image.relative_path))
@@ -2075,9 +2197,16 @@ class ScannerService {
       claimedMoveImageIds: new Set<number>(),
       rebuildDerivativeReuseIndex: contextOptions.rebuildDerivativeReuseIndex
     };
-    const treatStoriesAsFolders = this.shouldTreatStoriesAsFolders();
-    const treatCarouselsAsFolders = this.shouldTreatCarouselsAsFolders();
-    const excludedFolderRules = this.getEffectiveExcludedFolderRules();
+      const treatStoriesAsFolders = this.shouldTreatStoriesAsFolders();
+      const treatCarouselsAsFolders = this.shouldTreatCarouselsAsFolders();
+      const excludedFolderRules = this.getEffectiveExcludedFolderRules();
+      const selectedScanFolders = this.getSelectedScanFolders();
+      const scanRoots = selectedScanFolders.length > 0
+        ? selectedScanFolders.map((relativePath) => ({
+            absolutePath: path.join(appConfig.galleryRoot, relativePath),
+            relativePath
+          }))
+        : [{ absolutePath: appConfig.galleryRoot, relativePath: null }];
 
     if (!storageService.refreshAvailability().libraryAvailable) {
       return this.finishUnavailableRun(runId, reason);
@@ -2095,6 +2224,7 @@ class ScannerService {
         formatStep('media-errors', appConfig.scanMediaErrorMode),
         formatStep('stories-as-folders', formatToggle(treatStoriesAsFolders)),
         formatStep('carousels-as-folders', formatToggle(treatCarouselsAsFolders)),
+        selectedScanFolders.length > 0 ? formatStep('selected-folders', selectedScanFolders.join(',')) : null,
         excludedFolderRules.length > 0 ? formatStep('excluded-folders', excludedFolderRules.join(',')) : null,
         appConfig.managedGalleryRelativeIgnores.length > 0
           ? formatStep('ignored-managed-paths', appConfig.managedGalleryRelativeIgnores.join(','))
@@ -2244,7 +2374,8 @@ class ScannerService {
         }
       };
 
-      await this.walkMediaSourceFolders(appConfig.galleryRoot, async (sourceFolder) => {
+      for (const scanRoot of scanRoots) {
+        await this.walkMediaSourceFolders(scanRoot.absolutePath, async (sourceFolder) => {
         discoveredSourceFolders += 1;
         const result = await this.scanSourceFolder(
           sourceFolder,
@@ -2310,18 +2441,24 @@ class ScannerService {
           processedFolders: this.progress.processedFolders + 1
         });
         this.logProgress('folder');
-      }, null, treatStoriesAsFolders, treatCarouselsAsFolders, excludedFolderRules);
+        }, scanRoot.relativePath, treatStoriesAsFolders, treatCarouselsAsFolders, excludedFolderRules);
+      }
 
       for (const folder of existingFolders) {
-        if (!discoveredFolderIds.has(folder.id)) {
+        const isInSelectedScope = selectedScanFolders.length === 0 || matchesRelativeRoot(normalizePath(folder.folder_path), selectedScanFolders);
+        if (isInSelectedScope && !discoveredFolderIds.has(folder.id)) {
           summary.removed_files += imageRepository.markAllDeletedByFolder(folder.id);
           folderRepository.setAvatar(folder.id, null, 'auto');
         }
       }
 
+      summary.removed_files += await this.softDeleteVanishedOriginals(selectedScanFolders);
+
       postRepository.syncRepresentativePlaces();
 
-      metrics.removedFolderStateRows = folderScanStateRepository.deleteMissing([...activeFolderPaths]);
+      metrics.removedFolderStateRows = selectedScanFolders.length === 0
+        ? folderScanStateRepository.deleteMissing([...activeFolderPaths])
+        : folderScanStateRepository.deleteMissingWithin([...activeFolderPaths], selectedScanFolders);
 
       metrics.discoveryDurationMs = elapsedMilliseconds(discoveryStartedAt);
       metrics.derivativeJobsQueued = derivativeJobs.size;
@@ -2384,6 +2521,53 @@ class ScannerService {
     return summary;
   }
 
+  /**
+   * Final safety net after discovery: any indexed file whose original is gone
+   * gets soft deleted. Per-folder cleanup only reaches folders discovery walked,
+   * so a source directory that vanished as a whole would otherwise keep serving
+   * rows that 404 in the feed.
+   */
+  private async softDeleteVanishedOriginals(scopeRoots: string[] = []): Promise<number> {
+    const rows = imageRepository
+      .listAliveRelativePaths()
+      .filter((row) => scopeRoots.length === 0 || matchesRelativeRoot(normalizePath(row.relative_path), scopeRoots));
+    if (rows.length === 0) {
+      return 0;
+    }
+
+    const vanished: string[] = [];
+    await Promise.all(
+      rows.map((row) =>
+        discoveryLimit(async () => {
+          let absolutePath: string;
+          try {
+            absolutePath = resolveOriginalPath(row.relative_path);
+          } catch {
+            vanished.push(row.relative_path);
+            return;
+          }
+
+          try {
+            await fs.stat(absolutePath);
+          } catch {
+            vanished.push(row.relative_path);
+          }
+        })
+      )
+    );
+
+    for (const relativePath of vanished) {
+      imageRepository.markDeleted(relativePath);
+    }
+
+    if (vanished.length > 0) {
+      log.info(joinLogParts(['Pruned vanished originals', formatStep('files', vanished.length)]));
+    }
+
+    return vanished.length;
+  }
+
+
   private async performIncrementalScan(relativePaths: string[], reason: string): Promise<ScanSummary> {
     const runId = scanRunRepository.start();
     const summary = createEmptySummary();
@@ -2410,6 +2594,19 @@ class ScannerService {
       }
 
       if (!isSupportedMediaFile(path.basename(relativePath))) {
+        if (matchesExcludedFolder(relativePath, excludedFolderRules)) {
+          continue;
+        }
+
+        const directorySourceFolders = await this.expandDirectoryPathToSourceFolders(
+          relativePath,
+          treatStoriesAsFolders,
+          this.shouldTreatCarouselsAsFolders(),
+          excludedFolderRules
+        );
+        for (const sourceFolder of directorySourceFolders) {
+          impactedSourceFolders.add(sourceFolder);
+        }
         continue;
       }
 
@@ -2645,12 +2842,34 @@ class ScannerService {
       }
     };
 
+    // Each job is a natural quiescent point: nothing is mid-write, so the scan can
+    // hand the maintenance lock to interactive work (permanent deletion, lazy
+    // derivatives) instead of blocking it for the whole derivative phase.
+    const runJobWithPreemption = async (job: DerivativeJob) => {
+      const maintenanceContext = this.maintenanceContext;
+      if (maintenanceContext?.isContended()) {
+        await maintenanceContext.yieldToHigherPriority();
+      }
+
+      // A permanent deletion may have removed this media while the scan yielded.
+      // Skipping keeps deletions from surfacing as scan errors.
+      const currentImage = imageRepository.getByRelativePath(job.relativePath);
+      if (!currentImage || currentImage.is_deleted === 1) {
+        this.setProgress({
+          processedDerivativeJobs: this.progress.processedDerivativeJobs + 1
+        });
+        return;
+      }
+
+      await processJob(job);
+    };
+
     if (appConfig.scanMediaErrorMode === 'fail') {
       for (const job of jobs) {
-        await processJob(job);
+        await runJobWithPreemption(job);
       }
     } else {
-      await Promise.all(jobs.map((job) => derivativeLimit(() => processJob(job))));
+      await Promise.all(jobs.map((job) => derivativeLimit(() => runJobWithPreemption(job))));
     }
 
     const summary = {

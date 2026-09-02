@@ -22,6 +22,8 @@ describe.sequential('trash flow', () => {
   let scannerService: ScannerServiceModule['scannerService'];
   let imageRepository: RepositoriesModule['imageRepository'];
   let likeRepository: RepositoriesModule['likeRepository'];
+  let appSettingsRepository: RepositoriesModule['appSettingsRepository'];
+  let libraryRebuildRequiredSettingKey: string;
 
   beforeAll(async () => {
     tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'insta-trash-flow-'));
@@ -52,7 +54,8 @@ describe.sequential('trash flow', () => {
     ({ appConfig } = await import('../src/config/env.js'));
     ({ galleryService } = await import('../src/services/gallery-service.js'));
     ({ scannerService } = await import('../src/services/scanner-service.js'));
-    ({ imageRepository, likeRepository } = await import('../src/db/repositories.js'));
+    ({ imageRepository, likeRepository, appSettingsRepository } = await import('../src/db/repositories.js'));
+    ({ LIBRARY_REBUILD_REQUIRED_SETTING_KEY: libraryRebuildRequiredSettingKey } = await import('../src/constants/app-setting-keys.js'));
 
     await Promise.all([
       fs.mkdir(appConfig.galleryRoot, { recursive: true }),
@@ -239,6 +242,18 @@ describe.sequential('trash flow', () => {
       folderSlug: 'cleanup'
     });
     expect(imageRepository.getById(imageB.id)).toBeUndefined();
+  });
+
+  it('allows permanent deletion from trash while a library rebuild is pending', async () => {
+    await createSourceFile('pending-rebuild/trashed.jpg');
+    await scanAll('initial');
+
+    const image = mustGetImage('pending-rebuild/trashed.jpg');
+    expect(galleryService.trashImage(image.id)).toMatchObject({ id: image.id });
+    appSettingsRepository.set(libraryRebuildRequiredSettingKey, '1');
+
+    await expect(galleryService.deleteImage(image.id)).resolves.toMatchObject({ id: image.id });
+    expect(imageRepository.getById(image.id)).toBeUndefined();
   });
 
   it('keeps scan-driven missing/reappeared is_deleted behavior intact for non-trashed files', async () => {

@@ -5,7 +5,7 @@
       :src="src"
       :alt="name"
       loading="lazy"
-      :retry-while="appStore.isScanning"
+      :retry-while="appStore.isInitialScan"
       class="h-full w-full object-cover"
     />
     <span v-else>{{ initials }}</span>

@@ -10,6 +10,9 @@ import type {
   CreateCollectionResult,
   CreateFolderShareLinkInput,
   CreateFolderShareLinkResult,
+  CreatePostShareLinkResult,
+  PostShareLinksPayload,
+  SharePublicBaseUrlSetting,
   DeleteCollectionResult,
   FolderShareAccessState,
   FolderShareLinksPayload,
@@ -20,7 +23,10 @@ import type {
   HomeFeedDefaultSetting,
   UpdateCollectionResult,
   UpdateExcludedFoldersSettingResult,
+  ScanFoldersPayload,
+  UpdateScanFoldersResult,
   NestedFolderTitleFormatSetting,
+  VideoPlaybackQualitySetting,
   ReelsFeedDefaultSetting,
   SharedFolderImagesPayload,
   SharedFolderSummary,
@@ -33,6 +39,7 @@ import type {
   FolderImageOrder,
   FolderImageOrderDefaultSetting,
   NestedFolderTitleFormat,
+  VideoPlaybackQuality,
   ImageCaptionMutationResult,
   ImageDetail,
   ImageCollectionsPayload,
@@ -43,6 +50,7 @@ import type {
   MomentsPayload,
   PaginatedFeed,
   PaginatedReels,
+  PermanentDeletionJobResult,
   FolderImagesPayload,
   PlaceDetail,
   PlaceImagesPayload,
@@ -60,7 +68,13 @@ import type {
 } from '../types/api';
 import { requestJson } from './http';
 
-export function fetchFeed(page = 1, limit = 24, mode: FeedMode = 'random', seed?: number) {
+export function fetchFeed(
+  page = 1,
+  limit = 24,
+  mode: FeedMode = 'random',
+  seed?: number,
+  excludeIds?: number[]
+) {
   const params = new URLSearchParams({
     page: String(page),
     limit: String(limit),
@@ -69,6 +83,10 @@ export function fetchFeed(page = 1, limit = 24, mode: FeedMode = 'random', seed?
 
   if (typeof seed === 'number') {
     params.set('seed', String(seed));
+  }
+
+  if (excludeIds && excludeIds.length > 0) {
+    params.set('exclude', excludeIds.join(','));
   }
 
   return requestJson<PaginatedFeed>(`/api/feed?${params.toString()}`);
@@ -274,6 +292,37 @@ function fetchSharedDetail(resource: 'posts' | 'images', id: number, mediaType?:
   return requestJson<SharedImageDetail>(`/api/share/${resource}/${id}${suffix}`);
 }
 
+export function fetchPostShareLinks(postId: number) {
+  return requestJson<PostShareLinksPayload>(`/api/share/posts/${postId}/links`);
+}
+
+export function createPostShareLink(postId: number, input: CreateFolderShareLinkInput = { expiresIn: 'unlimited', unlimited: true }) {
+  return requestJson<CreatePostShareLinkResult>(`/api/share/posts/${postId}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input)
+  });
+}
+
+export function revokePostShareLink(postId: number, linkId: number) {
+  return requestJson<{ ok: boolean; link: CreatePostShareLinkResult['link'] }>(
+    `/api/share/posts/${postId}/links/${linkId}`,
+    { method: 'DELETE' }
+  );
+}
+
+export function fetchSharedPostByToken(token: string) {
+  return requestJson<SharedImageDetail>(`/api/share/post-links/${encodeURIComponent(token)}`);
+}
+
+export function updateSharePublicBaseUrl(publicBaseUrl: string | null) {
+  return requestJson<SharePublicBaseUrlSetting>('/api/admin/settings/share-public-base-url', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ publicBaseUrl })
+  });
+}
+
 export function fetchSharedPost(id: number, mediaType?: 'image' | 'video') {
   return fetchSharedDetail('posts', id, mediaType);
 }
@@ -398,6 +447,24 @@ export function deleteImage(id: number) {
   });
 }
 
+export function enqueuePermanentDeletionBatch(ids: number[]) {
+  return requestJson<PermanentDeletionJobResult>('/api/posts/deletions/batch', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ ids })
+  });
+}
+
+export function fetchPermanentDeletionJob() {
+  return requestJson<PermanentDeletionJobResult>('/api/posts/deletions/batch');
+}
+
+export function acknowledgePermanentDeletionJob() {
+  return requestJson<PermanentDeletionJobResult>('/api/posts/deletions/batch', {
+    method: 'DELETE'
+  });
+}
+
 export function deleteFolder(slug: string, options: { deleteSourceFolder?: boolean } = {}) {
   const params = new URLSearchParams();
   if (options.deleteSourceFolder) {
@@ -424,6 +491,10 @@ export function fetchScanProgress() {
 
 export function fetchAdminScanProgress() {
   return requestJson<ScanProgress>('/api/admin/scan-progress');
+}
+
+export function fetchScanFolders() {
+  return requestJson<ScanFoldersPayload>('/api/admin/scan-folders');
 }
 
 export function fetchAuthStatus() {
@@ -565,6 +636,14 @@ export function updateFolderImageOrderDefault(defaultOrder: FolderImageOrder) {
   });
 }
 
+export function updateVideoPlaybackQuality(videoPlaybackQuality: VideoPlaybackQuality) {
+  return requestJson<VideoPlaybackQualitySetting>('/api/admin/settings/video-playback-quality', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ videoPlaybackQuality })
+  });
+}
+
 export function updateNestedFolderTitleFormat(titleFormat: NestedFolderTitleFormat) {
   return requestJson<NestedFolderTitleFormatSetting>('/api/admin/settings/nested-folder-title-format', {
     method: 'PUT',
@@ -586,6 +665,14 @@ export function updateExcludedFolders(rules: string[]) {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ rules })
+  });
+}
+
+export function updateScanFolders(folders: string[]) {
+  return requestJson<UpdateScanFoldersResult>('/api/admin/settings/scan-folders', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ folders })
   });
 }
 

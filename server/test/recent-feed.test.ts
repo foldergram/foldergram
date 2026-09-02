@@ -25,6 +25,7 @@ describe.sequential('recent feed ordering', () => {
   let galleryService: GalleryServiceModule['galleryService'];
   let folderRepository: RepositoriesModule['folderRepository'];
   let imageRepository: RepositoriesModule['imageRepository'];
+  let appSettingsRepository: RepositoriesModule['appSettingsRepository'];
 
   beforeAll(async () => {
     tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'insta-recent-feed-'));
@@ -45,7 +46,7 @@ describe.sequential('recent feed ordering', () => {
 
     ({ appConfig } = await import('../src/config/env.js'));
     ({ galleryService } = await import('../src/services/gallery-service.js'));
-    ({ folderRepository, imageRepository } = await import('../src/db/repositories.js'));
+    ({ appSettingsRepository, folderRepository, imageRepository } = await import('../src/db/repositories.js'));
 
     await Promise.all([
       fs.mkdir(appConfig.galleryRoot, { recursive: true }),
@@ -69,6 +70,42 @@ describe.sequential('recent feed ordering', () => {
 
     expect(payload.mode).toBe('recent');
     expect(payload.items.map((item) => item.id)).toEqual([julyNewer.id, julyOlder.id, octoberOlder.id]);
+  });
+
+  // Pull-to-refresh sends the ids already on screen so the next batch is new content
+  // rather than a reshuffle of the same rows.
+  it('skips excluded post ids in both recent and random mode', async () => {
+    const newest = await createIndexedImage('mi-11t', 'IMG_20220710_071100.jpg', Date.UTC(2022, 6, 10, 7, 11, 0));
+    const middle = await createIndexedImage('mi-11t', 'IMG_20220710_071048.jpg', Date.UTC(2022, 6, 10, 7, 10, 48));
+    const oldest = await createIndexedImage('note9', 'Samsung_Note9_20211019_103000.jpg', Date.UTC(2021, 9, 19, 10, 30, 0));
+
+    const recent = galleryService.getFeed(1, 10, 'recent', undefined, [newest.id, middle.id]);
+    expect(recent.items.map((item) => item.id)).toEqual([oldest.id]);
+
+    const random = galleryService.getFeed(1, 10, 'random', 42, [newest.id, oldest.id]);
+    expect(random.items.map((item) => item.id)).toEqual([middle.id]);
+
+    // Excluding nothing has to stay the plain query, otherwise refreshing a small
+    // library would come back empty.
+    const unfiltered = galleryService.getFeed(1, 10, 'recent', undefined, []);
+    expect(unfiltered.items).toHaveLength(3);
+  });
+
+  it('uses selected scan folders as display scope without deleting indexed rows', async () => {
+    const selected = await createIndexedImage('selected', 'selected.jpg', Date.UTC(2022, 6, 10, 7, 11, 0));
+    const hidden = await createIndexedImage('hidden', 'hidden.jpg', Date.UTC(2022, 6, 10, 7, 10, 48));
+
+    appSettingsRepository.set('library.scan_folders', JSON.stringify(['selected']));
+    expect(galleryService.getFeed(1, 10, 'recent').items.map((item) => item.id)).toEqual([selected.id]);
+    expect(galleryService.listFolders().map((folder) => folder.folderPath)).toEqual(['selected']);
+    expect(imageRepository.getById(hidden.id)?.is_deleted).toBe(0);
+
+    appSettingsRepository.set('library.scan_folders', JSON.stringify([]));
+    expect(galleryService.getFeed(1, 10, 'recent').items).toEqual([]);
+    expect(imageRepository.getById(selected.id)?.is_deleted).toBe(0);
+
+    appSettingsRepository.set('library.scan_folders', JSON.stringify(['hidden']));
+    expect(galleryService.getFeed(1, 10, 'recent').items.map((item) => item.id)).toEqual([hidden.id]);
   });
 
   async function createIndexedImage(folderPath: string, filename: string, timestamp: number): Promise<ImageRecord> {

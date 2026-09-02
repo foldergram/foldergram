@@ -13,12 +13,20 @@
   <RouterView v-else-if="isPublicShareRoute" />
   <AuthGate v-else-if="authStore.requiresLogin" />
   <AppShell v-else>
-    <RouterView :route="displayRoute" />
+    <RouterView v-slot="{ Component }" :route="displayRoute">
+      <!-- The dock destinations stay mounted so switching tabs restores the existing
+           grid and scroll position instead of rebuilding the whole view. -->
+      <KeepAlive :include="keptAliveViewNames">
+        <component :is="Component" />
+      </KeepAlive>
+    </RouterView>
     <div v-if="showImageModal" class="app__image-modal-layer" @click.self="closeImageModal">
       <PostView :id="String(route.params.id ?? '')" modal @close="closeImageModal" />
     </div>
   </AppShell>
   <AdminUnlockDialog v-if="authStore.unlockDialogOpen" />
+  <ImmersiveImageLayer />
+  <ImmersiveVideoLayer />
 </template>
 
 <script setup lang="ts">
@@ -29,7 +37,9 @@ import { RouterView, useRoute, useRouter, type RouteLocationNormalizedLoaded } f
 import AppShell from './components/AppShell.vue';
 import AdminUnlockDialog from './components/AdminUnlockDialog.vue';
 import AuthGate from './components/AuthGate.vue';
-import { canAccessRoute, routeAllowsPublicShareAccess } from './router';
+import ImmersiveImageLayer from './components/ImmersiveImageLayer.vue';
+import ImmersiveVideoLayer from './components/ImmersiveVideoLayer.vue';
+import { canAccessRoute, routeAllowsPublicShareAccess, KEPT_ALIVE_VIEW_NAMES } from './router';
 import PostView from './views/PostView.vue';
 import { useAppStore } from './stores/app';
 import { useAuthStore } from './stores/auth';
@@ -39,6 +49,8 @@ import { useLikesStore } from './stores/likes';
 import { useFoldersStore } from './stores/folders';
 import { useFeedStore } from './stores/feed';
 import { useMomentsStore } from './stores/moments';
+import { useImmersiveImageStore } from './stores/immersive-image';
+import { useImmersiveVideoStore } from './stores/immersive-video';
 import { useReelsStore } from './stores/reels';
 import { useTrashStore } from './stores/trash';
 import { useViewerStore } from './stores/viewer';
@@ -52,6 +64,8 @@ const feedStore = useFeedStore();
 const likesStore = useLikesStore();
 const foldersStore = useFoldersStore();
 const momentsStore = useMomentsStore();
+const immersiveImageStore = useImmersiveImageStore();
+const immersiveVideoStore = useImmersiveVideoStore();
 const reelsStore = useReelsStore();
 const route = useRoute();
 const router = useRouter();
@@ -99,9 +113,12 @@ const displayRoute = computed<RouteLocationNormalizedLoaded | undefined>(() =>
   showImageModal.value ? modalBackgroundRoute.value ?? undefined : route
 );
 const showAuthLoading = computed(() => !authStore.ready && authStore.loading);
+const keptAliveViewNames = [...KEPT_ALIVE_VIEW_NAMES];
 
 function resetProtectedState() {
   unlockModalScroll();
+  immersiveImageStore.reset();
+  immersiveVideoStore.reset();
   appStore.resetProtectedState();
   feedStore.resetForRebuild();
   foldersStore.resetForRebuild();

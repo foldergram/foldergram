@@ -24,10 +24,19 @@
     }
   },
   "app": {
+    "scanBanner": {
+      "collapse": "Hide scan progress",
+      "expand": "Show scan progress"
+    },
     "authLoading": {
       "eyebrow": "Access Protection",
       "title": "Checking access",
       "description": "Loading the current password protection status."
+    },
+    "pullToRefresh": {
+      "pull": "Pull to refresh",
+      "release": "Release to refresh",
+      "refreshing": "Loading new posts..."
     }
   },
   "auth": {
@@ -257,6 +266,41 @@
           }
         }
       },
+      "videoPlaybackQuality": {
+        "label": "Video playback quality",
+        "description": "Choose the quality videos play at in reels and posts. Anything other than Original is transcoded on demand by the NAS.",
+        "closeMenuAria": "Close video playback quality menu",
+        "deviceOverride": "This device is set to {value} on its own.",
+        "useLibraryDefault": "Follow library default",
+        "options": {
+          "auto": {
+            "label": "Auto",
+            "description": "Starts from a 480p stream and adapts upward when bandwidth allows; best for WAN use."
+          },
+          "480p": {
+            "label": "480p (WAN first)",
+            "description": "About 0.9 Mbps. Best for a 2-3 Mbps external connection and the fastest start."
+          },
+          "original": {
+            "label": "Original",
+            "description": "Always plays the original file with no transcoding."
+          },
+          "1080p": {
+            "label": "1080p",
+            "description": "Transcodes on demand to 1080p, balancing detail and bandwidth."
+          },
+          "720p": {
+            "label": "720p",
+            "description": "About 1.8 Mbps. Best for a stable, faster connection."
+          }
+        }
+      },
+      "sharePublicBaseUrl": {
+        "label": "Public share address",
+        "description": "Share links created from outside the LAN use this address. LAN visits always keep the LAN address.",
+        "fieldLabel": "Public base URL",
+        "helper": "Leave empty to fall back to the address currently in use. Enter a full URL, for example https://gallery.example.com."
+      },
       "storiesMode": {
         "label": "Treat stories folders as normal app folders",
         "scanRequired": "Scan required",
@@ -295,6 +339,7 @@
         "reelsOnly": "This updates the queue style used when Reels opens for this app. Visitors cannot switch modes from the reels page.",
         "folderOnly": "This updates the default photo order used by app folder grids.",
         "nestedFolderTitleOnly": "This updates how nested app folders are labeled throughout the app.",
+        "sharePublicBaseUrlOnly": "This updates the address prefix used by share links created from outside the LAN.",
         "carouselReconciliation": "The Carousel folder mode is saved. Complete the library action above to apply it to the index.",
         "idle": "These are the current app-wide defaults for language, Home, Reels, app folders, nested folder titles, stories folders, carousel folders, and excluded folders."
       },
@@ -322,6 +367,7 @@
         "reelsSaved": "Reels now opens with {label}.",
         "folderOrderSaved": "App folders now open with {label}.",
         "nestedFolderTitleSaved": "Nested app folders now use {label}.",
+        "videoPlaybackQualitySaved": "Videos now play at {label}.",
         "parts": {
           "appLanguage": "app language",
           "excludedFolders": "excluded folders",
@@ -330,8 +376,11 @@
           "homeFeedDefault": "Home feed default",
           "reelsFeedDefault": "Reels feed default",
           "appFolderOrder": "app folder order",
-          "nestedFolderTitles": "nested folder titles"
-        }
+          "nestedFolderTitles": "nested folder titles",
+          "videoPlaybackQuality": "video playback quality",
+          "sharePublicBaseUrl": "public share address"
+        },
+        "sharePublicBaseUrlSaved": "Public share address saved."
       },
       "errors": {
         "validateExcludedFolders": "Unable to validate the excluded folder rules.",
@@ -353,6 +402,22 @@
       "scanCard": {
         "title": "Scan Library",
         "description": "Run a scan after adding folders or when you want to refresh indexed media."
+      },
+      "scanFolders": {
+        "title": "Scan folders",
+        "description": "Choose which folders are included when you run Scan Library or regenerate thumbnails.",
+        "chooseLabel": "Choose folders",
+        "loading": "Loading folders...",
+        "empty": "No folders are available under the gallery root.",
+        "helper": "Selecting a folder includes all of its subfolders. Leave everything unchecked to scan the entire library.",
+        "allFolders": "All folders",
+        "selectedCount": "{count} selected",
+        "hasChildren": "contains subfolders",
+        "save": "Save scan scope",
+        "saving": "Saving...",
+        "saved": "Scan scope saved. Run Scan Library to apply it.",
+        "loadError": "Unable to load available folders.",
+        "saveError": "Unable to save the scan scope."
       },
       "statusLabel": {
         "storageUnavailable": "Storage unavailable",
@@ -603,6 +668,14 @@
           "updated": "updated",
           "removed": "removed"
         }
+      },
+      "todayChanges": {
+        "title": "Today's Changes",
+        "description": "All completed full and incremental scans from today, excluding scans still in progress.",
+        "scans": "Scans",
+        "filesScanned": "Files scanned today",
+        "changes": "Change summary",
+        "latestFinished": "Latest finished"
       }
     }
   },
@@ -817,7 +890,18 @@
     "errorTitle": "Could not open folder share",
     "errorDescription": "Unable to load this folder share.",
     "backToFolder": "Back to shared folder",
-    "postErrorTitle": "Could not load shared post"
+    "postErrorTitle": "Could not load shared post",
+    "post": {
+      "action": "Share this post",
+      "copied": "Link copied",
+      "creating": "Creating link...",
+      "createError": "Unable to create a share link.",
+      "copyManually": "Copy this link manually:",
+      "notFoundTitle": "This share link is unavailable",
+      "notFoundDescription": "The link may be expired, revoked, or invalid.",
+      "loadingTitle": "Opening shared post",
+      "badge": "Shared post"
+    }
   },
   "reels": {
     "view": {
@@ -852,7 +936,8 @@
       "format": "Format",
       "loading": "Loading reel details...",
       "folderPath": "Folder Path",
-      "mimeType": "MIME Type"
+      "mimeType": "MIME Type",
+      "deleteVideo": "Move to Trash"
     }
   },
   "post": {
@@ -862,6 +947,19 @@
       "previousItem": "Previous carousel item",
       "nextItem": "Next carousel item",
       "open": "Open carousel with {count} items"
+    },
+    "immersive": {
+      "label": "Immersive video player",
+      "close": "Back",
+      "rotate": "Rotate to landscape",
+      "fullscreen": "Toggle fullscreen",
+      "open": "Open immersive player",
+      "exitHint": "Swipe down to close",
+      "imageLabel": "Immersive photo viewer",
+      "zoom": "Toggle zoom",
+      "details": "Details",
+      "hideDetails": "Hide details",
+      "deleteVideo": "Move to Trash"
     },
     "captionModal": {
       "title": "Edit caption",
@@ -1113,6 +1211,11 @@
     "description": "Posts moved here stay on disk until you permanently delete them.",
     "selectedOne": "{count} selected post",
     "selectedOther": "{count} selected posts",
+    "selectAll": "Select all",
+    "deselectAll": "Deselect all",
+    "processingProgress": "Processing {done} / {total}...",
+    "deletionProgress": "Deleting in the background {done} / {total}. You can keep browsing.",
+    "dismissDeletionResult": "Dismiss",
     "restoreButton": "Restore",
     "deleteButton": "Permanently Delete",
     "libraryUnavailableTitle": "Library storage unavailable",

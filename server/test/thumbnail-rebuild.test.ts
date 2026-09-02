@@ -239,6 +239,31 @@ describe.sequential('thumbnail-only rebuild', () => {
     expect(getScanRunCount()).toBe(0);
   });
 
+  it('compacts selected folders and rebuilds thumbnails only inside the selected scope', async () => {
+    const saved = scannerService.setSelectedScanFolders(['Trips/day-two', 'Trips', 'Archive']);
+    expect(saved.selectedFolders).toEqual(['Trips', 'Archive']);
+    expect(scannerService.getSelectedScanFolders()).toEqual(['Trips', 'Archive']);
+
+    await createCompletedScanRun({
+      scanned_files: 2,
+      new_files: 0,
+      updated_files: 0,
+      removed_files: 0
+    });
+    await createIndexedFolder('Trips/day-one', [{ filename: 'selected.jpg' }]);
+    await createIndexedFolder('Other', [{ filename: 'untouched.jpg' }]);
+
+    await scannerService.rebuildThumbnails();
+
+    expect(generateThumbnailDerivativeMock).toHaveBeenCalledTimes(1);
+    expect(generateThumbnailDerivativeMock).toHaveBeenCalledWith(
+      path.join(appConfig.galleryRoot, 'Trips/day-one/selected.jpg'),
+      'Trips/day-one/selected.jpg',
+      true,
+      expect.anything()
+    );
+  });
+
   async function createIndexedFolder(
     relativeFolderPath: string,
     entries: Array<{ filename: string; missingSource?: boolean; like?: boolean; storedGalleryRoot?: string }>

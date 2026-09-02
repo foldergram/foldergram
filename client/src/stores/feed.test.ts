@@ -57,7 +57,7 @@ describe('feed store', () => {
     await feedStore.loadInitial();
 
     expect(feedStore.mode).toBe('recent');
-    expect(fetchFeedSpy).toHaveBeenCalledWith(1, 18, 'recent', undefined);
+    expect(fetchFeedSpy).toHaveBeenCalledWith(1, 18, 'recent', undefined, undefined);
     expect(feedStore.loadedMode).toBe('recent');
     expect(feedStore.items.map((item) => item.id)).toEqual([7]);
   });
@@ -86,7 +86,7 @@ describe('feed store', () => {
     feedStore.initializeMode('recent');
     await feedStore.loadInitial();
 
-    expect(fetchFeedSpy).toHaveBeenCalledWith(1, 18, 'recent', undefined);
+    expect(fetchFeedSpy).toHaveBeenCalledWith(1, 18, 'recent', undefined, undefined);
     expect(feedStore.loadedMode).toBe('recent');
     expect(feedStore.items.map((item) => item.id)).toEqual([21]);
   });
@@ -127,7 +127,7 @@ describe('feed store', () => {
     const pendingRecentLoadPromise = feedStore.loadInitial();
 
     expect(fetchFeedSpy).toHaveBeenCalledTimes(1);
-    expect(fetchFeedSpy).toHaveBeenNthCalledWith(1, 1, 18, 'random', expect.any(Number));
+    expect(fetchFeedSpy).toHaveBeenNthCalledWith(1, 1, 18, 'random', expect.any(Number), undefined);
 
     randomRequest.resolve({
       mode: 'random',
@@ -142,7 +142,7 @@ describe('feed store', () => {
       expect(fetchFeedSpy).toHaveBeenCalledTimes(2);
     });
 
-    expect(fetchFeedSpy).toHaveBeenNthCalledWith(2, 1, 18, 'recent', undefined);
+    expect(fetchFeedSpy).toHaveBeenNthCalledWith(2, 1, 18, 'recent', undefined, undefined);
 
     recentRequest.resolve({
       mode: 'recent',
@@ -158,5 +158,100 @@ describe('feed store', () => {
     expect(feedStore.mode).toBe('recent');
     expect(feedStore.loadedMode).toBe('recent');
     expect(feedStore.items.map((item) => item.id)).toEqual([21]);
+  });
+
+  it('rotates the shuffle seed and excludes what was already seen on pull-to-refresh', async () => {
+    const fetchFeedSpy = vi
+      .spyOn(galleryApi, 'fetchFeed')
+      .mockResolvedValueOnce({
+        mode: 'random',
+        items: [createFeedItem(1), createFeedItem(2)],
+        page: 1,
+        limit: 18,
+        total: 2,
+        hasMore: false
+      })
+      .mockResolvedValueOnce({
+        mode: 'random',
+        items: [createFeedItem(3)],
+        page: 1,
+        limit: 18,
+        total: 1,
+        hasMore: false
+      });
+
+    const feedStore = useFeedStore();
+    feedStore.initializeMode('random');
+    await feedStore.loadInitial();
+
+    const firstSeed = fetchFeedSpy.mock.calls[0][3];
+    expect(feedStore.seenIds).toEqual([1, 2]);
+
+    await feedStore.refreshWithNewSeed();
+
+    const secondCall = fetchFeedSpy.mock.calls[1];
+    expect(secondCall[3]).not.toBe(firstSeed);
+    expect(secondCall[4]).toEqual([1, 2]);
+    expect(feedStore.items.map((item) => item.id)).toEqual([3]);
+    expect(feedStore.seenIds).toEqual([1, 2, 3]);
+    expect(feedStore.refreshing).toBe(false);
+  });
+
+  it('forgets what was seen and retries when excluding everything empties the feed', async () => {
+    const fetchFeedSpy = vi
+      .spyOn(galleryApi, 'fetchFeed')
+      .mockResolvedValueOnce({
+        mode: 'random',
+        items: [createFeedItem(11)],
+        page: 1,
+        limit: 18,
+        total: 1,
+        hasMore: false
+      })
+      .mockResolvedValueOnce({
+        mode: 'random',
+        items: [],
+        page: 1,
+        limit: 18,
+        total: 0,
+        hasMore: false
+      })
+      .mockResolvedValueOnce({
+        mode: 'random',
+        items: [createFeedItem(11)],
+        page: 1,
+        limit: 18,
+        total: 1,
+        hasMore: false
+      });
+
+    const feedStore = useFeedStore();
+    feedStore.initializeMode('random');
+    await feedStore.loadInitial();
+    await feedStore.refreshWithNewSeed();
+
+    expect(fetchFeedSpy).toHaveBeenCalledTimes(3);
+    expect(fetchFeedSpy.mock.calls[1][4]).toEqual([11]);
+    expect(fetchFeedSpy.mock.calls[2][4]).toEqual([]);
+    expect(feedStore.items.map((item) => item.id)).toEqual([11]);
+  });
+
+  it('clears the seen ids when the feed mode changes', async () => {
+    vi.spyOn(galleryApi, 'fetchFeed').mockResolvedValue({
+      mode: 'recent',
+      items: [createFeedItem(31)],
+      page: 1,
+      limit: 18,
+      total: 1,
+      hasMore: false
+    });
+
+    const feedStore = useFeedStore();
+    feedStore.initializeMode('random');
+    feedStore.seenIds = [4, 5, 6];
+
+    await feedStore.setMode('recent');
+
+    expect(feedStore.seenIds).toEqual([31]);
   });
 });

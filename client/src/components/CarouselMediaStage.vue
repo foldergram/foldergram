@@ -17,6 +17,7 @@
         v-if="item.mediaType === 'video' && index === activeIndex"
         class="h-full w-full object-contain bg-black"
         :src="item.previewUrl"
+        :media="toVideoPlaybackMedia(item)"
         :original-url="item.originalUrl"
         :playback-strategy="item.playbackStrategy"
         :width="item.width"
@@ -26,12 +27,11 @@
         :muted="appStore.videoMuted"
         :autoplay="autoplay"
         variant="viewer"
-        @autoplay-muted="appStore.setVideoMuted(true)"
         @toggle-mute="appStore.setVideoMuted(!appStore.videoMuted)"
       />
       <ResilientImage
         v-else-if="index === activeIndex"
-        class="h-full w-full object-contain"
+        class="h-full w-full object-contain cursor-zoom-in"
         :src="item.isAnimated ? item.previewUrl : (preferPreview ? item.previewUrl : item.thumbnailUrl)"
         :fallback-src="item.originalUrl"
         :alt="item.filename"
@@ -40,6 +40,7 @@
         :loading="loading"
         :retry-while="retryWhile"
         draggable="false"
+        @click="openImmersiveImage(item)"
       />
     </template>
 
@@ -92,6 +93,9 @@ import { useI18n } from 'vue-i18n';
 
 import type { PostMediaItem } from '../types/api';
 import { useAppStore } from '../stores/app';
+import { useImmersiveImageStore } from '../stores/immersive-image';
+import { getOriginalMediaUrl } from '../utils/original-media';
+import type { VideoPlaybackMedia } from '../utils/video-playback';
 import ResilientImage from './ResilientImage.vue';
 import VideoMediaPlayer from './VideoMediaPlayer.vue';
 
@@ -121,6 +125,7 @@ const emit = defineEmits<{
 
 const { t } = useI18n();
 const appStore = useAppStore();
+const immersiveImageStore = useImmersiveImageStore();
 const pointerId = ref<number | null>(null);
 const pointerStartX = ref(0);
 
@@ -131,6 +136,29 @@ const aspectRatio = computed(() =>
     ? `${Math.max(frameItem.value.width, 1)} / ${Math.max(frameItem.value.height, 1)}`
     : '1 / 1'
 );
+
+function toVideoPlaybackMedia(item: PostMediaItem): VideoPlaybackMedia {
+  return {
+    id: item.imageId,
+    filename: item.filename,
+    playbackStrategy: item.playbackStrategy,
+    streamUrl: item.streamUrl,
+    originalUrl: item.originalUrl,
+    previewUrl: item.previewUrl,
+    previewFileUrl: item.previewFileUrl
+  };
+}
+
+function openImmersiveImage(item: PostMediaItem) {
+  immersiveImageStore.open({
+    id: item.imageId,
+    filename: item.filename,
+    thumbnailUrl: item.thumbnailUrl,
+    fullUrl: item.originalUrl ?? getOriginalMediaUrl(item.imageId),
+    width: item.width,
+    height: item.height
+  });
+}
 
 function isGestureIgnored(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false;

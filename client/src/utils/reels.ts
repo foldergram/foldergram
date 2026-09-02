@@ -56,6 +56,27 @@ export function getActiveReelId(
   return activePanel?.id ?? null;
 }
 
+/**
+ * Cards whose stream should be warmed up while the current clip plays. Cold HLS
+ * segments cost 1.2-1.5s of ffmpeg start-up on the NAS, so warming only the very
+ * next card falls behind as soon as the user swipes several times in a row.
+ */
+export function getReelPrefetchIndexes(activeIndex: number, totalItems: number, lookahead = 4): Set<number> {
+  if (activeIndex < 0 || totalItems <= 0) {
+    return new Set<number>();
+  }
+
+  const indexes = new Set<number>();
+  for (let offset = 1; offset <= lookahead; offset += 1) {
+    const index = activeIndex + offset;
+    if (index < totalItems) {
+      indexes.add(index);
+    }
+  }
+
+  return indexes;
+}
+
 export function shouldPrefetchReels(activeIndex: number, totalItems: number, remainingThreshold = 3): boolean {
   if (activeIndex < 0 || totalItems <= 0) {
     return false;

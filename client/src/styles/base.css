@@ -82,6 +82,8 @@ body {
   margin: 0;
   color: var(--text);
   background: var(--bg);
+  /* The feed owns pull-to-refresh, so the browser must not also bounce the page. */
+  overscroll-behavior-y: contain;
   transition:
     background-color 0.2s ease,
     color 0.2s ease;
@@ -698,6 +700,10 @@ img[data-loaded="true"] {
   object-fit: contain;
 }
 
+.viewer__media-image--zoomable {
+  cursor: zoom-in;
+}
+
 .viewer__player {
   position: relative;
   display: block;
@@ -742,6 +748,28 @@ img[data-loaded="true"] {
   height: 1.45rem;
 }
 
+.viewer__hold-indicator {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.62);
+  color: #fff;
+  font-size: 0.82rem;
+  font-weight: 600;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+}
+
+.viewer__hold-icon {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
 /* ── TikTok-style bottom progress bar ─────────────────────── */
 
 .video-progress-footer {
@@ -762,7 +790,19 @@ img[data-loaded="true"] {
 }
 
 .video-progress-footer--viewer {
-  padding: 0.48rem 0.78rem 0;
+  padding: 0.48rem 0.78rem calc(0.55rem + env(safe-area-inset-bottom, 0px));
+  /* Keep the timeline above the pause/time row explicitly. column-reverse made
+     this depend on flex's reversed main-start and caused the bar to sit at the
+     bottom edge on some mobile browsers. */
+  flex-direction: column;
+}
+
+/* The immersive layer moves the shared feed player instead of creating a second
+   decoder. Give that moved player the viewer layout too; its component variant
+   remains `feed` because the same DOM node returns to the card on close. */
+.immersive-video .video-progress-footer--feed {
+  padding: 0.48rem 0.78rem calc(0.55rem + env(safe-area-inset-bottom, 0px));
+  flex-direction: column;
 }
 
 /* ── meta row (controls + time label) ──────────────────────── */
@@ -776,6 +816,18 @@ img[data-loaded="true"] {
   pointer-events: none;
   /* small bottom gap between controls and the progress bar */
   margin-bottom: 0.28rem;
+}
+
+.video-progress-footer--viewer .video-progress-footer__meta {
+  order: 2;
+  margin-top: 0.28rem;
+  margin-bottom: 0;
+}
+
+.immersive-video .video-progress-footer--feed .video-progress-footer__meta {
+  order: 2;
+  margin-top: 0.28rem;
+  margin-bottom: 0;
 }
 
 .video-progress-footer__slot {
@@ -821,6 +873,12 @@ img[data-loaded="true"] {
 }
 
 .video-progress-footer--viewer .video-progress-footer__timeline-shell {
+  order: 1;
+  margin-inline: -0.78rem;
+}
+
+.immersive-video .video-progress-footer--feed .video-progress-footer__timeline-shell {
+  order: 1;
   margin-inline: -0.78rem;
 }
 
@@ -843,11 +901,11 @@ img[data-loaded="true"] {
 .video-progress-footer__slider .vds-slider-track {
   position: absolute;
   inset-inline: 0;
-  bottom: 0;
-  top: auto;
+  top: 50%;
+  bottom: auto;
   height: 3px;
   border-radius: 0;
-  transform: none;
+  transform: translateY(-50%);
   transition: height 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
 }
 
@@ -893,8 +951,8 @@ img[data-loaded="true"] {
 
 .video-progress-footer__thumb {
   position: absolute;
-  bottom: 0;
-  top: auto;
+  top: 50%;
+  bottom: auto;
   left: var(--slider-fill, 0%);
   z-index: 3;
   width: 0.78rem;
@@ -904,7 +962,7 @@ img[data-loaded="true"] {
   box-shadow: 0 10px 22px rgba(0, 0, 0, 0.32);
   opacity: 0;
   pointer-events: none;
-  transform: translate(-50%, 50%);
+  transform: translate(-50%, -50%);
   transition:
     opacity 0.18s ease,
     transform 0.18s ease;
@@ -917,7 +975,7 @@ img[data-loaded="true"] {
 .video-progress-footer__slider[data-focus] .video-progress-footer__thumb,
 .video-progress-footer__slider:focus-visible .video-progress-footer__thumb {
   opacity: 1;
-  transform: translate(-50%, 40%);
+  transform: translate(-50%, -50%);
 }
 
 .video-progress-footer__slider[data-focus] .video-progress-footer__track,
@@ -1038,6 +1096,19 @@ img[data-loaded="true"] {
   height: 100%;
 }
 
+/* Vidstack's provider and poster are siblings. Keeping both in the same absolute
+   stage prevents the empty provider from pushing the poster below the card while a
+   route switch is waiting for the native video element to reattach. */
+.feed-card__player media-provider,
+.feed-card__player media-poster,
+.viewer__player media-provider,
+.viewer__player media-poster,
+.video-media-player__player media-provider,
+.video-media-player__player media-poster {
+  position: absolute;
+  inset: 0;
+}
+
 .feed-card__player video,
 .feed-card__player img {
   object-fit: cover;
@@ -1052,8 +1123,61 @@ img[data-loaded="true"] {
   object-fit: contain;
 }
 
+/* The home player keeps its feed class while Vue teleports it into the immersive
+   layer. Override the feed's cover crop there so a landscape source remains whole
+   in a portrait fullscreen viewport. Vidstack creates the native video at runtime,
+   so this must be a global selector rather than a component-scoped one. */
+.immersive-video #immersive-video-slot,
+.immersive-video #immersive-video-slot .feed-card__player,
+.immersive-video #immersive-video-slot media-provider,
+.immersive-video #immersive-video-slot .feed-card__player video,
+.immersive-video #immersive-video-slot .feed-card__player img,
+.immersive-video .video-media-player__player video,
+.immersive-video .video-media-player__player img {
+  object-fit: contain !important;
+}
+
+.immersive-video #immersive-video-slot,
+.immersive-video #immersive-video-slot .feed-card__player {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  background: #000;
+}
+
 .feed-card__video-shell--interactive {
   cursor: pointer;
+}
+
+/* iOS pops a text-selection loupe on a long press unless the callout is refused.
+   The properties do not inherit into every descendant reliably, so the shell and
+   everything it renders (including vidstack's shadow video) all opt out. Native
+   apps have no equivalent because the surface is not selectable text to begin
+   with; this is the closest a web app gets. */
+.feed-card__video-shell,
+.viewer__media-shell--video-interactive,
+.feed-card__video-shell *,
+.viewer__media-shell--video-interactive * {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Held over the player until the clip's own first frame is on screen: vidstack drops
+   its poster the moment the provider attaches, so without this the card is black
+   while the NAS is still producing the first segment. */
+.feed-card__first-frame {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #000;
+  pointer-events: none;
 }
 
 .feed-card__pause-indicator {
@@ -1175,7 +1299,7 @@ img[data-loaded="true"] {
   }
 
   .video-progress-footer--viewer {
-    padding: 0.48rem 0.62rem 0;
+    padding: 0.48rem 0.62rem calc(0.6rem + env(safe-area-inset-bottom, 0px));
   }
 
   .video-progress-footer__timeline-shell {

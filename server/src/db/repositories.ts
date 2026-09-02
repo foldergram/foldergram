@@ -1,5 +1,5 @@
 import { databaseManager } from './database.js';
-import { SHARE_SESSION_SECRET_SETTING_KEY } from '../constants/app-setting-keys.js';
+import { SCAN_FOLDERS_SETTING_KEY, SHARE_SESSION_SECRET_SETTING_KEY } from '../constants/app-setting-keys.js';
 import { normalizePath, safeJoin } from '../utils/path-utils.js';
 import { resolveUniqueSlug, slugifyFolderName } from '../utils/slug.js';
 import type {
@@ -15,6 +15,7 @@ import type {
   FolderScanStateRecord,
   FolderShareLinkRecord,
   FolderSharePasswordRecord,
+  PostShareLinkRecord,
   ImageDetail,
   ImageRecord,
   LikeRecord,
@@ -31,6 +32,7 @@ import type {
   FolderRecord,
   FolderSummaryRecord,
   ScanRunRecord,
+  ScanChangesSummary,
   TrashImage,
   TrashPost,
   TakenAtSource
@@ -55,10 +57,44 @@ const COVER_FILENAME_SQL = COVER_FILENAMES.map((name) => `'${name}'`).join(', ')
 const NORMAL_FOLDER_ROLE_SQL = "folders.role = 'normal'";
 const NORMAL_FOLDER_ID_SUBQUERY_SQL = "SELECT id FROM folders WHERE role = 'normal'";
 
+// Scan selection is a visibility scope, not a deletion operation. Keeping this in
+// SQL means old indexed rows stay reusable when a folder is selected again, while
+// every feed/search/collection count hides rows outside the current selection.
+const SELECTED_SCAN_IMAGE_SCOPE_SQL =
+  `(NOT EXISTS (SELECT 1 FROM app_settings WHERE key = '${SCAN_FOLDERS_SETTING_KEY}') OR EXISTS (` +
+  `SELECT 1 FROM app_settings scan_scope, json_each(scan_scope.value) selected ` +
+  `WHERE scan_scope.key = '${SCAN_FOLDERS_SETTING_KEY}' ` +
+  `AND (images.relative_path = selected.value OR images.relative_path LIKE selected.value || '/%')))`;
+const SELECTED_SCAN_FOLDER_SCOPE_SQL =
+  `(NOT EXISTS (SELECT 1 FROM app_settings WHERE key = '${SCAN_FOLDERS_SETTING_KEY}') OR EXISTS (` +
+  `SELECT 1 FROM app_settings scan_scope, json_each(scan_scope.value) selected ` +
+  `WHERE scan_scope.key = '${SCAN_FOLDERS_SETTING_KEY}' ` +
+  `AND (folders.folder_path = selected.value OR folders.folder_path LIKE selected.value || '/%')))`;
+/**
+ * Folder ids inside the current scan selection.
+ *
+ * Resolving the selection to ids once lets the post scope below test an indexed
+ * `images.folder_id` instead of running a `LIKE` against every candidate's path for
+ * every selected prefix. On the live library that is what took the feed query from
+ * ~370 ms down to ~140 ms, which is most of the wait before the first card renders.
+ */
+const SELECTED_SCAN_FOLDER_ID_SUBQUERY_SQL =
+  `SELECT scope_folders.id FROM folders scope_folders ` +
+  `INNER JOIN app_settings scan_scope ON scan_scope.key = '${SCAN_FOLDERS_SETTING_KEY}' ` +
+  `CROSS JOIN json_each(scan_scope.value) selected ` +
+  `WHERE scope_folders.folder_path = selected.value OR scope_folders.folder_path LIKE selected.value || '/%'`;
+
+const SELECTED_SCAN_POST_SCOPE_SQL =
+  `(NOT EXISTS (SELECT 1 FROM app_settings WHERE key = '${SCAN_FOLDERS_SETTING_KEY}') OR EXISTS (` +
+  `SELECT 1 FROM post_items scope_items ` +
+  `INNER JOIN images scope_images ON scope_images.id = scope_items.image_id ` +
+  `WHERE scope_items.post_id = posts.id ` +
+  `AND scope_images.folder_id IN (${SELECTED_SCAN_FOLDER_ID_SUBQUERY_SQL})))`;
+
 const VISIBLE_IMAGE_WHERE_SQL =
-  `images.is_deleted = 0 AND images.is_trashed = 0 AND LOWER(images.filename) NOT IN (${COVER_FILENAME_SQL}) AND ${NORMAL_FOLDER_ROLE_SQL}`;
+  `images.is_deleted = 0 AND images.is_trashed = 0 AND LOWER(images.filename) NOT IN (${COVER_FILENAME_SQL}) AND ${NORMAL_FOLDER_ROLE_SQL} AND ${SELECTED_SCAN_IMAGE_SCOPE_SQL}`;
 const VISIBLE_IMAGE_WHERE_UNSCOPED_SQL =
-  `is_deleted = 0 AND is_trashed = 0 AND LOWER(filename) NOT IN (${COVER_FILENAME_SQL}) AND folder_id IN (${NORMAL_FOLDER_ID_SUBQUERY_SQL})`;
+  `is_deleted = 0 AND is_trashed = 0 AND LOWER(filename) NOT IN (${COVER_FILENAME_SQL}) AND folder_id IN (${NORMAL_FOLDER_ID_SUBQUERY_SQL}) AND ${SELECTED_SCAN_IMAGE_SCOPE_SQL}`;
 
 const NOT_EXPLICIT_FOLDER_COVER_SQL =
   `NOT EXISTS (` +
@@ -71,23 +107,54 @@ const NOT_EXPLICIT_FOLDER_COVER_SQL =
   `)`;
 
 const VISIBLE_POST_WHERE_SQL =
-  `posts.is_deleted = 0 AND posts.is_trashed = 0 AND ${NORMAL_FOLDER_ROLE_SQL} AND ${NOT_EXPLICIT_FOLDER_COVER_SQL}`;
+  `posts.is_deleted = 0 AND posts.is_trashed = 0 AND ${NORMAL_FOLDER_ROLE_SQL} AND ${NOT_EXPLICIT_FOLDER_COVER_SQL} AND ${SELECTED_SCAN_POST_SCOPE_SQL}`;
 const VISIBLE_POST_WHERE_UNSCOPED_SQL =
-  `is_deleted = 0 AND is_trashed = 0 AND folder_id IN (${NORMAL_FOLDER_ID_SUBQUERY_SQL}) AND ${NOT_EXPLICIT_FOLDER_COVER_SQL}`;
+  `is_deleted = 0 AND is_trashed = 0 AND folder_id IN (${NORMAL_FOLDER_ID_SUBQUERY_SQL}) AND ${NOT_EXPLICIT_FOLDER_COVER_SQL} AND ${SELECTED_SCAN_POST_SCOPE_SQL}`;
+
+/**
+ * A post whose cover image has no thumbnail yet cannot be drawn: the feed would show a
+ * blank card and, for a video, a player pointed at a derivative that does not exist.
+ * Scanning fills thumbnails in gradually, so the feed filters on this instead of going
+ * empty-looking while a scan runs.
+ */
+const RENDERABLE_COVER_WHERE_SQL = "images.thumbnail_path IS NOT NULL AND images.thumbnail_path != ''";
+
+/**
+ * Pull-to-refresh asks for content the viewer has not seen yet. The caller caps the id
+ * list, so this only ever builds a bounded `NOT IN (...)`.
+ */
+function buildExcludedPostIdsClause(excludeIds: number[] | undefined): { sql: string; params: number[] } {
+  const ids = (excludeIds ?? []).filter((id) => Number.isInteger(id) && id > 0);
+  if (ids.length === 0) {
+    return { sql: '', params: [] };
+  }
+
+  return {
+    sql: ` AND posts.id NOT IN (${ids.map(() => '?').join(',')})`,
+    params: ids
+  };
+}
 
 const STORY_IMAGE_WHERE_SQL = 'images.is_deleted = 0 AND images.is_trashed = 0';
 const STORY_IMAGE_WHERE_UNSCOPED_SQL = 'is_deleted = 0 AND is_trashed = 0';
 
+// Nested EXISTS instead of a JOIN: it forces SQLite to drive from
+// idx_folders_story_owner_role. With a JOIN and no ANALYZE stats the planner
+// picks images as the outer loop and rescans the whole table per folder,
+// which measured 15.4s for 1769 folders versus 10ms here.
 const HAS_AVATAR_STORY_SQL = `
   EXISTS (
     SELECT 1
     FROM folders AS story_folders
-    INNER JOIN images AS story_images ON story_images.folder_id = story_folders.id
     WHERE story_folders.story_owner_folder_id = folders.id
       AND story_folders.role IN ('story_root', 'story_capsule')
-      AND story_images.is_deleted = 0
-      AND story_images.is_trashed = 0
-    LIMIT 1
+      AND EXISTS (
+        SELECT 1
+        FROM images AS story_images
+        WHERE story_images.folder_id = story_folders.id
+          AND story_images.is_deleted = 0
+          AND story_images.is_trashed = 0
+      )
   )
 `;
 
@@ -474,6 +541,13 @@ export interface CreateFolderShareLinkInput {
   expiresAt: string | null;
 }
 
+export interface CreatePostShareLinkInput {
+  postId: number;
+  tokenHash: string;
+  tokenPrefix: string;
+  expiresAt: string | null;
+}
+
 export interface UpsertFolderSharePasswordInput {
   folderId: number;
   passwordHash: string;
@@ -603,13 +677,21 @@ export const folderRepository = {
     return database.prepare("SELECT * FROM folders WHERE slug = ? AND role = 'normal'").get(slug) as FolderRecord | undefined;
   },
 
+  // One round trip instead of one lookup per folder while naming parents.
+  listPathNames(): Array<{ folder_path: string; name: string }> {
+    return database.prepare('SELECT folder_path, name FROM folders').all() as unknown as Array<{
+      folder_path: string;
+      name: string;
+    }>;
+  },
+
   getAllSummaries(): FolderSummaryRecord[] {
     return database
       .prepare(
         `
         SELECT * FROM (
           ${FOLDER_SUMMARY_SELECT_SQL}
-          WHERE folders.role = 'normal'
+          WHERE folders.role = 'normal' AND ${SELECTED_SCAN_FOLDER_SCOPE_SQL}
         ) AS summaries
         WHERE post_count > 0 OR summary_avatar_image_id IS NOT NULL
         ORDER BY latest_image_mtime_ms DESC, name COLLATE NOCASE ASC, folder_path COLLATE NOCASE ASC
@@ -637,7 +719,7 @@ export const folderRepository = {
       .prepare(
         `
         ${FOLDER_SUMMARY_SELECT_SQL}
-        WHERE folders.slug = ? AND folders.role = 'normal'
+        WHERE folders.slug = ? AND folders.role = 'normal' AND ${SELECTED_SCAN_FOLDER_SCOPE_SQL}
         `
       )
       .get(slug) as FolderSummaryRecord | undefined;
@@ -714,6 +796,7 @@ export const folderRepository = {
             SELECT COUNT(*) AS count
             FROM folders
             WHERE folders.role = 'normal'
+              AND ${SELECTED_SCAN_FOLDER_SCOPE_SQL}
               AND (
                 EXISTS (
                   SELECT 1
@@ -1422,7 +1505,7 @@ export const postRepository = {
     const posts = database.prepare(
       `
       ${BASE_POST_SELECT_SQL}
-      WHERE ${VISIBLE_POST_WHERE_SQL}
+      WHERE ${VISIBLE_POST_WHERE_SQL} AND ${RENDERABLE_COVER_WHERE_SQL}
       ORDER BY posts.sort_timestamp DESC, posts.id DESC
       LIMIT ? OFFSET ?
       `
@@ -1437,14 +1520,36 @@ export const postRepository = {
     );
   },
 
+  /**
+   * Feed pagination total. Kept separate from `countFeed` so the library statistics keep
+   * reporting everything that is indexed while the feed only promises what it can draw.
+   */
+  countRenderableFeed(): number {
+    return Number(
+      (
+        database
+          .prepare(
+            `SELECT COUNT(*) AS count
+             FROM posts
+             INNER JOIN folders ON folders.id = posts.folder_id
+             JOIN post_items ON post_items.post_id = posts.id AND post_items.position = 1
+             JOIN images ON images.id = post_items.image_id
+             WHERE ${VISIBLE_POST_WHERE_SQL} AND ${RENDERABLE_COVER_WHERE_SQL}`
+          )
+          .get() as { count: number }
+      ).count
+    );
+  },
+
   countVisibleMediaAssets(): number {
     return Number((database.prepare(
       `SELECT COUNT(*) AS count
        FROM post_items
        INNER JOIN posts ON posts.id = post_items.post_id
-       WHERE posts.is_deleted = 0
-         AND posts.is_trashed = 0
-         AND posts.folder_id IN (${NORMAL_FOLDER_ID_SUBQUERY_SQL})`
+       INNER JOIN folders ON folders.id = posts.folder_id
+       INNER JOIN images ON images.id = post_items.image_id
+       WHERE ${VISIBLE_POST_WHERE_SQL}
+         AND ${SELECTED_SCAN_IMAGE_SCOPE_SQL}`
     ).get() as { count: number }).count);
   },
 
@@ -1458,11 +1563,10 @@ export const postRepository = {
     return Number((database.prepare(
       `SELECT COUNT(*) AS count
        FROM posts
+       INNER JOIN folders ON folders.id = posts.folder_id
        INNER JOIN post_items ON post_items.post_id = posts.id AND post_items.position = 1
        INNER JOIN images ON images.id = post_items.image_id
-       WHERE posts.is_deleted = 0
-         AND posts.is_trashed = 0
-         AND posts.folder_id IN (${NORMAL_FOLDER_ID_SUBQUERY_SQL})
+       WHERE ${VISIBLE_POST_WHERE_SQL}
          AND posts.post_type = 'single'
          AND images.media_type = 'video'`
     ).get() as { count: number }).count);
@@ -1510,15 +1614,16 @@ export const postRepository = {
     );
   },
 
-  listRecentCandidates(offset: number, limit: number): FeedPost[] {
+  listRecentCandidates(offset: number, limit: number, excludeIds?: number[]): FeedPost[] {
+    const excluded = buildExcludedPostIdsClause(excludeIds);
     const posts = database.prepare(
       `
       ${BASE_POST_SELECT_SQL}
-      WHERE ${VISIBLE_POST_WHERE_SQL}
+      WHERE ${VISIBLE_POST_WHERE_SQL} AND ${RENDERABLE_COVER_WHERE_SQL}${excluded.sql}
       ORDER BY ${EFFECTIVE_FEED_TIME_SQL} DESC, posts.sort_timestamp DESC, posts.id DESC
       LIMIT ? OFFSET ?
       `
-    ).all(limit, offset) as unknown as FeedPost[];
+    ).all(...excluded.params, limit, offset) as unknown as FeedPost[];
 
     return this.hydratePostItems(posts);
   },
@@ -1527,7 +1632,14 @@ export const postRepository = {
     return Number(
       (
         database
-          .prepare(`SELECT COUNT(*) AS count FROM posts WHERE ${VISIBLE_POST_WHERE_UNSCOPED_SQL} AND ${EFFECTIVE_FEED_TIME_SQL} <= ?`)
+          .prepare(
+            `SELECT COUNT(*) AS count
+             FROM posts
+             INNER JOIN folders ON folders.id = posts.folder_id
+             JOIN post_items ON post_items.post_id = posts.id AND post_items.position = 1
+             JOIN images ON images.id = post_items.image_id
+             WHERE ${VISIBLE_POST_WHERE_SQL} AND ${RENDERABLE_COVER_WHERE_SQL} AND ${EFFECTIVE_FEED_TIME_SQL} <= ?`
+          )
           .get(cutoffTimestamp) as { count: number }
       ).count
     );
@@ -1538,7 +1650,7 @@ export const postRepository = {
       `
       ${BASE_POST_SELECT_SQL}
       LEFT JOIN likes ON likes.post_id = posts.id
-      WHERE ${VISIBLE_POST_WHERE_SQL} AND ${EFFECTIVE_FEED_TIME_SQL} <= ?
+      WHERE ${VISIBLE_POST_WHERE_SQL} AND ${RENDERABLE_COVER_WHERE_SQL} AND ${EFFECTIVE_FEED_TIME_SQL} <= ?
       ORDER BY
         CASE WHEN likes.post_id IS NULL THEN 0 ELSE 1 END DESC,
         ${EFFECTIVE_FEED_TIME_SQL} DESC,
@@ -1551,16 +1663,17 @@ export const postRepository = {
     return this.hydratePostItems(posts);
   },
 
-  listRandom(page: number, limit: number, seed: number): FeedPost[] {
+  listRandom(page: number, limit: number, seed: number, excludeIds?: number[]): FeedPost[] {
     const offset = (page - 1) * limit;
+    const excluded = buildExcludedPostIdsClause(excludeIds);
     const posts = database.prepare(
       `
       ${BASE_POST_SELECT_SQL}
-      WHERE ${VISIBLE_POST_WHERE_SQL}
+      WHERE ${VISIBLE_POST_WHERE_SQL} AND ${RENDERABLE_COVER_WHERE_SQL}${excluded.sql}
       ORDER BY ABS(((posts.id * 1103515245) + (? * 1013904223)) % 2147483647), posts.id DESC
       LIMIT ? OFFSET ?
       `
-    ).all(seed, limit, offset) as unknown as FeedPost[];
+    ).all(...excluded.params, seed, limit, offset) as unknown as FeedPost[];
 
     return this.hydratePostItems(posts);
   },
@@ -1602,6 +1715,7 @@ export const postRepository = {
       LEFT JOIN places ON places.id = posts.place_id
       LEFT JOIN likes ON likes.post_id = posts.id
       WHERE ${VISIBLE_POST_WHERE_SQL}
+        AND ${RENDERABLE_COVER_WHERE_SQL}
         AND posts.post_type = 'single'
         AND images.media_type = 'video'
         AND LOWER(images.filename) NOT IN (${COVER_FILENAME_SQL})
@@ -1866,6 +1980,7 @@ export const postRepository = {
       JOIN images ON images.id = post_items.image_id
       LEFT JOIN places ON places.id = posts.place_id
       WHERE posts.id = ? AND posts.is_deleted = 0 AND posts.is_trashed = 0 AND ${NORMAL_FOLDER_ROLE_SQL}
+        AND ${SELECTED_SCAN_POST_SCOPE_SQL}
       `
     ).get(resolvedId) as (Omit<PostDetail, 'nextPostId' | 'previousPostId' | 'nextImageId' | 'previousImageId' | 'exif' | 'mediaItems' | 'itemCount'> & { originalUrl: string; exifJson: string | null }) | undefined;
 
@@ -2282,6 +2397,18 @@ export const imageRepository = {
     return removedCount;
   },
 
+  /**
+   * Lists every indexed file the API would still serve, so a caller can verify
+   * the originals are actually on disk. Discovery only walks folders it finds,
+   * so a source directory that disappeared as a whole leaves rows behind that no
+   * per-folder cleanup ever touches.
+   */
+  listAliveRelativePaths(): Array<{ id: number; relative_path: string }> {
+    return database
+      .prepare('SELECT id, relative_path FROM images WHERE is_deleted = 0 AND is_trashed = 0')
+      .all() as Array<{ id: number; relative_path: string }>;
+  },
+
   markAllDeletedByFolder(folderId: number, postType?: PostType): number {
     const deletedAt = nowIso();
     const result = database
@@ -2482,8 +2609,12 @@ export const imageRepository = {
     return postRepository.countVisibleSearch(query);
   },
 
-  listRecentCandidates(offset: number, limit: number): FeedImage[] {
-    return postRepository.listRecentCandidates(offset, limit);
+  listRecentCandidates(offset: number, limit: number, excludeIds?: number[]): FeedImage[] {
+    return postRepository.listRecentCandidates(offset, limit, excludeIds);
+  },
+
+  countRenderableFeed(): number {
+    return postRepository.countRenderableFeed();
   },
 
   countRediscover(cutoffTimestamp: number): number {
@@ -2494,8 +2625,8 @@ export const imageRepository = {
     return postRepository.listRediscoverCandidates(offset, limit, cutoffTimestamp);
   },
 
-  listRandom(page: number, limit: number, seed: number): FeedImage[] {
-    return postRepository.listRandom(page, limit, seed);
+  listRandom(page: number, limit: number, seed: number, excludeIds?: number[]): FeedImage[] {
+    return postRepository.listRandom(page, limit, seed, excludeIds);
   },
 
   listVisibleVideoCandidates(): ReelCandidate[] {
@@ -3603,6 +3734,64 @@ export const folderShareLinkRepository = {
 
 export const folderShareRepository = folderShareLinkRepository;
 
+/**
+ * Post-level share links. Separate from folder shares on purpose: a folder token
+ * unlocks a whole album, while these only ever unlock the single post they were
+ * minted for, which is what the "share this clip" button needs.
+ */
+export const postShareLinkRepository = {
+  create(input: CreatePostShareLinkInput): PostShareLinkRecord {
+    database
+      .prepare(
+        `
+        INSERT INTO post_share_links (
+          post_id, token_hash, token_prefix, expires_at, revoked_at, created_at
+        )
+        VALUES (?, ?, ?, ?, NULL, ?)
+        `
+      )
+      .run(input.postId, input.tokenHash, input.tokenPrefix, input.expiresAt, nowIso());
+
+    return database
+      .prepare('SELECT * FROM post_share_links WHERE token_hash = ?')
+      .get(input.tokenHash) as unknown as PostShareLinkRecord;
+  },
+
+  getById(id: number): PostShareLinkRecord | undefined {
+    return database.prepare('SELECT * FROM post_share_links WHERE id = ?').get(id) as PostShareLinkRecord | undefined;
+  },
+
+  getByTokenHash(tokenHash: string): PostShareLinkRecord | undefined {
+    return database
+      .prepare('SELECT * FROM post_share_links WHERE token_hash = ?')
+      .get(tokenHash) as PostShareLinkRecord | undefined;
+  },
+
+  listByPost(postId: number): PostShareLinkRecord[] {
+    return database
+      .prepare('SELECT * FROM post_share_links WHERE post_id = ? ORDER BY created_at DESC, id DESC')
+      .all(postId) as unknown as PostShareLinkRecord[];
+  },
+
+  revoke(id: number, postId: number): PostShareLinkRecord | undefined {
+    database
+      .prepare(
+        `
+        UPDATE post_share_links
+        SET revoked_at = ?
+        WHERE id = ? AND post_id = ? AND revoked_at IS NULL
+        `
+      )
+      .run(nowIso(), id, postId);
+
+    return this.getById(id);
+  },
+
+  touchLastUsed(id: number): void {
+    database.prepare('UPDATE post_share_links SET last_used_at = ? WHERE id = ?').run(nowIso(), id);
+  }
+};
+
 export const folderSharePasswordRepository = {
   get(folderId: number): FolderSharePasswordRecord | undefined {
     return database
@@ -3708,6 +3897,39 @@ export const appSettingsRepository = {
   }
 };
 
+/**
+ * A cheap fingerprint of everything that can change what the library returns.
+ *
+ * Reels has to rank the whole video catalogue before it can answer a page, which costs
+ * hundreds of milliseconds on this library. Caching that work needs a key that is far
+ * cheaper than the work itself and still changes on every scan, edit, deletion or scan
+ * selection change, which is exactly what these five values cover.
+ */
+export const libraryStateRepository = {
+  getSignature(): string {
+    const row = database
+      .prepare(
+        `
+        SELECT
+          (SELECT COUNT(*) FROM posts) AS postCount,
+          (SELECT COALESCE(MAX(id), 0) FROM posts) AS maxPostId,
+          (SELECT COALESCE(MAX(updated_at), '') FROM posts) AS maxPostUpdatedAt,
+          (SELECT COALESCE(MAX(id), 0) FROM scan_runs) AS maxScanRunId,
+          (SELECT COALESCE(value, '') FROM app_settings WHERE key = '${SCAN_FOLDERS_SETTING_KEY}') AS scanScope
+        `
+      )
+      .get() as {
+        postCount: number;
+        maxPostId: number;
+        maxPostUpdatedAt: string;
+        maxScanRunId: number;
+        scanScope: string;
+      };
+
+    return [row.postCount, row.maxPostId, row.maxPostUpdatedAt, row.maxScanRunId, row.scanScope].join('|');
+  }
+};
+
 export const maintenanceRepository = {
   resetLibraryIndex(): void {
     database.exec(`
@@ -3778,6 +4000,23 @@ export const folderScanStateRepository = {
     const statement = database.prepare(`DELETE FROM folder_scan_state WHERE folder_path NOT IN (${placeholders})`);
     const result = statement.run(...normalizedFolderPaths);
     return Number(result.changes ?? 0);
+  },
+
+  deleteMissingWithin(activeFolderPaths: string[], scopeRoots: string[]): number {
+    if (scopeRoots.length === 0) return 0;
+
+    const active = activeFolderPaths.map((folderPath) => normalizePath(folderPath));
+    const activeClause = active.length > 0 ? `AND folder_path NOT IN (${active.map(() => '?').join(', ')})` : '';
+    const scopeClause = scopeRoots.map(() => '(folder_path = ? OR folder_path LIKE ?)').join(' OR ');
+    const params = [
+      ...scopeRoots.flatMap((root) => {
+        const normalized = normalizePath(root);
+        return [normalized, `${normalized}/%`];
+      }),
+      ...active
+    ];
+    const result = database.prepare(`DELETE FROM folder_scan_state WHERE (${scopeClause}) ${activeClause}`).run(...params);
+    return Number(result.changes ?? 0);
   }
 };
 
@@ -3820,5 +4059,34 @@ export const scanRunRepository = {
     return database
       .prepare('SELECT * FROM scan_runs WHERE finished_at IS NOT NULL ORDER BY id DESC LIMIT 1')
       .get() as ScanRunRecord | undefined;
+  },
+
+  completedSummaryBetween(startIso: string, endIso: string): ScanChangesSummary {
+    const row = database
+      .prepare(
+        `
+        SELECT
+          COALESCE(SUM(scanned_files), 0) AS scanned_files,
+          COALESCE(SUM(new_files), 0) AS new_files,
+          COALESCE(SUM(updated_files), 0) AS updated_files,
+          COALESCE(SUM(removed_files), 0) AS removed_files,
+          COUNT(*) AS scan_count,
+          MAX(finished_at) AS latest_finished_at
+        FROM scan_runs
+        WHERE finished_at IS NOT NULL
+          AND finished_at >= ?
+          AND finished_at < ?
+        `
+      )
+      .get(startIso, endIso) as Partial<ScanChangesSummary>;
+
+    return {
+      scanned_files: Number(row.scanned_files ?? 0),
+      new_files: Number(row.new_files ?? 0),
+      updated_files: Number(row.updated_files ?? 0),
+      removed_files: Number(row.removed_files ?? 0),
+      scan_count: Number(row.scan_count ?? 0),
+      latest_finished_at: row.latest_finished_at ?? null
+    };
   }
 };

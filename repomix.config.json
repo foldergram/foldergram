@@ -1,0 +1,47 @@
+{
+  "output": {
+    "filePath": ".tmp/AI_REPOMIX_CONTEXT.md",
+    "style": "markdown",
+    "removeComments": false,
+    "showLineNumbers": false,
+    "topFilesLength": 20
+  },
+  "include": [
+    "AGENTS.md",
+    "README.md",
+    "ai/AI_CONTEXT.md",
+    "package.json",
+    "pnpm-workspace.yaml",
+    "server/package.json",
+    "client/package.json",
+    "server/src/**/*.ts",
+    "client/src/**/*.ts",
+    "client/src/**/*.vue",
+    "server/db/migrations/*.sql"
+  ],
+  "ignore": {
+    "useGitignore": true,
+    "customPatterns": [
+      "node_modules/**",
+      "**/dist/**",
+      "**/build/**",
+      "coverage/**",
+      "data/**",
+      "docs/.vitepress/dist/**",
+      "docs/.vitepress/cache/**",
+      ".tmp/**",
+      ".ai/**",
+      "**/._*",
+      "pnpm-lock.yaml",
+      "**/*.png",
+      "**/*.jpg",
+      "**/*.mp4",
+      "**/*.sqlite*",
+      "ai/AI_REPOMIX_CONTEXT.md",
+      "ai/AI_FILE_INDEX.md"
+    ]
+  },
+  "security": {
+    "enableSecurityCheck": true
+  }
+}

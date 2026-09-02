@@ -1,47 +1,76 @@
 <template>
-  <article class="reel-player-card">
-    <div class="reel-player-card__stage">
+  <article class="reel-player-card" :class="{ 'reel-player-card--rotated': landscape.isRotated.value }">
+    <div
+      ref="stageElement"
+      class="reel-player-card__stage"
+      @pointerdown.capture="handleReelZoomPointerDownCapture"
+      @pointermove.capture="handleReelZoomPointerMoveCapture"
+      @pointerup.capture="handleReelZoomPointerUpCapture"
+      @pointercancel.capture="handleReelZoomPointerCancelCapture"
+    >
+      <div class="reel-player-card__rotator">
       <div
         class="reel-player-card__surface"
-        :aria-label="active ? 'Toggle playback' : undefined"
+        :aria-label="active ? t('post.viewer.togglePlayback') : undefined"
         :role="active ? 'button' : undefined"
         :tabindex="active ? 0 : -1"
         @click="handleSurfaceClick"
+        @contextmenu.prevent
         @keydown="handleSurfaceKeydown"
+        @pointercancel="holdSpeed.onPointercancel"
+        @pointerdown="holdSpeed.onPointerdown"
+        @pointermove="holdSpeed.onPointermove"
+        @pointerup="holdSpeed.onPointerup"
       >
-        <media-player
-          ref="playerElement"
-          class="reel-player-card__player"
-          :src.prop="videoSource"
-          :title.prop="item.filename"
-          :fullscreenOrientation.prop="'none'"
-          :playsInline.prop="true"
-          :muted.prop="appStore.videoMuted"
-          :loop.prop="true"
-          :load="playerLoadMode"
-          preload="metadata"
+        <div
+          class="reel-player-card__zoom-frame"
+          :class="{ 'reel-player-card__zoom-frame--interacting': reelZoom.isPanning.value || reelZoom.isPinching.value }"
+          :style="{ transform: reelZoom.transform.value }"
         >
-          <media-provider />
-          <media-poster
-            :src.prop="item.thumbnailUrl"
-            :alt.prop="item.filename"
-          />
-          <!-- TikTok-style bottom seek bar -->
-          <div class="reel-player-card__seekbar-shell">
-            <media-time-slider
-              class="reel-player-card__seekbar"
-              aria-label="Seek video"
-              @click.stop
-              @pointerdown.stop
-              @pointerup.stop
-            >
-              <div class="reel-player-card__seekbar-track" />
-              <div class="reel-player-card__seekbar-track reel-player-card__seekbar-progress" />
-              <div class="reel-player-card__seekbar-track reel-player-card__seekbar-fill" />
-              <div class="reel-player-card__seekbar-thumb" />
-            </media-time-slider>
-          </div>
-        </media-player>
+          <media-player
+            ref="playerElement"
+            class="reel-player-card__player"
+            :src.prop="videoSource"
+            :title.prop="item.filename"
+            :fullscreenOrientation.prop="'landscape'"
+            :playsInline.prop="true"
+            :muted.prop="effectiveMuted"
+            :loop.prop="true"
+            :load="playerLoadMode"
+            :preload="playerPreloadMode"
+          >
+            <media-provider />
+            <media-poster
+              :src.prop="item.thumbnailUrl"
+              :alt.prop="item.filename"
+            />
+            <!-- TikTok-style bottom seek bar -->
+            <div class="reel-player-card__seekbar-shell">
+              <media-time-slider
+                class="reel-player-card__seekbar"
+                aria-label="Seek video"
+                :noSwipeGesture.prop="true"
+                @click.stop
+                @pointerdown.stop
+                @pointerup.stop
+              >
+                <div class="reel-player-card__seekbar-track" />
+                <div class="reel-player-card__seekbar-track reel-player-card__seekbar-progress" />
+                <div class="reel-player-card__seekbar-track reel-player-card__seekbar-fill" />
+                <div class="reel-player-card__seekbar-thumb" />
+              </media-time-slider>
+            </div>
+          </media-player>
+        </div>
+
+        <img
+          v-if="!hasRenderedFrame"
+          class="reel-player-card__first-frame"
+          :src="item.thumbnailUrl"
+          :alt="item.filename"
+          decoding="async"
+          aria-hidden="true"
+        />
 
         <div
           v-if="showPausedIndicator"
@@ -49,6 +78,23 @@
           aria-hidden="true"
         >
           <span class="reel-player-card__pause-icon i-fluent-play-20-filled" />
+        </div>
+
+        <div
+          v-if="holdSpeed.isFastForwarding.value"
+          class="reel-player-card__hold-indicator"
+          aria-hidden="true"
+        >
+          <span class="reel-player-card__hold-icon i-fluent-fast-forward-20-filled" />
+          <span>{{ holdSpeed.rate }}x</span>
+        </div>
+
+        <div
+          v-else-if="holdSpeed.isScrubbing.value"
+          class="reel-player-card__hold-indicator"
+          aria-hidden="true"
+        >
+          <span>{{ scrubLabel }}</span>
         </div>
 
         <div class="reel-player-card__bottom-fade" aria-hidden="true" />
@@ -89,6 +135,18 @@
             </div>
 
             <button
+              class="reel-player-card__playback-button"
+              :class="{ 'reel-player-card__playback-button--active': landscape.isRotated.value || landscape.isFullscreen.value }"
+              type="button"
+              :aria-label="t('post.immersive.rotate')"
+              :title="t('post.immersive.rotate')"
+              :aria-pressed="landscape.isRotated.value || landscape.isFullscreen.value"
+              @click.stop="landscape.toggle()"
+            >
+              <OrientationToggleIcon class="reel-player-card__orientation-icon" />
+            </button>
+
+            <button
               class="reel-player-card__sound-button"
               type="button"
               :aria-label="appStore.videoMuted ? 'Enable sound' : 'Mute sound'"
@@ -107,6 +165,7 @@
           </div>
         </div>
       </div>
+      </div>
     </div>
   </article>
 </template>
@@ -115,32 +174,76 @@
 import 'vidstack/bundle';
 
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { RouterLink } from 'vue-router';
 import type { PlayerSrc } from 'vidstack';
 import type { MediaPlayerElement } from 'vidstack/elements';
 
+import { useHoldToSpeed } from '../composables/useHoldToSpeed';
+import { useLandscapeStage } from '../composables/useLandscapeStage';
+import { reelsLandscapeRotation } from '../composables/useReelsLandscape';
+import { resolveGesturePoint } from '../utils/gesture-coordinates';
+import { useViewActive } from '../composables/useViewActivation';
 import { useAppStore } from '../stores/app';
+import { useImmersiveVideoStore } from '../stores/immersive-video';
 import type { FeedItem, FolderSummary } from '../types/api';
 import { formatFolderTitle } from '../utils/folder-titles';
-import { getOriginalMediaUrl } from '../utils/original-media';
+import { formatVideoTimestamp } from '../utils/media';
+import {
+  resolveVideoFallbackSource,
+  resolveVideoSource,
+  toPlayerSrc,
+  useBundledHlsLibrary,
+  warmVideoStream,
+  type ResolvedVideoSource
+} from '../utils/video-playback';
 import Avatar from './Avatar.vue';
+import OrientationToggleIcon from './OrientationToggleIcon.vue';
+import { usePinchZoom } from '../composables/usePinchZoom';
+import {
+  safeMediaPlayerGetCurrentTime,
+  safeMediaPlayerPause,
+  safeMediaPlayerPlay,
+  safeMediaPlayerSetCurrentTime,
+  safeMediaPlayerSetMuted
+} from '../utils/safe-media-player';
 
-const props = defineProps<{
-  item: FeedItem;
-  folder: FolderSummary | null;
-  active: boolean;
-}>();
+const props = withDefaults(
+  defineProps<{
+    item: FeedItem;
+    folder: FolderSummary | null;
+    active: boolean;
+    /** The next card warms its buffer so swiping starts playing immediately. */
+    prefetch?: boolean;
+  }>(),
+  {
+    prefetch: false
+  }
+);
 
+const { t } = useI18n();
 const appStore = useAppStore();
+const immersiveVideoStore = useImmersiveVideoStore();
 const playerElement = ref<MediaPlayerElement | null>(null);
+const stageElement = ref<HTMLElement | null>(null);
 const isPaused = ref(false);
-const isUsingOriginalFallback = ref(false);
-const playerLoadMode = computed(() => (props.active ? 'eager' : 'visible'));
-const currentVideoSrc = computed(() => (isUsingOriginalFallback.value ? getOriginalMediaUrl(props.item.id) : props.item.previewUrl));
-const videoSource = computed<PlayerSrc>(() => ({
-  src: currentVideoSrc.value,
-  type: 'video/mp4'
-}));
+// Vidstack may report the old clock briefly after a seek. Keep the latest visible
+// scrub target as the next gesture's relative origin until playback catches up.
+const reelScrubPosition = ref<number | null>(null);
+// Vidstack drops its poster as soon as the provider attaches, which is what leaves
+// a black card when the first segment has not decoded yet. Holding our own copy
+// until playback really advances is what keeps a cover on screen.
+const hasRenderedFrame = ref(false);
+const fallbackSource = ref<ResolvedVideoSource | null>(null);
+const playerLoadMode = computed(() => (props.active || props.prefetch ? 'eager' : 'visible'));
+// Buffering the neighbour is what removes the stall on the first frame after a swipe.
+const playerPreloadMode = computed(() => (props.active || props.prefetch ? 'auto' : 'metadata'));
+const preferredSource = computed<ResolvedVideoSource>(() =>
+  resolveVideoSource(props.item, appStore.videoPlaybackQuality)
+);
+const activeSource = computed<ResolvedVideoSource>(() => fallbackSource.value ?? preferredSource.value);
+const currentVideoSrc = computed(() => activeSource.value.src);
+const videoSource = computed<PlayerSrc>(() => toPlayerSrc(activeSource.value));
 const showPausedIndicator = computed(() => props.active && isPaused.value);
 const displayFolderTitle = computed(() => formatFolderTitle(props.folder ?? props.item, appStore.nestedFolderTitleFormat));
 const folderDescription = computed(() => {
@@ -151,13 +254,20 @@ const folderDescription = computed(() => {
   return currentFolderName ? `${currentFolderName}/${props.item.filename}` : props.item.filename;
 });
 
-let muteSyncToken = 0;
 let removePlayerEventListeners: (() => void) | null = null;
 let autoplayRetryAttempts = 0;
 let autoplayRetryTimer = 0;
 
-const AUTOPLAY_RETRY_DELAY_MS = 140;
+const AUTOPLAY_RETRY_DELAY_MS = 160;
 const MAX_AUTOPLAY_RETRIES = 3;
+// Retries keep going long after the fallback switch: a stream the NAS is still
+// transcoding can need several seconds before the first segment is playable.
+const MAX_STALL_RETRIES = 12;
+const MAX_STALL_RETRY_DELAY_MS = 1_200;
+const STARTUP_FALLBACK_MS = 2_000;
+let startupFallbackTimer = 0;
+const REEL_SCRUB_SECONDS_PER_PIXEL = 0.08;
+const REEL_SCRUB_ACTIVATION_PX = 18;
 
 function clearAutoplayRetry() {
   if (autoplayRetryTimer !== 0) {
@@ -171,36 +281,107 @@ function resetAutoplayRetry() {
   autoplayRetryAttempts = 0;
 }
 
+function clearStartupFallback() {
+  if (startupFallbackTimer !== 0) {
+    window.clearTimeout(startupFallbackTimer);
+    startupFallbackTimer = 0;
+  }
+}
+
+function scheduleStartupFallback() {
+  if (!props.active || immersiveVideoStore.isOpen || fallbackSource.value) {
+    return;
+  }
+
+  clearStartupFallback();
+  startupFallbackTimer = window.setTimeout(() => {
+    startupFallbackTimer = 0;
+    const player = playerElement.value;
+    if (!player || !props.active || immersiveVideoStore.isOpen || fallbackSource.value) {
+      return;
+    }
+
+    if ((player.currentTime ?? 0) > 0.05) {
+      return;
+    }
+
+    switchToFallbackSource();
+  }, STARTUP_FALLBACK_MS);
+}
+
 function scheduleAutoplayRetry() {
-  if (!props.active || autoplayRetryTimer !== 0 || autoplayRetryAttempts >= MAX_AUTOPLAY_RETRIES) {
+  if (!props.active || autoplayRetryTimer !== 0 || autoplayRetryAttempts >= MAX_STALL_RETRIES) {
     return;
   }
 
   autoplayRetryAttempts += 1;
-  autoplayRetryTimer = window.setTimeout(() => {
-    autoplayRetryTimer = 0;
-    void syncPlayback();
-  }, AUTOPLAY_RETRY_DELAY_MS * autoplayRetryAttempts);
+  autoplayRetryTimer = window.setTimeout(
+    () => {
+      autoplayRetryTimer = 0;
+      void syncPlayback();
+    },
+    Math.min(AUTOPLAY_RETRY_DELAY_MS * autoplayRetryAttempts, MAX_STALL_RETRY_DELAY_MS)
+  );
 }
 
-function switchToOriginalFallback() {
-  if (isUsingOriginalFallback.value) {
+function switchToFallbackSource() {
+  if (fallbackSource.value) {
+    return;
+  }
+
+  const fallback = resolveVideoFallbackSource(props.item, activeSource.value);
+  if (!fallback) {
     return;
   }
 
   resetAutoplayRetry();
-  isUsingOriginalFallback.value = true;
+  fallbackSource.value = fallback;
 }
 
-function syncMuted(player: MediaPlayerElement, muted: boolean) {
-  const token = ++muteSyncToken;
-  player.muted = muted;
+// A refused audible autoplay is a document-level verdict, so it lives in the store
+// and every surface (feed, reels, viewer, stories) reads the same value.
+const effectiveMuted = computed(() => appStore.videoEffectivelyMuted);
+// False while the reels route is cached behind another dock tab.
+const isViewActive = useViewActive();
 
-  requestAnimationFrame(() => {
-    if (muteSyncToken === token) {
-      muteSyncToken = 0;
+const reelZoom = usePinchZoom({
+  doubleTapZoom: false,
+  // At rest one finger belongs to scrub/dismiss. Once zoomed, one finger pans X/Y.
+  singlePointerPan: () => reelZoom.isZoomed.value,
+  getGesturePoint: (event) =>
+    resolveGesturePoint(event, reelsLandscapeRotation.value ? 'rotated' : 'normal')
+});
+let reelZoomClickUntil = 0;
+
+function syncMuted(player: MediaPlayerElement, muted: boolean) {
+  safeMediaPlayerSetMuted(player, muted);
+  const videos = [player.querySelector('video'), player.shadowRoot?.querySelector('video')];
+  for (const video of videos) {
+    if (video instanceof HTMLVideoElement) {
+      video.muted = muted;
     }
-  });
+  }
+}
+
+function getNativeVideo(player: MediaPlayerElement): HTMLVideoElement | null {
+  const lightDomVideo = player.querySelector('video');
+  if (lightDomVideo instanceof HTMLVideoElement) {
+    return lightDomVideo;
+  }
+
+  const shadowVideo = player.shadowRoot?.querySelector('video');
+  return shadowVideo instanceof HTMLVideoElement ? shadowVideo : null;
+}
+
+// Vidstack re-initialises its own muted state after the provider attaches and after
+// a source swap, so the element is pushed back onto the stored preference whenever
+// it drifts. Without this a card starts playing audibly while the icon still shows
+// muted.
+function enforceMuted() {
+  const player = playerElement.value;
+  if (player) {
+    syncMuted(player, effectiveMuted.value);
+  }
 }
 
 async function syncPlayback() {
@@ -209,33 +390,67 @@ async function syncPlayback() {
     return;
   }
 
-  if (!props.active) {
+  // The immersive layer plays the same clip, so the deck copy stays paused while
+  // it is open instead of decoding twice. A cached (deactivated) view is still
+  // mounted, so it must stand down too or the reel keeps playing on another tab.
+  if (!props.active || immersiveVideoStore.isOpen || !isViewActive.value) {
     resetAutoplayRetry();
     isPaused.value = false;
-    void player.pause().catch(() => {
-      // Ignore pause rejections before the provider is ready.
-    });
-    syncMuted(player, appStore.videoMuted);
+    safeMediaPlayerPause(player);
+    syncMuted(player, effectiveMuted.value);
     return;
   }
 
-  syncMuted(player, appStore.videoMuted);
+  syncMuted(player, effectiveMuted.value);
+
+  // Warm the first HLS segments before asking the player to start. This matters
+  // when the user arrives from the home feed, where the reels deck has not had
+  // time to warm its neighbours yet.
+  warmVideoStream(props.item, appStore.videoPlaybackQuality, { segments: 4 });
 
   try {
-    await player.play();
+    if (!(await safeMediaPlayerPlay(player))) {
+      scheduleAutoplayRetry();
+      return;
+    }
+    // Vidstack can resolve its player-level play promise while the provider is
+    // still attaching the native element. Do not treat that as real playback.
+    const nativeVideo = getNativeVideo(player);
+    if (!nativeVideo || nativeVideo.paused) {
+      scheduleAutoplayRetry();
+      return;
+    }
     resetAutoplayRetry();
     isPaused.value = false;
+    scheduleStartupFallback();
     return;
   } catch {
-    if (appStore.videoMuted) {
-      if (!isUsingOriginalFallback.value && autoplayRetryAttempts >= MAX_AUTOPLAY_RETRIES) {
-        switchToOriginalFallback();
+    if (effectiveMuted.value) {
+      if (!fallbackSource.value && autoplayRetryAttempts >= MAX_AUTOPLAY_RETRIES) {
+        switchToFallbackSource();
         return;
       }
 
       scheduleAutoplayRetry();
       return;
     }
+  }
+
+  // Audible autoplay was refused. The verdict holds for the whole document until the
+  // next user gesture, and it is recorded without overwriting the stored preference.
+  const blocked = appStore.reportAudibleAutoplayBlocked();
+  syncMuted(player, blocked ? true : effectiveMuted.value);
+
+  try {
+    if (!(await safeMediaPlayerPlay(player))) {
+      scheduleAutoplayRetry();
+      return;
+    }
+    syncMuted(player, effectiveMuted.value);
+    resetAutoplayRetry();
+    isPaused.value = false;
+  } catch {
+    scheduleAutoplayRetry();
   }
 }
 
@@ -249,29 +464,80 @@ function bindPlayerEventListeners(player: MediaPlayerElement | null) {
 
   const handleReady = () => {
     void syncPlayback();
+    window.setTimeout(() => {
+      if (props.active && isViewActive.value && !immersiveVideoStore.isOpen) {
+        void syncPlayback();
+      }
+    }, 0);
+  };
+  const handleVolume = () => {
+    enforceMuted();
+  };
+  const handleError = () => {
+    switchToFallbackSource();
   };
   const handlePlay = () => {
     isPaused.value = false;
     if (!props.active) {
-      void player.pause().catch(() => {
-        // Ignore pause rejections before the provider is ready.
-      });
+      safeMediaPlayerPause(player);
     }
   };
   const handlePause = () => {
     isPaused.value = props.active;
   };
+  const handleProgress = () => {
+    const currentTime = player.currentTime ?? 0;
+    if (reelScrubPosition.value !== null && Math.abs(currentTime - reelScrubPosition.value) <= 1.5) {
+      reelScrubPosition.value = null;
+    }
+    if (currentTime > 0.05) {
+      clearStartupFallback();
+      hasRenderedFrame.value = true;
+    }
+  };
+  const handleSeeking = () => {
+    // The bottom seek bar and the provider's own recovery jumps also land here.
+    warmSeekTarget(player.currentTime ?? 0);
+  };
+  const handleStall = () => {
+    // A stalled stream never resolves on its own here, because the provider has
+    // already committed to a source the NAS has not finished transcoding.
+    if (props.active && !isPaused.value) {
+      scheduleAutoplayRetry();
+    }
+  };
+
+  const removeHlsLibraryBinding = useBundledHlsLibrary(player);
 
   player.addEventListener('loaded-metadata', handleReady);
   player.addEventListener('can-play', handleReady);
+  player.addEventListener('provider-change', handleReady);
+  player.addEventListener('source-change', handleReady);
+  player.addEventListener('load-start', handleReady);
+  player.addEventListener('volume-change', handleVolume);
   player.addEventListener('play', handlePlay);
   player.addEventListener('pause', handlePause);
+  player.addEventListener('error', handleError);
+  player.addEventListener('time-update', handleProgress);
+  player.addEventListener('waiting', handleStall);
+  player.addEventListener('stalled', handleStall);
+  player.addEventListener('seeking', handleSeeking);
 
   removePlayerEventListeners = () => {
+    removeHlsLibraryBinding();
     player.removeEventListener('loaded-metadata', handleReady);
     player.removeEventListener('can-play', handleReady);
+    player.removeEventListener('provider-change', handleReady);
+    player.removeEventListener('source-change', handleReady);
+    player.removeEventListener('load-start', handleReady);
+    player.removeEventListener('volume-change', handleVolume);
     player.removeEventListener('play', handlePlay);
     player.removeEventListener('pause', handlePause);
+    player.removeEventListener('error', handleError);
+    player.removeEventListener('time-update', handleProgress);
+    player.removeEventListener('waiting', handleStall);
+    player.removeEventListener('stalled', handleStall);
+    player.removeEventListener('seeking', handleSeeking);
   };
 
   if (player.hasAttribute('data-can-play')) {
@@ -280,40 +546,232 @@ function bindPlayerEventListeners(player: MediaPlayerElement | null) {
 }
 
 async function toggleSound() {
+  const player = playerElement.value;
+
   const nextMuted = !appStore.videoMuted;
+  // Tapping the control is the user gesture that lifts an autoplay block, and
+  // setVideoMuted clears it as part of turning sound back on.
   appStore.setVideoMuted(nextMuted);
 
-  const player = playerElement.value;
   if (!player || !props.active) {
     return;
   }
 
   syncMuted(player, nextMuted);
 
+  if (!nextMuted) {
+    void safeMediaPlayerPlay(player);
+  }
+
   if (player.paused) {
     await syncPlayback();
   }
 }
 
-async function handleSurfaceClick(event?: MouseEvent) {
-  if (event && isInteractiveTarget(event.target)) {
+/**
+ * Jumping into a cold part of a stream is where the NAS transcode start-up cost shows
+ * up as a stall, so the segments around the target are requested as soon as it is
+ * known rather than when the player finally asks for them.
+ */
+function warmSeekTarget(seconds: number) {
+  if (!Number.isFinite(seconds) || seconds <= 0) {
     return;
   }
 
+  warmVideoStream(props.item, appStore.videoPlaybackQuality, {
+    fromSeconds: seconds,
+    segments: 2
+  });
+}
+
+const holdSpeed = useHoldToSpeed({
+  canStart: (event) => props.active && !isInteractiveTarget(event.target),
+  secondsPerPixel: REEL_SCRUB_SECONDS_PER_PIXEL,
+  scrubActivationPx: REEL_SCRUB_ACTIVATION_PX,
+  getCurrentTime: () => reelScrubPosition.value ?? (playerElement.value ? safeMediaPlayerGetCurrentTime(playerElement.value) : 0),
+  getDuration: () => playerElement.value?.duration ?? 0,
+  seekTo: (seconds) => {
+    reelScrubPosition.value = seconds;
+    const player = playerElement.value;
+    if (!player) {
+      return;
+    }
+
+    warmSeekTarget(seconds);
+
+    try {
+      safeMediaPlayerSetCurrentTime(player, seconds);
+    } catch {
+      // Seeking before the provider is attached is a no-op.
+    }
+  },
+  // The seek bar reads the media element's currentTime. Updating it during the drag
+  // makes the bar and the central preview label show the same live target.
+  previewSeek: (seconds) => {
+    reelScrubPosition.value = seconds;
+    const player = playerElement.value;
+    if (player) {
+      safeMediaPlayerSetCurrentTime(player, seconds);
+    }
+  },
+  // Keep the central time label on the exact same target as the bottom progress bar,
+  // rather than letting it derive a second position from the gesture origin.
+  onScrub: (seconds) => {
+    reelScrubPosition.value = seconds;
+  },
+  getPlaybackRate: () => playerElement.value?.playbackRate ?? 1,
+  setPlaybackRate: (rate) => {
+    const player = playerElement.value;
+    if (!player) {
+      return;
+    }
+
+    try {
+      player.playbackRate = rate;
+    } catch {
+      // Rate changes before the provider is attached are a no-op.
+    }
+  },
+  play: () => {
+    if (playerElement.value) void safeMediaPlayerPlay(playerElement.value);
+  },
+  // The deck rotates the card with CSS rather than the device, so the axes the viewer
+  // sees are swapped while landscape is on. Reading the shared rotation flag keeps the
+  // sideways scrub sideways from the viewer's point of view.
+  getGesturePoint: (event) =>
+    resolveGesturePoint(event, reelsLandscapeRotation.value ? 'rotated' : 'normal')
+});
+
+const scrubLabel = computed(() => {
+  const seconds = reelScrubPosition.value ?? holdSpeed.scrubSeconds.value;
+  if (seconds === null) {
+    return '';
+  }
+
+  return formatVideoTimestamp((playerElement.value?.duration ?? 0) * 1000, seconds * 1000);
+});
+
+// Rotating in place instead of asking for native fullscreen: fullscreen took the
+// card out of the scroll container, which is why the deck stopped swiping and the
+// picture came back half-off-screen after closing.
+const landscape = useLandscapeStage({
+  mode: 'rotate',
+  rotationState: reelsLandscapeRotation,
+  getStage: () => stageElement.value,
+  getVideo: () => {
+    const player = playerElement.value;
+    if (!player) {
+      return null;
+    }
+
+    const direct = player.querySelector('video');
+    if (direct instanceof HTMLVideoElement) {
+      return direct;
+    }
+
+    const shadow = player.shadowRoot?.querySelector('video');
+    return shadow instanceof HTMLVideoElement ? shadow : null;
+  }
+});
+
+async function togglePlayback() {
   const player = playerElement.value;
   if (!player || !props.active) {
     return;
   }
 
   if (player.paused) {
+    // Resuming from the reel surface is a user gesture. Restore the one global
+    // sound preference before the provider starts playback again.
+    appStore.activateVideoSoundFromUserGesture();
+    syncMuted(player, effectiveMuted.value);
     await syncPlayback();
     return;
   }
 
   isPaused.value = true;
-  void player.pause().catch(() => {
-    // Ignore pause rejections before the provider is ready.
-  });
+  safeMediaPlayerPause(player);
+}
+
+function handleSurfaceClick(event?: MouseEvent) {
+  if (event && isInteractiveTarget(event.target)) {
+    return;
+  }
+
+  if (
+    holdSpeed.shouldSuppressClick() ||
+    !props.active ||
+    reelZoom.isZoomed.value ||
+    reelZoom.isPinching.value ||
+    Date.now() < reelZoomClickUntil
+  ) {
+    return;
+  }
+
+  // The deck already fills the screen, so a tap only needs to pause and resume.
+  // Widening the picture is the rotate button's job.
+  void togglePlayback();
+}
+
+function shouldHandleReelZoom(event: Event): boolean {
+  return !isInteractiveTarget(event.target);
+}
+
+function handleReelZoomPointerDownCapture(event: PointerEvent) {
+  if (!shouldHandleReelZoom(event)) {
+    return;
+  }
+
+  reelZoom.onPointerdown(event);
+
+  if (reelZoom.isZoomed.value || reelZoom.isPinching.value || reelZoom.pointerCount() >= 2) {
+    event.stopPropagation();
+    holdSpeed.stop();
+    reelZoomClickUntil = Date.now() + 300;
+  }
+}
+
+function handleReelZoomPointerMoveCapture(event: PointerEvent) {
+  if (!shouldHandleReelZoom(event)) {
+    return;
+  }
+
+  const activeZoom = reelZoom.isZoomed.value || reelZoom.isPinching.value;
+  reelZoom.onPointermove(event);
+
+  if (activeZoom || reelZoom.isPinching.value) {
+    event.stopPropagation();
+  }
+}
+
+function handleReelZoomPointerUpCapture(event: PointerEvent) {
+  if (!shouldHandleReelZoom(event)) {
+    return;
+  }
+
+  const wasPinching = reelZoom.isPinching.value;
+  const wasZoomed = reelZoom.isZoomed.value;
+  reelZoom.onPointerup(event);
+
+  if (wasPinching || wasZoomed) {
+    event.stopPropagation();
+    reelZoomClickUntil = Date.now() + 300;
+  }
+}
+
+function handleReelZoomPointerCancelCapture(event: PointerEvent) {
+  if (!shouldHandleReelZoom(event)) {
+    return;
+  }
+
+  const wasPinching = reelZoom.isPinching.value;
+  const wasZoomed = reelZoom.isZoomed.value;
+  reelZoom.onPointercancel(event);
+
+  if (wasPinching || wasZoomed) {
+    event.stopPropagation();
+    reelZoomClickUntil = Date.now() + 300;
+  }
 }
 
 function isInteractiveTarget(target: EventTarget | null): boolean {
@@ -330,14 +788,30 @@ function handleSurfaceKeydown(event: KeyboardEvent) {
   }
 
   event.preventDefault();
-  void handleSurfaceClick();
+  void togglePlayback();
 }
+
+// A cached view keeps its players mounted, so activation has to drive playback the
+// same way the active flag does.
+watch(isViewActive, (active) => {
+  if (!active) {
+    holdSpeed.stop();
+  }
+
+  void syncPlayback();
+});
 
 watch(
   () => props.active,
   (active) => {
+    if (!active) {
+      holdSpeed.stop();
+    }
+
     if (active) {
       resetAutoplayRetry();
+    } else {
+      reelZoom.reset();
     }
 
     void syncPlayback();
@@ -347,21 +821,35 @@ watch(
 watch(
   () => props.item.id,
   () => {
+    // The card is being recycled onto another clip: end any hold before the provider
+    // changes underneath it, otherwise the rate stays at 2x with nothing to reset it.
+    holdSpeed.stop();
+    reelZoom.reset();
     resetAutoplayRetry();
-    isUsingOriginalFallback.value = false;
+    clearStartupFallback();
+    reelScrubPosition.value = null;
+    fallbackSource.value = null;
     isPaused.value = false;
+    hasRenderedFrame.value = false;
   }
 );
 
 watch(
-  () => appStore.videoMuted,
-  (videoMuted) => {
+  () => appStore.videoPlaybackQuality,
+  () => {
+    fallbackSource.value = null;
+  }
+);
+
+watch(
+  () => [appStore.videoEffectivelyMuted, appStore.videoSoundGeneration] as const,
+  ([effectivelyMuted]) => {
     const player = playerElement.value;
     if (!player) {
       return;
     }
 
-    syncMuted(player, videoMuted);
+    syncMuted(player, effectivelyMuted);
   }
 );
 
@@ -370,14 +858,49 @@ watch(playerElement, (player) => {
 });
 
 watch(
-  currentVideoSrc,
-  () => {
+  () => immersiveVideoStore.isOpen,
+  async (isOpen) => {
     if (!props.active) {
       return;
     }
 
-    void syncPlayback();
+    if (isOpen) {
+      await syncPlayback();
+      return;
+    }
+
+    const exitState = immersiveVideoStore.consumeExitState(props.item.id);
+    const player = playerElement.value;
+    if (exitState && player) {
+      try {
+        safeMediaPlayerSetCurrentTime(player, exitState.currentTime);
+      } catch {
+        // Seeking before the provider is attached is a no-op.
+      }
+    }
+
+    await syncPlayback();
   }
+);
+
+watch(currentVideoSrc, () => {
+  hasRenderedFrame.value = false;
+
+  if (!props.active) {
+    return;
+  }
+
+  void syncPlayback();
+});
+
+watch(
+  () => props.prefetch,
+  (prefetch) => {
+    if (prefetch) {
+      warmVideoStream(props.item, appStore.videoPlaybackQuality);
+    }
+  },
+  { immediate: true }
 );
 
 onMounted(() => {
@@ -388,12 +911,13 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  holdSpeed.stop();
+  reelZoom.reset();
   clearAutoplayRetry();
+  clearStartupFallback();
   removePlayerEventListeners?.();
   removePlayerEventListeners = null;
-  void playerElement.value?.pause().catch(() => {
-    // Ignore pause rejections before the provider is ready.
-  });
+  if (playerElement.value) safeMediaPlayerPause(playerElement.value);
 });
 </script>
 
@@ -429,6 +953,14 @@ onBeforeUnmount(() => {
   box-shadow: none;
 }
 
+/* Size container for the rotated surface below: 100cqh/100cqw is how the turned
+   picture gets the stage's swapped dimensions without measuring in JavaScript. */
+.reel-player-card__rotator {
+  position: absolute;
+  inset: 0;
+  container-type: size;
+}
+
 .reel-player-card__surface {
   position: relative;
   display: block;
@@ -439,6 +971,21 @@ onBeforeUnmount(() => {
   background: transparent;
   text-align: left;
   cursor: pointer;
+  /* iOS raises a selection loupe on a long press unless the callout is refused,
+     which would fight the hold-to-speed gesture. */
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: pan-y;
+}
+
+/* The callout refusal has to reach the shadow video too, otherwise the loupe still
+   appears when the press lands on the picture itself. */
+.reel-player-card__surface *,
+.reel-player-card__surface :deep(*) {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .reel-player-card__player {
@@ -462,6 +1009,18 @@ onBeforeUnmount(() => {
 .reel-player-card__player :deep(img) {
   object-fit: contain;
   background: #000;
+}
+
+.reel-player-card__first-frame {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+  pointer-events: none;
 }
 
 .reel-player-card__pause-indicator {
@@ -586,7 +1145,61 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-.reel-player-card__sound-button {
+.reel-player-card__zoom-frame {
+  width: 100%;
+  height: 100%;
+  transform-origin: center;
+  transition: transform 0.2s ease;
+  will-change: transform;
+}
+
+.reel-player-card__zoom-frame--interacting {
+  transition: none;
+}
+
+/* Landscape without leaving the page: the stage box keeps its portrait footprint so
+   scroll-snap and the vertical swipe still work, while the picture inside is turned
+   a quarter and sized against the stage's own container so it fills it edge to edge.
+   The viewer turns the phone; nothing about the deck layout moves. */
+.reel-player-card--rotated .reel-player-card__surface {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 100cqh;
+  height: 100cqw;
+  transform: translate(-50%, -50%) rotate(90deg);
+  transform-origin: center;
+  /* `pan-y` is expressed in screen space, so after the quarter turn it would block
+     the swipe that moves the deck. Handing panning back to the browser keeps the
+     vertical swipe alive; the scrub gesture uses pointer capture either way. */
+  touch-action: auto;
+}
+
+.reel-player-card__hold-indicator {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.7rem;
+  transform: translate(-50%, -50%);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.62);
+  color: #fff;
+  font-size: 0.82rem;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.reel-player-card__hold-icon {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+.reel-player-card__sound-button,
+.reel-player-card__playback-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -605,7 +1218,12 @@ onBeforeUnmount(() => {
     transform 0.15s ease;
 }
 
-.reel-player-card__sound-button:hover {
+.reel-player-card__playback-button--active {
+  color: #38bdf8;
+}
+
+.reel-player-card__sound-button:hover,
+.reel-player-card__playback-button:hover {
   color: #fff;
   background: rgba(230, 233, 239, 0.3);
   opacity: 0.9;
@@ -664,7 +1282,8 @@ onBeforeUnmount(() => {
     height: 2.15rem;
   }
 
-  .reel-player-card__sound-button {
+  .reel-player-card__sound-button,
+  .reel-player-card__playback-button {
     width: 1.9rem;
     height: 1.9rem;
   }

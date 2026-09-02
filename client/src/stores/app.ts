@@ -14,7 +14,14 @@ import {
   syncDocumentLanguage,
   type SupportedLocale
 } from '../locales';
-import type { AppStatus, FeedMode, FolderImageOrder, ReelsFeedMode, ScanProgress } from '../types/api';
+import type {
+  AppStatus,
+  FeedMode,
+  FolderImageOrder,
+  ReelsFeedMode,
+  ScanProgress,
+  VideoPlaybackQuality
+} from '../types/api';
 import { useAuthStore } from './auth';
 
 interface AppState {
@@ -24,6 +31,15 @@ interface AppState {
   theme: 'light' | 'dark';
   locale: SupportedLocale;
   videoMuted: boolean;
+  /**
+   * Set when the browser refuses audible autoplay. An autoplay verdict is issued per
+   * document, not per element, so this is global: keeping it in each player is what
+   * used to make one card silent while another showed "sound on".
+   */
+  audibleAutoplayBlocked: boolean;
+  hasExplicitlyEnabledVideoSound: boolean;
+  videoSoundGeneration: number;
+  videoPlaybackQualityOverride: VideoPlaybackQuality | null;
   lastOpenedFolderSlug: string | null;
   recentOpenedFolderSlugs: string[];
   imageModalBackgroundPath: string | null;
@@ -35,6 +51,14 @@ interface AppState {
 const THEME_STORAGE_KEY = 'foldergram-theme';
 const LOCALE_STORAGE_KEY = 'foldergram-locale';
 const VIDEO_MUTED_STORAGE_KEY = 'foldergram-video-muted';
+const VIDEO_PLAYBACK_QUALITY_STORAGE_KEY = 'foldergram-video-playback-quality';
+const VIDEO_PLAYBACK_QUALITIES: VideoPlaybackQuality[] = ['auto', 'original', '1080p', '720p', '480p'];
+
+function parseStoredVideoPlaybackQuality(value: string | null): VideoPlaybackQuality | null {
+  return VIDEO_PLAYBACK_QUALITIES.includes(value as VideoPlaybackQuality)
+    ? (value as VideoPlaybackQuality)
+    : null;
+}
 const LAST_OPENED_FOLDER_STORAGE_KEY = 'foldergram-last-opened-folder';
 const RECENT_OPENED_FOLDERS_STORAGE_KEY = 'foldergram-recent-opened-folders';
 const RECENT_OPENED_FOLDERS_LIMIT = 24;
@@ -89,6 +113,10 @@ export const useAppStore = defineStore('app', {
     theme: 'light',
     locale: DEFAULT_LOCALE,
     videoMuted: true,
+    audibleAutoplayBlocked: false,
+    hasExplicitlyEnabledVideoSound: false,
+    videoSoundGeneration: 0,
+    videoPlaybackQualityOverride: null,
     lastOpenedFolderSlug: null,
     recentOpenedFolderSlugs: [],
     imageModalBackgroundPath: null,
@@ -98,6 +126,11 @@ export const useAppStore = defineStore('app', {
   }),
   getters: {
     isLibraryUnavailable: (state) => state.stats?.storage.available === false,
+    /**
+     * The single source of truth every player must use for its `muted` property:
+     * the stored preference, plus the browser's autoplay verdict.
+     */
+    videoEffectivelyMuted: (state) => state.videoMuted || state.audibleAutoplayBlocked,
     libraryUnavailableReason: (state) => state.stats?.storage.reason ?? 'Configured library storage is unavailable.',
     isLibraryRebuildRequired: (state) => state.stats?.libraryIndex.rebuildRequired === true,
     isScanning: (state) => state.stats?.scan.isScanning === true,
@@ -109,6 +142,14 @@ export const useAppStore = defineStore('app', {
     defaultReelsFeedMode: (state): ReelsFeedMode => state.stats?.preferences.defaultReelsFeedMode ?? 'random',
     defaultFolderImageOrder: (state): FolderImageOrder => state.stats?.preferences.defaultFolderImageOrder ?? 'newest',
     nestedFolderTitleFormat: (state) => state.stats?.preferences.nestedFolderTitleFormat ?? 'folder',
+    savedVideoPlaybackQuality: (state): VideoPlaybackQuality =>
+      state.stats?.preferences.videoPlaybackQuality ?? 'auto',
+    /** Origin stamped on share links created from outside the LAN. */
+    sharePublicBaseUrl: (state): string | null => state.stats?.preferences.sharePublicBaseUrl ?? null,
+    // A per-device override wins over the library default so one phone on a weak
+    // connection can drop to 720p without changing playback for everyone.
+    videoPlaybackQuality: (state): VideoPlaybackQuality =>
+      state.videoPlaybackQualityOverride ?? state.stats?.preferences.videoPlaybackQuality ?? 'auto',
     treatStoriesAsFolders: (state) => state.stats?.preferences.treatStoriesAsFolders === true,
     treatCarouselsAsFolders: (state) => state.stats?.preferences.treatCarouselsAsFolders === true,
     isCarouselsReconciliationPending: (state) => state.stats?.carouselsMigration?.reconciliationPending === true
@@ -219,11 +260,78 @@ export const useAppStore = defineStore('app', {
     initializeVideoMuted() {
       const savedPreference = window.localStorage.getItem(VIDEO_MUTED_STORAGE_KEY);
       this.videoMuted = savedPreference === 'false' ? false : true;
+      this.audibleAutoplayBlocked = false;
+      this.hasExplicitlyEnabledVideoSound = false;
+    },
+
+    initializeVideoPlaybackQuality() {
+      this.videoPlaybackQualityOverride = parseStoredVideoPlaybackQuality(
+        window.localStorage.getItem(VIDEO_PLAYBACK_QUALITY_STORAGE_KEY)
+      );
+    },
+
+    setVideoPlaybackQualityOverride(quality: VideoPlaybackQuality | null) {
+      this.videoPlaybackQualityOverride = quality;
+
+      if (quality) {
+        window.localStorage.setItem(VIDEO_PLAYBACK_QUALITY_STORAGE_KEY, quality);
+      } else {
+        window.localStorage.removeItem(VIDEO_PLAYBACK_QUALITY_STORAGE_KEY);
+      }
     },
 
     setVideoMuted(videoMuted: boolean) {
       this.videoMuted = videoMuted;
+      if (!videoMuted) {
+        this.activateVideoSoundFromUserGesture();
+      }
       window.localStorage.setItem(VIDEO_MUTED_STORAGE_KEY, String(videoMuted));
+    },
+
+    /**
+     * A direct tap that opens or resumes a video is a browser user gesture. Keep that
+     * fact globally so a delayed provider/autoplay event cannot re-mute a player after
+     * the viewer already chose sound on. The persisted preference is deliberately not
+     * changed here: a muted preference always remains muted.
+     */
+    activateVideoSoundFromUserGesture() {
+      if (this.videoMuted) {
+        return;
+      }
+
+      this.audibleAutoplayBlocked = false;
+      this.hasExplicitlyEnabledVideoSound = true;
+      this.videoSoundGeneration += 1;
+    },
+
+    /**
+     * Records a refused audible autoplay without touching the stored preference, so
+     * the sound icon keeps showing what the viewer asked for while every player
+     * falls back to muted playback together.
+     */
+    reportAudibleAutoplayBlocked(): boolean {
+      // Once the viewer explicitly enables sound, a later autoplay failure from an
+      // off-screen/new player must not silently mute every surface again.
+      if (this.hasExplicitlyEnabledVideoSound) {
+        return false;
+      }
+
+      if (this.audibleAutoplayBlocked) {
+        return true;
+      }
+
+      this.audibleAutoplayBlocked = true;
+      return true;
+    },
+
+    /** Called after a user gesture proves audible playback is allowed again. */
+    clearAudibleAutoplayBlock() {
+      if (!this.audibleAutoplayBlocked) {
+        return;
+      }
+
+      this.audibleAutoplayBlocked = false;
+      this.videoSoundGeneration += 1;
     },
 
     recordOpenedFolder(slug: string) {

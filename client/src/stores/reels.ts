@@ -173,6 +173,21 @@ export const useReelsStore = defineStore('reels', {
       }
     },
 
+    removeImage(id: number) {
+      const wasActive = this.activeReelId === id;
+      const removedIndex = this.items.findIndex((item) => item.id === id);
+      this.items = this.items.filter((item) => item.id !== id);
+
+      if (!wasActive) {
+        return;
+      }
+
+      // Keeping the position rather than the id is what lets the deck slide onto
+      // the next clip instead of jumping back to the top of the queue.
+      const nextIndex = Math.min(Math.max(removedIndex, 0), this.items.length - 1);
+      this.activeReelId = nextIndex >= 0 ? this.items[nextIndex]?.id ?? null : null;
+    },
+
     updateImageCaption(id: number, caption: string | null) {
       this.items = updateCaptionInItems(this.items, id, caption);
     }

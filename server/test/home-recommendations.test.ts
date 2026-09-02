@@ -109,17 +109,20 @@ describe('home recommendations', () => {
   });
 
   it('builds a stable daily suggestion list from ranked non-empty folders', () => {
+    // The daily seed and the recency scores both key off the local calendar day,
+    // so both visits must be constructed in local time to stay on the same day
+    // regardless of the machine timezone.
     const first = selectHomeRecommendations(
       baseFolders,
       likedCountByFolder,
       null,
-      new Date('2026-03-12T12:00:00.000Z')
+      new Date(2026, 2, 12, 12, 0, 0)
     );
     const second = selectHomeRecommendations(
       baseFolders,
       likedCountByFolder,
       null,
-      new Date('2026-03-12T18:30:00.000Z')
+      new Date(2026, 2, 12, 18, 30, 0)
     );
 
     expect(first.recommendedFolders.map((folder) => folder.slug)).toEqual(

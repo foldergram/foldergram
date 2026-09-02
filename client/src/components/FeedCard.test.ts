@@ -3,10 +3,20 @@ import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useAuthStore } from '../stores/auth';
+import { useImmersiveVideoStore } from '../stores/immersive-video';
+import { createPostShareLink, trashImage } from '../api/gallery';
 import type { FeedItem } from '../types/api';
 import FeedCard from './FeedCard.vue';
 
 vi.mock('vidstack/bundle', () => ({}));
+vi.mock('../api/gallery', async () => {
+  const actual = await vi.importActual<typeof import('../api/gallery')>('../api/gallery');
+  return {
+    ...actual,
+    createPostShareLink: vi.fn(),
+    trashImage: vi.fn()
+  };
+});
 vi.mock('vue-router', async () => {
   const actual = await vi.importActual<typeof import('vue-router')>('vue-router');
 
@@ -149,6 +159,8 @@ const globalStubs = {
 describe('FeedCard', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
+    vi.mocked(createPostShareLink).mockReset();
+    vi.mocked(trashImage).mockReset();
     vi.stubGlobal(
       'IntersectionObserver',
       class {
@@ -196,7 +208,45 @@ describe('FeedCard', () => {
     expect(container.style.aspectRatio).toBe('1080 / 1920');
   });
 
-  it('toggles playback from home-feed video clicks and shows the paused indicator', async () => {
+  it('holds a first-frame cover over the home video until the clip actually starts', async () => {
+    const wrapper = mount(FeedCard, {
+      props: {
+        item: createVideoItem(8049),
+        avatarUrl: null,
+        context: 'home',
+        isActiveVideo: true
+      },
+      global: {
+        stubs: globalStubs
+      }
+    });
+
+    await flushPromises();
+
+    // Vidstack drops its own poster as soon as the provider attaches, so this is the
+    // only thing keeping a deep-scrolled card from going black.
+    expect(wrapper.find('.feed-card__first-frame').exists()).toBe(true);
+
+    const player = wrapper.get('media-player').element as unknown as FakeMediaPlayerElement;
+    const video = document.createElement('video');
+    Object.defineProperty(video, 'readyState', {
+      configurable: true,
+      value: HTMLMediaElement.HAVE_CURRENT_DATA
+    });
+    Object.defineProperty(video, 'currentTime', {
+      configurable: true,
+      value: 0.4
+    });
+    player.appendChild(video);
+    player.currentTime = 0.4;
+    player.dispatchEvent(new Event('time-update'));
+    await flushPromises();
+
+    expect(wrapper.find('.feed-card__first-frame').exists()).toBe(false);
+  });
+
+  it('hands home playback to the immersive player and resumes it on return', async () => {
+    const immersiveVideoStore = useImmersiveVideoStore();
     const wrapper = mount(FeedCard, {
       props: {
         item: createVideoItem(805),
@@ -214,21 +264,49 @@ describe('FeedCard', () => {
     const player = wrapper.get('media-player').element as unknown as FakeMediaPlayerElement;
     expect(player.playCallCount).toBeGreaterThanOrEqual(1);
     expect(player.paused).toBe(false);
-    expect(wrapper.find('.feed-card__pause-indicator').exists()).toBe(false);
+    player.currentTime = 12.5;
 
     await wrapper.get('.feed-card__video-shell').trigger('click');
     await flushPromises();
 
-    expect(player.pauseCallCount).toBe(1);
-    expect(player.paused).toBe(true);
-    expect(wrapper.find('.feed-card__pause-indicator').exists()).toBe(true);
-
-    await wrapper.get('.feed-card__video-shell').trigger('click');
-    await flushPromises();
-
-    expect(player.playCallCount).toBeGreaterThanOrEqual(2);
+    expect(immersiveVideoStore.isOpen).toBe(true);
+    expect(immersiveVideoStore.target?.id).toBe(805);
+    expect(immersiveVideoStore.startTime).toBe(12.5);
+    expect(immersiveVideoStore.startPaused).toBe(false);
+    // The same decoder is teleported into immersive, so playback must keep running.
     expect(player.paused).toBe(false);
-    expect(wrapper.find('.feed-card__pause-indicator').exists()).toBe(false);
+
+    immersiveVideoStore.close({ id: 805, currentTime: 20, paused: false });
+    await flushPromises();
+
+    expect(player.currentTime).toBe(20);
+    expect(player.paused).toBe(false);
+  });
+
+  it('starts an inactive feed clip when opening it in the immersive player', async () => {
+    const immersiveVideoStore = useImmersiveVideoStore();
+    const wrapper = mount(FeedCard, {
+      props: {
+        item: createVideoItem(8052),
+        avatarUrl: null,
+        context: 'home',
+        isActiveVideo: false
+      },
+      global: {
+        stubs: globalStubs
+      }
+    });
+
+    await flushPromises();
+    const player = wrapper.get('media-player').element as unknown as FakeMediaPlayerElement;
+    expect(player.paused).toBe(true);
+
+    await wrapper.get('.feed-card__video-shell').trigger('click');
+    await flushPromises();
+
+    expect(immersiveVideoStore.startPaused).toBe(false);
+    expect(immersiveVideoStore.isOpen).toBe(true);
+    expect(player.paused).toBe(false);
   });
 
   it('renders the bottom progress UI and keeps slider clicks from pausing the home video', async () => {
@@ -327,10 +405,49 @@ describe('FeedCard', () => {
     expect(downloadLink.attributes('href')).toBe('/api/originals/807?download=1');
     expect(downloadLink.attributes('title')).toBe('Download original file');
 
-    const originalLink = wrapper.get('a[aria-label="Open original file"]');
+    const shareButton = wrapper.get('[data-test="feed-direct-share"]');
+    expect(shareButton.attributes('title')).toBe('Share this post');
+  });
 
-    expect(originalLink.attributes('href')).toBe('/api/originals/807');
-    expect(originalLink.attributes('title')).toBe('Open original file');
+  it('creates and copies a real share link directly from the home action row', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText }
+    });
+    vi.mocked(createPostShareLink).mockResolvedValue({
+      ok: true,
+      shareUrl: 'https://example.test/share/posts/token',
+      sharePath: '/share/posts/token',
+      link: {
+        id: 1,
+        postId: 807,
+        tokenPrefix: 'token',
+        expiresAt: null,
+        revokedAt: null,
+        createdAt: '2026-08-29T00:00:00.000Z',
+        lastUsedAt: null,
+        status: 'active'
+      }
+    });
+
+    const wrapper = mount(FeedCard, {
+      props: {
+        item: createImageItem(807),
+        avatarUrl: null,
+        context: 'home'
+      },
+      global: {
+        stubs: globalStubs
+      }
+    });
+
+    await wrapper.get('[data-test="feed-direct-share"]').trigger('click');
+    await flushPromises();
+
+    expect(createPostShareLink).toHaveBeenCalledWith(807);
+    expect(writeText).toHaveBeenCalledWith('https://example.test/share/posts/token');
+    expect(wrapper.get('[data-test="feed-direct-share"]').attributes('title')).toBe('Link copied');
   });
 
   it('falls back to a readable filename when the caption is not customized', () => {
@@ -406,5 +523,35 @@ describe('FeedCard', () => {
 
     await restrictedWrapper.get('button[aria-label="More options"]').trigger('click');
     expect(restrictedWrapper.text()).not.toContain('Edit caption');
+  });
+
+  it('moves a home post to Trash immediately without a second confirmation dialog', async () => {
+    const item = createImageItem(812);
+    vi.mocked(trashImage).mockResolvedValue({
+      id: item.id,
+      folderSlug: item.folderSlug,
+      trashedAt: '2026-09-01T00:00:00.000Z'
+    });
+
+    const wrapper = mount(FeedCard, {
+      props: {
+        item,
+        avatarUrl: null,
+        context: 'home'
+      },
+      global: {
+        stubs: globalStubs
+      }
+    });
+
+    await wrapper.get('button[aria-label="More options"]').trigger('click');
+    const deleteButton = wrapper.findAll('button').find((button) => button.text().includes('Delete post'));
+    expect(deleteButton).toBeDefined();
+
+    await deleteButton!.trigger('click');
+    await flushPromises();
+
+    expect(trashImage).toHaveBeenCalledWith(item.id);
+    expect(wrapper.find('[data-test="confirm-dialog"]').exists()).toBe(false);
   });
 });

@@ -13,6 +13,14 @@
         <button
           class="min-h-[2.35rem] px-4 py-[0.6rem] rounded-[0.75rem] border border-border bg-surface text-text font-semibold disabled:opacity-55 disabled:cursor-not-allowed"
           type="button"
+          :disabled="trashStore.items.length === 0 || processing"
+          @click="toggleAllVisible"
+        >
+          {{ allVisibleSelected ? t('trashPage.deselectAll') : t('trashPage.selectAll') }}
+        </button>
+        <button
+          class="min-h-[2.35rem] px-4 py-[0.6rem] rounded-[0.75rem] border border-border bg-surface text-text font-semibold disabled:opacity-55 disabled:cursor-not-allowed"
+          type="button"
           :disabled="selectedCount === 0 || processing"
           @click="restoreConfirmOpen = true"
         >
@@ -40,6 +48,27 @@
       :message="trashStore.error"
     />
     <template v-else>
+      <p
+        v-if="deletionProgressLabel"
+        class="m-0 px-4 py-[0.75rem] rounded-[0.85rem] border border-border text-[0.88rem] text-muted bg-surface"
+        role="status"
+        aria-live="polite"
+      >
+        {{ deletionProgressLabel }}
+      </p>
+      <div
+        v-else-if="deletionFailureLabel"
+        class="m-0 flex items-center justify-between gap-3 px-4 py-[0.75rem] rounded-[0.85rem] border border-[rgba(217,48,37,0.24)] text-[0.88rem] text-[#b42318] bg-[rgba(217,48,37,0.08)] max-sm:flex-col max-sm:items-start"
+      >
+        <span>{{ deletionFailureLabel }}</span>
+        <button
+          class="min-h-[2rem] px-3 py-[0.4rem] rounded-[0.6rem] border border-[rgba(217,48,37,0.32)] bg-transparent text-[#b42318] font-semibold"
+          type="button"
+          @click="dismissDeletionResult"
+        >
+          {{ t('trashPage.dismissDeletionResult') }}
+        </button>
+      </div>
       <p
         v-if="actionError"
         class="m-0 px-4 py-[0.75rem] rounded-[0.85rem] border border-[rgba(217,48,37,0.24)] text-[0.88rem] text-[#b42318] bg-[rgba(217,48,37,0.08)]"
@@ -93,7 +122,7 @@
                 :src="item.thumbnailUrl"
                 :alt="item.filename"
                 loading="lazy"
-                :retry-while="appStore.isScanning"
+                :retry-while="appStore.isInitialScan"
                 :class="[
                   'h-full w-full object-cover transition-[transform,filter] duration-180',
                   isSelected(item.id) ? 'scale-[1.02] saturate-[1.05]' : 'group-hover:scale-[1.01]'
@@ -146,7 +175,7 @@
       :message="restoreDialogMessage"
       :confirm-label="t('trashPage.restoreDialog.confirm')"
       :cancel-label="t('common.cancel')"
-      :loading-label="t('trashPage.restoreDialog.loading')"
+      :loading-label="progressLabel ?? t('trashPage.restoreDialog.loading')"
       :loading="processing"
       @cancel="restoreConfirmOpen = false"
       @confirm="handleRestore"
@@ -158,7 +187,7 @@
       :message="permanentDeleteDialogMessage"
       :confirm-label="t('trashPage.deleteDialog.confirm')"
       :cancel-label="t('common.cancel')"
-      :loading-label="t('trashPage.deleteDialog.loading')"
+      :loading-label="progressLabel ?? t('trashPage.deleteDialog.loading')"
       :loading="processing"
       @cancel="permanentConfirmOpen = false"
       @confirm="handlePermanentDelete"
@@ -177,7 +206,7 @@ import { computed, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { RouterLink } from 'vue-router';
 
-import { deleteImage, restoreImage } from '../api/gallery';
+import { restoreImage } from '../api/gallery';
 import ConfirmDialog from '../components/ConfirmDialog.vue';
 import EmptyState from '../components/EmptyState.vue';
 import ErrorState from '../components/ErrorState.vue';
@@ -201,11 +230,17 @@ const momentsStore = useMomentsStore();
 const trashStore = useTrashStore();
 const selectedIds = ref<number[]>([]);
 const actionError = ref<string | null>(null);
+const lastFailureMessage = ref<string | null>(null);
 const processing = ref(false);
+const processedCount = ref(0);
+const processingTotal = ref(0);
 const restoreConfirmOpen = ref(false);
 const permanentConfirmOpen = ref(false);
 
 const selectedCount = computed(() => selectedIds.value.length);
+const allVisibleSelected = computed(
+  () => trashStore.items.length > 0 && trashStore.items.every((item) => selectedIds.value.includes(item.id))
+);
 const libraryUnavailableDescription = computed(() => appStore.stats?.storage.reason ?? t('trashPage.libraryUnavailableDescription'));
 const selectedCountLabel = computed(() => {
   const count = formatCount(selectedCount.value);
@@ -216,6 +251,47 @@ const restoreDialogMessage = computed(() => {
   return selectedCount.value === 1
     ? t('trashPage.restoreDialog.messageOne', { count })
     : t('trashPage.restoreDialog.messageOther', { count });
+});
+// Restores are quick, so their dialog keeps a simple in-place progress label.
+const progressLabel = computed(() => {
+  if (!processing.value || processingTotal.value === 0) {
+    return undefined;
+  }
+
+  return t('trashPage.processingProgress', {
+    done: formatCount(processedCount.value),
+    total: formatCount(processingTotal.value)
+  });
+});
+// Permanent deletion runs in the store so it keeps going while the user browses
+// elsewhere. This banner reports its progress whenever the page is visible.
+const deletionProgressLabel = computed(() => {
+  if (!trashStore.deletionActive) {
+    return null;
+  }
+
+  return t('trashPage.deletionProgress', {
+    done: formatCount(trashStore.deletionProcessed),
+    total: formatCount(trashStore.deletionTotal)
+  });
+});
+const deletionFailureLabel = computed(() => {
+  if (trashStore.deletionActive) {
+    return null;
+  }
+
+  if (trashStore.deletionFailedCount === 0) {
+    // A stalled batch (for example storage offline) reports a message without failures.
+    return trashStore.deletionErrorMessage;
+  }
+
+  const count = formatCount(trashStore.deletionFailedCount);
+  const summary =
+    trashStore.deletionFailedCount === 1
+      ? t('trashPage.errors.processOne', { count })
+      : t('trashPage.errors.processOther', { count });
+
+  return trashStore.deletionErrorMessage ? `${summary} ${trashStore.deletionErrorMessage}` : summary;
 });
 const permanentDeleteDialogMessage = computed(() => {
   const count = formatCount(selectedCount.value);
@@ -235,6 +311,20 @@ function toggleSelected(id: number) {
   }
 
   selectedIds.value = [...selectedIds.value, id];
+}
+
+function toggleAllVisible() {
+  if (allVisibleSelected.value) {
+    const visibleIds = new Set(trashStore.items.map((item) => item.id));
+    selectedIds.value = selectedIds.value.filter((id) => !visibleIds.has(id));
+    return;
+  }
+
+  const selectedIdSet = new Set(selectedIds.value);
+  for (const item of trashStore.items) {
+    selectedIdSet.add(item.id);
+  }
+  selectedIds.value = [...selectedIdSet];
 }
 
 function displayCaption(item: { filename: string; caption?: string | null }) {
@@ -283,7 +373,7 @@ function refreshVisibleDataInBackground() {
   });
 }
 
-async function processSelection(action: 'restore' | 'delete') {
+async function processRestoreSelection() {
   const ids = [...selectedIds.value];
   if (ids.length === 0) {
     return {
@@ -294,34 +384,39 @@ async function processSelection(action: 'restore' | 'delete') {
 
   processing.value = true;
   actionError.value = null;
+  processedCount.value = 0;
+  processingTotal.value = ids.length;
   const succeeded: number[] = [];
   let failedCount = 0;
 
   for (const id of ids) {
     try {
-      if (action === 'restore') {
-        await restoreImage(id);
-      } else {
-        await deleteImage(id);
-      }
+      await restoreImage(id);
       succeeded.push(id);
-    } catch {
+      // Drop the row as soon as the server confirms it so long batches show progress.
+      trashStore.removeItems([id]);
+      selectedIds.value = selectedIds.value.filter((selectedId) => selectedId !== id);
+    } catch (error) {
       failedCount += 1;
+      if (failedCount === 1) {
+        lastFailureMessage.value = error instanceof Error ? error.message : null;
+      }
+    } finally {
+      processedCount.value += 1;
     }
-  }
-
-  if (succeeded.length > 0) {
-    trashStore.removeItems(succeeded);
-    selectedIds.value = selectedIds.value.filter((id) => !succeeded.includes(id));
   }
 
   if (failedCount > 0) {
     const count = formatCount(failedCount);
-    actionError.value =
+    const summary =
       failedCount === 1 ? t('trashPage.errors.processOne', { count }) : t('trashPage.errors.processOther', { count });
+    actionError.value = lastFailureMessage.value ? `${summary} ${lastFailureMessage.value}` : summary;
   }
 
   processing.value = false;
+  processedCount.value = 0;
+  processingTotal.value = 0;
+  lastFailureMessage.value = null;
 
   if (succeeded.length > 0) {
     refreshVisibleDataInBackground();
@@ -334,23 +429,39 @@ async function processSelection(action: 'restore' | 'delete') {
 }
 
 async function handleRestore() {
-  const result = await processSelection('restore');
+  const result = await processRestoreSelection();
   if (result.succeededCount > 0 || result.failedCount === 0) {
     restoreConfirmOpen.value = false;
   }
 }
 
-async function handlePermanentDelete() {
-  const result = await processSelection('delete');
-  if (result.succeededCount > 0 || result.failedCount === 0) {
+function handlePermanentDelete() {
+  const ids = [...selectedIds.value];
+  if (ids.length === 0) {
     permanentConfirmOpen.value = false;
+    return;
   }
+
+  // Hand the batch to the server and close the dialog right away. The job keeps
+  // running even if this tab is closed, so the user is free to browse elsewhere.
+  permanentConfirmOpen.value = false;
+  selectedIds.value = [];
+  actionError.value = null;
+
+  void trashStore.deletePermanently(ids);
+}
+
+function dismissDeletionResult() {
+  void trashStore.dismissDeletionResult();
 }
 
 onMounted(async () => {
   if (appStore.isLibraryUnavailable) {
     return;
   }
+
+  // Reconnect to a batch that may still be running from an earlier session.
+  void trashStore.syncDeletionJob();
 
   if (trashStore.initialized) {
     void trashStore.loadInitial(true);
@@ -359,6 +470,17 @@ onMounted(async () => {
 
   await trashStore.loadInitial(true);
 });
+
+// Once the server-side batch settles, refresh the other views so their counts
+// reflect the removed posts.
+watch(
+  () => trashStore.deletionActive,
+  (active, wasActive) => {
+    if (wasActive && !active && trashStore.deletionTotal > 0) {
+      refreshVisibleDataInBackground();
+    }
+  }
+);
 
 watch(
   () => trashStore.items.map((item) => item.id),

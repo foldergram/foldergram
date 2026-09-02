@@ -6,7 +6,7 @@
     @scroll="handleScroll"
   >
     <div
-      v-for="item in items"
+      v-for="(item, index) in items"
       :key="item.id"
       :ref="setPanelRef(item.id)"
       class="reel-deck__panel"
@@ -15,6 +15,7 @@
         :item="item"
         :folder="folderLookup.get(item.folderSlug) ?? null"
         :active="item.id === activeReelId"
+        :prefetch="prefetchIndexes.has(index)"
       >
         <template v-if="item.id === activeReelId" #mobile-action-rail>
           <slot
@@ -36,7 +37,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type ComponentPublicInstance } from 'vue';
 
 import type { FeedItem, FolderSummary } from '../types/api';
-import { getActiveReelId, shouldPrefetchReels } from '../utils/reels';
+import { getActiveReelId, getReelPrefetchIndexes, shouldPrefetchReels } from '../utils/reels';
 import ReelPlayerCard from './ReelPlayerCard.vue';
 
 const props = defineProps<{
@@ -54,6 +55,13 @@ const emit = defineEmits<{
 const scrollerElement = ref<HTMLElement | null>(null);
 const panelElements = new Map<number, HTMLElement>();
 const folderLookup = computed(() => new Map(props.folders.map((folder) => [folder.slug, folder])));
+// Warming the neighbours is what removes the stall on the first frame after a swipe.
+const prefetchIndexes = computed(() =>
+  getReelPrefetchIndexes(
+    props.items.findIndex((item) => item.id === props.activeReelId),
+    props.items.length
+  )
+);
 
 let resizeObserver: ResizeObserver | null = null;
 let scrollFrame = 0;
@@ -171,7 +179,7 @@ function handleScroll() {
   scheduleActiveUpdate();
 }
 
-function scrollToIndex(index: number) {
+function scrollToIndex(index: number, behavior: ScrollBehavior = 'smooth') {
   const nextItem = props.items[index];
   const scroller = scrollerElement.value;
   if (!nextItem || !scroller) {
@@ -185,8 +193,20 @@ function scrollToIndex(index: number) {
 
   scroller.scrollTo({
     top: panel.offsetTop,
-    behavior: 'smooth'
+    behavior
   });
+}
+
+function restoreActiveReel() {
+  const activeIndex = props.items.findIndex((item) => item.id === props.activeReelId);
+  if (activeIndex < 0) {
+    return;
+  }
+
+  // A kept-alive snap scroller can be laid out at scrollTop 0 while hidden. Restore
+  // from the stable reel id after the route becomes visible, not from that transient 0.
+  scrollToIndex(activeIndex, 'auto');
+  scheduleActiveUpdate();
 }
 
 function navigateByOffset(offset: number) {
@@ -322,7 +342,9 @@ onBeforeUnmount(() => {
 defineExpose({
   goToPrevious,
   goToNext,
-  navigateByWheel
+  navigateByWheel,
+  restoreActiveReel,
+  getScrollElement: () => scrollerElement.value
 });
 </script>
 

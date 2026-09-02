@@ -333,7 +333,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
 
@@ -348,6 +348,10 @@ import type { FolderSummary } from '../types/api';
 import { searchFolders, rankExploreItems } from '../utils/explore';
 import { formatFolderTitle } from '../utils/folder-titles';
 import { buildLikedCountByFolder } from '../utils/home-recommendations';
+import { useRouteScrollMemory } from '../composables/useRouteScrollMemory';
+
+// Named explicitly so <KeepAlive include> keeps matching after a minified build.
+defineOptions({ name: 'ExploreView' });
 
 type SearchTab = 'media' | 'folders';
 
@@ -357,6 +361,7 @@ const appStore = useAppStore();
 const exploreStore = useExploreStore();
 const foldersStore = useFoldersStore();
 const likesStore = useLikesStore();
+useRouteScrollMemory({ key: 'explore' });
 const route = useRoute();
 const router = useRouter();
 const { t, locale } = useI18n();
@@ -623,6 +628,16 @@ onMounted(async () => {
 
   window.addEventListener('keydown', handleWindowKeydown);
   await Promise.all(tasks);
+});
+
+// This route is cached, so the Escape handler must only be bound while search is on
+// screen; otherwise Escape on another tab would clear the search chrome invisibly.
+onActivated(() => {
+  window.addEventListener('keydown', handleWindowKeydown);
+});
+
+onDeactivated(() => {
+  window.removeEventListener('keydown', handleWindowKeydown);
 });
 
 onUnmounted(() => {

@@ -20,7 +20,7 @@
           isImmersiveShell
             ? 'px-0 pt-0 pb-0 md:px-0 md:pt-0 md:pb-0'
             : 'px-10 pt-7 pb-28 md:px-[0.9rem] md:pt-4 md:pb-10',
-          showStickyScanStatus && !isReelsShell ? 'pb-48 md:pb-40' : ''
+          showStickyScanStatus && isScanBannerExpanded && !isReelsShell ? 'pb-48 md:pb-40' : ''
         ]"
       >
         <slot />
@@ -33,7 +33,22 @@
       role="status"
       aria-live="polite"
     >
+      <button
+        v-if="!isScanBannerExpanded"
+        class="app-shell__scan-chip pointer-events-auto inline-flex items-center gap-2 self-end rounded-full border border-white/12 px-[0.85rem] py-[0.42rem] text-[0.78rem] font-semibold text-white shadow-[0_18px_40px_rgba(15,23,42,0.32)] backdrop-blur-[18px]"
+        style="background: linear-gradient(135deg, rgba(15,23,42,0.92) 0%, rgba(17,24,39,0.96) 100%);"
+        type="button"
+        data-test="scan-banner-expand"
+        :aria-label="t('app.scanBanner.expand')"
+        :title="t('app.scanBanner.expand')"
+        @click="expandScanBanner"
+      >
+        <span class="app-shell__scan-chip-dot" aria-hidden="true" />
+        <span>{{ stickyScanPhaseLabel }}</span>
+      </button>
+
       <section
+        v-else
         class="pointer-events-auto w-[min(100%,44rem)] rounded-[1.15rem] border border-white/12 px-4 py-[0.95rem] text-white shadow-[0_24px_60px_rgba(15,23,42,0.38)] backdrop-blur-[18px] md:px-5"
         style="background: linear-gradient(135deg, rgba(15,23,42,0.95) 0%, rgba(17,24,39,0.98) 100%);"
       >
@@ -46,12 +61,24 @@
                 {{ stickyScanActionLine }}
               </p>
             </div>
-            <span
-              class="inline-flex items-center justify-center min-h-8 px-[0.72rem] py-[0.34rem] rounded-full text-[0.73rem] font-bold whitespace-nowrap text-[#dbeafe]"
-              style="background: rgba(78, 197, 255, 0.16);"
-            >
-              {{ stickyScanPhaseLabel }}
-            </span>
+            <div class="flex items-center gap-2">
+              <span
+                class="inline-flex items-center justify-center min-h-8 px-[0.72rem] py-[0.34rem] rounded-full text-[0.73rem] font-bold whitespace-nowrap text-[#dbeafe]"
+                style="background: rgba(78, 197, 255, 0.16);"
+              >
+                {{ stickyScanPhaseLabel }}
+              </span>
+              <button
+                class="app-shell__scan-collapse inline-flex h-8 w-8 items-center justify-center rounded-full border-0 text-white/80"
+                type="button"
+                data-test="scan-banner-collapse"
+                :aria-label="t('app.scanBanner.collapse')"
+                :title="t('app.scanBanner.collapse')"
+                @click="collapseScanBanner"
+              >
+                <span class="i-fluent-chevron-down-20-regular h-5 w-5" aria-hidden="true" />
+              </button>
+            </div>
           </div>
 
           <div
@@ -81,7 +108,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { useRoute } from 'vue-router';
 
 import SidebarNav from './SidebarNav.vue';
@@ -96,14 +124,63 @@ import {
   getScanSummary
 } from '../utils/scan-progress';
 
+const { t } = useI18n();
 const appStore = useAppStore();
 const route = useRoute();
+
+/**
+ * The banner sits over the feed, so it has to be dismissible. Collapsing is remembered
+ * per scan run: a new scan is new information and earns one more appearance, while the
+ * run the viewer already dismissed stays out of the way across reloads. Detailed
+ * progress lives on the settings page.
+ */
+const SCAN_BANNER_DISMISSED_KEY = 'foldergram-scan-banner-dismissed';
+const dismissedScanSession = ref<string | null>(null);
 const isStandaloneDisplay = ref(false);
 const isExploreShell = computed(() => route.meta.shell === 'explore');
 const isReelsShell = computed(() => route.meta.shell === 'reels');
 const isImmersiveShell = computed(() => isExploreShell.value || isReelsShell.value);
 const activeScan = computed(() => appStore.stats?.scan ?? null);
 const showStickyScanStatus = computed(() => Boolean(activeScan.value?.isScanning));
+// `runId` stands for the scan session; the start timestamp covers a server that does
+// not report one, and a scan with neither simply cannot be remembered as dismissed.
+const scanSessionId = computed(() => {
+  const scan = activeScan.value;
+  if (!scan?.isScanning) {
+    return null;
+  }
+
+  const identity = scan.runId ?? scan.startedAt;
+  return identity === null || identity === undefined ? null : String(identity);
+});
+const isScanBannerExpanded = computed(
+  () => scanSessionId.value === null || dismissedScanSession.value !== scanSessionId.value
+);
+
+function collapseScanBanner() {
+  const session = scanSessionId.value;
+  dismissedScanSession.value = session;
+
+  if (session === null) {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(SCAN_BANNER_DISMISSED_KEY, session);
+  } catch {
+    // A blocked storage quota only costs the memory of the choice.
+  }
+}
+
+function expandScanBanner() {
+  dismissedScanSession.value = null;
+
+  try {
+    window.localStorage.removeItem(SCAN_BANNER_DISMISSED_KEY);
+  } catch {
+    // Nothing to undo if storage is unavailable.
+  }
+}
 
 const stickyScanTitle = computed(() => {
   if (activeScan.value?.scanReason === 'rebuild') {
@@ -124,14 +201,46 @@ const stickyScanMetricLine = computed(() => getScanMetricLine(activeScan.value))
 const stickyScanBarState = computed(() => getScanBarState(activeScan.value));
 
 onMounted(() => {
+  try {
+    dismissedScanSession.value = window.localStorage.getItem(SCAN_BANNER_DISMISSED_KEY);
+  } catch {
+    dismissedScanSession.value = null;
+  }
+
   const navigatorWithStandalone = navigator as Navigator & { standalone?: boolean };
   isStandaloneDisplay.value =
     window.matchMedia('(display-mode: standalone)').matches ||
     navigatorWithStandalone.standalone === true;
 });
+
+// A finished scan clears the stored dismissal so the next run is announced once.
+watch(
+  () => activeScan.value?.isScanning ?? false,
+  (isScanning) => {
+    if (!isScanning && dismissedScanSession.value !== null) {
+      expandScanBanner();
+    }
+  }
+);
 </script>
 
 <style scoped>
+.app-shell__scan-collapse {
+  background: rgba(255, 255, 255, 0.1);
+  cursor: pointer;
+}
+
+.app-shell__scan-chip {
+  cursor: pointer;
+}
+
+.app-shell__scan-chip-dot {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 999px;
+  background: #38bdf8;
+}
+
 .app-shell {
   --mobile-safe-area-bottom: 0px;
   --mobile-bottom-nav-height: calc(3.55rem + var(--mobile-safe-area-bottom));

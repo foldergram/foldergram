@@ -1,6 +1,9 @@
 services:
   foldergram:
-    image: ghcr.io/foldergram/foldergram:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: foldergram:current
     ports:
       - "4141:4141"
     environment:

@@ -127,4 +127,37 @@ describe('reels utils', () => {
     expect(queue[0]?.folderSlug).toBe('alpha');
     expect(queue[1]?.folderSlug).not.toBe('alpha');
   });
+
+  it('returns the same head when the queue is capped as when it is built in full', () => {
+    const candidates = Array.from({ length: 60 }, (_, index) =>
+      createCandidate(index + 1, {
+        folderSlug: index % 3 === 0 ? 'dominant' : `folder-${index % 11}`,
+        takenAt: 1_778_300_000_000 + index * 1_000,
+        sortTimestamp: 1_778_300_000_000 + index * 1_000
+      })
+    );
+
+    const full = buildReelQueue(candidates, 4_242);
+    const capped = buildReelQueue(candidates, 4_242, {}, 12);
+
+    expect(capped).toHaveLength(12);
+    expect(capped.map((candidate) => candidate.id)).toEqual(full.slice(0, 12).map((candidate) => candidate.id));
+  });
+
+  it('builds a page of reels for a large library without walking the whole queue', () => {
+    const candidates = Array.from({ length: 4_000 }, (_, index) =>
+      createCandidate(index + 1, {
+        // Half the library in one folder is what makes the diversity pass expensive.
+        folderSlug: index % 2 === 0 ? 'dominant' : `folder-${index % 400}`,
+        takenAt: 1_778_300_000_000 + index * 1_000,
+        sortTimestamp: 1_778_300_000_000 + index * 1_000
+      })
+    );
+
+    const startedAt = Date.now();
+    const page = buildReelQueue(candidates, 9_001, {}, 6);
+
+    expect(page).toHaveLength(6);
+    expect(Date.now() - startedAt).toBeLessThan(1_000);
+  });
 });

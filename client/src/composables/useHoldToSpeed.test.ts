@@ -1,0 +1,435 @@
+import { describe, expect, it, vi } from 'vitest';
+
+import { useHoldToSpeed, type GesturePoint } from './useHoldToSpeed';
+
+function createHarness(options: {
+  currentTime?: number;
+  duration?: number;
+  commitSeek?: (seconds: number, setCurrentTime: (seconds: number) => void) => void | Promise<void>;
+  getGesturePoint?: (event: PointerEvent) => GesturePoint;
+  getScrubPoint?: (event: PointerEvent) => GesturePoint;
+  onGestureEnd?: () => void;
+  onGestureStart?: () => void;
+} = {}) {
+  let currentTime = options.currentTime ?? 30;
+  let playbackRate = 1;
+  let playCalls = 0;
+  let rateWrites: number[] | null = null;
+  const surface = document.createElement('div');
+
+  const hold = useHoldToSpeed({
+    getCurrentTime: () => currentTime,
+    getDuration: () => options.duration ?? 120,
+    seekTo: (seconds) => {
+      if (options.commitSeek) {
+        return options.commitSeek(seconds, (next) => {
+          currentTime = next;
+        });
+      }
+
+      currentTime = seconds;
+    },
+    getPlaybackRate: () => playbackRate,
+    setPlaybackRate: (rate) => {
+      playbackRate = rate;
+      rateWrites?.push(rate);
+    },
+    play: () => {
+      playCalls += 1;
+    },
+    getGesturePoint: options.getGesturePoint,
+    getScrubPoint: options.getScrubPoint,
+    onGestureStart: options.onGestureStart,
+    onGestureEnd: options.onGestureEnd
+  });
+
+  // jsdom has no PointerEvent constructor, so the handlers get the shape they read.
+  function press(clientX = 200, clientY = 150) {
+    hold.onPointerdown({ clientX, clientY, isPrimary: true, pointerId: 1, currentTarget: surface } as unknown as PointerEvent);
+  }
+
+  function move(clientX: number, clientY = 150) {
+    hold.onPointermove({ clientX, clientY, pointerId: 1 } as unknown as PointerEvent);
+  }
+
+  function release(clientX = 200, clientY = 150) {
+    hold.onPointerup({ clientX, clientY, pointerId: 1 } as unknown as PointerEvent);
+  }
+
+  function setPlaybackRate(rate: number) {
+    playbackRate = rate;
+  }
+
+  function recordRateWrites(sink: number[]) {
+    rateWrites = sink;
+  }
+
+  return {
+    hold,
+    press,
+    move,
+    release,
+    setPlaybackRate,
+    recordRateWrites,
+    surface,
+    getCurrentTime: () => currentTime,
+    getPlaybackRate: () => playbackRate,
+    getPlayCalls: () => playCalls
+  };
+}
+
+describe('useHoldToSpeed', () => {
+  it('speeds playback up while held anywhere and restores the rate on release', () => {
+    vi.useFakeTimers();
+    const harness = createHarness();
+
+    harness.press();
+    expect(harness.getPlaybackRate()).toBe(1);
+
+    vi.advanceTimersByTime(300);
+    expect(harness.hold.isFastForwarding.value).toBe(true);
+    expect(harness.getPlaybackRate()).toBe(2);
+
+    harness.release();
+    expect(harness.hold.isFastForwarding.value).toBe(false);
+    expect(harness.getPlaybackRate()).toBe(1);
+    // Never leave the clip parked: releasing resumes normal-speed playback.
+    expect(harness.getPlayCalls()).toBeGreaterThanOrEqual(2);
+    vi.useRealTimers();
+  });
+
+  it('does not let a stuck rate become the baseline across two holds', () => {
+    vi.useFakeTimers();
+    const harness = createHarness();
+
+    harness.press();
+    vi.advanceTimersByTime(300);
+    expect(harness.getPlaybackRate()).toBe(2);
+
+    // Simulate the release being lost, so the element is still parked at 2x.
+    harness.hold.isFastForwarding.value = false;
+
+    harness.press();
+    vi.advanceTimersByTime(300);
+    expect(harness.getPlaybackRate()).toBe(2);
+
+    harness.release();
+    // Sampling the current rate on activation used to make 2x the new "normal".
+    expect(harness.getPlaybackRate()).toBe(1);
+    vi.useRealTimers();
+  });
+
+  it('restores the baseline from a window pointerup when the surface never sees it', () => {
+    vi.useFakeTimers();
+    const harness = createHarness();
+
+    harness.press();
+    vi.advanceTimersByTime(300);
+    expect(harness.getPlaybackRate()).toBe(2);
+
+    // The captured element left the DOM mid-hold, so only the window hears the release.
+    const event = new Event('pointerup');
+    Object.defineProperty(event, 'pointerId', { value: 1 });
+    window.dispatchEvent(event);
+
+    expect(harness.hold.isFastForwarding.value).toBe(false);
+    expect(harness.getPlaybackRate()).toBe(1);
+    vi.useRealTimers();
+  });
+
+  it('writes the baseline back even when stop runs with no hold flagged', () => {
+    const harness = createHarness();
+
+    harness.setPlaybackRate(2);
+    harness.hold.stop();
+
+    expect(harness.getPlaybackRate()).toBe(1);
+  });
+
+  it('leaves a short tap alone so it still counts as a click', () => {
+    vi.useFakeTimers();
+    const harness = createHarness();
+
+    harness.press();
+    vi.advanceTimersByTime(120);
+    harness.release();
+
+    expect(harness.hold.isFastForwarding.value).toBe(false);
+    expect(harness.getPlaybackRate()).toBe(1);
+    expect(harness.hold.shouldSuppressClick()).toBe(false);
+    vi.useRealTimers();
+  });
+
+  it('scrubs on a horizontal drag and commits the seek when the finger lifts', () => {
+    vi.useFakeTimers();
+    const harness = createHarness({ currentTime: 30 });
+
+    harness.press(200);
+    harness.move(300);
+
+    expect(harness.hold.isScrubbing.value).toBe(true);
+    expect(harness.hold.scrubSeconds.value).toBeCloseTo(42, 5);
+    // Not committed until release, so the preview can be shown first.
+    expect(harness.getCurrentTime()).toBe(30);
+
+    harness.release(300);
+    expect(harness.getCurrentTime()).toBeCloseTo(42, 5);
+    expect(harness.hold.isScrubbing.value).toBe(false);
+    expect(harness.hold.shouldSuppressClick()).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it('waits for the final seek to settle before resuming playback', async () => {
+    const seekSettlers: Array<() => void> = [];
+    const harness = createHarness({
+      currentTime: 300,
+      duration: 600,
+      commitSeek: (seconds, setCurrentTime) =>
+        new Promise<void>((resolve) => {
+          seekSettlers.push(() => {
+            setCurrentTime(seconds);
+            resolve();
+          });
+        })
+    });
+
+    harness.press(200);
+    harness.move(300);
+    harness.release(300);
+
+    // Starting playback before the provider acknowledges its new seek target lets a
+    // direct stream resume on the old decoded segment. This must stay at zero until
+    // the final seek transaction settles.
+    expect(harness.getPlayCalls()).toBe(0);
+    expect(seekSettlers).toHaveLength(1);
+
+    seekSettlers[0]?.();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(harness.getCurrentTime()).toBeCloseTo(312, 5);
+    expect(harness.getPlayCalls()).toBe(1);
+  });
+
+  it('keeps a second swipe relative to the already-scrubbed time, not the finger X', () => {
+    vi.useFakeTimers();
+    const harness = createHarness({ currentTime: 30 });
+
+    harness.press(200);
+    harness.move(300);
+    harness.release(300);
+    expect(harness.getCurrentTime()).toBeCloseTo(42, 5);
+
+    harness.press(50);
+    harness.move(10);
+    harness.release(10);
+
+    expect(harness.getCurrentTime()).toBeCloseTo(37.2, 5);
+    vi.useRealTimers();
+  });
+
+  it('notifies the host after a surface scrub fully releases', () => {
+    vi.useFakeTimers();
+    const onGestureEnd = vi.fn();
+    const harness = createHarness({ onGestureEnd });
+
+    harness.press(200, 150);
+    harness.move(300, 150);
+    harness.release(300, 150);
+
+    expect(onGestureEnd).toHaveBeenCalledTimes(1);
+    harness.hold.stop();
+    expect(onGestureEnd).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+  });
+
+  it('notifies the host when horizontal scrub takes ownership', () => {
+    vi.useFakeTimers();
+    const onGestureStart = vi.fn();
+    const harness = createHarness({ onGestureStart });
+
+    harness.press(200, 150);
+    harness.move(300, 150);
+
+    expect(onGestureStart).toHaveBeenCalledTimes(1);
+    harness.release(300, 150);
+    vi.useRealTimers();
+  });
+
+  it('maps a rotated screen drag onto the video horizontal axis', () => {
+    vi.useFakeTimers();
+    const harness = createHarness({
+      getGesturePoint: (event) => ({ x: event.clientY, y: -event.clientX })
+    });
+
+    harness.press(200, 100);
+    harness.move(200, 200);
+    harness.release(200, 200);
+
+    expect(harness.getCurrentTime()).toBeCloseTo(42, 5);
+    vi.useRealTimers();
+  });
+
+  it('keeps landscape screen-horizontal scrubbing independent from dismiss coordinates', () => {
+    vi.useFakeTimers();
+    const harness = createHarness({
+      getGesturePoint: (event) => ({ x: event.clientY, y: -event.clientX }),
+      getScrubPoint: (event) => ({ x: event.clientX, y: event.clientY })
+    });
+
+    harness.press(200, 100);
+    harness.move(300, 100);
+    expect(harness.hold.scrubSeconds.value).toBeCloseTo(42, 5);
+    harness.release(300, 100);
+
+    expect(harness.getCurrentTime()).toBeCloseTo(42, 5);
+    vi.useRealTimers();
+  });
+
+  it('hands a slow horizontal drag to the scrub instead of fast playback', () => {
+    vi.useFakeTimers();
+    const harness = createHarness({ currentTime: 30 });
+
+    harness.press(200);
+    // The finger moved sideways before the hold timer was due, so the timer must be
+    // dropped: it used to fire mid-drag and leave the clip at 2x for the whole scrub.
+    harness.move(216);
+    vi.advanceTimersByTime(600);
+
+    expect(harness.hold.isFastForwarding.value).toBe(false);
+    expect(harness.getPlaybackRate()).toBe(1);
+    expect(harness.hold.isScrubbing.value).toBe(true);
+
+    harness.release(216);
+    expect(harness.getPlaybackRate()).toBe(1);
+    expect(harness.getCurrentTime()).toBeCloseTo(31.92, 5);
+    vi.useRealTimers();
+  });
+
+  it('drops back to normal speed when a hold turns into a scrub', () => {
+    vi.useFakeTimers();
+    const harness = createHarness({ currentTime: 30 });
+
+    harness.press(200);
+    vi.advanceTimersByTime(300);
+    expect(harness.getPlaybackRate()).toBe(2);
+
+    // Sliding after the hold fired used to be ignored, so the clip stayed at 2x until
+    // the finger lifted and the seek never happened.
+    harness.move(280);
+    expect(harness.hold.isFastForwarding.value).toBe(false);
+    expect(harness.getPlaybackRate()).toBe(1);
+    expect(harness.hold.isScrubbing.value).toBe(true);
+
+    harness.release(280);
+    expect(harness.getPlaybackRate()).toBe(1);
+    expect(harness.getCurrentTime()).toBeCloseTo(39.6, 5);
+    vi.useRealTimers();
+  });
+
+  it('hands a vertical drag to dismiss after fast playback has already started', () => {
+    vi.useFakeTimers();
+    const harness = createHarness();
+
+    harness.press(200, 150);
+    vi.advanceTimersByTime(300);
+    expect(harness.hold.isFastForwarding.value).toBe(true);
+    expect(harness.getPlaybackRate()).toBe(2);
+
+    harness.move(205, 230);
+
+    expect(harness.hold.isFastForwarding.value).toBe(false);
+    expect(harness.hold.isScrubbing.value).toBe(false);
+    expect(harness.getPlaybackRate()).toBe(1);
+    vi.useRealTimers();
+  });
+
+  it('rewrites the baseline even when the player misreports its rate', () => {
+    vi.useFakeTimers();
+    const harness = createHarness();
+
+    harness.press();
+    vi.advanceTimersByTime(300);
+    // vidstack answers with its own pending state, so a player really still at 2x can
+    // report 1 here. Trusting that report used to leave it fast forever.
+    harness.setPlaybackRate(1);
+    const writes: number[] = [];
+    harness.recordRateWrites(writes);
+
+    harness.release();
+    expect(writes).toEqual([1]);
+    vi.useRealTimers();
+  });
+
+  it('clamps a scrub inside the clip duration', () => {
+    vi.useFakeTimers();
+    const harness = createHarness({ currentTime: 110, duration: 120 });
+
+    harness.press(200);
+    harness.move(600);
+    harness.release(600);
+
+    expect(harness.getCurrentTime()).toBe(119.75);
+    vi.useRealTimers();
+  });
+
+  it('ignores a vertical drag so the host keeps its own gesture', () => {
+    vi.useFakeTimers();
+    const harness = createHarness();
+
+    harness.press(200, 150);
+    harness.move(206, 260);
+
+    expect(harness.hold.isScrubbing.value).toBe(false);
+    harness.release(206, 260);
+    expect(harness.getCurrentTime()).toBe(30);
+    vi.useRealTimers();
+  });
+
+  // The immersive layer turns the stage with `rotate(90deg)`, so the drag the viewer
+  // makes sideways arrives as screen-vertical movement. Both gesture points have to be
+  // mapped into the picture's frame or landscape scrubbing never activates.
+  it('scrubs a rotated stage from the viewer\'s sideways drag', () => {
+    vi.useFakeTimers();
+    const rotated = (event: PointerEvent): GesturePoint => ({ x: event.clientY, y: -event.clientX });
+    const harness = createHarness({ getGesturePoint: rotated, getScrubPoint: rotated });
+
+    harness.press(200, 150);
+    // Screen-vertical travel: in the picture's frame this is a sideways scrub.
+    harness.move(200, 260);
+
+    expect(harness.hold.isScrubbing.value).toBe(true);
+
+    harness.release(200, 260);
+    expect(harness.getCurrentTime()).toBeCloseTo(30 + 110 * 0.12, 5);
+    vi.useRealTimers();
+  });
+
+  it('still dismisses a rotated stage when the viewer swipes along the screen X axis', () => {
+    vi.useFakeTimers();
+    const rotated = (event: PointerEvent): GesturePoint => ({ x: event.clientY, y: -event.clientX });
+    const harness = createHarness({ getGesturePoint: rotated, getScrubPoint: rotated });
+
+    harness.press(200, 150);
+    harness.move(80, 150);
+
+    expect(harness.hold.isScrubbing.value).toBe(false);
+    harness.release(80, 150);
+    expect(harness.getCurrentTime()).toBe(30);
+    vi.useRealTimers();
+  });
+
+  it('drops a pending activation once the finger swipes vertically', () => {
+    vi.useFakeTimers();
+    const harness = createHarness();
+
+    harness.press(200, 150);
+    harness.move(202, 190);
+    vi.advanceTimersByTime(600);
+
+    // A slow reels swipe must not turn into fast playback partway through.
+    expect(harness.hold.isFastForwarding.value).toBe(false);
+    expect(harness.getPlaybackRate()).toBe(1);
+    vi.useRealTimers();
+  });
+});

@@ -1,9 +1,19 @@
 <template>
   <aside
     class="reels-info-sidebar sidebar"
-    :class="{ 'reels-info-sidebar--anchor-right': anchor === 'right' }"
+    :class="{
+      'reels-info-sidebar--anchor-right': anchor === 'right',
+      'reels-info-sidebar--sheet': variant === 'sheet'
+    }"
     :aria-label="t('reels.info.ariaLabel')"
+    :style="sheetStyle"
+    @pointercancel="dismiss.onPointercancel"
+    @pointerdown="onSheetPointerdown"
+    @pointermove="dismiss.onPointermove"
+    @pointerup="dismiss.onPointerup"
   >
+    <div v-if="variant === 'sheet'" class="reels-info-sidebar__grabber" aria-hidden="true" />
+
     <div class="reels-info-sidebar__header">
       <p class="reels-info-sidebar__eyebrow">{{ t('reels.info.eyebrow') }}</p>
 
@@ -96,6 +106,41 @@
       </div>
     </dl>
 
+    <button
+      class="reels-info-sidebar__share"
+      type="button"
+      data-test="reel-share"
+      :disabled="postShare.sharing.value"
+      @click="handleShare"
+    >
+      <span class="reels-info-sidebar__share-icon i-fluent-share-20-regular" aria-hidden="true" />
+      <span>{{ postShare.sharing.value ? t('share.post.creating') : postShare.copied.value ? t('share.post.copied') : t('share.post.action') }}</span>
+    </button>
+
+    <p v-if="postShare.error.value" class="reels-info-sidebar__delete-error" role="status">
+      {{ postShare.error.value }}
+    </p>
+
+    <p v-else-if="postShare.shareUrl.value && !postShare.copied.value" class="reels-info-sidebar__share-url">
+      {{ t('share.post.copyManually') }}
+      <span class="reels-info-sidebar__share-url-value">{{ postShare.shareUrl.value }}</span>
+    </p>
+
+    <button
+      v-if="deletion.canDelete.value"
+      class="reels-info-sidebar__delete"
+      type="button"
+      data-test="reel-delete"
+      :disabled="deletion.isDeleting.value"
+      @click="handleDelete"
+    >
+      <span class="reels-info-sidebar__delete-icon i-fluent-delete-20-regular" aria-hidden="true" />
+      <span>{{ t('reels.info.deleteVideo') }}</span>
+    </button>
+
+    <p v-if="deletion.error.value" class="reels-info-sidebar__delete-error" role="status">
+      {{ deletion.error.value }}
+    </p>
   </aside>
 </template>
 
@@ -105,6 +150,9 @@ import { useI18n } from 'vue-i18n';
 import { RouterLink } from 'vue-router';
 
 import { fetchImage } from '../api/gallery';
+import { usePostDeletion } from '../composables/usePostDeletion';
+import { usePostShare } from '../composables/usePostShare';
+import { useVerticalDismiss } from '../composables/useVerticalDismiss';
 import { useAppStore } from '../stores/app';
 import type { FeedItem, FolderSummary, ImageDetail } from '../types/api';
 import { resolveDisplayCaption } from '../utils/caption';
@@ -117,11 +165,14 @@ const props = withDefaults(defineProps<{
   folder: FolderSummary | null;
   open: boolean;
   anchor?: 'left' | 'right';
+  /** `sheet` is the phone presentation: a bottom sheet with a grabber and swipe-to-close. */
+  variant?: 'panel' | 'sheet';
 }>(), {
-  anchor: 'left'
+  anchor: 'left',
+  variant: 'panel'
 });
 
-defineEmits<{
+const emit = defineEmits<{
   close: [];
 }>();
 
@@ -132,7 +183,54 @@ const loading = ref(false);
 const error = ref<string | null>(null);
 
 const detailCache = new Map<number, ImageDetail>();
+const deletion = usePostDeletion();
+const postShare = usePostShare();
 let requestToken = 0;
+
+// Swipe-down to close, so the sheet behaves the way a phone sheet is expected to.
+const dismiss = useVerticalDismiss({
+  canStart: (event) =>
+    props.variant === 'sheet' &&
+    !(event.target instanceof Element && event.target.closest('button, a, input, label')),
+  minDistance: 72,
+  onDismiss: (direction) => {
+    if (direction === 'down') {
+      emit('close');
+    }
+  }
+});
+
+function onSheetPointerdown(event: PointerEvent) {
+  if (props.variant !== 'sheet') {
+    return;
+  }
+
+  dismiss.onPointerdown(event);
+}
+
+const sheetStyle = computed(() => {
+  if (props.variant !== 'sheet' || !dismiss.isDragging.value || dismiss.dragOffset.value <= 0) {
+    return undefined;
+  }
+
+  // Only downward travel follows the finger; dragging up must not lift the sheet off
+  // the bottom edge.
+  return { transform: `translateY(${Math.min(dismiss.dragOffset.value, 420)}px)` };
+});
+
+async function handleShare() {
+  await postShare.share(props.item.id);
+}
+
+// Straight to the Trash, no dialog: the Trash view is the undo, and permanent
+// deletion still asks first from the feed card.
+async function handleDelete() {
+  const deleted = await deletion.trashNow(props.item);
+  if (deleted) {
+    // The reel is gone, so the panel that described it has nothing left to show.
+    emit('close');
+  }
+}
 
 const hasExplicitItemCaption = computed(() => Object.hasOwn(props.item, 'caption'));
 const caption = computed(() =>
@@ -181,6 +279,7 @@ watch(
   ([open, itemId]) => {
     requestToken += 1;
     const currentToken = requestToken;
+    postShare.reset();
 
     if (!open) {
       detail.value = detailCache.get(itemId) ?? null;
@@ -259,6 +358,137 @@ watch(
   left: auto;
   border-right: 1px solid color-mix(in srgb, var(--border) 86%, transparent 14%);
   border-left: 0;
+}
+
+/* The reel details are a modal on phones too. Keeping it in the viewport center avoids
+   PWA viewport offsets that previously made this panel appear in the lower-left. */
+.reels-info-sidebar--sheet {
+  position: relative;
+  inset: auto;
+  z-index: 80;
+  width: min(22rem, calc(100vw - 2rem));
+  max-height: min(34rem, calc(100dvh - 2rem));
+  padding: 1rem;
+  border: 1px solid color-mix(in srgb, var(--border) 86%, transparent 14%);
+  border-radius: 1.35rem;
+  box-shadow: 0 22px 48px rgba(15, 20, 25, 0.32);
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+}
+
+.reels-info-sidebar--sheet::before {
+  content: none;
+}
+
+.reels-info-sidebar__grabber {
+  width: 2.6rem;
+  height: 0.25rem;
+  margin: 0.15rem auto 0.6rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--border) 70%, transparent 30%);
+}
+
+.reels-info-sidebar__share {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  width: 100%;
+  min-height: 2.5rem;
+  margin-top: 0.9rem;
+  padding: 0 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 0.85rem;
+  background: var(--surface-alt);
+  color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.reels-info-sidebar__share:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.reels-info-sidebar__share-icon {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+.reels-info-sidebar__share-url {
+  margin: 0.5rem 0 0;
+  overflow-wrap: anywhere;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.reels-info-sidebar__share-url-value {
+  display: block;
+  margin-top: 0.15rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.reels-info-sidebar__delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  width: 100%;
+  min-height: 2.5rem;
+  margin-top: 0.9rem;
+  padding: 0 0.9rem;
+  border: 1px solid rgba(217, 48, 37, 0.28);
+  border-radius: 0.85rem;
+  background: rgba(217, 48, 37, 0.08);
+  color: #d93025;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.reels-info-sidebar__delete:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.reels-info-sidebar__delete-icon {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+.reels-info-sidebar__delete-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.reels-info-sidebar__delete-option-title {
+  display: block;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.reels-info-sidebar__delete-option-hint {
+  display: block;
+  margin-top: 0.18rem;
+  font-size: 0.84rem;
+  color: var(--muted);
+}
+
+.reels-info-sidebar__delete-error {
+  margin: 0.75rem 0 0;
+  padding: 0.8rem 0.75rem;
+  border: 1px solid rgba(217, 48, 37, 0.24);
+  border-radius: 0.9rem;
+  background: rgba(217, 48, 37, 0.08);
+  font-size: 0.84rem;
+  color: #b42318;
 }
 
 .reels-info-sidebar__header {

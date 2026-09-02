@@ -70,7 +70,7 @@ interface PasswordGrant {
   version: number;
 }
 
-function decodeBase64Url(value: string | null): Buffer | null {
+export function decodeBase64Url(value: string | null): Buffer | null {
   if (!value) {
     return null;
   }
@@ -83,7 +83,7 @@ function decodeBase64Url(value: string | null): Buffer | null {
   }
 }
 
-function getShareSessionSecret(): Buffer {
+export function getShareSessionSecret(): Buffer {
   const existing = decodeBase64Url(appSettingsRepository.get(SHARE_SESSION_SECRET_SETTING_KEY));
   if (existing) {
     return existing;
@@ -94,11 +94,11 @@ function getShareSessionSecret(): Buffer {
   return secret;
 }
 
-function signValue(value: string, secret: Buffer): string {
+export function signValue(value: string, secret: Buffer): string {
   return createHmac('sha256', secret).update(value).digest('base64url');
 }
 
-function parseCookieValue(cookieHeader: string | undefined, cookieName: string): string | null {
+export function parseCookieValue(cookieHeader: string | undefined, cookieName: string): string | null {
   if (!cookieHeader) {
     return null;
   }
@@ -191,7 +191,7 @@ function parseSessionToken(token: string, secret: Buffer): ShareSessionPayload |
   }
 }
 
-function isSecureRequest(request: express.Request): boolean {
+export function isSecureRequest(request: express.Request): boolean {
   if (request.secure) {
     return true;
   }
@@ -209,7 +209,7 @@ function isSecureRequest(request: express.Request): boolean {
   return firstValue === 'https' || firstValue === 'https:';
 }
 
-function hashShareToken(token: string): string {
+export function hashShareToken(token: string): string {
   return createHash('sha256').update(token).digest('base64url');
 }
 

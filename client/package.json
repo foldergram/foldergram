@@ -11,6 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "hls.js": "1.6.16",
     "pinia": "^3.0.1",
     "vidstack": "^1.12.13",
     "vue": "^3.5.13",

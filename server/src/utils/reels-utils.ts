@@ -206,17 +206,36 @@ export function shuffleReelCandidates(
   });
 }
 
+/**
+ * Interleaves the ranked candidates so consecutive reels come from different
+ * folders. `limit` caps how many picks are produced: the greedy walk is
+ * sequential, so asking for one page worth of reels avoids paying for the whole
+ * library on every request.
+ */
 export function buildReelQueue(
   candidates: ReelRecommendationCandidate[],
   seed: number,
-  signals: ReelAffinitySignals = {}
+  signals: ReelAffinitySignals = {},
+  limit = Number.POSITIVE_INFINITY
 ): ReelRecommendationCandidate[] {
   const rankedCandidates = rankReelCandidates(candidates, seed, signals);
   const remaining = [...rankedCandidates];
   const queue: ReelRecommendationCandidate[] = [];
   const folderCounts = new Map<string, number>();
 
-  while (remaining.length > 0) {
+  // Tracks how many unplaced candidates each folder still has. Deriving
+  // "is another folder available" from these counters keeps the interleave
+  // linear per pick; scanning the remaining list for it made the whole queue
+  // quadratic on the number of candidates, which stalled the event loop for
+  // minutes on libraries with thousands of clips.
+  const remainingFolderCounts = new Map<string, number>();
+  for (const entry of remaining) {
+    remainingFolderCounts.set(entry.candidate.folderSlug, (remainingFolderCounts.get(entry.candidate.folderSlug) ?? 0) + 1);
+  }
+
+  const maximumPicks = Number.isFinite(limit) ? Math.max(0, Math.trunc(limit)) : Number.POSITIVE_INFINITY;
+
+  while (remaining.length > 0 && queue.length < maximumPicks) {
     const previousFolderSlug = queue.at(-1)?.folderSlug ?? null;
     const secondaryPreviousFolderSlug = queue.at(-2)?.folderSlug ?? null;
     let bestIndex = 0;
@@ -228,11 +247,16 @@ export function buildReelQueue(
         continue;
       }
 
+      // `remaining` stays sorted by descending raw score and every penalty only
+      // lowers it, so once the raw score drops to the best adjusted score found
+      // so far nothing further down the list can win.
+      if (entry.score <= bestAdjustedScore) {
+        break;
+      }
+
       let adjustedScore = entry.score;
-      const hasAlternativeFolder = remaining.some(
-        (candidate, candidateIndex) =>
-          candidateIndex !== index && candidate.candidate.folderSlug !== entry.candidate.folderSlug
-      );
+      const hasAlternativeFolder =
+        remaining.length - (remainingFolderCounts.get(entry.candidate.folderSlug) ?? 0) > 0;
 
       if (hasAlternativeFolder && previousFolderSlug && entry.candidate.folderSlug === previousFolderSlug) {
         adjustedScore -= PRIMARY_REPEAT_FOLDER_PENALTY;
@@ -257,6 +281,12 @@ export function buildReelQueue(
 
     queue.push(nextEntry.candidate);
     folderCounts.set(nextEntry.candidate.folderSlug, (folderCounts.get(nextEntry.candidate.folderSlug) ?? 0) + 1);
+    const stillRemaining = (remainingFolderCounts.get(nextEntry.candidate.folderSlug) ?? 1) - 1;
+    if (stillRemaining > 0) {
+      remainingFolderCounts.set(nextEntry.candidate.folderSlug, stillRemaining);
+    } else {
+      remainingFolderCounts.delete(nextEntry.candidate.folderSlug);
+    }
   }
 
   return queue;

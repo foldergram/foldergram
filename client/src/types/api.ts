@@ -4,6 +4,7 @@ export type FeedMode = 'recent' | 'rediscover' | 'random';
 export type ReelsFeedMode = 'recommended' | 'recent' | 'random';
 export type FolderImageOrder = 'newest' | 'oldest';
 export type NestedFolderTitleFormat = 'folder' | 'parent-plus-folder';
+export type VideoPlaybackQuality = 'auto' | 'original' | '1080p' | '720p' | '480p';
 export type FeedRailKind = 'moments' | 'highlights';
 export type StoryCapsulePresentation = 'avatar' | 'highlight';
 export type MediaType = 'image' | 'video';
@@ -45,6 +46,10 @@ export interface StoriesModeSetting {
   treatStoriesAsFolders: boolean;
 }
 
+export interface VideoPlaybackQualitySetting {
+  videoPlaybackQuality: VideoPlaybackQuality;
+}
+
 export interface ExcludedFoldersSettings {
   envExcludedFolders: string[];
   customExcludedFolders: string[];
@@ -52,6 +57,16 @@ export interface ExcludedFoldersSettings {
 }
 
 export interface UpdateExcludedFoldersSettingResult extends ExcludedFoldersSettings {
+  requiresScan: boolean;
+}
+
+export interface ScanFoldersPayload {
+  folders: string[];
+  selectedFolders: string[];
+}
+
+export interface UpdateScanFoldersResult {
+  selectedFolders: string[];
   requiresScan: boolean;
 }
 
@@ -68,7 +83,9 @@ export interface PostMediaItem {
   isAnimated: boolean | null;
   thumbnailUrl: string;
   previewUrl: string;
+  previewFileUrl?: string | null;
   playbackStrategy?: 'preview' | 'original' | null;
+  streamUrl?: string | null;
   originalUrl?: string;
   mimeType?: string;
   fileSize?: number;
@@ -96,6 +113,10 @@ export interface FeedItem {
   isAnimated?: boolean | null;
   thumbnailUrl: string;
   previewUrl: string;
+  previewFileUrl?: string | null;
+  playbackStrategy?: 'preview' | 'original' | null;
+  streamUrl?: string | null;
+  originalUrl?: string;
   sortTimestamp: number;
   takenAt: number | null;
   isSaved?: boolean;
@@ -288,6 +309,34 @@ export interface CreateFolderShareLinkResult {
   link: FolderShareLink;
 }
 
+export interface PostShareLink {
+  id: number;
+  postId: number;
+  tokenPrefix: string | null;
+  expiresAt: string | null;
+  revokedAt: string | null;
+  createdAt: string;
+  lastUsedAt: string | null;
+  status: FolderShareLinkStatus;
+}
+
+export interface PostShareLinksPayload {
+  links: PostShareLink[];
+  publicBaseUrl: string | null;
+}
+
+export interface CreatePostShareLinkResult {
+  ok: boolean;
+  link: PostShareLink;
+  /** Absolute when the server could resolve an origin, otherwise a bare path. */
+  shareUrl: string;
+  sharePath: string;
+}
+
+export interface SharePublicBaseUrlSetting {
+  sharePublicBaseUrl: string | null;
+}
+
 export interface FolderSharePasswordMutationResult {
   ok: boolean;
   password: FolderSharePasswordStatus;
@@ -349,6 +398,9 @@ export interface SharedImageDetail {
   isAnimated?: boolean | null;
   thumbnailUrl: string;
   previewUrl: string;
+  /** Only present on token-scoped post shares, and only for videos. */
+  streamUrl?: string | null;
+  playbackStrategy?: 'preview' | 'original' | null;
   sortTimestamp: number;
   nextImageId: number | null;
   previousImageId: number | null;
@@ -483,6 +535,25 @@ export interface DeleteImageResult {
   folderSlug: string;
 }
 
+export interface PermanentDeletionJob {
+  active: boolean;
+  total: number;
+  processed: number;
+  remaining: number;
+  failedCount: number;
+  errorMessage: string | null;
+  deletedIds: number[];
+  startedAt: string | null;
+  finishedAt: string | null;
+  /** True when the batch stopped early (e.g. storage offline) but can still resume. */
+  stalled: boolean;
+}
+
+export interface PermanentDeletionJobResult {
+  ok: boolean;
+  job: PermanentDeletionJob;
+}
+
 export type TrashImageResult = DeleteImageResult;
 export type RestoreImageResult = DeleteImageResult;
 
@@ -516,6 +587,15 @@ export interface ScanRunSummary {
   error_text: string | null;
   warning_count: number;
   warning_text: string | null;
+}
+
+export interface ScanChangesSummary {
+  scanned_files: number;
+  new_files: number;
+  updated_files: number;
+  removed_files: number;
+  scan_count: number;
+  latest_finished_at: string | null;
 }
 
 export interface ScanProgress {
@@ -583,6 +663,8 @@ export interface AppStatus {
     defaultReelsFeedMode: ReelsFeedMode;
     defaultFolderImageOrder?: FolderImageOrder;
     nestedFolderTitleFormat?: NestedFolderTitleFormat;
+    videoPlaybackQuality?: VideoPlaybackQuality;
+    sharePublicBaseUrl?: string | null;
     treatStoriesAsFolders: boolean;
     treatCarouselsAsFolders: boolean;
   };
@@ -613,6 +695,7 @@ export interface AppStats extends AppStatus {
     pendingDerivativeMigrationRows: number;
   };
   lastScan: ScanRunSummary | null;
+  todayScanChanges: ScanChangesSummary;
 }
 
 export type AuthRole = 'admin' | 'viewer' | 'anonymous';

@@ -5,14 +5,14 @@
         :href="href"
         class="group relative overflow-hidden bg-surface-alt"
         :class="variant === 'reels' ? 'aspect-[9/14]' : variant === 'posts' ? 'aspect-[3/4]' : 'aspect-square'"
-        @click="handleImageNavigation($event, navigate)"
+        @click="handleImageNavigation($event, item, navigate)"
         :aria-label="item.postType === 'carousel' ? t('post.carousel.open', { count: item.itemCount ?? item.mediaItems?.length ?? 0 }) : undefined"
       >
         <ResilientImage
           :src="item.thumbnailUrl"
           :alt="item.filename"
           loading="lazy"
-          :retry-while="appStore.isScanning"
+          :retry-while="appStore.isInitialScan"
           class="h-full w-full object-cover group-hover:scale-[1.03] group-hover:opacity-90"
           style="transition: transform 0.22s ease, opacity 0.22s ease;"
         />
@@ -39,6 +39,7 @@
 import { RouterLink, useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 
+import { useImmersiveMediaOpen } from '../composables/useImmersiveMediaOpen';
 import { useAppStore } from '../stores/app';
 import type { FeedItem, SharedFeedItem } from '../types/api';
 import { formatMediaDuration } from '../utils/media';
@@ -61,6 +62,7 @@ const props = withDefaults(
 const appStore = useAppStore();
 const route = useRoute();
 const { t } = useI18n();
+const immersiveOpen = useImmersiveMediaOpen();
 
 function buildImageRoute(id: number) {
   if (props.sharedSlug) {
@@ -81,7 +83,11 @@ function buildImageRoute(id: number) {
   };
 }
 
-function handleImageNavigation(event: MouseEvent, navigate: () => void) {
+function handleImageNavigation(
+  event: MouseEvent,
+  item: FeedItem | SharedFeedItem,
+  navigate: () => void
+) {
   if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
     return;
   }
@@ -92,7 +98,11 @@ function handleImageNavigation(event: MouseEvent, navigate: () => void) {
     return;
   }
 
-  appStore.setImageModalBackground(route.fullPath);
-  navigate();
+  // Same players as the home feed, so the delete and gesture behaviour is identical
+  // wherever a tile is tapped. Carousels still need the post route.
+  if (!('folderId' in item) || !immersiveOpen.openInPlace(item as FeedItem)) {
+    appStore.setImageModalBackground(route.fullPath);
+    navigate();
+  }
 }
 </script>
