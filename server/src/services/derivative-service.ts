@@ -583,16 +583,15 @@ async function generateImageDerivatives(
   previewAbsolutePath: string,
   force: boolean
 ): Promise<Pick<DerivativeResult, 'generatedThumbnail' | 'generatedPreview'>> {
-  const shouldWriteThumbnail = force || !(await fileExists(thumbnailAbsolutePath));
-  const shouldWritePreview = force || !(await fileExists(previewAbsolutePath));
+  const [shouldWriteThumbnail, shouldWritePreview] = await Promise.all([
+    force ? Promise.resolve(true) : fileExists(thumbnailAbsolutePath).then((exists) => !exists),
+    force ? Promise.resolve(true) : fileExists(previewAbsolutePath).then((exists) => !exists)
+  ]);
 
-  if (shouldWriteThumbnail) {
-    await writeImageThumbnail(sourcePath, thumbnailAbsolutePath);
-  }
-
-  if (shouldWritePreview) {
-    await writeImagePreview(sourcePath, previewAbsolutePath);
-  }
+  await Promise.all([
+    shouldWriteThumbnail ? writeImageThumbnail(sourcePath, thumbnailAbsolutePath) : Promise.resolve(),
+    shouldWritePreview ? writeImagePreview(sourcePath, previewAbsolutePath) : Promise.resolve()
+  ]);
 
   return {
     generatedThumbnail: shouldWriteThumbnail,
@@ -638,16 +637,15 @@ async function generateVideoDerivatives(
   previewAbsolutePath: string,
   force: boolean
 ): Promise<Pick<DerivativeResult, 'generatedThumbnail' | 'generatedPreview'>> {
-  const shouldWriteThumbnail = force || !(await fileExists(thumbnailAbsolutePath));
-  const shouldWritePreview = force || !(await fileExists(previewAbsolutePath));
+  const [shouldWriteThumbnail, shouldWritePreview] = await Promise.all([
+    force ? Promise.resolve(true) : fileExists(thumbnailAbsolutePath).then((exists) => !exists),
+    force ? Promise.resolve(true) : fileExists(previewAbsolutePath).then((exists) => !exists)
+  ]);
 
-  if (shouldWriteThumbnail) {
-    await writeVideoThumbnail(sourcePath, thumbnailAbsolutePath);
-  }
-
-  if (shouldWritePreview) {
-    await writeVideoPreview(sourcePath, previewAbsolutePath);
-  }
+  await Promise.all([
+    shouldWriteThumbnail ? writeVideoThumbnail(sourcePath, thumbnailAbsolutePath) : Promise.resolve(),
+    shouldWritePreview ? writeVideoPreview(sourcePath, previewAbsolutePath) : Promise.resolve()
+  ]);
 
   return {
     generatedThumbnail: shouldWriteThumbnail,
