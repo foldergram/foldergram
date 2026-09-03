@@ -49,7 +49,14 @@ function logServerReady(): void {
 }
 
 async function bootstrap(): Promise<void> {
-  await permanentDeletionService.recoverPendingDeletions();
+  try {
+    await permanentDeletionService.recoverPendingDeletions();
+  } catch (error) {
+    // Recovery is best-effort. A broken deletion journal must never make the
+    // entire gallery unavailable; the pending operation remains quarantined
+    // and is exposed through the admin status response.
+    log.error("Permanent deletion recovery failed; server startup will continue", error);
+  }
   const app = createApp();
   const server = createServer(app);
   const portVariableName = appConfig.nodeEnv === "production" ? "SERVER_PORT" : "DEV_SERVER_PORT";

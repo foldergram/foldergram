@@ -26,6 +26,20 @@ interface FileIdentity {
   modifiedNanoseconds: string;
 }
 
+export interface PermanentDeletionRecoveryFailure {
+  journalName: string;
+  operationId: string | null;
+  postId: number | null;
+  folderSlug: string | null;
+  createdAt: string | null;
+  message: string;
+}
+
+export interface PermanentDeletionRecoveryStatus {
+  failedCount: number;
+  failures: PermanentDeletionRecoveryFailure[];
+}
+
 interface DirectoryIdentity {
   device: string;
   inode: string;
@@ -376,6 +390,7 @@ function parseJournal(value: unknown): DeletionJournal {
 
 export class PermanentDeletionService {
   private readonly renameFile: (sourcePath: string, destinationPath: string) => Promise<void>;
+  private recoveryFailures = new Map<string, PermanentDeletionRecoveryFailure>();
 
   constructor(private readonly hooks: PermanentDeletionServiceHooks = {}) {
     this.renameFile = hooks.rename ?? ((sourcePath, destinationPath) => fs.rename(sourcePath, destinationPath));
@@ -394,6 +409,30 @@ export class PermanentDeletionService {
 
   recoverPendingDeletionsWhileLocked(): Promise<void> {
     return this.recoverPendingDeletionsInternal();
+  }
+
+  getRecoveryStatus(): PermanentDeletionRecoveryStatus {
+    const failures = [...this.recoveryFailures.values()]
+      .sort((left, right) => left.journalName.localeCompare(right.journalName));
+    return {
+      failedCount: failures.length,
+      failures
+    };
+  }
+
+  private recordRecoveryFailure(
+    journalName: string,
+    error: unknown,
+    journal?: Pick<DeletionJournal, 'operationId' | 'postId' | 'folderSlug' | 'createdAt'>
+  ): void {
+    this.recoveryFailures.set(journalName, {
+      journalName,
+      operationId: journal?.operationId ?? null,
+      postId: journal?.postId ?? null,
+      folderSlug: journal?.folderSlug ?? null,
+      createdAt: journal?.createdAt ?? null,
+      message: error instanceof Error ? error.message : 'Unknown permanent deletion recovery error'
+    });
   }
 
   private async renameValidatedFile(
@@ -677,6 +716,7 @@ export class PermanentDeletionService {
 
     if (restoreErrors.length > 0) {
       const restoreError = new AggregateError(restoreErrors, `Unable to restore ${restoreErrors.length} quarantined deletion target(s)`);
+      this.recordRecoveryFailure(path.basename(journalPath), restoreError, journal);
       log.error('Permanent deletion rollback requires recovery', {
         operationId: journal.operationId,
         postId: journal.postId,
@@ -687,6 +727,7 @@ export class PermanentDeletionService {
 
     await this.removeMoveMarkers(journal);
     this.unlinkInternalFileIfPresent(appConfig.galleryRoot, journalPath, 'Deletion journal');
+    this.recoveryFailures.delete(path.basename(journalPath));
   }
 
   private async restoreEntry(entry: DeletionJournalEntry, moveCompleted: boolean): Promise<void> {
@@ -726,40 +767,71 @@ export class PermanentDeletionService {
 
   private async recoverPendingDeletionsInternal(): Promise<void> {
     const journalDirectory = path.join(appConfig.galleryRoot, QUARANTINE_DIRECTORY_NAME, 'journals');
-    const directoryStats = await lstatIfPresent(journalDirectory);
-    if (!directoryStats) return;
-    await assertNoSymlinkTraversal(appConfig.galleryRoot, journalDirectory, 'Deletion journal directory');
-    if (!directoryStats.isDirectory() || directoryStats.isSymbolicLink()) {
-      throw new Error('Deletion journal path is not a directory');
-    }
-
-    const journalNames = (await fs.readdir(journalDirectory))
-      .filter((name) => name.endsWith('.json'))
-      .sort((left, right) => left.localeCompare(right));
-    if (journalNames.length > 0 && storageService.getState().usingInMemoryDatabase) {
-      throw new Error('Cannot recover permanent deletions while the configured database is offline');
-    }
-    for (const journalName of journalNames) {
-      const journalPath = resolveRelativePathWithinRoot(
-        appConfig.galleryRoot,
-        path.join(QUARANTINE_DIRECTORY_NAME, 'journals', journalName),
-        'Deletion journal path'
-      );
-      await assertNoSymlinkTraversal(appConfig.galleryRoot, journalPath, 'Deletion journal path');
-      const stats = await fs.lstat(journalPath);
-      if (!stats.isFile() || stats.isSymbolicLink()) {
-        throw new Error(`Deletion journal is not a regular file: ${journalName}`);
+    let journalNames: string[];
+    try {
+      const directoryStats = await lstatIfPresent(journalDirectory);
+      if (!directoryStats) {
+        this.recoveryFailures.clear();
+        return;
       }
-      const journal = parseJournal(JSON.parse(await fs.readFile(journalPath, 'utf8')));
+      await assertNoSymlinkTraversal(appConfig.galleryRoot, journalDirectory, 'Deletion journal directory');
+      if (!directoryStats.isDirectory() || directoryStats.isSymbolicLink()) {
+        throw new Error('Deletion journal path is not a directory');
+      }
 
-      if (postRepository.findById(journal.postId)) {
-        await this.restoreJournal(journal, journalPath);
-        log.info('Recovered interrupted permanent deletion by restoring quarantined files', {
-          operationId: journal.operationId,
-          postId: journal.postId
+      journalNames = (await fs.readdir(journalDirectory))
+        .filter((name) => name.endsWith('.json'))
+        .sort((left, right) => left.localeCompare(right));
+      if (journalNames.length > 0 && storageService.getState().usingInMemoryDatabase) {
+        throw new Error('Cannot recover permanent deletions while the configured database is offline');
+      }
+    } catch (error) {
+      this.recordRecoveryFailure('journals', error);
+      log.error('Permanent deletion recovery check failed; server operation will continue', error);
+      return;
+    }
+
+    const activeJournalNames = new Set(journalNames);
+    for (const recordedName of this.recoveryFailures.keys()) {
+      if (recordedName !== 'journals' && !activeJournalNames.has(recordedName)) {
+        this.recoveryFailures.delete(recordedName);
+      }
+    }
+    this.recoveryFailures.delete('journals');
+
+    for (const journalName of journalNames) {
+      let journal: DeletionJournal | undefined;
+      try {
+        const journalPath = resolveRelativePathWithinRoot(
+          appConfig.galleryRoot,
+          path.join(QUARANTINE_DIRECTORY_NAME, 'journals', journalName),
+          'Deletion journal path'
+        );
+        await assertNoSymlinkTraversal(appConfig.galleryRoot, journalPath, 'Deletion journal path');
+        const stats = await fs.lstat(journalPath);
+        if (!stats.isFile() || stats.isSymbolicLink()) {
+          throw new Error(`Deletion journal is not a regular file: ${journalName}`);
+        }
+        journal = parseJournal(JSON.parse(await fs.readFile(journalPath, 'utf8')));
+
+        if (postRepository.findById(journal.postId)) {
+          await this.restoreJournal(journal, journalPath);
+          log.info('Recovered interrupted permanent deletion by restoring quarantined files', {
+            operationId: journal.operationId,
+            postId: journal.postId
+          });
+        } else {
+          await this.cleanupCommittedJournal(journal, journalPath);
+        }
+        this.recoveryFailures.delete(journalName);
+      } catch (error) {
+        this.recordRecoveryFailure(journalName, error, journal);
+        log.error('Permanent deletion recovery remains pending; server operation will continue', {
+          journalName,
+          operationId: journal?.operationId ?? null,
+          postId: journal?.postId ?? null,
+          error
         });
-      } else {
-        await this.tryCleanupCommittedJournal(journal, journalPath);
       }
     }
   }
@@ -767,7 +839,9 @@ export class PermanentDeletionService {
   private async tryCleanupCommittedJournal(journal: DeletionJournal, journalPath: string): Promise<void> {
     try {
       await this.cleanupCommittedJournal(journal, journalPath);
+      this.recoveryFailures.delete(path.basename(journalPath));
     } catch (error) {
+      this.recordRecoveryFailure(path.basename(journalPath), error, journal);
       log.error('Permanent deletion cleanup is pending and will be retried', {
         operationId: journal.operationId,
         postId: journal.postId,

@@ -66,10 +66,10 @@ import { resolveOriginalPath } from '../utils/media-paths.js';
 import { getLeafPathName, getParentRelativePath, getPathBreadcrumb } from '../utils/path-utils.js';
 import { buildReelQueue, shuffleReelCandidates, type ReelAffinitySignals } from '../utils/reels-utils.js';
 import { parseTreatStoriesAsFoldersSetting, serializeTreatStoriesAsFoldersSetting } from '../utils/stories-utils.js';
-import { scannerService } from './scanner-service.js';
-import { storageService } from './storage-service.js';
 import { geodataService, placeResolutionService } from './place-service.js';
 import { permanentDeletionService } from './permanent-deletion-service.js';
+import { scannerService } from './scanner-service.js';
+import { storageService } from './storage-service.js';
 
 type FeedMode = 'recent' | 'rediscover' | 'random';
 type ReelsFeedMode = 'recommended' | 'recent' | 'random';
@@ -2251,7 +2251,8 @@ export const galleryService = {
       },
       storiesMigration,
       carouselsMigration,
-      excludedFolders
+      excludedFolders,
+      deletionRecovery: permanentDeletionService.getRecoveryStatus()
     };
   },
 

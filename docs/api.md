@@ -856,6 +856,7 @@ additional fields below and uses the same admin-detailed `scan` payload as
 | `libraryIndex.legacyDerivativeMigrationPending` | Whether older mirrored derivatives still need a manual migration scan. |
 | `libraryIndex.pendingDerivativeMigrationRows` | Count of indexed rows still pending legacy derivative migration checks. |
 | `excludedFolders` | Env-backed, custom, and effective exclusion rules. |
+| `deletionRecovery` | Failed permanent-deletion recovery count and admin-safe journal details. A failed journal remains quarantined and does not stop the server or scans. |
 | `lastScan` | Last completed scan run. |
 
 The same `preferences.treatStoriesAsFolders` and `storiesMigration` fields from

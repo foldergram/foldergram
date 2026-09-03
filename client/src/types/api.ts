@@ -612,6 +612,17 @@ export interface AppStats extends AppStatus {
     legacyDerivativeMigrationPending: boolean;
     pendingDerivativeMigrationRows: number;
   };
+  deletionRecovery: {
+    failedCount: number;
+    failures: Array<{
+      journalName: string;
+      operationId: string | null;
+      postId: number | null;
+      folderSlug: string | null;
+      createdAt: string | null;
+      message: string;
+    }>;
+  };
   lastScan: ScanRunSummary | null;
 }
 

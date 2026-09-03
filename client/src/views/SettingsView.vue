@@ -9,6 +9,26 @@
     </header>
 
     <section
+      v-if="failedDeletionRecoveryCount > 0"
+      class="card grid gap-[0.75rem] px-5 py-4 border-[color-mix(in_srgb,#d93025_38%,var(--border)_62%)]"
+      style="background: linear-gradient(180deg, color-mix(in srgb, var(--surface) 96%, #fff0ed 4%) 0%, color-mix(in srgb, var(--surface) 91%, #ffe4df 9%) 100%);"
+      role="alert"
+      data-test="deletion-recovery-warning"
+    >
+      <div class="grid gap-[0.3rem]">
+        <span class="eyebrow text-[#b42318]">{{ t('settings.notices.deletionRecovery.eyebrow') }}</span>
+        <h2 class="m-0 text-[1.05rem]">{{ t('settings.notices.deletionRecovery.title', { count: failedDeletionRecoveryCount }) }}</h2>
+        <p class="m-0 text-[0.88rem] leading-[1.5] text-muted">{{ t('settings.notices.deletionRecovery.description') }}</p>
+      </div>
+      <ul class="m-0 grid gap-2 pl-5 text-[0.82rem] leading-[1.45] text-[#8f2d24]">
+        <li v-for="failure in deletionRecoveryFailures" :key="failure.journalName">
+          <span class="font-semibold">{{ deletionRecoveryFailureLabel(failure) }}</span>
+          <span>: {{ failure.message }}</span>
+        </li>
+      </ul>
+    </section>
+
+    <section
       v-if="showScanErrorNotice"
       class="card grid gap-[1rem] p-8 border-[color-mix(in_srgb,#d2a133_45%,var(--border)_55%)]"
       style="background: radial-gradient(circle at top right, rgba(210,161,51,0.18), transparent 42%), linear-gradient(180deg, color-mix(in srgb, var(--surface) 92%, #fff4d1 8%) 0%, color-mix(in srgb, var(--surface) 86%, #ffeab1 14%) 100%);"
@@ -1403,6 +1423,8 @@ const authFeedback = ref<{ tone: 'success' | 'error'; message: string } | null>(
 const viewerFeedback = ref<{ tone: 'success' | 'error'; message: string } | null>(null);
 const generalSettingsFeedback = ref<{ tone: 'success' | 'error'; message: string } | null>(null);
 const adminStats = ref<AppStats | null>(null);
+const failedDeletionRecoveryCount = computed(() => adminStats.value?.deletionRecovery.failedCount ?? 0);
+const deletionRecoveryFailures = computed(() => adminStats.value?.deletionRecovery.failures ?? []);
 const showChangePasswordForm = ref(false);
 const showDisablePasswordForm = ref(false);
 const enablePassword = ref('');
@@ -1443,6 +1465,14 @@ const PLACES_ONBOARDING_STORAGE_KEY = 'foldergram:places-onboarding-dismissed:v1
 const EXCLUDED_FOLDER_EDGE_SLASH_PATTERN = /^\/+|\/+$/g;
 const EXCLUDED_FOLDER_UNSUPPORTED_PATTERN = /[*?]/;
 const excludedFoldersHydrated = ref(false);
+
+function deletionRecoveryFailureLabel(failure: AppStats['deletionRecovery']['failures'][number]): string {
+  if (failure.postId !== null) {
+    return t('settings.notices.deletionRecovery.postLabel', { postId: failure.postId });
+  }
+
+  return failure.operationId ?? failure.journalName;
+}
 
 function normalizeExcludedFolderRuleInput(rule: string): string {
   const segments = rule

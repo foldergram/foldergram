@@ -33,6 +33,7 @@ describe.sequential('crash-recoverable permanent post deletion', () => {
   let databaseManager: DatabaseModule['databaseManager'];
   let PermanentDeletionService: DeletionServiceModule['PermanentDeletionService'];
   let SimulatedDeletionInterruptionError: DeletionServiceModule['SimulatedDeletionInterruptionError'];
+  let permanentDeletionService: DeletionServiceModule['permanentDeletionService'];
   let galleryService: GalleryServiceModule['galleryService'];
   let scannerService: ScannerServiceModule['scannerService'];
   let folderRepository: RepositoriesModule['folderRepository'];
@@ -69,7 +70,7 @@ describe.sequential('crash-recoverable permanent post deletion', () => {
 
     ({ appConfig } = await import('../src/config/env.js'));
     ({ databaseManager } = await import('../src/db/database.js'));
-    ({ PermanentDeletionService, SimulatedDeletionInterruptionError } = await import('../src/services/permanent-deletion-service.js'));
+    ({ PermanentDeletionService, SimulatedDeletionInterruptionError, permanentDeletionService } = await import('../src/services/permanent-deletion-service.js'));
     ({ galleryService } = await import('../src/services/gallery-service.js'));
     ({ scannerService } = await import('../src/services/scanner-service.js'));
     ({
@@ -290,6 +291,41 @@ describe.sequential('crash-recoverable permanent post deletion', () => {
     await expectPostFiles(created.images, false);
     await expect(fs.stat(created.sourceDirectory)).rejects.toMatchObject({ code: 'ENOENT' });
     expect(await journalFiles()).toEqual([]);
+  });
+
+  it('keeps the server status available and reports a warning when one recovery journal cannot be restored', async () => {
+    const created = await createSingle('recovery/unrestorable.jpg');
+    const interruptedService = new PermanentDeletionService({
+      afterQuarantine: () => {
+        throw new SimulatedDeletionInterruptionError();
+      }
+    });
+
+    await expect(interruptedService.deletePost(created.post.id)).rejects.toBeInstanceOf(SimulatedDeletionInterruptionError);
+    const journalName = (await journalFiles())[0];
+    const journal = JSON.parse(await fs.readFile(
+      path.join(appConfig.galleryRoot, '.foldergram-delete-quarantine', 'journals', journalName),
+      'utf8'
+    )) as {
+      entries: Array<{ root: string; quarantineRelativePath: string }>;
+    };
+    const originalEntry = journal.entries.find((entry) => entry.root === 'gallery');
+    expect(originalEntry).toBeDefined();
+    await fs.appendFile(path.join(appConfig.galleryRoot, ...originalEntry!.quarantineRelativePath.split('/')), ':changed');
+
+    await expect(permanentDeletionService.recoverPendingDeletions()).resolves.toBeUndefined();
+
+    expect(postRepository.findById(created.post.id)).toBeDefined();
+    expect(await journalFiles()).toEqual([journalName]);
+    expect(galleryService.getStats().deletionRecovery).toMatchObject({
+      failedCount: 1,
+      failures: [{
+        journalName,
+        postId: created.post.id,
+        folderSlug: created.ownerFolder.slug,
+        message: 'Unable to restore 1 quarantined deletion target(s)'
+      }]
+    });
   });
 
   it('serializes deletion and thumbnail rebuilds in both directions', async () => {

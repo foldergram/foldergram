@@ -55,6 +55,18 @@ their schema work began. If the log instead reports a partially present schema,
 do not delete the database; restore a known-good `gallery.sqlite` backup and
 retry the upgrade.
 
+## Settings reports a permanent deletion recovery warning
+
+Foldergram retries unfinished permanent deletions at startup and before later
+maintenance work. If one journal cannot be restored or cleaned safely, its
+quarantined files and journal are left untouched. The failure is logged and
+shown in Settings, but it does not prevent the server from starting or the rest
+of the library from being used.
+
+Do not manually delete the named journal or quarantine files unless you have
+first decided whether the affected post should be restored or permanently
+removed. A later recovery attempt can still use those files.
+
 ## Nothing is being indexed
 
 Start with the gallery structure rules:

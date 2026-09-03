@@ -427,6 +427,12 @@
       }
     },
     "notices": {
+      "deletionRecovery": {
+        "eyebrow": "Deletion Recovery Warning",
+        "title": "{count} permanent deletion needs attention",
+        "description": "Foldergram could not safely finish or roll back the operation. The quarantined files and journal were left untouched. The server and library remain available.",
+        "postLabel": "Post {postId}"
+      },
       "scanWarning": {
         "eyebrow": "Scan Warning",
         "title": "Scan completed with {count} structural warning",

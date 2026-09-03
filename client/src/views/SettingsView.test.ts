@@ -105,6 +105,10 @@ function createAppStats(): AppStats {
       pendingDerivativeMigrationRows: 0,
       ignoredRootMediaCount: 0
     },
+    deletionRecovery: {
+      failedCount: 0,
+      failures: []
+    },
     lastScan: null
   };
 }
@@ -158,6 +162,32 @@ describe('SettingsView', () => {
       value: scrollIntoViewSpy
     });
     vi.spyOn(galleryApi, 'fetchAdminStats').mockResolvedValue(createAppStats());
+  });
+
+  it('shows a persistent warning when permanent deletion recovery needs attention', async () => {
+    const appStore = useAppStore();
+    appStore.$patch({ stats: createAppStatus() });
+    const stats = createAppStats();
+    stats.deletionRecovery = {
+      failedCount: 1,
+      failures: [{
+        journalName: 'operation.json',
+        operationId: 'operation',
+        postId: 6070,
+        folderSlug: 'photos',
+        createdAt: '2026-08-29T15:14:55.472Z',
+        message: 'Unable to restore 1 quarantined deletion target(s)'
+      }]
+    };
+    vi.spyOn(galleryApi, 'fetchAdminStats').mockResolvedValue(stats);
+
+    const wrapper = mountSettingsView();
+    await flushPromises();
+
+    const warning = wrapper.get('[data-test="deletion-recovery-warning"]');
+    expect(warning.text()).toContain('1 permanent deletion needs attention');
+    expect(warning.text()).toContain('Post 6070');
+    expect(warning.text()).toContain('The server and library remain available.');
   });
 
   it('renders the combined feed defaults card with separate home and reels groups', async () => {

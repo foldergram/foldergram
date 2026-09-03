@@ -427,6 +427,12 @@
       }
     },
     "notices": {
+      "deletionRecovery": {
+        "eyebrow": "删除恢复警告",
+        "title": "{count} 个永久删除操作需要处理",
+        "description": "Foldergram 无法安全完成或回滚该操作。隔离文件和日志保持不变，服务器和图库仍可使用。",
+        "postLabel": "帖子 {postId}"
+      },
       "scanWarning": {
         "eyebrow": "扫描警告",
         "title": "扫描完成，发现 {count} 个结构警告",

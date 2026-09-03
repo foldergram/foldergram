@@ -728,7 +728,11 @@ class ScannerService {
       }
       const runWithMaintenanceLock = () => maintenanceOperationLock.runExclusive(async () => {
         const { permanentDeletionService } = await import('./permanent-deletion-service.js');
-        await permanentDeletionService.recoverPendingDeletionsWhileLocked();
+        try {
+          await permanentDeletionService.recoverPendingDeletionsWhileLocked();
+        } catch (error) {
+          log.error('Permanent deletion recovery failed; scan will continue', error);
+        }
         return job();
       });
       this.queue = this.queue.then(runWithMaintenanceLock, runWithMaintenanceLock);

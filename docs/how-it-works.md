@@ -148,6 +148,10 @@ Interrupted permanent deletions are recovered automatically at server startup
 and before another permanent deletion. If the database still contains the post,
 Foldergram restores its quarantined files. If the database transaction already
 committed, Foldergram keeps the post deleted and retries quarantine cleanup.
+If an individual journal cannot be recovered safely, Foldergram leaves its
+quarantined files and journal untouched, logs the failure, and continues starting
+the server. Administrators can review the persistent recovery warning in Settings
+without losing access to the rest of the library.
 Only empty source and derivative directories are pruned. Scans, index rebuilds,
 thumbnail rebuilds, lazy derivative generation, and permanent deletions run one
 at a time so indexing or derivative work cannot race a deletion or remove its

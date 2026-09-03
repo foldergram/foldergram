@@ -427,6 +427,12 @@
       }
     },
     "notices": {
+      "deletionRecovery": {
+        "eyebrow": "Advertencia de recuperación de eliminación",
+        "title": "{count} eliminación permanente necesita atención",
+        "description": "Foldergram no pudo finalizar ni revertir la operación de forma segura. Los archivos en cuarentena y el diario no se modificaron. El servidor y la biblioteca siguen disponibles.",
+        "postLabel": "Publicación {postId}"
+      },
       "scanWarning": {
         "eyebrow": "Aviso de escaneo",
         "title": "El escaneo terminó con {count} aviso estructural",
