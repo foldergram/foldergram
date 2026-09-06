@@ -23,5 +23,6 @@ export const AUTH_VIEWER_PASSWORD_HASH_SETTING_KEY = 'auth.viewer_password_hash'
 export const AUTH_VIEWER_PASSWORD_SALT_SETTING_KEY = 'auth.viewer_password_salt';
 export const SHARE_SESSION_SECRET_SETTING_KEY = 'share.session_secret';
 export const TREAT_CAROUSELS_AS_FOLDERS_SETTING_KEY = 'library.treat_carousels_as_folders';
+export const ALLOW_DOWNLOADS_SETTING_KEY = 'library.allow_downloads';
 export const CAROUSELS_MIGRATION_DECISION_SETTING_KEY = 'library.carousels_migration_decision';
 export const CAROUSELS_APPLIED_MODE_SETTING_KEY = 'library.carousels_applied_mode';

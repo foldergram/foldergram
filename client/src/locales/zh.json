@@ -272,6 +272,11 @@
         "enabledDescription": "旧版模式已启用。carousels 文件夹仍是普通应用文件夹。",
         "disabledDescription": "轮播模式已启用。AppFolder/carousels 的每个直接子文件夹会成为一篇帖子。"
       },
+      "allowDownloads": {
+        "label": "允许下载原始文件",
+        "toggleLabel": "切换下载按钮",
+        "description": "关闭后，下载按钮会被隐藏，访客将无法下载原始图片或视频。适合公开或共享的相册，便于浏览但不便于复制媒体内容。"
+      },
       "excludedFolders": {
         "label": "排除的源文件夹",
         "description": "按名称或图库根目录下的精确相对路径跳过匹配文件夹。隐藏路径和应用管理的存储仍会自动排除。",
@@ -327,6 +332,7 @@
           "excludedFolders": "排除文件夹",
           "storiesFolderHandling": "stories 文件夹行为",
           "carouselsFolderHandling": "轮播文件夹处理",
+          "allowDownloads": "下载按钮",
           "homeFeedDefault": "首页动态默认项",
           "reelsFeedDefault": "短片默认项",
           "appFolderOrder": "应用文件夹顺序",

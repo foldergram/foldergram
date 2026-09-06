@@ -206,7 +206,8 @@ describe.sequential('viewer-safe status payload', () => {
       defaultFolderImageOrder: 'newest',
       nestedFolderTitleFormat: 'folder',
       treatStoriesAsFolders: false,
-      treatCarouselsAsFolders: false
+      treatCarouselsAsFolders: false,
+      allowDownloads: true
     });
   });
 
@@ -225,7 +226,8 @@ describe.sequential('viewer-safe status payload', () => {
       defaultFolderImageOrder: 'oldest',
       nestedFolderTitleFormat: 'folder',
       treatStoriesAsFolders: false,
-      treatCarouselsAsFolders: false
+      treatCarouselsAsFolders: false,
+      allowDownloads: true
     });
   });
 });

@@ -272,6 +272,11 @@
         "enabledDescription": "El modo heredado está activo. Las carpetas carousels siguen siendo carpetas normales.",
         "disabledDescription": "El modo carrusel está activo. Cada hijo directo de AppFolder/carousels se convierte en una publicación."
       },
+      "allowDownloads": {
+        "label": "Permitir descargar archivos originales",
+        "toggleLabel": "Alternar botones de descarga",
+        "description": "Cuando está desactivado, los botones de descarga se ocultan para que los visitantes no puedan descargar las imágenes o videos originales. Útil para galerías públicas o compartidas donde quieres navegación sin copiar el contenido."
+      },
       "excludedFolders": {
         "label": "Carpetas de origen excluidas",
         "description": "Omite carpetas coincidentes en cualquier lugar por nombre o por ruta relativa exacta bajo la raíz de la galería. Las rutas ocultas y el almacenamiento administrado por la app siguen excluyéndose automáticamente.",
@@ -327,6 +332,7 @@
           "excludedFolders": "carpetas excluidas",
           "storiesFolderHandling": "comportamiento de las carpetas stories",
           "carouselsFolderHandling": "comportamiento de las carpetas de carrusel",
+          "allowDownloads": "botones de descarga",
           "homeFeedDefault": "predeterminado del feed de Inicio",
           "reelsFeedDefault": "predeterminado de Reels",
           "appFolderOrder": "orden de las carpetas de la app",
