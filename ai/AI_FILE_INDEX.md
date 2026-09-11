@@ -1,6 +1,6 @@
 # AI File Index
 
-Generated: 2026-09-11 10:22:01 +0800
+Generated: 2026-09-11 10:40:50 +0800
 
 Run again after adding/moving files: `scripts/ai-map.sh`.
 
