@@ -1,6 +1,6 @@
 # AI File Index
 
-Generated: 2026-09-11 09:55:04 +0800
+Generated: 2026-09-11 10:22:01 +0800
 
 Run again after adding/moving files: `scripts/ai-map.sh`.
 
@@ -69,6 +69,14 @@ Do not read `ai/AI_REPOMIX_CONTEXT.md` or graph dumps by default.
 - `server/src/services/derivative-service.ts`
 - `server/src/services/folder-share-service.ts`
 - `server/src/services/gallery-service.ts`
+- `server/src/services/gallery-service/admin.ts`
+- `server/src/services/gallery-service/collections.ts`
+- `server/src/services/gallery-service/feed.ts`
+- `server/src/services/gallery-service/folders.ts`
+- `server/src/services/gallery-service/interactions.ts`
+- `server/src/services/gallery-service/places.ts`
+- `server/src/services/gallery-service/shared.ts`
+- `server/src/services/gallery-service/shares.ts`
 - `server/src/services/hls-cache-service.ts`
 - `server/src/services/library-relocation-service.ts`
 - `server/src/services/log-service.ts`
