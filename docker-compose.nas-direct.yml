@@ -1,6 +1,6 @@
 services:
   foldergram-migrate:
-    image: foldergram:route-split-20260911
+    image: foldergram:domain-split-20260911
     build:
       context: .
       dockerfile: Dockerfile
@@ -14,7 +14,7 @@ services:
     restart: "no"
 
   foldergram-web:
-    image: foldergram:route-split-20260911
+    image: foldergram:domain-split-20260911
     command: ["node", "server/dist/index.js"]
     environment:
       TZ: Asia/Shanghai
@@ -34,7 +34,7 @@ services:
     restart: unless-stopped
 
   foldergram-worker:
-    image: foldergram:route-split-20260911
+    image: foldergram:domain-split-20260911
     command: ["node", "server/dist/worker.js"]
     environment:
       TZ: Asia/Shanghai

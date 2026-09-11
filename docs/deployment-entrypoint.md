@@ -13,7 +13,7 @@
 
 - 对外容器名：`foldergram`（Nginx 网关）；应用容器为 `foldergram-web` 和 `foldergram-worker`。
 - 当前性能部署 Compose：`docker-compose.nas-direct.yml`。
-- 部署方式：NAS 上从当前源码目录本地构建 `foldergram:route-split-20260911`，再启动网关、web 和 worker。
+- 部署方式：NAS 上从当前源码目录本地构建 `foldergram:domain-split-20260911`，再启动网关、web 和 worker。
 - 禁止使用：`ghcr.io/foldergram/foldergram:latest`。它可能把系统带回未包含本地优化的原始版本。
 - NAS Docker：`27.2.0`
 - NAS Compose：`v2.40.1`
