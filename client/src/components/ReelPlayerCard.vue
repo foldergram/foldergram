@@ -28,6 +28,7 @@
           :style="{ transform: reelZoom.transform.value }"
         >
           <media-player
+            :key="playerGeneration"
             ref="playerElement"
             class="reel-player-card__player"
             :src.prop="videoSource"
@@ -179,7 +180,11 @@ import { RouterLink } from 'vue-router';
 import type { PlayerSrc } from 'vidstack';
 import type { MediaPlayerElement } from 'vidstack/elements';
 
-import { useHoldToSpeed } from '../composables/useHoldToSpeed';
+import {
+  VIDEO_SURFACE_SCRUB_ACTIVATION_PX,
+  VIDEO_SURFACE_SCRUB_SECONDS_PER_PIXEL,
+  useHoldToSpeed
+} from '../composables/useHoldToSpeed';
 import { useLandscapeStage } from '../composables/useLandscapeStage';
 import { reelsLandscapeRotation } from '../composables/useReelsLandscape';
 import { resolveGesturePoint } from '../utils/gesture-coordinates';
@@ -192,6 +197,7 @@ import { formatVideoTimestamp } from '../utils/media';
 import {
   resolveVideoFallbackSource,
   resolveVideoSource,
+  seekMediaPlayerAndWait,
   toPlayerSrc,
   useBundledHlsLibrary,
   warmVideoStream,
@@ -224,7 +230,9 @@ const props = withDefaults(
 const { t } = useI18n();
 const appStore = useAppStore();
 const immersiveVideoStore = useImmersiveVideoStore();
+const isViewActive = useViewActive();
 const playerElement = ref<MediaPlayerElement | null>(null);
+const playerGeneration = ref(0);
 const stageElement = ref<HTMLElement | null>(null);
 const isPaused = ref(false);
 // Vidstack may report the old clock briefly after a seek. Keep the latest visible
@@ -235,9 +243,12 @@ const reelScrubPosition = ref<number | null>(null);
 // until playback really advances is what keeps a cover on screen.
 const hasRenderedFrame = ref(false);
 const fallbackSource = ref<ResolvedVideoSource | null>(null);
-const playerLoadMode = computed(() => (props.active || props.prefetch ? 'eager' : 'visible'));
-// Buffering the neighbour is what removes the stall on the first frame after a swipe.
-const playerPreloadMode = computed(() => (props.active || props.prefetch ? 'auto' : 'metadata'));
+const playerLoadMode = computed(() =>
+  isViewActive.value && (props.active || props.prefetch) ? 'eager' : 'visible'
+);
+const playerPreloadMode = computed(() =>
+  isViewActive.value && (props.active || props.prefetch) ? 'auto' : 'metadata'
+);
 const preferredSource = computed<ResolvedVideoSource>(() =>
   resolveVideoSource(props.item, appStore.videoPlaybackQuality)
 );
@@ -265,9 +276,24 @@ const MAX_AUTOPLAY_RETRIES = 3;
 const MAX_STALL_RETRIES = 12;
 const MAX_STALL_RETRY_DELAY_MS = 1_200;
 const STARTUP_FALLBACK_MS = 2_000;
+const PLAYBACK_PROGRESS_EPSILON_SEC = 0.05;
 let startupFallbackTimer = 0;
-const REEL_SCRUB_SECONDS_PER_PIXEL = 0.08;
-const REEL_SCRUB_ACTIVATION_PX = 18;
+let playbackBaselineSec = 0;
+let lastConfirmedPlaybackSec = 0;
+let pendingRecoverySec = 0;
+let recoverySeekInFlight = false;
+let playerRecoveryCount = 0;
+const MAX_PLAYER_RECOVERIES = 2;
+const REEL_SCRUB_SECONDS_PER_PIXEL = VIDEO_SURFACE_SCRUB_SECONDS_PER_PIXEL;
+const REEL_SCRUB_ACTIVATION_PX = VIDEO_SURFACE_SCRUB_ACTIVATION_PX;
+
+function hasPlaybackAdvanced(player: MediaPlayerElement): boolean {
+  return (player.currentTime ?? 0) > playbackBaselineSec + PLAYBACK_PROGRESS_EPSILON_SEC;
+}
+
+function markPlaybackBaseline(player: MediaPlayerElement) {
+  playbackBaselineSec = player.currentTime ?? 0;
+}
 
 function clearAutoplayRetry() {
   if (autoplayRetryTimer !== 0) {
@@ -301,16 +327,21 @@ function scheduleStartupFallback() {
       return;
     }
 
-    if ((player.currentTime ?? 0) > 0.05) {
+    if (hasPlaybackAdvanced(player)) {
       return;
     }
 
-    switchToFallbackSource();
+    recoverStuckPlayer();
   }, STARTUP_FALLBACK_MS);
 }
 
 function scheduleAutoplayRetry() {
-  if (!props.active || autoplayRetryTimer !== 0 || autoplayRetryAttempts >= MAX_STALL_RETRIES) {
+  if (!props.active || autoplayRetryTimer !== 0) {
+    return;
+  }
+
+  if (autoplayRetryAttempts >= MAX_STALL_RETRIES) {
+    recoverStuckPlayer();
     return;
   }
 
@@ -318,31 +349,102 @@ function scheduleAutoplayRetry() {
   autoplayRetryTimer = window.setTimeout(
     () => {
       autoplayRetryTimer = 0;
-      void syncPlayback();
+      const player = playerElement.value;
+      if (!player || !props.active || immersiveVideoStore.isOpen || !isViewActive.value) {
+        return;
+      }
+
+      if (!player.paused && hasPlaybackAdvanced(player)) {
+        resetAutoplayRetry();
+        return;
+      }
+
+      void syncPlayback({ preserveRetryAttempts: true });
+      if (autoplayRetryAttempts >= MAX_STALL_RETRIES) {
+        recoverStuckPlayer();
+      }
     },
     Math.min(AUTOPLAY_RETRY_DELAY_MS * autoplayRetryAttempts, MAX_STALL_RETRY_DELAY_MS)
   );
 }
 
-function switchToFallbackSource() {
+function switchToFallbackSource(): boolean {
   if (fallbackSource.value) {
-    return;
+    return false;
   }
 
   const fallback = resolveVideoFallbackSource(props.item, activeSource.value);
   if (!fallback) {
+    return false;
+  }
+
+  const player = playerElement.value;
+  if (player) {
+    pendingRecoverySec = Math.max(pendingRecoverySec, lastConfirmedPlaybackSec, player.currentTime ?? 0);
+    playbackBaselineSec = pendingRecoverySec;
+  }
+  resetAutoplayRetry();
+  fallbackSource.value = fallback;
+  return true;
+}
+
+function recoverStuckPlayer() {
+  const player = playerElement.value;
+  if (!player || !props.active || !isViewActive.value || immersiveVideoStore.isOpen) {
     return;
   }
 
-  resetAutoplayRetry();
-  fallbackSource.value = fallback;
+  const resumeTime = Math.max(lastConfirmedPlaybackSec, player.currentTime ?? 0);
+  pendingRecoverySec = resumeTime;
+  if (switchToFallbackSource()) {
+    playbackBaselineSec = resumeTime;
+    return;
+  }
+
+  if (playerRecoveryCount >= MAX_PLAYER_RECOVERIES) {
+    return;
+  }
+
+  playerRecoveryCount += 1;
+  playbackBaselineSec = resumeTime;
+  clearAutoplayRetry();
+  clearStartupFallback();
+  playerGeneration.value += 1;
+}
+
+function resumeRecoveredPlayback(player: MediaPlayerElement) {
+  if (pendingRecoverySec <= 0) {
+    return;
+  }
+
+  const resumeTime = pendingRecoverySec;
+  playbackBaselineSec = resumeTime;
+  if (recoverySeekInFlight) {
+    safeMediaPlayerSetCurrentTime(player, resumeTime);
+    return;
+  }
+
+  recoverySeekInFlight = true;
+  void seekMediaPlayerAndWait(player, resumeTime).finally(() => {
+    recoverySeekInFlight = false;
+    if (playerElement.value !== player) {
+      return;
+    }
+
+    if (pendingRecoverySec > 0 && Math.abs((player.currentTime ?? 0) - pendingRecoverySec) > 1.5) {
+      resumeRecoveredPlayback(player);
+      return;
+    }
+
+    if (props.active && isViewActive.value && !immersiveVideoStore.isOpen) {
+      void syncPlayback({ preserveRetryAttempts: true });
+    }
+  });
 }
 
 // A refused audible autoplay is a document-level verdict, so it lives in the store
 // and every surface (feed, reels, viewer, stories) reads the same value.
 const effectiveMuted = computed(() => appStore.videoEffectivelyMuted);
-// False while the reels route is cached behind another dock tab.
-const isViewActive = useViewActive();
 
 const reelZoom = usePinchZoom({
   doubleTapZoom: false,
@@ -384,7 +486,7 @@ function enforceMuted() {
   }
 }
 
-async function syncPlayback() {
+async function syncPlayback(options: { preserveRetryAttempts?: boolean } = {}) {
   const player = playerElement.value;
   if (!player) {
     return;
@@ -420,8 +522,11 @@ async function syncPlayback() {
       scheduleAutoplayRetry();
       return;
     }
-    resetAutoplayRetry();
+    if (!options.preserveRetryAttempts && autoplayRetryAttempts === 0) {
+      markPlaybackBaseline(player);
+    }
     isPaused.value = false;
+    scheduleAutoplayRetry();
     scheduleStartupFallback();
     return;
   } catch {
@@ -463,6 +568,11 @@ function bindPlayerEventListeners(player: MediaPlayerElement | null) {
   }
 
   const handleReady = () => {
+    if (pendingRecoverySec > 0) {
+      resumeRecoveredPlayback(player);
+      return;
+    }
+
     void syncPlayback();
     window.setTimeout(() => {
       if (props.active && isViewActive.value && !immersiveVideoStore.isOpen) {
@@ -490,7 +600,13 @@ function bindPlayerEventListeners(player: MediaPlayerElement | null) {
     if (reelScrubPosition.value !== null && Math.abs(currentTime - reelScrubPosition.value) <= 1.5) {
       reelScrubPosition.value = null;
     }
-    if (currentTime > 0.05) {
+    if (hasPlaybackAdvanced(player)) {
+      lastConfirmedPlaybackSec = currentTime;
+      if (pendingRecoverySec > 0 && Math.abs(currentTime - pendingRecoverySec) <= 1.5) {
+        pendingRecoverySec = 0;
+      }
+      playerRecoveryCount = 0;
+      resetAutoplayRetry();
       clearStartupFallback();
       hasRenderedFrame.value = true;
     }
@@ -503,6 +619,8 @@ function bindPlayerEventListeners(player: MediaPlayerElement | null) {
     // A stalled stream never resolves on its own here, because the provider has
     // already committed to a source the NAS has not finished transcoding.
     if (props.active && !isPaused.value) {
+      markPlaybackBaseline(player);
+      clearAutoplayRetry();
       scheduleAutoplayRetry();
     }
   };
@@ -598,12 +716,14 @@ const holdSpeed = useHoldToSpeed({
     }
 
     warmSeekTarget(seconds);
-
-    try {
-      safeMediaPlayerSetCurrentTime(player, seconds);
-    } catch {
-      // Seeking before the provider is attached is a no-op.
-    }
+    playbackBaselineSec = seconds;
+    return seekMediaPlayerAndWait(player, seconds).finally(() => {
+      if (reelScrubPosition.value === seconds) {
+        reelScrubPosition.value = null;
+      }
+      clearAutoplayRetry();
+      scheduleAutoplayRetry();
+    });
   },
   // The seek bar reads the media element's currentTime. Updating it during the drag
   // makes the bar and the central preview label show the same live target.
@@ -796,6 +916,11 @@ function handleSurfaceKeydown(event: KeyboardEvent) {
 watch(isViewActive, (active) => {
   if (!active) {
     holdSpeed.stop();
+    resetAutoplayRetry();
+    clearStartupFallback();
+    reelScrubPosition.value = null;
+  } else if (props.active && playerElement.value) {
+    markPlaybackBaseline(playerElement.value);
   }
 
   void syncPlayback();
@@ -806,6 +931,8 @@ watch(
   (active) => {
     if (!active) {
       holdSpeed.stop();
+      resetAutoplayRetry();
+      clearStartupFallback();
     }
 
     if (active) {
@@ -829,6 +956,12 @@ watch(
     clearStartupFallback();
     reelScrubPosition.value = null;
     fallbackSource.value = null;
+    playbackBaselineSec = 0;
+    lastConfirmedPlaybackSec = 0;
+    pendingRecoverySec = 0;
+    recoverySeekInFlight = false;
+    playerRecoveryCount = 0;
+    playerGeneration.value = 0;
     isPaused.value = false;
     hasRenderedFrame.value = false;
   }
@@ -854,7 +987,11 @@ watch(
 );
 
 watch(playerElement, (player) => {
+  recoverySeekInFlight = false;
   bindPlayerEventListeners(player);
+  if (player && pendingRecoverySec > 0) {
+    resumeRecoveredPlayback(player);
+  }
 });
 
 watch(
@@ -896,7 +1033,7 @@ watch(currentVideoSrc, () => {
 watch(
   () => props.prefetch,
   (prefetch) => {
-    if (prefetch) {
+    if (prefetch && isViewActive.value) {
       warmVideoStream(props.item, appStore.videoPlaybackQuality);
     }
   },

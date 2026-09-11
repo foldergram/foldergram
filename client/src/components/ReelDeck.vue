@@ -6,26 +6,40 @@
     @scroll="handleScroll"
   >
     <div
-      v-for="(item, index) in items"
-      :key="item.id"
-      :ref="setPanelRef(item.id)"
+      v-if="windowStartIndex > 0"
+      class="reel-deck__spacer reel-deck__spacer--before"
+      :style="{ height: `${windowStartIndex * 100}%` }"
+      aria-hidden="true"
+    />
+
+    <div
+      v-for="entry in renderedEntries"
+      :key="entry.item.id"
+      :ref="setPanelRef(entry.item.id)"
       class="reel-deck__panel"
     >
       <ReelPlayerCard
-        :item="item"
-        :folder="folderLookup.get(item.folderSlug) ?? null"
-        :active="item.id === activeReelId"
-        :prefetch="prefetchIndexes.has(index)"
+        :item="entry.item"
+        :folder="folderLookup.get(entry.item.folderSlug) ?? null"
+        :active="entry.item.id === activeReelId"
+        :prefetch="prefetchIndexes.has(entry.index)"
       >
-        <template v-if="item.id === activeReelId" #mobile-action-rail>
+        <template v-if="entry.item.id === activeReelId" #mobile-action-rail>
           <slot
             name="mobile-action-rail"
-            :item="item"
-            :folder="folderLookup.get(item.folderSlug) ?? null"
+            :item="entry.item"
+            :folder="folderLookup.get(entry.item.folderSlug) ?? null"
           />
         </template>
       </ReelPlayerCard>
     </div>
+
+    <div
+      v-if="windowEndIndex < items.length - 1"
+      class="reel-deck__spacer reel-deck__spacer--after"
+      :style="{ height: `${(items.length - windowEndIndex - 1) * 100}%` }"
+      aria-hidden="true"
+    />
 
     <div v-if="loading && items.length > 0" class="reel-deck__status" role="status" aria-live="polite">
       Loading more reels...
@@ -37,7 +51,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type ComponentPublicInstance } from 'vue';
 
 import type { FeedItem, FolderSummary } from '../types/api';
-import { getActiveReelId, getReelPrefetchIndexes, shouldPrefetchReels } from '../utils/reels';
+import { getReelPrefetchIndexes, shouldPrefetchReels } from '../utils/reels';
 import ReelPlayerCard from './ReelPlayerCard.vue';
 
 const props = defineProps<{
@@ -55,12 +69,23 @@ const emit = defineEmits<{
 const scrollerElement = ref<HTMLElement | null>(null);
 const panelElements = new Map<number, HTMLElement>();
 const folderLookup = computed(() => new Map(props.folders.map((folder) => [folder.slug, folder])));
-// Warming the neighbours is what removes the stall on the first frame after a swipe.
+const activeIndex = computed(() => props.items.findIndex((item) => item.id === props.activeReelId));
+// Five mounted cards keep the previous and next two swipes ready while capping the
+// number of media providers, event listeners and decoders no matter how long the feed grows.
+const REEL_WINDOW_RADIUS = 2;
+const windowStartIndex = computed(() => Math.max(0, activeIndex.value < 0 ? 0 : activeIndex.value - REEL_WINDOW_RADIUS));
+const windowEndIndex = computed(() =>
+  Math.min(props.items.length - 1, activeIndex.value < 0 ? REEL_WINDOW_RADIUS * 2 : activeIndex.value + REEL_WINDOW_RADIUS)
+);
+const renderedEntries = computed(() =>
+  props.items
+    .slice(windowStartIndex.value, windowEndIndex.value + 1)
+    .map((item, offset) => ({ item, index: windowStartIndex.value + offset }))
+);
+// Warming one neighbour prevents the next-swipe cold start without making four
+// videos compete for bandwidth, cache and hardware decoder slots.
 const prefetchIndexes = computed(() =>
-  getReelPrefetchIndexes(
-    props.items.findIndex((item) => item.id === props.activeReelId),
-    props.items.length
-  )
+  getReelPrefetchIndexes(activeIndex.value, props.items.length, 1)
 );
 
 let resizeObserver: ResizeObserver | null = null;
@@ -89,39 +114,28 @@ function updateActiveReel() {
   scrollFrame = 0;
 
   const scroller = scrollerElement.value;
-  if (!scroller || props.items.length === 0) {
+  if (!scroller || props.items.length === 0 || scroller.clientHeight <= 0) {
     return;
   }
 
-  const activeReelId = getActiveReelId(
-    props.items
-      .map((item) => {
-        const panel = panelElements.get(item.id);
-        if (!panel) {
-          return null;
-        }
-
-        return {
-          id: item.id,
-          offsetTop: panel.offsetTop,
-          offsetHeight: panel.offsetHeight
-        };
-      })
-      .filter((panel): panel is { id: number; offsetTop: number; offsetHeight: number } => panel !== null),
-    scroller.scrollTop,
-    scroller.clientHeight
+  // Every logical row is exactly one deck viewport tall, including the virtual
+  // spacers. Rounding the scroll position avoids walking every panel and forcing
+  // layout on every animation frame as the list grows.
+  const nextIndex = Math.min(
+    props.items.length - 1,
+    Math.max(0, Math.round(scroller.scrollTop / scroller.clientHeight))
   );
-  if (activeReelId === null) {
+  const nextItem = props.items[nextIndex];
+  if (!nextItem) {
     return;
   }
 
-  if (activeReelId !== props.activeReelId) {
-    emit('activeChange', activeReelId);
+  if (nextItem.id !== props.activeReelId) {
+    emit('activeChange', nextItem.id);
   }
 
-  const activeIndex = props.items.findIndex((item) => item.id === activeReelId);
-  if (shouldPrefetchReels(activeIndex, props.items.length)) {
-    emit('prefetch', activeIndex);
+  if (shouldPrefetchReels(nextIndex, props.items.length)) {
+    emit('prefetch', nextIndex);
   }
 }
 
@@ -180,19 +194,13 @@ function handleScroll() {
 }
 
 function scrollToIndex(index: number, behavior: ScrollBehavior = 'smooth') {
-  const nextItem = props.items[index];
   const scroller = scrollerElement.value;
-  if (!nextItem || !scroller) {
-    return;
-  }
-
-  const panel = panelElements.get(nextItem.id);
-  if (!panel) {
+  if (!props.items[index] || !scroller || scroller.clientHeight <= 0) {
     return;
   }
 
   scroller.scrollTo({
-    top: panel.offsetTop,
+    top: index * scroller.clientHeight,
     behavior
   });
 }
@@ -290,10 +298,6 @@ watch(
       if (scroller) {
         resizeObserver.observe(scroller);
       }
-
-      for (const panel of panelElements.values()) {
-        resizeObserver.observe(panel);
-      }
     }
   },
   {
@@ -317,10 +321,6 @@ onMounted(async () => {
   const scroller = scrollerElement.value;
   if (scroller) {
     resizeObserver.observe(scroller);
-  }
-
-  for (const panel of panelElements.values()) {
-    resizeObserver.observe(panel);
   }
 
   window.addEventListener('keydown', handleKeydown);
@@ -362,12 +362,21 @@ defineExpose({
   display: none;
 }
 
+.reel-deck__panel,
+.reel-deck__spacer {
+  min-height: 100%;
+  height: 100%;
+}
+
 .reel-deck__panel {
   display: grid;
   place-items: center;
-  min-height: 100%;
   scroll-snap-align: start;
   scroll-snap-stop: always;
+}
+
+.reel-deck__spacer {
+  pointer-events: none;
 }
 
 .reel-deck__status {

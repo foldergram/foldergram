@@ -126,6 +126,7 @@
     >
       <Teleport :to="sharedSurfaceTarget ?? 'body'" :disabled="sharedSurfaceTarget === null">
       <media-player
+        :key="homePlayerGeneration"
         ref="homePlayerElement"
         class="feed-card__player"
         :src.prop="homeVideoSource"
@@ -135,8 +136,8 @@
         :muted.prop="homeEffectiveMuted"
         :autoplay.prop="shouldAutoplayHomeVideo"
         :loop.prop="true"
-        :load="shouldAutoplayHomeVideo ? 'eager' : 'visible'"
-        preload="auto"
+        :load="homeVideoLoadMode"
+        :preload="homeVideoPreloadMode"
         @pointerdown="handleHomeVideoPointerdown"
         @pointermove="handleHomeVideoPointermove"
         @pointerup="handleHomeVideoPointerup"
@@ -450,7 +451,11 @@ import { trashImage } from '../api/gallery';
 import { useImageCaptionEditor } from '../composables/useImageCaptionEditor';
 import { usePostShare } from '../composables/usePostShare';
 import { useViewActive } from '../composables/useViewActivation';
-import { useHoldToSpeed } from '../composables/useHoldToSpeed';
+import {
+  VIDEO_SURFACE_SCRUB_ACTIVATION_PX,
+  VIDEO_SURFACE_SCRUB_SECONDS_PER_PIXEL,
+  useHoldToSpeed
+} from '../composables/useHoldToSpeed';
 import { useAppStore } from '../stores/app';
 import { useAuthStore } from '../stores/auth';
 import { useFeedStore } from '../stores/feed';
@@ -536,6 +541,7 @@ const deleting = ref(false);
 const isEditingCaption = ref(false);
 const homeVideoTarget = ref<HTMLElement | null>(null);
 const homePlayerElement = ref<MediaPlayerElement | null>(null);
+const homePlayerGeneration = ref(0);
 const loadedHomeVideoAspectRatio = ref<string | null>(null);
 const isHomeVideoPaused = ref(false);
 const isHomeVideoFullscreen = ref(false);
@@ -547,6 +553,9 @@ const lastHomeImageTapAt = ref(0);
 let homeImmersiveStartupFallbackTimer: ReturnType<typeof setTimeout> | null = null;
 let homeVideoPlaybackRetryTimer: ReturnType<typeof setTimeout> | null = null;
 let homeVideoPlaybackRetryCount = 0;
+let homeLastConfirmedPlaybackSec = 0;
+let homePlayerRecoveryCount = 0;
+const MAX_HOME_PLAYER_RECOVERIES = 2;
 const homeVideoFallbackHistory = new Set<string>();
 const heartBurstEl = ref<HTMLElement | null>(null);
 const carouselIndex = ref(0);
@@ -944,6 +953,8 @@ function startHomeVideoObserver() {
 const homeEffectiveMuted = computed(() => appStore.videoEffectivelyMuted);
 // False while the enclosing route is cached behind another dock tab.
 const isViewActive = useViewActive();
+const homeVideoLoadMode = computed(() => (shouldAutoplayHomeVideo.value ? 'eager' : 'visible'));
+const homeVideoPreloadMode = computed(() => (isViewActive.value ? 'auto' : 'metadata'));
 
 function syncHomeVideoMuted(player: MediaPlayerElement, muted: boolean) {
   safeMediaPlayerSetMuted(player, muted);
@@ -964,16 +975,23 @@ function clearHomeImmersiveStartupFallback() {
   }
 }
 
-function clearHomeVideoPlaybackRetry() {
+function clearHomeVideoPlaybackRetry(options: { resetCount?: boolean } = {}) {
   if (homeVideoPlaybackRetryTimer !== null) {
     clearTimeout(homeVideoPlaybackRetryTimer);
     homeVideoPlaybackRetryTimer = null;
   }
-  homeVideoPlaybackRetryCount = 0;
+  if (options.resetCount ?? true) {
+    homeVideoPlaybackRetryCount = 0;
+  }
 }
 
 function scheduleHomeVideoPlaybackRetry() {
-  if (homeVideoPlaybackRetryTimer !== null || homeVideoPlaybackRetryCount >= 8) {
+  if (homeVideoPlaybackRetryTimer !== null) {
+    return;
+  }
+
+  if (homeVideoPlaybackRetryCount >= 8) {
+    recoverStuckHomePlayer();
     return;
   }
 
@@ -981,6 +999,9 @@ function scheduleHomeVideoPlaybackRetry() {
   homeVideoPlaybackRetryTimer = setTimeout(() => {
     homeVideoPlaybackRetryTimer = null;
     void syncHomeVideoPlayback();
+    if (homeVideoPlaybackRetryCount >= 8) {
+      recoverStuckHomePlayer();
+    }
   }, Math.min(150 * retryNumber, 750));
 }
 
@@ -1003,7 +1024,7 @@ function scheduleHomeVideoStartupFallback(player: MediaPlayerElement) {
       return;
     }
 
-    switchHomeVideoToFallbackSource();
+    recoverStuckHomePlayer();
   }, 2_000);
 }
 
@@ -1070,7 +1091,6 @@ async function syncHomeVideoPlayback() {
       return;
     }
 
-    clearHomeVideoPlaybackRetry();
     isHomeVideoPaused.value = false;
     scheduleHomeVideoStartupFallback(player);
     return;
@@ -1124,6 +1144,13 @@ function handleHomeVideoTimeUpdate(event: Event) {
     (nativeVideo && nativeVideo.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && nativeVideo.currentTime > 0.05)
   ) {
     hasRenderedHomeVideoFrame.value = true;
+    const confirmedTime = homePlayerElement.value ? safeMediaPlayerGetCurrentTime(homePlayerElement.value) : 0;
+    if (confirmedTime > homeLastConfirmedPlaybackSec + 0.05) {
+      homeLastConfirmedPlaybackSec = confirmedTime;
+      homePlayerRecoveryCount = 0;
+      clearHomeVideoPlaybackRetry();
+      clearHomeImmersiveStartupFallback();
+    }
   }
 
   if (
@@ -1288,7 +1315,8 @@ function handleHomeVideoSurfaceKeydown(event: KeyboardEvent) {
 
 const homeHoldSpeed = useHoldToSpeed({
   canStart: (event) => !isInteractiveTarget(event.target),
-  secondsPerPixel: 0.1,
+  secondsPerPixel: VIDEO_SURFACE_SCRUB_SECONDS_PER_PIXEL,
+  scrubActivationPx: VIDEO_SURFACE_SCRUB_ACTIVATION_PX,
   getCurrentTime: getHomeScrubStartTime,
   getDuration: () => homePlayerElement.value?.duration ?? 0,
   seekTo: seekHomeVideoTo,
@@ -1388,17 +1416,45 @@ async function toggleHomeVideoSound() {
   }
 }
 
-function switchHomeVideoToFallbackSource() {
+function switchHomeVideoToFallbackSource(): boolean {
   const failed = homeActiveVideoSource.value;
   homeVideoFallbackHistory.add(failed.src);
 
   const fallback = resolveVideoFallbackSource(props.item, failed);
   if (!fallback || homeVideoFallbackHistory.has(fallback.src)) {
-    return;
+    return false;
   }
 
   homeVideoFallbackSource.value = fallback;
   clearHomeImmersiveStartupFallback();
+  return true;
+}
+
+function recoverStuckHomePlayer() {
+  const player = homePlayerElement.value;
+  if (!player || !props.isActiveVideo || !isViewActive.value || immersiveVideoStore.isOpen) {
+    return;
+  }
+
+  const retryCount = homeVideoPlaybackRetryCount;
+  const resumeTime = Math.max(homeLastConfirmedPlaybackSec, safeMediaPlayerGetCurrentTime(player));
+  pendingHomeVideoSeek.value = resumeTime;
+  homeVideoCurrentTimeMs.value = resumeTime * 1000;
+
+  if (switchHomeVideoToFallbackSource()) {
+    homeVideoPlaybackRetryCount = retryCount;
+    return;
+  }
+
+  if (homePlayerRecoveryCount >= MAX_HOME_PLAYER_RECOVERIES || sharedSurfaceTarget.value !== null) {
+    return;
+  }
+
+  homePlayerRecoveryCount += 1;
+  clearHomeVideoPlaybackRetry();
+  clearHomeImmersiveStartupFallback();
+  hasRenderedHomeVideoFrame.value = false;
+  homePlayerGeneration.value += 1;
 }
 
 function bindHomePlayerEventListeners(player: MediaPlayerElement | null) {
@@ -1413,7 +1469,6 @@ function bindHomePlayerEventListeners(player: MediaPlayerElement | null) {
     enforceHomeVideoMuted();
   };
   const handleReady = () => {
-    clearHomeVideoPlaybackRetry();
     clearHomeImmersiveStartupFallback();
     homePlayerReady = true;
     syncHomeVideoAspectRatio(player);
@@ -1456,6 +1511,13 @@ function bindHomePlayerEventListeners(player: MediaPlayerElement | null) {
   const handleProviderReady = () => {
     void syncHomeVideoPlayback();
   };
+  const handleStall = () => {
+    if (props.isActiveVideo && isViewActive.value && !immersiveVideoStore.isOpen) {
+      clearHomeVideoPlaybackRetry({ resetCount: false });
+      scheduleHomeVideoPlaybackRetry();
+      scheduleHomeVideoStartupFallback(player);
+    }
+  };
 
   const removeHlsLibraryBinding = useBundledHlsLibrary(player);
 
@@ -1472,6 +1534,8 @@ function bindHomePlayerEventListeners(player: MediaPlayerElement | null) {
   player.addEventListener('provider-change', handleProviderReady);
   player.addEventListener('source-change', handleProviderReady);
   player.addEventListener('load-start', handleProviderReady);
+  player.addEventListener('waiting', handleStall);
+  player.addEventListener('stalled', handleStall);
 
   removeHomePlayerEventListeners = () => {
     removeHlsLibraryBinding();
@@ -1488,6 +1552,8 @@ function bindHomePlayerEventListeners(player: MediaPlayerElement | null) {
     player.removeEventListener('provider-change', handleProviderReady);
     player.removeEventListener('source-change', handleProviderReady);
     player.removeEventListener('load-start', handleProviderReady);
+    player.removeEventListener('waiting', handleStall);
+    player.removeEventListener('stalled', handleStall);
   };
 
   if (player.hasAttribute('data-can-play')) {
@@ -1587,6 +1653,9 @@ watch(
     isHomeVideoPaused.value = false;
     homeVideoDurationMs.value = props.item.durationMs ?? 0;
     homeVideoCurrentTimeMs.value = 0;
+    homeLastConfirmedPlaybackSec = 0;
+    homePlayerRecoveryCount = 0;
+    homePlayerGeneration.value = 0;
     homeVideoFallbackSource.value = null;
     homeVideoFallbackHistory.clear();
   }
@@ -1608,7 +1677,15 @@ watch(homeActiveVideoSource, () => {
 
 // A cached view keeps its players mounted, so activation has to drive playback the
 // same way visibility does.
-watch(isViewActive, () => {
+watch(isViewActive, (active) => {
+  if (!active) {
+    homeHoldSpeed.stop();
+    clearHomeVideoPlaybackRetry();
+    clearHomeImmersiveStartupFallback();
+    pendingHomeVideoSeek.value = null;
+    hasRenderedHomeVideoFrame.value = false;
+  }
+
   void syncHomeVideoPlayback();
 });
 
@@ -1673,10 +1750,19 @@ watch(homePlayerElement, (player) => {
   isHomeVideoPaused.value = false;
   homeVideoDurationMs.value = props.item.durationMs ?? 0;
   homePlayerReady = false;
-  homeVideoCurrentTimeMs.value = 0;
   bindHomePlayerEventListeners(player);
   if (player) {
     sharedVideoSurfaceStore.register(`feed:${props.item.id}`, player);
+    const resumeTime = pendingHomeVideoSeek.value;
+    if (resumeTime !== null && resumeTime > 0) {
+      void seekMediaPlayerAndWait(player, resumeTime).finally(() => {
+        if (props.isActiveVideo && isViewActive.value && !immersiveVideoStore.isOpen) {
+          void syncHomeVideoPlayback();
+        }
+      });
+    } else {
+      homeVideoCurrentTimeMs.value = 0;
+    }
   }
 });
 

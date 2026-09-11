@@ -1,7 +1,11 @@
 import { flushPromises, mount } from '@vue/test-utils';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 
+import {
+  VIDEO_SURFACE_SCRUB_ACTIVATION_PX,
+  VIDEO_SURFACE_SCRUB_SECONDS_PER_PIXEL
+} from '../composables/useHoldToSpeed';
 import { useAppStore } from '../stores/app';
 import { useImmersiveVideoStore } from '../stores/immersive-video';
 import type { FeedItem, FolderSummary } from '../types/api';
@@ -16,6 +20,9 @@ class FakeMediaPlayerElement extends HTMLElement {
   paused = true;
   playCallCount = 0;
   pauseCallCount = 0;
+  currentTime = 0;
+  duration = 21;
+  playbackRate = 1;
   src: unknown = null;
 
   async play() {
@@ -28,11 +35,14 @@ class FakeMediaPlayerElement extends HTMLElement {
     }
 
     this.paused = false;
+    // The real provider announces this, and the card clears its paused state from the event.
+    this.dispatchEvent(new Event('play'));
   }
 
   async pause() {
     this.pauseCallCount += 1;
     this.paused = true;
+    this.dispatchEvent(new Event('pause'));
   }
 }
 
@@ -108,6 +118,7 @@ const globalStubs = {
 
 describe('ReelPlayerCard', () => {
   beforeEach(() => {
+    vi.useFakeTimers();
     setActivePinia(createPinia());
     nextPlayFailures = 0;
     const appStore = useAppStore();
@@ -115,6 +126,11 @@ describe('ReelPlayerCard', () => {
       videoMuted: true
     });
     window.localStorage.clear();
+  });
+
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
   });
 
   it('shows the overlay only for the active reel', async () => {
@@ -329,8 +345,69 @@ describe('ReelPlayerCard', () => {
     expect(nextWrapper.get('.reel-player-card__sound-button').attributes('aria-label')).toBe('Mute sound');
   });
 
+  it('matches the home feed scrub activation and sensitivity', async () => {
+    const source = await import('./ReelPlayerCard.vue?raw');
+    expect(VIDEO_SURFACE_SCRUB_SECONDS_PER_PIXEL).toBe(0.1);
+    expect(VIDEO_SURFACE_SCRUB_ACTIVATION_PX).toBe(12);
+    expect(source.default).toContain('VIDEO_SURFACE_SCRUB_SECONDS_PER_PIXEL');
+    expect(source.default).toContain('VIDEO_SURFACE_SCRUB_ACTIVATION_PX');
+  });
+
+  it('keeps retrying a stalled active reel until its clock advances', async () => {
+    const wrapper = mount(ReelPlayerCard, {
+      props: {
+        item: createFeedItem(14),
+        folder: createFolder(),
+        active: true
+      },
+      global: {
+        stubs: globalStubs
+      }
+    });
+
+    await flushPromises();
+    const player = getPlayerElement(wrapper);
+    const playsBeforeStall = player.playCallCount;
+    player.currentTime = 8;
+    player.dispatchEvent(new Event('waiting'));
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    await flushPromises();
+
+    expect(player.playCallCount).toBeGreaterThan(playsBeforeStall);
+    wrapper.unmount();
+  });
+
+  it('restores the playback position after switching to the fallback source', async () => {
+    const wrapper = mount(ReelPlayerCard, {
+      props: {
+        item: createFeedItem(15),
+        folder: createFolder(),
+        active: true
+      },
+      global: {
+        stubs: globalStubs
+      }
+    });
+
+    await flushPromises();
+    const player = getPlayerElement(wrapper);
+    player.currentTime = 8;
+    player.dispatchEvent(new Event('waiting'));
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    await flushPromises();
+    expect((player.src as { src?: string } | null)?.src).toBe('/api/originals/15');
+
+    player.dispatchEvent(new Event('loaded-metadata'));
+    await vi.advanceTimersByTimeAsync(1);
+    await flushPromises();
+
+    expect(player.currentTime).toBe(8);
+    wrapper.unmount();
+  });
+
   it('falls back to the original video when preview autoplay keeps failing', async () => {
-    vi.useFakeTimers();
     nextPlayFailures = 4;
 
     const wrapper = mount(ReelPlayerCard, {
@@ -353,10 +430,10 @@ describe('ReelPlayerCard', () => {
     expect((player.src as { src?: string } | null)?.src).toBe('/api/originals/7');
     expect(player.playCallCount).toBeGreaterThan(1);
 
-    vi.useRealTimers();
+    wrapper.unmount();
   });
 
-  it('falls back to visible loading when the reel is inactive', async () => {
+  it('falls back to metadata preload when the reel is inactive', async () => {
     const wrapper = mount(ReelPlayerCard, {
       props: {
         item: createFeedItem(6),
@@ -371,6 +448,7 @@ describe('ReelPlayerCard', () => {
     await flushPromises();
 
     expect(wrapper.get('media-player').attributes('load')).toBe('visible');
+    expect(wrapper.get('media-player').attributes('preload')).toBe('metadata');
   });
 
   it('makes the folder overlay clickable without toggling playback', async () => {

@@ -32,7 +32,31 @@ describe('ReelDeck', () => {
     setActivePinia(createPinia());
   });
 
-  it('warms only the four cards after the active one', () => {
+  it('renders only a bounded player window around the active reel', () => {
+    const items = Array.from({ length: 30 }, (_, index) => createFeedItem(index + 1));
+    const wrapper = mount(ReelDeck, {
+      props: {
+        items,
+        folders: [],
+        activeReelId: 15
+      },
+      global: {
+        stubs: {
+          ReelPlayerCard: {
+            props: ['item', 'folder', 'active', 'prefetch'],
+            template: '<div class="reel-stub" :data-id="item.id" :data-prefetch="prefetch ? \'1\' : \'0\'" />'
+          }
+        }
+      }
+    });
+
+    const renderedIds = wrapper.findAll('.reel-stub').map((stub) => Number(stub.attributes('data-id')));
+    expect(renderedIds).toEqual([13, 14, 15, 16, 17]);
+    expect(wrapper.get('.reel-deck__spacer--before').attributes('style')).toContain('1200%');
+    expect(wrapper.get('.reel-deck__spacer--after').attributes('style')).toContain('1300%');
+  });
+
+  it('warms only the next card after the active one', () => {
     const items = [1, 2, 3, 4, 5, 6, 7].map(createFeedItem);
     const wrapper = mount(ReelDeck, {
       props: {
@@ -54,13 +78,14 @@ describe('ReelDeck', () => {
       wrapper.findAll('.reel-stub').map((stub) => [stub.attributes('data-id'), stub.attributes('data-prefetch')])
     );
 
-    // Buffering the next four keeps repeated swipes instant without decoding the whole deck.
+    // One decoded neighbour makes the next swipe immediate without making several
+    // videos compete for network, memory and decoder resources.
     expect(prefetchByItemId.get('2')).toBe('0');
     expect(prefetchByItemId.get('3')).toBe('1');
-    expect(prefetchByItemId.get('4')).toBe('1');
-    expect(prefetchByItemId.get('5')).toBe('1');
-    expect(prefetchByItemId.get('6')).toBe('1');
-    expect(prefetchByItemId.get('7')).toBe('0');
+    expect(prefetchByItemId.get('4')).toBe('0');
+    expect(prefetchByItemId.has('5')).toBe(false);
+    expect(prefetchByItemId.has('6')).toBe(false);
+    expect(prefetchByItemId.has('7')).toBe(false);
     expect(prefetchByItemId.get('1')).toBe('0');
   });
 
@@ -102,11 +127,10 @@ describe('ReelDeck', () => {
     const scroller = wrapper.get('.reel-deck').element as HTMLElement;
     const scrollTo = vi.fn();
     Object.assign(scroller, { scrollTo });
-    const panels = wrapper.findAll('.reel-deck__panel');
-    Object.defineProperty(panels[2]!.element, 'offsetTop', { configurable: true, value: 960 });
+    Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 320 });
 
     (wrapper.vm as unknown as { restoreActiveReel: () => void }).restoreActiveReel();
 
-    expect(scrollTo).toHaveBeenCalledWith({ top: 960, behavior: 'auto' });
+    expect(scrollTo).toHaveBeenCalledWith({ top: 640, behavior: 'auto' });
   });
 });

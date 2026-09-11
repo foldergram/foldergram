@@ -66,3 +66,13 @@ pnpm monorepo：`server/`（Express 5 + TypeScript ESM + SQLite）、`client/`�
 - 前端文案改动必须同步 `client/src/locales/` 下 `en.json`、`zh.json`、`es.json` 三份
 - 不要碰 `data/`（真实媒体库和 SQLite 数据库）和 `.env`
 - 本仓库在外接 exFAT 盘上，大量 `._*` 资源分叉文件是噪音，不是源码
+
+## 播放器锁定（禁止擅自改）
+
+小窗和沉浸式是**同一个直推播放器实例**，手势已写死。完整契约：`docs/player-contract.md`。
+
+- 不要拆成两套 `<media-player>` / 两个解码器
+- 不要把全屏左右拖改回“手指 X = 时间轴绝对位置”
+- 不要把单击画面改成暂停；双击才暂停，单击小窗是进沉浸式
+- 不要把沉浸式横屏视频改回 `object-fit: cover`
+- 改 `FeedCard.vue`、`ImmersiveVideoLayer.vue`、`VideoMediaPlayer.vue`、`useHoldToSpeed.ts`、`video-playback.ts`、`shared-video-surface.ts` 前必须先读契约；没有用户明确要求就不要动这些文件的播放/手势逻辑

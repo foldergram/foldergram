@@ -38,6 +38,7 @@
 | `gallery` | 聚合业务逻辑 | `server/src/services/gallery-service.ts` |
 | `auth` | 登录/会话/权限 | `server/src/services/auth-service.ts`, `middleware/auth-protection.ts` |
 | `share` | 文件夹分享 | `server/src/services/folder-share-service.ts` |
+| `player` | 小窗/沉浸式播放器（已锁定） | `docs/player-contract.md`, `client/src/components/ImmersiveVideoLayer.vue`, `client/src/components/FeedCard.vue`, `client/src/composables/useHoldToSpeed.ts` |
 | `trash` | 回收站/永久删除 | `server/src/services/permanent-deletion-service.ts` |
 | `route` | 前端路由 | `client/src/router/index.ts` |
 | `store` | Pinia 全局状态 | `client/src/stores/` |

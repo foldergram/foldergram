@@ -116,7 +116,10 @@ export function seekMediaPlayerAndWait(
       if (timeout !== null) clearTimeout(timeout);
       player.removeEventListener('seeked', onSettled);
       player.removeEventListener('time-update', onSettled);
-      resolve();
+      // The same event that confirms the seek may arrive synchronously from a custom
+      // media element. Queue completion so the caller can publish its pending target
+      // before the promise settles, avoiding a stale "seek in progress" marker.
+      queueMicrotask(resolve);
     };
 
     const onSettled = () => {

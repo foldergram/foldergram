@@ -44,7 +44,9 @@ vi.mock('../components/ReelDeck.vue', async () => {
         expose({
           goToPrevious: deckControls.goToPrevious,
           goToNext: deckControls.goToNext,
-          navigateByWheel: deckControls.navigateByWheel
+          navigateByWheel: deckControls.navigateByWheel,
+          // The view reads this for its scroll memory; the real deck exposes it too.
+          getScrollElement: () => null
         });
 
         const activeItem = () =>

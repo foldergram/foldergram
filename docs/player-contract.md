@@ -85,3 +85,25 @@ sharedVideoSurfaceStore.ownerId === `feed:${target.id}`
 3. 打开沉浸式时 pause 共享卡，造成双解码或冻帧。
 4. 横屏视频在竖屏沉浸式里 `object-fit: cover`。
 5. 把 Teleport 共享实例拆回两套 player。
+
+## 首页卡片流窗口化（锁定）
+
+`client/src/components/FeedList.vue` 只渲染视口附近的卡片，滑走的卡片会被卸载，空出来的高度由列容器的
+`padding-top` / `padding-bottom` 顶住（`client/src/composables/useFeedWindow.ts`）。UI、卡片结构、样式、间距
+都没有改，改的只是「同时挂多少张卡」。
+
+不这样做的后果（2026-09-04 线上实测，滚 10 页）：342 张卡、318 个 `media-player`、332 个 `<video>`、19150 个
+DOM 节点，其中 47 个已经远离视口的 `<video>` 还挂着源、缓冲已被系统清空 —— 这就是「刷久了越来越卡」和
+「滑回去卡在 0:00」。窗口化后同样操作是 7 张卡、8 个 player、815 个节点、0 个滑走仍挂源的 video。
+
+禁止：
+
+- 把 `FeedList.vue` 改回 `v-for="item in items"` 全量渲染。
+- 给 `.feed-list` 绑 `:style`，或改掉 `overflow-anchor: none`。窗口用 `el.style.padding*` 直接写，绑 style 会被
+  Vue 覆盖，浏览器的 scroll anchoring 也会和 padding 数学打架。
+- 去掉 `pinnedIndex`。沉浸式 claim 的那张卡必须留在 DOM 里，否则共享 `<media-player>` 被销毁，全屏直接黑屏。
+- 用「离屏隐藏容器」来实现 pin。换父节点会让 Vue 重建 `<media-player>`，等于毁掉共享解码器。
+- 让 `activeVideoId` 回到遍历全量 `items`。只有窗口内的卡片能拿播放权，否则播放权会落到已卸载的卡上。
+- 让「容器量不到宽度」时重置成全量渲染。KeepAlive 把首页从 DOM 上摘下来的瞬间，ResizeObserver 会报一次
+  0x0；如果那时把 `endIndex` 归零，隐藏着的首页会在后台把每张卡重新挂一遍（实测 40 张全挂回来），列容器高度
+  也会塌掉，从纯刷切回首页的滚动位置就会掉回顶部。只有「从来没解析过窗口」（jsdom、首帧）才允许全量兜底。

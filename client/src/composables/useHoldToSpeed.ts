@@ -52,6 +52,10 @@ const DEFAULT_SECONDS_PER_PIXEL = 0.12;
 const DEFAULT_SCRUB_ACTIVATION_PX = 12;
 const DEFAULT_CANCEL_ACTIVATION_PX = 10;
 
+/** Locked full-surface scrub feel shared by the home feed and reels. */
+export const VIDEO_SURFACE_SCRUB_SECONDS_PER_PIXEL = 0.1;
+export const VIDEO_SURFACE_SCRUB_ACTIVATION_PX = 12;
+
 /**
  * Press-and-hold fast playback plus horizontal drag scrubbing, the way short-video
  * apps behave: holding anywhere speeds the clip up (audio included, because the
