@@ -6,6 +6,7 @@ import { LIBRARY_REBUILD_REQUIRED_MESSAGE, scannerService } from './services/sca
 import { watcherService } from './services/watcher-service.js';
 
 type ScanOperation = 'manual' | 'rebuild' | 'rebuild-thumbnails';
+const HLS_CACHE_CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 function startScan(operation: ScanOperation): void {
   if (scannerService.getProgress().isScanning) {
@@ -36,6 +37,16 @@ function json(response: import('node:http').ServerResponse, status: number, payl
 }
 
 async function bootstrap(): Promise<void> {
+  const { cleanupHlsCache } = await import('./services/hls-cache-service.js');
+  const runHlsCacheCleanup = (): void => {
+    void cleanupHlsCache().catch((error: unknown) => {
+      log.error('HLS cache cleanup failed', error instanceof Error ? error.message : String(error));
+    });
+  };
+  const hlsCacheCleanupTimer = setInterval(runHlsCacheCleanup, HLS_CACHE_CLEANUP_INTERVAL_MS);
+  hlsCacheCleanupTimer.unref();
+  runHlsCacheCleanup();
+
   const server = createServer((request, response) => {
     const pathname = new URL(request.url ?? '/', 'http://worker').pathname;
 
@@ -86,6 +97,7 @@ async function bootstrap(): Promise<void> {
 
   const shutdown = async (signal: string) => {
     log.info(`Worker received ${signal}, shutting down`);
+    clearInterval(hlsCacheCleanupTimer);
     await watcherService.stop();
     server.close(() => process.exit(0));
   };

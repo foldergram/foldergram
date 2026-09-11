@@ -1,6 +1,6 @@
 services:
   foldergram-migrate:
-    image: foldergram:direct-worker-20260901
+    image: foldergram:route-split-20260911
     build:
       context: .
       dockerfile: Dockerfile
@@ -8,10 +8,13 @@ services:
     volumes:
       - ${GALLERY_ROOT_HOST_PATH:?Set GALLERY_ROOT_HOST_PATH to the total gallery root}:/app/data/gallery
       - ${FOLDERGRAM_DATA_HOST_PATH:?Set FOLDERGRAM_DATA_HOST_PATH to the existing Foldergram config mount}:/app/data
+      - ${FOLDERGRAM_DATA_HOST_PATH:?Set FOLDERGRAM_DATA_HOST_PATH to the existing Foldergram config mount}/thumbnails:/app/data/thumbnails
+      - ${FOLDERGRAM_DATA_HOST_PATH:?Set FOLDERGRAM_DATA_HOST_PATH to the existing Foldergram config mount}/previews:/app/data/previews
+      - ${GALLERY_ROOT_HOST_PATH:?Set GALLERY_ROOT_HOST_PATH to the total gallery root}/.foldergram-cache/hls-cache:/app/data/hls-cache
     restart: "no"
 
   foldergram-web:
-    image: foldergram:direct-worker-20260901
+    image: foldergram:route-split-20260911
     command: ["node", "server/dist/index.js"]
     environment:
       TZ: Asia/Shanghai
@@ -22,13 +25,16 @@ services:
     volumes:
       - ${GALLERY_ROOT_HOST_PATH:?Set GALLERY_ROOT_HOST_PATH to the total gallery root}:/app/data/gallery
       - ${FOLDERGRAM_DATA_HOST_PATH:?Set FOLDERGRAM_DATA_HOST_PATH to the existing Foldergram config mount}:/app/data
+      - ${FOLDERGRAM_DATA_HOST_PATH:?Set FOLDERGRAM_DATA_HOST_PATH to the existing Foldergram config mount}/thumbnails:/app/data/thumbnails
+      - ${FOLDERGRAM_DATA_HOST_PATH:?Set FOLDERGRAM_DATA_HOST_PATH to the existing Foldergram config mount}/previews:/app/data/previews
+      - ${GALLERY_ROOT_HOST_PATH:?Set GALLERY_ROOT_HOST_PATH to the total gallery root}/.foldergram-cache/hls-cache:/app/data/hls-cache
     depends_on:
       foldergram-migrate:
         condition: service_completed_successfully
     restart: unless-stopped
 
   foldergram-worker:
-    image: foldergram:direct-worker-20260901
+    image: foldergram:route-split-20260911
     command: ["node", "server/dist/worker.js"]
     environment:
       TZ: Asia/Shanghai
@@ -41,6 +47,9 @@ services:
     volumes:
       - ${GALLERY_ROOT_HOST_PATH:?Set GALLERY_ROOT_HOST_PATH to the total gallery root}:/app/data/gallery
       - ${FOLDERGRAM_DATA_HOST_PATH:?Set FOLDERGRAM_DATA_HOST_PATH to the existing Foldergram config mount}:/app/data
+      - ${FOLDERGRAM_DATA_HOST_PATH:?Set FOLDERGRAM_DATA_HOST_PATH to the existing Foldergram config mount}/thumbnails:/app/data/thumbnails
+      - ${FOLDERGRAM_DATA_HOST_PATH:?Set FOLDERGRAM_DATA_HOST_PATH to the existing Foldergram config mount}/previews:/app/data/previews
+      - ${GALLERY_ROOT_HOST_PATH:?Set GALLERY_ROOT_HOST_PATH to the total gallery root}/.foldergram-cache/hls-cache:/app/data/hls-cache
     depends_on:
       foldergram-migrate:
         condition: service_completed_successfully

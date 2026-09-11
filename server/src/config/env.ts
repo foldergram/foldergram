@@ -22,6 +22,9 @@ const envSchema = z.object({
   DB_DIR: z.string().optional(),
   THUMBNAILS_DIR: z.string().optional(),
   PREVIEWS_DIR: z.string().optional(),
+  HLS_CACHE_DIR: z.string().optional(),
+  HLS_CACHE_MAX_AGE_DAYS: z.coerce.number().int().min(1).default(7),
+  HLS_CACHE_MAX_BYTES: z.coerce.number().int().positive().default(100 * 1024 * 1024 * 1024),
   LOG_VERBOSE: z.string().optional(),
   SCAN_MEDIA_ERROR_MODE: z.enum(['skip', 'fail']).default('skip'),
   LIBRARY_AUTO_SCAN_ENABLED: z.string().default('true'),
@@ -105,8 +108,8 @@ const dbDir = resolveConfiguredPath(parsed.DB_DIR, path.join(dataRoot, 'db'));
 const geodataDir = path.join(dataRoot, 'geodata');
 const thumbnailsDir = resolveConfiguredPath(parsed.THUMBNAILS_DIR, path.join(dataRoot, 'thumbnails'));
 const previewsDir = resolveConfiguredPath(parsed.PREVIEWS_DIR, path.join(dataRoot, 'previews'));
+const hlsCacheDir = resolveConfiguredPath(parsed.HLS_CACHE_DIR, path.join(dataRoot, 'hls-cache'));
 const scanErrorReportDir = path.join(dataRoot, 'scan-errors');
-const hlsCacheDir = path.join(dataRoot, 'hls-cache');
 const logVerbose = parseBooleanFlag(parsed.LOG_VERBOSE);
 const publicDemoMode = parseBooleanFlag(parsed.PUBLIC_DEMO_MODE);
 const csrfTrustedOrigins = parseConfiguredOrigins(parsed.CSRF_TRUSTED_ORIGINS);
@@ -142,6 +145,20 @@ if (isSameOrWithinPath(previewsDir, galleryRoot)) {
   throw new Error('Invalid storage configuration: PREVIEWS_DIR cannot contain GALLERY_ROOT.');
 }
 
+if (isSameOrWithinPath(hlsCacheDir, galleryRoot)) {
+  throw new Error('Invalid storage configuration: HLS_CACHE_DIR cannot contain GALLERY_ROOT.');
+}
+
+const hlsCacheDirectoriesOverlap =
+  isSameOrWithinPath(hlsCacheDir, thumbnailsDir) ||
+  isSameOrWithinPath(thumbnailsDir, hlsCacheDir) ||
+  isSameOrWithinPath(hlsCacheDir, previewsDir) ||
+  isSameOrWithinPath(previewsDir, hlsCacheDir);
+
+if (hlsCacheDirectoriesOverlap) {
+  throw new Error('Invalid storage configuration: HLS_CACHE_DIR must not overlap THUMBNAILS_DIR or PREVIEWS_DIR.');
+}
+
 const managedGalleryRelativeIgnores = uniq(
   [dbDir, thumbnailsDir, previewsDir, scanErrorReportDir, hlsCacheDir]
     .map((directoryPath) => getRelativePathWithinRoot(galleryRoot, directoryPath))
@@ -163,6 +180,8 @@ export const appConfig = {
   previewsDir,
   scanErrorReportDir,
   hlsCacheDir,
+  hlsCacheMaxAgeDays: parsed.HLS_CACHE_MAX_AGE_DAYS,
+  hlsCacheMaxBytes: parsed.HLS_CACHE_MAX_BYTES,
   managedGalleryRelativeIgnores,
   galleryExcludedFolders,
   logVerbose,

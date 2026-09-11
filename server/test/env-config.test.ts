@@ -47,6 +47,9 @@ describe.sequential('derivative mode env config', () => {
     expect(appConfig.derivativeMode).toBe('eager');
     expect(appConfig.scanMediaErrorMode).toBe('skip');
     expect(appConfig.scanErrorReportDir).toBe(path.join(tempRoot, 'data', 'scan-errors'));
+    expect(appConfig.hlsCacheDir).toBe(path.join(tempRoot, 'data', 'hls-cache'));
+    expect(appConfig.hlsCacheMaxAgeDays).toBe(7);
+    expect(appConfig.hlsCacheMaxBytes).toBe(100 * 1024 * 1024 * 1024);
     expect(appConfig.galleryExcludedFolders).toEqual([]);
   });
 
@@ -101,6 +104,18 @@ describe.sequential('derivative mode env config', () => {
     }));
 
     await expect(import('../src/config/env.js')).rejects.toThrow();
+  });
+
+  it('rejects an HLS cache directory that overlaps media derivatives', async () => {
+    await stubBaseEnv();
+    vi.stubEnv('HLS_CACHE_DIR', path.join(tempRoot, 'thumbnails'));
+    vi.doMock('dotenv', () => ({
+      default: {
+        config: vi.fn()
+      }
+    }));
+
+    await expect(import('../src/config/env.js')).rejects.toThrow(/HLS_CACHE_DIR.*overlap/i);
   });
 
   it('rejects derivative directories that overlap scan error reports', async () => {

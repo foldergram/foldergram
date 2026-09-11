@@ -22,6 +22,7 @@ import { appConfig } from "./config/env.js";
 import { createApp } from "./app.js";
 import { collectionRepository } from "./db/repositories.js";
 import { deletionJobService } from "./services/deletion-job-service.js";
+import { cleanupHlsCache } from "./services/hls-cache-service.js";
 import { log } from "./services/log-service.js";
 import { permanentDeletionService } from "./services/permanent-deletion-service.js";
 import { scannerService } from "./services/scanner-service.js";

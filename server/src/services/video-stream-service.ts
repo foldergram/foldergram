@@ -7,6 +7,7 @@ import pLimit from 'p-limit';
 
 import { appConfig } from '../config/env.js';
 import type { VideoPlaybackQuality } from '../types/models.js';
+import { acquireHlsCacheGroup, touchHlsCacheGroup } from './hls-cache-service.js';
 import { log } from './log-service.js';
 
 const execFileAsync = promisify(execFile);
@@ -286,8 +287,12 @@ function runFfmpeg(args: string[]): Promise<Buffer> {
   });
 }
 
+function getCacheGroupPath(imageId: number, quality: VideoStreamQuality): string {
+  return path.join(appConfig.hlsCacheDir, String(imageId), quality);
+}
+
 function getCachePath(imageId: number, quality: VideoStreamQuality, index: number): string {
-  return path.join(appConfig.hlsCacheDir, String(imageId), quality, `segment-${index}.ts`);
+  return path.join(getCacheGroupPath(imageId, quality), `segment-${index}.ts`);
 }
 
 /** Removes every cached HLS segment for media that was permanently deleted. */
@@ -340,79 +345,87 @@ export interface TranscodeSegmentInput {
 }
 
 export async function getSegment(input: TranscodeSegmentInput): Promise<Buffer> {
-  const cachePath = getCachePath(input.imageId, input.quality, input.index);
-  const cached = await readCachedSegment(cachePath);
-  if (cached) {
-    return cached;
-  }
+  const cacheGroupPath = getCacheGroupPath(input.imageId, input.quality);
+  const releaseCacheGroup = acquireHlsCacheGroup(cacheGroupPath);
 
-  const dedupeKey = cachePath;
-  const existing = inflightSegments.get(dedupeKey);
-  if (existing) {
-    return existing;
-  }
-
-  const work = segmentLimit(async () => {
-    const raced = await readCachedSegment(cachePath);
-    if (raced) {
-      return raced;
+  try {
+    await touchHlsCacheGroup(cacheGroupPath);
+    const cachePath = getCachePath(input.imageId, input.quality, input.index);
+    const cached = await readCachedSegment(cachePath);
+    if (cached) {
+      return cached;
     }
 
-    const hardware = await getHardwareState();
-    const target = resolveTargetDimensions(input.width, input.height, input.quality);
-    const startSeconds = input.index * HLS_SEGMENT_SECONDS;
-    const durationSeconds = getSegmentDuration(input.durationMs, input.index);
-    const args = buildFfmpegArgs({
-      sourcePath: input.sourcePath,
-      startSeconds,
-      durationSeconds,
-      target,
-      quality: input.quality,
-      hardware
-    });
+    const dedupeKey = cachePath;
+    const existing = inflightSegments.get(dedupeKey);
+    if (existing) {
+      return existing;
+    }
 
-    let payload: Buffer;
-    try {
-      payload = await runFfmpeg(args);
-    } catch (error) {
-      if (hardware.mode === 'none') {
-        throw error;
+    const work = segmentLimit(async () => {
+      const raced = await readCachedSegment(cachePath);
+      if (raced) {
+        return raced;
       }
 
-      // A driver-level failure on one clip should not take playback down, so the
-      // CPU encoder covers the gap for that segment.
-      log.info(
-        `HLS segment hardware encode failed, retrying on CPU | image ${input.imageId} | segment ${input.index} | ${
-          error instanceof Error ? error.message : String(error)
-        }`
-      );
-      payload = await runFfmpeg(
-        buildFfmpegArgs({
-          sourcePath: input.sourcePath,
-          startSeconds,
-          durationSeconds,
-          target,
-          quality: input.quality,
-          hardware: { mode: 'none', device: null }
-        })
-      );
-    }
+      const hardware = await getHardwareState();
+      const target = resolveTargetDimensions(input.width, input.height, input.quality);
+      const startSeconds = input.index * HLS_SEGMENT_SECONDS;
+      const durationSeconds = getSegmentDuration(input.durationMs, input.index);
+      const args = buildFfmpegArgs({
+        sourcePath: input.sourcePath,
+        startSeconds,
+        durationSeconds,
+        target,
+        quality: input.quality,
+        hardware
+      });
 
-    // A segment may still finish transcoding after its source was deleted. Never put
-    // that stale result back into the cache after invalidation removed its directory.
-    if (!invalidatedImageIds.has(input.imageId)) {
-      await writeCachedSegment(cachePath, payload);
-    }
-    return payload;
-  });
+      let payload: Buffer;
+      try {
+        payload = await runFfmpeg(args);
+      } catch (error) {
+        if (hardware.mode === 'none') {
+          throw error;
+        }
 
-  const tracked = work.finally(() => {
-    if (inflightSegments.get(dedupeKey) === tracked) {
-      inflightSegments.delete(dedupeKey);
-    }
-  });
-  inflightSegments.set(dedupeKey, tracked);
-  return tracked;
+        // A driver-level failure on one clip should not take playback down, so the
+        // CPU encoder covers the gap for that segment.
+        log.info(
+          `HLS segment hardware encode failed, retrying on CPU | image ${input.imageId} | segment ${input.index} | ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        );
+        payload = await runFfmpeg(
+          buildFfmpegArgs({
+            sourcePath: input.sourcePath,
+            startSeconds,
+            durationSeconds,
+            target,
+            quality: input.quality,
+            hardware: { mode: 'none', device: null }
+          })
+        );
+      }
+
+      // A segment may still finish transcoding after its source was deleted. Never put
+      // that stale result back into the cache after invalidation removed its directory.
+      if (!invalidatedImageIds.has(input.imageId)) {
+        await writeCachedSegment(cachePath, payload);
+      }
+      return payload;
+    });
+
+    const tracked = work.finally(() => {
+      if (inflightSegments.get(dedupeKey) === tracked) {
+        inflightSegments.delete(dedupeKey);
+      }
+    });
+    inflightSegments.set(dedupeKey, tracked);
+    return await tracked;
+  } finally {
+    releaseCacheGroup();
+  }
 }
 
 const codecCache = new Map<string, string | null>();

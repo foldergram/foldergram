@@ -171,7 +171,7 @@ describe.sequential('post share links', () => {
     expect(master.status).toBe(200);
     expect(master.headers.get('content-type')).toContain('application/vnd.apple.mpegurl');
     expect(master.body).toContain(
-      `/api/share/post-links/${created.rawToken}/videos/${videoImageId}/hls/720p/index.m3u8`
+      `/api/share/post-links/${created.rawToken}/videos/${videoImageId}/hls/480p/index.m3u8`
     );
     // A viewer must never be handed the library-wide route.
     expect(master.body).not.toContain('/api/videos/');
