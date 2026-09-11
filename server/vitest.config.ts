@@ -8,6 +8,7 @@ export default defineConfig({
   root: __dirname,
   test: {
     include: ['test/**/*.test.ts'],
+    exclude: ['test/**/._*.test.ts'],
     setupFiles: ['./test/setup.ts'],
     fileParallelism: false,
     maxWorkers: 1,

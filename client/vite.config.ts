@@ -91,6 +91,8 @@ export default defineConfig(async ({ command, mode }) => {
       }
     },
     test: {
+      include: ['src/**/*.test.ts'],
+      exclude: ['src/**/._*.test.ts'],
       environment: 'jsdom',
       setupFiles: './vitest.setup.ts',
       css: true
