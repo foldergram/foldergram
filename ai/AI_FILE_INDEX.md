@@ -1,6 +1,6 @@
 # AI File Index
 
-Generated: 2026-09-11 00:46:55 +0800
+Generated: 2026-09-11 09:55:04 +0800
 
 Run again after adding/moving files: `scripts/ai-map.sh`.
 
@@ -31,6 +31,12 @@ Do not read `ai/AI_REPOMIX_CONTEXT.md` or graph dumps by default.
 - `server/src/db/database.ts`
 - `server/src/db/migration.ts`
 - `server/src/db/repositories.ts`
+- `server/src/db/repositories/collections.ts`
+- `server/src/db/repositories/media.ts`
+- `server/src/db/repositories/scans.ts`
+- `server/src/db/repositories/settings.ts`
+- `server/src/db/repositories/shared.ts`
+- `server/src/db/repositories/shares.ts`
 - `server/src/db/schema-compat.ts`
 - `server/src/db/schema.ts`
 - `server/src/index.ts`

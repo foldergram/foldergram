@@ -127,7 +127,7 @@ for (const file of files) visit(file);
 
 const ceilings = {
   'server/src/routes/api.ts': 1829,
-  'server/src/db/repositories.ts': 4113,
+  'server/src/db/repositories.ts': 27,
   'server/src/services/gallery-service.ts': 2796,
   'client/src/api/gallery.ts': 693,
   'client/src/components/FeedCard.vue': 1853,
