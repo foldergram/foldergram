@@ -20,6 +20,7 @@
     "build:server": "node scripts/run-workspace-script.mjs server build",
     "build:client": "node scripts/run-workspace-script.mjs client build",
     "build:docs": "node scripts/run-workspace-script.mjs docs build",
+    "check:architecture": "node scripts/check-architecture.mjs",
     "rescan": "node scripts/run-workspace-script.mjs server rescan",
     "test": "node scripts/run-workspace-script.mjs server test && node scripts/run-workspace-script.mjs client test",
     "test:server": "node scripts/run-workspace-script.mjs server test",
