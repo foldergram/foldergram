@@ -2915,6 +2915,27 @@ export const imageRepository = {
     );
   },
 
+  countMissingScanMetadataByFolder(folderId: number): number {
+    return Number(
+      (
+        database
+          .prepare(
+            `
+            SELECT COUNT(*) AS count
+            FROM images
+            WHERE folder_id = ?
+              AND is_deleted = 0
+              AND (
+                (media_type = 'image' AND (display_orientation IS NULL OR is_animated IS NULL OR exif_json IS NULL))
+                OR (media_type = 'video' AND duration_ms IS NULL)
+              )
+            `
+          )
+          .get(folderId) as { count: number }
+      ).count
+    );
+  },
+
   countMissingPlaybackStrategyByFolder(folderId: number): number {
     return Number(
       (

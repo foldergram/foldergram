@@ -1901,10 +1901,12 @@ class ScannerService {
     const storedFolderState = folderScanStates.get(normalizedFolderPath);
     const hasCompleteTakenAtMetadata = imageRepository.countMissingTimestampMetadataByFolder(folder.id) === 0;
     const hasCompletePlaybackStrategyMetadata = imageRepository.countMissingPlaybackStrategyByFolder(folder.id) === 0;
+    const hasCompleteScanMetadata = imageRepository.countMissingScanMetadataByFolder(folder.id) === 0;
     const hasMatchingIndexedFiles =
       discoveredFiles.length > 0 &&
       hasCompleteTakenAtMetadata &&
       hasCompletePlaybackStrategyMetadata &&
+      hasCompleteScanMetadata &&
       imageRepository.countByFolder(folder.id) === discoveredFiles.length &&
       discoveredFiles.every((file) => {
         const existingImage = imageRepository.getByRelativePath(file.relativePath);
