@@ -36,7 +36,7 @@ pnpm monorepo：`server/`（Express 5 + TypeScript ESM + SQLite）、`client/`�
 - 每个问题最多两轮宽泛搜索；若两轮反复命中同一批文件/符号，立即停止搜索并冻结结论
 - `scripts/ai-refresh.sh` 每个任务开头运行一次即可；只有新增/移动/生成文件后才再运行
 - 不要用同义词反复搜同一问题；优先打开已定位文件细读
-- `server/src/routes/api.ts`（1400 行）和 `server/src/db/repositories.ts`（3800 行）**禁止整读**，用 `scripts/ai-symbol.sh` 拿到行号后读区间
+- `server/src/routes/api.ts`、`server/src/db/repositories.ts`、`server/src/services/gallery-service.ts`、`client/src/api/gallery.ts` 现在都只是几十行的兼容组合根，实现按业务域在同名目录下（`server/src/modules/`、`server/src/db/repositories/`、`server/src/services/gallery-service/`、`client/src/api/gallery/`）；直接读对应域文件，不要整读大目录
 - 输出被截断时优先收窄查询或打开具体文件，不要默认扩大 token 预算
 - 正常排查不要跑 Repomix。仅在用户明确要求全量交接时运行 `AI_REFRESH_REPOMIX=1 scripts/ai-refresh.sh`，生成物在 `.tmp/`，且只允许抽样
 - 不要读 `ai/AI_REPOMIX_CONTEXT.md`；它是 stub

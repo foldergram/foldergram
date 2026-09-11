@@ -79,3 +79,18 @@ CI runs the architecture check before server tests, client tests, and the produc
 - Add ports only for real external variation or test isolation.
 - Do not add a generic base repository or controller/service/manager forwarding chain.
 - Remove compatibility exports after all callers migrate.
+
+## Migration status (2026-09-11)
+
+The four legacy hotspot files have been split behind compatible composition roots; every public export, caller import path, and HTTP contract is unchanged.
+
+| Composition root | Lines | Domain files |
+|---|---|---|
+| `server/src/routes/api.ts` | 48 | `server/src/modules/{feed,library,folders,collections,places,sharing,deletion,settings,admin}/` |
+| `server/src/db/repositories.ts` | 27 | `server/src/db/repositories/{media,collections,shares,settings,scans,shared}.ts` |
+| `server/src/services/gallery-service.ts` | 70 | `server/src/services/gallery-service/{feed,folders,shares,places,collections,interactions,admin,shared}.ts` |
+| `client/src/api/gallery.ts` | 13 | `client/src/api/gallery/{feed,moments,folders,places,stories,shares,posts,interactions,collections,trash,status,auth,admin}.ts` |
+
+- `server/test/api-route-contract.test.ts` still locks all 102 method/path registrations against the composed router.
+- Line-count ceilings in `scripts/check-architecture.mjs` were lowered to the actual composition-root sizes and now guard against regression.
+- The remaining large files (`FeedCard.vue`, `ReelPlayerCard.vue`) are player-contract surfaces in `docs/player-contract.md` and are intentionally not split.

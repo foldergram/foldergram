@@ -9,8 +9,9 @@
 - 技术栈: 服务端 Express 5 + TypeScript ESM + SQLite(dbmate 迁移) + sharp + exifr + zod；客户端 Vue 3 + Pinia + vue-router + vue-i18n + UnoCSS + Vite；文档 VitePress
 - 工作区: `server/`、`client/`、`docs/`（见 `pnpm-workspace.yaml`）
 - 服务端入口: `server/src/index.ts` → `server/src/app.ts`（中间件挂载顺序在此）
-- API 路由: `server/src/routes/api.ts`（单文件 1400+ 行，所有 `/api/*` 端点）
-- 数据访问: `server/src/db/repositories.ts`（3800+ 行，所有 SQL）；schema 在 `server/src/db/schema.ts`
+- API 路由: `server/src/routes/api.ts`（48 行组合根，路由按域注册在 `server/src/modules/<domain>/`，102 条端点注册表由 `server/test/api-route-contract.test.ts` 锁定）
+- 数据访问: `server/src/db/repositories.ts`（27 行组合根，SQL 按域在 `server/src/db/repositories/`）；schema 在 `server/src/db/schema.ts`
+- 聚合业务: `server/src/services/gallery-service.ts`（70 行组合根，方法按域在 `server/src/services/gallery-service/`）
 - 服务端模型: `server/src/types/models.ts`
 - 环境配置: `server/src/config/env.ts`（zod 校验，所有 env 变量在此声明）
 - 客户端入口: `client/src/main.ts`；路由 `client/src/router/index.ts`
@@ -58,8 +59,8 @@
 生产模式 → client/dist 静态资源 + SPA fallback
 ```
 
-服务端分层：`routes/api.ts`（校验 + 编排）→ `services/*`（业务）→ `db/repositories.ts`（SQL）。
-新增端点通常要动这三层，加字段还要加 `server/db/migrations/` 和 `client/src/types/api.ts`。
+服务端分层：`routes/api.ts`（48 行组合根，按域调用 `modules/<domain>/` 的注册函数）→ `services/*`（业务）→ `db/repositories.ts`（27 行组合根，SQL 在 `db/repositories/` 域文件）。
+新增端点：在对应 `server/src/modules/<domain>/` 域文件里加注册函数并确认组合根调用了它；聚合业务方法在 `server/src/services/gallery-service/<domain>.ts` 加并挂到组合根；SQL 在 `server/src/db/repositories/<domain>.ts`。加字段还要同步 `server/db/migrations/` 和 `client/src/types/api.ts`。
 
 关键服务对象都是单例导出（`galleryService`、`scannerService`、`authService`、`storageService`、`permanentDeletionService` 等），直接 import 使用。
 
@@ -72,8 +73,8 @@
 
 | 需求/症状 | 推荐搜索词 / 首查位置 |
 |---|---|
-| 加端点、改接口返回 | `router.get(` / `router.post(` in `server/src/routes/api.ts` |
-| 改数据库字段 | `server/db/migrations/` + `schema.ts` + `repositories.ts` |
+| 加端点、改接口返回 | `router.get(` / `router.post(` in `server/src/modules/<domain>/`（组合根 `server/src/routes/api.ts` 只做装配） |
+| 改数据库字段 | `server/db/migrations/` + `schema.ts` + `server/src/db/repositories/` 域文件 |
 | 首页 feed 排序/推荐 | `feed-utils.ts`, `feed-rail-utils.ts`, `home-recommendations.ts` |
 | Reels 播放列表 | `server/src/utils/reels-utils.ts`, `client/src/utils/reels.ts`, `useReelsStore` |
 | 轮播/多图帖 | `carousels-utils.ts`, `TREAT_CAROUSELS_AS_FOLDERS_SETTING_KEY`, `CarouselMediaStage.vue` |

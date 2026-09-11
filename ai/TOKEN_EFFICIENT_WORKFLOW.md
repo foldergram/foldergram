@@ -1,7 +1,7 @@
 # Token Efficient Workflow
 
 本文件定义 foldergram 的低 token 工作流：优先读小而准的索引，而不是反复全仓搜索。
-本仓库 238 个 TS/Vue 源文件，`api.ts` 和 `repositories.ts` 单文件就有 1400 / 3800 行，整读代价极高。
+本仓库 238 个 TS/Vue 源文件。原 1400 / 3800 行的 `api.ts` 和 `repositories.ts` 已拆为几十行组合根加业务域文件（见 `docs/architecture-boundaries.md`），大文件整读问题已消除，但仍优先读域文件而不是整个目录。
 
 ## 默认流程
 
