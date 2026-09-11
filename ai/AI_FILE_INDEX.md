@@ -1,6 +1,6 @@
 # AI File Index
 
-Generated: 2026-09-01 11:50:33 +0800
+Generated: 2026-09-11 00:46:55 +0800
 
 Run again after adding/moving files: `scripts/ai-map.sh`.
 
@@ -39,6 +39,19 @@ Do not read `ai/AI_REPOMIX_CONTEXT.md` or graph dumps by default.
 - `server/src/middleware/public-demo-mode.ts`
 - `server/src/middleware/rate-limit.ts`
 - `server/src/middleware/response-compression.ts`
+- `server/src/modules/admin/index.ts`
+- `server/src/modules/admin/prelude.ts`
+- `server/src/modules/collections/index.ts`
+- `server/src/modules/deletion/index.ts`
+- `server/src/modules/feed/index.ts`
+- `server/src/modules/folders/index.ts`
+- `server/src/modules/library/index.ts`
+- `server/src/modules/places/index.ts`
+- `server/src/modules/settings/index.ts`
+- `server/src/modules/sharing/index.ts`
+- `server/src/routes/api-helpers.ts`
+- `server/src/routes/api-middleware.ts`
+- `server/src/routes/api-schemas.ts`
 - `server/src/routes/api.ts`
 - `server/src/routes/lazy-derivatives.ts`
 - `server/src/routes/video-stream.ts`
@@ -50,12 +63,14 @@ Do not read `ai/AI_REPOMIX_CONTEXT.md` or graph dumps by default.
 - `server/src/services/derivative-service.ts`
 - `server/src/services/folder-share-service.ts`
 - `server/src/services/gallery-service.ts`
+- `server/src/services/hls-cache-service.ts`
 - `server/src/services/library-relocation-service.ts`
 - `server/src/services/log-service.ts`
 - `server/src/services/maintenance-operation-lock.ts`
 - `server/src/services/permanent-deletion-service.ts`
 - `server/src/services/place-service.ts`
 - `server/src/services/post-share-service.ts`
+- `server/src/services/scan-worker-client.ts`
 - `server/src/services/scanner-service.ts`
 - `server/src/services/storage-service.ts`
 - `server/src/services/video-stream-service.ts`
@@ -78,6 +93,7 @@ Do not read `ai/AI_REPOMIX_CONTEXT.md` or graph dumps by default.
 - `server/src/utils/share-url.ts`
 - `server/src/utils/slug.ts`
 - `server/src/utils/stories-utils.ts`
+- `server/src/worker.ts`
 
 ## Client Source (`client/src`)
 
@@ -103,6 +119,7 @@ Do not read `ai/AI_REPOMIX_CONTEXT.md` or graph dumps by default.
 - `client/src/components/ExploreGrid.vue`
 - `client/src/components/FeedCard.test.ts`
 - `client/src/components/FeedCard.vue`
+- `client/src/components/FeedList.test.ts`
 - `client/src/components/FeedList.vue`
 - `client/src/components/FolderGrid.test.ts`
 - `client/src/components/FolderGrid.vue`
@@ -138,11 +155,14 @@ Do not read `ai/AI_REPOMIX_CONTEXT.md` or graph dumps by default.
 - `client/src/components/StoriesModal.test.ts`
 - `client/src/components/StoriesModal.vue`
 - `client/src/components/TopNav.vue`
+- `client/src/components/VideoFirstFrame.vue`
 - `client/src/components/VideoMediaPlayer.test.ts`
 - `client/src/components/VideoMediaPlayer.vue`
 - `client/src/components/VideoProgressFooter.test.ts`
 - `client/src/components/VideoProgressFooter.vue`
 - `client/src/composables/immersive-gesture-coordination.test.ts`
+- `client/src/composables/useFeedWindow.test.ts`
+- `client/src/composables/useFeedWindow.ts`
 - `client/src/composables/useHoldToSpeed.test.ts`
 - `client/src/composables/useHoldToSpeed.ts`
 - `client/src/composables/useHorizontalSwipe.ts`
@@ -157,6 +177,7 @@ Do not read `ai/AI_REPOMIX_CONTEXT.md` or graph dumps by default.
 - `client/src/composables/usePostShare.ts`
 - `client/src/composables/usePullToRefresh.ts`
 - `client/src/composables/useReelsLandscape.ts`
+- `client/src/composables/useRouteScrollMemory.ts`
 - `client/src/composables/useVerticalDismiss.test.ts`
 - `client/src/composables/useVerticalDismiss.ts`
 - `client/src/composables/useViewActivation.test.ts`
@@ -211,6 +232,7 @@ Do not read `ai/AI_REPOMIX_CONTEXT.md` or graph dumps by default.
 - `client/src/utils/media.ts`
 - `client/src/utils/original-media.ts`
 - `client/src/utils/reels.ts`
+- `client/src/utils/safe-media-player.ts`
 - `client/src/utils/scan-progress.test.ts`
 - `client/src/utils/scan-progress.ts`
 - `client/src/utils/sidebar-folders.ts`
@@ -250,6 +272,7 @@ Do not read `ai/AI_REPOMIX_CONTEXT.md` or graph dumps by default.
 - `server/test/animated-image-derivative.test.ts`
 - `server/test/animated-image-feed-support.test.ts`
 - `server/test/api-cache-control.test.ts`
+- `server/test/api-route-contract.test.ts`
 - `server/test/auth-protection.test.ts`
 - `server/test/auth-route-validation.test.ts`
 - `server/test/auth-service.test.ts`
@@ -279,6 +302,7 @@ Do not read `ai/AI_REPOMIX_CONTEXT.md` or graph dumps by default.
 - `server/test/gallery-delete.test.ts`
 - `server/test/gallery-root-utils.test.ts`
 - `server/test/highlight-rail.test.ts`
+- `server/test/hls-cache-service.test.ts`
 - `server/test/home-recommendations.test.ts`
 - `server/test/http-test-utils.ts`
 - `server/test/image-detail-source.test.ts`
@@ -335,5 +359,6 @@ Do not read `ai/AI_REPOMIX_CONTEXT.md` or graph dumps by default.
 - `scripts/ai-refresh.sh`
 - `scripts/ai-search.sh`
 - `scripts/ai-symbol.sh`
+- `scripts/check-architecture.mjs`
 - `scripts/install-ai-hooks.sh`
 - `scripts/run-workspace-script.mjs`

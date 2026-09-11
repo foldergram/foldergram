@@ -60,7 +60,7 @@ describe.sequential('admin route rate limiting', () => {
     await fs.rm(tempRoot, { recursive: true, force: true });
   });
 
-  it('does not attach the mutation rate limiter to admin stats', () => {
+  it('does not attach the mutation rate limiter to admin stats', async () => {
     const handlers = getRouteHandlers('/admin/stats', 'get');
 
     expect(handlers.length).toBeGreaterThanOrEqual(2);
@@ -71,7 +71,7 @@ describe.sequential('admin route rate limiting', () => {
     for (let attempt = 0; attempt < 12; attempt += 1) {
       const response = createResponse();
 
-      terminalHandler(request, response as unknown as express.Response, vi.fn());
+      await terminalHandler(request, response as unknown as express.Response, vi.fn());
 
       expect(response.status).not.toHaveBeenCalled();
       expect(response.json).toHaveBeenCalledOnce();
