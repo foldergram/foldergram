@@ -151,6 +151,7 @@ import {
   preferEntryHlsLevel,
   resolveVideoFallbackSource,
   resolveVideoSource,
+  resumePlaybackAfterSeek,
   seekMediaPlayerAndWait,
   toPlayerSrc,
   useBundledHlsLibrary,
@@ -493,6 +494,30 @@ function warmSeekTarget(seconds: number) {
   });
 }
 
+// Warm the target while the viewer is still dragging the slider (pointer-down through
+// move), so the segments around the release point are already transcoding by the time
+// the seek commits. Throttled so a fast drag does not fire an ffmpeg run per pixel.
+const PREVIEW_WARM_MIN_INTERVAL_MS = 250;
+const PREVIEW_WARM_MIN_MOVE_SEC = 1.5;
+let lastPreviewWarmSec = Number.NEGATIVE_INFINITY;
+let lastPreviewWarmAt = 0;
+
+function warmSeekTargetWhileDragging(seconds: number) {
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    return;
+  }
+  const now = Date.now();
+  if (
+    Math.abs(seconds - lastPreviewWarmSec) < PREVIEW_WARM_MIN_MOVE_SEC &&
+    now - lastPreviewWarmAt < PREVIEW_WARM_MIN_INTERVAL_MS
+  ) {
+    return;
+  }
+  lastPreviewWarmSec = seconds;
+  lastPreviewWarmAt = now;
+  warmSeekTarget(seconds);
+}
+
 const holdSpeed = useHoldToSpeed({
   canStart: (event) => !isInteractiveTarget(event.target),
   getCurrentTime: getScrubStartTime,
@@ -718,12 +743,66 @@ function seekTo(seconds: number) {
   currentTimeSec.value = next;
   preferEntryHlsLevel(player);
   warmSeekTarget(next);
+  // Judge "playing again" from the seek target so a clip frozen on the new frame is
+  // not mistaken for progress (its clock already reads the target).
+  playbackBaselineSec = next;
   pendingSeekTargetSec.value = next;
   return seekMediaPlayerAndWait(player, next, {
     resumePlayback: !userPaused.value
   }).finally(() => {
-    if (pendingSeekTargetSec.value === next) {
+    // A newer seek may have taken the surface while this one was settling. Only the
+    // latest seek clears the marker and owns the resume; older ones stand down.
+    const isLatestSeek = pendingSeekTargetSec.value === next;
+    if (isLatestSeek) {
       pendingSeekTargetSec.value = null;
+    }
+    if (!isLatestSeek) {
+      return;
+    }
+    if (userPaused.value) {
+      isPaused.value = true;
+      return;
+    }
+    resumeAfterSeek(player, next);
+  });
+}
+
+/**
+ * The single `play()` inside `seekMediaPlayerAndWait` can be refused once it lands
+ * outside the pointerup gesture (slow cold Range, on-demand HLS), which is the "drag
+ * the bar, clip stays paused" report. This runs the reliable resume: retry, fall back
+ * to muted playback on an audible rejection, and hand a still-stuck Direct source to
+ * HLS at the same position instead of spinning `play()` forever.
+ */
+function resumeAfterSeek(player: MediaPlayerElement, target: number) {
+  // Resuming after a seek is an implicit "keep playing", so a prior autoplay stand-down
+  // must not veto the retry loop.
+  autoplayCancelled = false;
+  resumePlaybackAfterSeek({
+    play: () => safeMediaPlayerPlay(player),
+    hasResumed: () => !player.paused && hasPlaybackAdvanced(player),
+    shouldContinue: () =>
+      playerElement.value === player &&
+      !userPaused.value &&
+      !holdSpeed.isScrubbing.value &&
+      pendingSeekTargetSec.value === null,
+    onAudibleRejected: () => {
+      if (effectiveMuted.value) {
+        return false;
+      }
+      const blocked = appStore.reportAudibleAutoplayBlocked();
+      syncPlayerMuted(player, blocked ? true : effectiveMuted.value);
+      return true;
+    },
+    onExhausted: () => {
+      // Still parked after the retries: reflect it in the UI, and on a Direct source
+      // hand off to HLS at the same position rather than leaving a frozen frame.
+      isPaused.value = player.paused;
+      const active = managedActiveSource.value;
+      if (active && !active.isStream && !fallbackSource.value) {
+        pendingRestoreState = { currentTime: target, wasPaused: false };
+        switchToFallbackSource();
+      }
     }
   });
 }
@@ -747,6 +826,7 @@ function getScrubStartTime(): number {
 function previewSeekTo(seconds: number) {
   if (!Number.isFinite(seconds)) return;
   previewTimeSec.value = seconds;
+  warmSeekTargetWhileDragging(seconds);
 }
 
 function handleSurfaceKeydown(event: KeyboardEvent) {

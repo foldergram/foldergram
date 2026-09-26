@@ -892,6 +892,36 @@ function previewHomeVideoTo(seconds: number) {
   }
 
   homeVideoCurrentTimeMs.value = Math.max(0, seconds) * 1000;
+  warmHomeSeekTargetWhileDragging(Math.max(0, seconds));
+}
+
+// Warm the target while the viewer is still dragging the footer slider so the release
+// point is already transcoding by the time the seek commits. Throttled so a fast drag
+// does not fire an ffmpeg run per pixel; Direct Play (fromSeconds > 0) is a no-op.
+const HOME_PREVIEW_WARM_MIN_INTERVAL_MS = 250;
+const HOME_PREVIEW_WARM_MIN_MOVE_SEC = 1.5;
+let lastHomePreviewWarmSec = Number.NEGATIVE_INFINITY;
+let lastHomePreviewWarmAt = 0;
+
+function warmHomeSeekTargetWhileDragging(seconds: number) {
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    return;
+  }
+  const now = Date.now();
+  if (
+    Math.abs(seconds - lastHomePreviewWarmSec) < HOME_PREVIEW_WARM_MIN_MOVE_SEC &&
+    now - lastHomePreviewWarmAt < HOME_PREVIEW_WARM_MIN_INTERVAL_MS
+  ) {
+    return;
+  }
+  lastHomePreviewWarmSec = seconds;
+  lastHomePreviewWarmAt = now;
+  warmVideoStream(props.item, appStore.videoPlaybackQuality, {
+    fromSeconds: seconds,
+    segments: HLS_WARM_SEGMENTS,
+    source: homeActiveVideoSource.value,
+    playbackMode: appStore.videoPlaybackMode
+  });
 }
 
 function seekHomeVideoTo(seconds: number) {
@@ -914,9 +944,19 @@ function seekHomeVideoTo(seconds: number) {
   return seekMediaPlayerAndWait(player, next, {
     resumePlayback: !homeUserPaused.value
   }).finally(() => {
-    if (pendingHomeVideoSeek.value === next) {
+    // Only the latest seek clears the marker and drives the resume; an older seek that
+    // is still settling stands down so it cannot fight a newer target.
+    const isLatestSeek = pendingHomeVideoSeek.value === next;
+    if (isLatestSeek) {
       pendingHomeVideoSeek.value = null;
     }
+    if (!isLatestSeek || homeUserPaused.value) {
+      return;
+    }
+    // The single play() inside the seek can be refused once it lands outside the
+    // pointerup gesture. Run the full home resume path (retry + muted fallback +
+    // stalled-source recovery) so the clip does not stay parked after a bar drag.
+    void syncHomeVideoPlayback();
   });
 }
 

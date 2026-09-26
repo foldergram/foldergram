@@ -14,6 +14,7 @@ import {
   resetDirectPlayCapabilityCache,
   resolveVideoFallbackSource,
   resolveVideoSource,
+  resumePlaybackAfterSeek,
   seekMediaPlayerAndWait,
   useBundledHlsLibrary,
   warmVideoStream
@@ -234,6 +235,119 @@ describe('seekMediaPlayerAndWait', () => {
     const committing = seekMediaPlayerAndWait(player, 42, { timeoutMs: 1_000, resumePlayback: true });
     player.dispatchEvent(new Event('seeked'));
     await committing;
+
+    expect(play).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('resumePlaybackAfterSeek', () => {
+  it('retries a rejected resume until playback actually advances', async () => {
+    let playing = false;
+    const play = vi.fn(() => {
+      // The first attempt is refused (it landed outside the gesture); the second wins.
+      if (play.mock.calls.length >= 2) {
+        playing = true;
+        return Promise.resolve(true);
+      }
+      return Promise.resolve(false);
+    });
+
+    resumePlaybackAfterSeek(
+      { play, hasResumed: () => playing, shouldContinue: () => true },
+      { baseDelayMs: 1, maxDelayMs: 1 }
+    );
+
+    await vi.waitFor(() => {
+      expect(playing).toBe(true);
+    });
+    expect(play).toHaveBeenCalledTimes(2);
+  });
+
+  it('falls back to muted playback when an audible resume is refused', async () => {
+    let muted = false;
+    let playedMuted = false;
+    const play = vi.fn(() => {
+      if (muted) {
+        playedMuted = true;
+        return Promise.resolve(true);
+      }
+      return Promise.resolve(false);
+    });
+    const onAudibleRejected = vi.fn(() => {
+      muted = true;
+      return true;
+    });
+
+    resumePlaybackAfterSeek(
+      { play, hasResumed: () => playedMuted, shouldContinue: () => true, onAudibleRejected },
+      { baseDelayMs: 1, maxDelayMs: 1 }
+    );
+
+    await vi.waitFor(() => {
+      expect(playedMuted).toBe(true);
+    });
+    expect(onAudibleRejected).toHaveBeenCalledTimes(1);
+    expect(play).toHaveBeenCalledTimes(2);
+  });
+
+  it('escalates once after the retries are spent', async () => {
+    const play = vi.fn(() => Promise.resolve(false));
+    const onExhausted = vi.fn();
+
+    resumePlaybackAfterSeek(
+      { play, hasResumed: () => false, shouldContinue: () => true, onExhausted },
+      { maxAttempts: 3, baseDelayMs: 1, maxDelayMs: 1 }
+    );
+
+    await vi.waitFor(() => {
+      expect(onExhausted).toHaveBeenCalledTimes(1);
+    });
+    expect(play).toHaveBeenCalledTimes(3);
+  });
+
+  it('stops immediately once the surface says it should not continue', async () => {
+    const play = vi.fn(() => Promise.resolve(false));
+    const onExhausted = vi.fn();
+
+    resumePlaybackAfterSeek(
+      { play, hasResumed: () => false, shouldContinue: () => false, onExhausted },
+      { maxAttempts: 3, baseDelayMs: 1, maxDelayMs: 1 }
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(play).not.toHaveBeenCalled();
+    expect(onExhausted).not.toHaveBeenCalled();
+  });
+});
+
+describe('seekMediaPlayerAndWait timeout resume', () => {
+  it('resumes on the timeout branch when the provider never reaches the target', async () => {
+    const player = document.createElement('div') as HTMLDivElement & {
+      currentTime: number;
+      paused: boolean;
+      pause: () => void;
+      play: () => void;
+    };
+    // A cold on-demand seek can leave the clock parked and never fire `seeked`, so the
+    // clock never reaches the target and only the timeout fallback fires `finish`. That
+    // path must still resume playback rather than leaving the clip paused.
+    Object.defineProperty(player, 'currentTime', {
+      configurable: true,
+      get: () => 10,
+      set: () => {}
+    });
+    player.paused = false;
+    const play = vi.fn(() => {
+      player.paused = false;
+    });
+    player.pause = vi.fn(() => {
+      player.paused = true;
+    });
+    player.play = play;
+
+    const committing = seekMediaPlayerAndWait(player, 42, { timeoutMs: 20, resumePlayback: true });
+    await committing;
+    await new Promise((resolve) => setTimeout(resolve, 40));
 
     expect(play).toHaveBeenCalledTimes(1);
   });

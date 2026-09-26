@@ -254,6 +254,22 @@ function scheduleAfterCurrentTask(callback: () => void): void {
 }
 
 /**
+ * Starts playback without letting a rejected `play()` promise surface as an unhandled
+ * rejection. `player.play()` returns a promise on real elements and `void` on the test
+ * doubles, so both shapes are tolerated.
+ */
+function playAndIgnoreRejection(player: SeekableMediaPlayer): void {
+  try {
+    const result = player.play?.();
+    if (result && typeof (result as Promise<unknown>).then === 'function') {
+      (result as Promise<unknown>).then(undefined, () => {});
+    }
+  } catch {
+    // The provider is not attached yet; the caller's resume retry covers this.
+  }
+}
+
+/**
  * Sets a final scrub target and waits briefly for the provider to acknowledge it.
  *
  * During a full-surface scrub we preview several seeks in rapid succession. Starting
@@ -301,7 +317,11 @@ export function seekMediaPlayerAndWait(
         scheduleAfterCurrentTask(() => {
           // A newer seek owns the surface by now, so its own commit resumes playback.
           if (seekGeneration === currentSeekWaitGeneration(player)) {
-            void player.play?.();
+            // Fast path: this microtask still counts as the pointerup gesture on iOS.
+            // It is only the first attempt — the caller pairs this with
+            // `resumePlaybackAfterSeek` so a rejected play() is retried rather than
+            // leaving the clip parked on a frame.
+            playAndIgnoreRejection(player);
           }
         });
       }
@@ -334,6 +354,75 @@ export function seekMediaPlayerAndWait(
 
 function toDirectSource(url: string): ResolvedVideoSource {
   return { src: url, type: 'video/mp4', isStream: false };
+}
+
+/**
+ * Drives a bounded, backing-off resume after a seek commits.
+ *
+ * `seekMediaPlayerAndWait` fires a single best-effort `play()` inside the gesture
+ * microtask. On a slow seek (cold Range, on-demand HLS) that attempt lands outside the
+ * gesture and mobile browsers silently reject it, so the clip stays paused until the
+ * viewer taps play. This retries the resume a few times, folds in a muted fallback for
+ * an audible-autoplay rejection, and escalates once (e.g. Direct Play → HLS) instead of
+ * spinning `play()` forever, matching the "don't just spam play()" playback contract.
+ */
+export interface ReliableResumeController {
+  /** Attempt playback; resolves true when the `play()` promise resolved. */
+  play: () => Promise<boolean>;
+  /** True once the clip is genuinely advancing past where it was asked to resume. */
+  hasResumed: () => boolean;
+  /** False cancels the loop: the viewer paused, a newer seek took over, or unmounted. */
+  shouldContinue: () => boolean;
+  /**
+   * `play()` was refused while audible. Mute + record the document-wide verdict and
+   * return true to retry muted, mirroring the auto-play-fail path. Return false to give
+   * up the audible attempt (already muted, or the surface has no fallback).
+   */
+  onAudibleRejected?: () => boolean;
+  /** Retries are spent and the clip is still parked: last-resort escalation. */
+  onExhausted?: () => void;
+}
+
+export function resumePlaybackAfterSeek(
+  controller: ReliableResumeController,
+  options: { maxAttempts?: number; baseDelayMs?: number; maxDelayMs?: number } = {}
+): void {
+  const maxAttempts = options.maxAttempts ?? 6;
+  const baseDelayMs = options.baseDelayMs ?? 160;
+  const maxDelayMs = options.maxDelayMs ?? 1_200;
+  let attempts = 0;
+  let mutedRetryUsed = false;
+
+  const attempt = () => {
+    if (!controller.shouldContinue() || controller.hasResumed()) {
+      return;
+    }
+
+    attempts += 1;
+    void controller.play().then((started) => {
+      if (!controller.shouldContinue() || controller.hasResumed()) {
+        return;
+      }
+
+      // A refused audible play does not mean the clip cannot run. Retry muted before
+      // spending the retry budget, so a rejected resume falls back to silent playback
+      // instead of freezing.
+      if (!started && !mutedRetryUsed && controller.onAudibleRejected?.()) {
+        mutedRetryUsed = true;
+        queueMicrotask(attempt);
+        return;
+      }
+
+      if (attempts >= maxAttempts) {
+        controller.onExhausted?.();
+        return;
+      }
+
+      setTimeout(attempt, Math.min(baseDelayMs * attempts, maxDelayMs));
+    });
+  };
+
+  attempt();
 }
 
 function toHlsMasterSource(streamUrl: string): ResolvedVideoSource {
