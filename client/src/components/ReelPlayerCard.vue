@@ -39,6 +39,7 @@
             :loop.prop="true"
             :load="playerLoadMode"
             :preload="playerPreloadMode"
+            :noSwipeGesture.prop="true"
           >
             <media-provider />
             <media-poster
@@ -195,6 +196,8 @@ import type { FeedItem, FolderSummary } from '../types/api';
 import { formatFolderTitle } from '../utils/folder-titles';
 import { formatVideoTimestamp } from '../utils/media';
 import {
+  HLS_WARM_SEGMENTS,
+  preferEntryHlsLevel,
   resolveVideoFallbackSource,
   resolveVideoSource,
   seekMediaPlayerAndWait,
@@ -235,6 +238,7 @@ const playerElement = ref<MediaPlayerElement | null>(null);
 const playerGeneration = ref(0);
 const stageElement = ref<HTMLElement | null>(null);
 const isPaused = ref(false);
+const userPaused = ref(false);
 // Vidstack may report the old clock briefly after a seek. Keep the latest visible
 // scrub target as the next gesture's relative origin until playback catches up.
 const reelScrubPosition = ref<number | null>(null);
@@ -250,7 +254,10 @@ const playerPreloadMode = computed(() =>
   isViewActive.value && (props.active || props.prefetch) ? 'auto' : 'metadata'
 );
 const preferredSource = computed<ResolvedVideoSource>(() =>
-  resolveVideoSource(props.item, appStore.videoPlaybackQuality)
+  resolveVideoSource(props.item, appStore.videoPlaybackQuality, {
+    preferStream: appStore.adaptivePreferStream,
+    playbackMode: appStore.videoPlaybackMode
+  })
 );
 const activeSource = computed<ResolvedVideoSource>(() => fallbackSource.value ?? preferredSource.value);
 const currentVideoSrc = computed(() => activeSource.value.src);
@@ -277,7 +284,9 @@ const MAX_STALL_RETRIES = 12;
 const MAX_STALL_RETRY_DELAY_MS = 1_200;
 const STARTUP_FALLBACK_MS = 2_000;
 const PLAYBACK_PROGRESS_EPSILON_SEC = 0.05;
+const SLOW_DIRECT_FALLBACK_MS = 2_500;
 let startupFallbackTimer = 0;
+let slowDirectFallbackTimer = 0;
 let playbackBaselineSec = 0;
 let lastConfirmedPlaybackSec = 0;
 let pendingRecoverySec = 0;
@@ -312,6 +321,32 @@ function clearStartupFallback() {
     window.clearTimeout(startupFallbackTimer);
     startupFallbackTimer = 0;
   }
+}
+
+function clearSlowDirectFallback() {
+  if (slowDirectFallbackTimer !== 0) {
+    window.clearTimeout(slowDirectFallbackTimer);
+    slowDirectFallbackTimer = 0;
+  }
+}
+
+function scheduleSlowDirectFallback() {
+  if (activeSource.value.isStream || fallbackSource.value) {
+    return;
+  }
+
+  if (hasRenderedFrame.value) {
+    return;
+  }
+
+  clearSlowDirectFallback();
+  slowDirectFallbackTimer = window.setTimeout(() => {
+    slowDirectFallbackTimer = 0;
+    if (activeSource.value.isStream || fallbackSource.value || !props.active) {
+      return;
+    }
+    recoverStuckPlayer();
+  }, SLOW_DIRECT_FALLBACK_MS);
 }
 
 function scheduleStartupFallback() {
@@ -492,6 +527,10 @@ async function syncPlayback(options: { preserveRetryAttempts?: boolean } = {}) {
     return;
   }
 
+  if (holdSpeed.isScrubbing.value) {
+    return;
+  }
+
   // The immersive layer plays the same clip, so the deck copy stays paused while
   // it is open instead of decoding twice. A cached (deactivated) view is still
   // mounted, so it must stand down too or the reel keeps playing on another tab.
@@ -593,11 +632,18 @@ function bindPlayerEventListeners(player: MediaPlayerElement | null) {
     }
   };
   const handlePause = () => {
+    if (holdSpeed.isScrubbing.value || reelScrubPosition.value !== null) {
+      return;
+    }
     isPaused.value = props.active;
   };
   const handleProgress = () => {
     const currentTime = player.currentTime ?? 0;
-    if (reelScrubPosition.value !== null && Math.abs(currentTime - reelScrubPosition.value) <= 1.5) {
+    if (
+      !holdSpeed.isScrubbing.value &&
+      reelScrubPosition.value !== null &&
+      Math.abs(currentTime - reelScrubPosition.value) <= 1.5
+    ) {
       reelScrubPosition.value = null;
     }
     if (hasPlaybackAdvanced(player)) {
@@ -608,6 +654,7 @@ function bindPlayerEventListeners(player: MediaPlayerElement | null) {
       playerRecoveryCount = 0;
       resetAutoplayRetry();
       clearStartupFallback();
+      clearSlowDirectFallback();
       hasRenderedFrame.value = true;
     }
   };
@@ -618,7 +665,8 @@ function bindPlayerEventListeners(player: MediaPlayerElement | null) {
   const handleStall = () => {
     // A stalled stream never resolves on its own here, because the provider has
     // already committed to a source the NAS has not finished transcoding.
-    if (props.active && !isPaused.value) {
+    if (props.active && !isPaused.value && !holdSpeed.isScrubbing.value) {
+      scheduleSlowDirectFallback();
       markPlaybackBaseline(player);
       clearAutoplayRetry();
       scheduleAutoplayRetry();
@@ -698,7 +746,7 @@ function warmSeekTarget(seconds: number) {
 
   warmVideoStream(props.item, appStore.videoPlaybackQuality, {
     fromSeconds: seconds,
-    segments: 2
+    segments: HLS_WARM_SEGMENTS
   });
 }
 
@@ -715,24 +763,25 @@ const holdSpeed = useHoldToSpeed({
       return;
     }
 
+    preferEntryHlsLevel(player);
     warmSeekTarget(seconds);
     playbackBaselineSec = seconds;
-    return seekMediaPlayerAndWait(player, seconds).finally(() => {
+    return seekMediaPlayerAndWait(player, seconds, {
+      resumePlayback: !userPaused.value
+    }).finally(() => {
       if (reelScrubPosition.value === seconds) {
         reelScrubPosition.value = null;
       }
       clearAutoplayRetry();
-      scheduleAutoplayRetry();
+      if (!userPaused.value) {
+        scheduleAutoplayRetry();
+      }
     });
   },
   // The seek bar reads the media element's currentTime. Updating it during the drag
   // makes the bar and the central preview label show the same live target.
   previewSeek: (seconds) => {
     reelScrubPosition.value = seconds;
-    const player = playerElement.value;
-    if (player) {
-      safeMediaPlayerSetCurrentTime(player, seconds);
-    }
   },
   // Keep the central time label on the exact same target as the bottom progress bar,
   // rather than letting it derive a second position from the gesture origin.
@@ -755,6 +804,12 @@ const holdSpeed = useHoldToSpeed({
   play: () => {
     if (playerElement.value) void safeMediaPlayerPlay(playerElement.value);
   },
+  pause: () => {
+    clearAutoplayRetry();
+    if (playerElement.value) safeMediaPlayerPause(playerElement.value);
+  },
+  // Sampled at scrub start, before this surface freezes the player.
+  isPlaying: () => !userPaused.value,
   // The deck rotates the card with CSS rather than the device, so the axes the viewer
   // sees are swapped while landscape is on. Reading the shared rotation flag keeps the
   // sideways scrub sideways from the viewer's point of view.
@@ -803,6 +858,8 @@ async function togglePlayback() {
   if (player.paused) {
     // Resuming from the reel surface is a user gesture. Restore the one global
     // sound preference before the provider starts playback again.
+    userPaused.value = false;
+    isPaused.value = false;
     appStore.activateVideoSoundFromUserGesture();
     syncMuted(player, effectiveMuted.value);
     await syncPlayback();
@@ -810,6 +867,7 @@ async function togglePlayback() {
   }
 
   isPaused.value = true;
+  userPaused.value = true;
   safeMediaPlayerPause(player);
 }
 
@@ -918,6 +976,7 @@ watch(isViewActive, (active) => {
     holdSpeed.stop();
     resetAutoplayRetry();
     clearStartupFallback();
+    clearSlowDirectFallback();
     reelScrubPosition.value = null;
   } else if (props.active && playerElement.value) {
     markPlaybackBaseline(playerElement.value);
@@ -933,6 +992,7 @@ watch(
       holdSpeed.stop();
       resetAutoplayRetry();
       clearStartupFallback();
+      clearSlowDirectFallback();
     }
 
     if (active) {
@@ -954,6 +1014,7 @@ watch(
     reelZoom.reset();
     resetAutoplayRetry();
     clearStartupFallback();
+    clearSlowDirectFallback();
     reelScrubPosition.value = null;
     fallbackSource.value = null;
     playbackBaselineSec = 0;
@@ -1052,6 +1113,7 @@ onBeforeUnmount(() => {
   reelZoom.reset();
   clearAutoplayRetry();
   clearStartupFallback();
+  clearSlowDirectFallback();
   removePlayerEventListeners?.();
   removePlayerEventListeners = null;
   if (playerElement.value) safeMediaPlayerPause(playerElement.value);
@@ -1426,12 +1488,15 @@ onBeforeUnmount(() => {
   }
 }
 
-/* ── Bottom seek bar ──────────────────────────────────────── */
+/* ── Seek bar ─────────────────────────────────────────────── */
 
+/* The bottom edge of the reels deck is crowded (dock, safe-area, action rail),
+   so the seek bar lives at the top edge instead. Gesture wiring is untouched:
+   the shell keeps `pointer-events: none` with `auto` only on the slider. */
 .reel-player-card__seekbar-shell {
   position: absolute;
   inset-inline: 0;
-  bottom: 0;
+  top: env(safe-area-inset-top, 0px);
   z-index: 4;
   pointer-events: none;
 }

@@ -18,6 +18,7 @@ import {
   TREAT_CAROUSELS_AS_FOLDERS_SETTING_KEY,
   TREAT_STORIES_AS_FOLDERS_SETTING_KEY,
   VIDEO_PLAYBACK_QUALITY_SETTING_KEY,
+  VIDEO_PLAYBACK_MODE_SETTING_KEY,
   SHARE_PUBLIC_BASE_URL_SETTING_KEY
 } from '../../constants/app-setting-keys.js';
 import { appConfig } from '../../config/env.js';
@@ -55,7 +56,8 @@ import type {
   SharedFolderSummary,
   SharedImageDetail,
   TrashImage,
-  VideoPlaybackQuality
+  VideoPlaybackQuality,
+  VideoPlaybackMode
 } from '../../types/models.js';
 import {
   getEffectiveExcludedFolderRules,
@@ -78,7 +80,7 @@ import { geodataService, placeResolutionService } from '../place-service.js';
 import { permanentDeletionService } from '../permanent-deletion-service.js';
 
 import type { FeedMode, ReelsFeedMode, SupportedLocale, FeedCapsuleDefinition, CalendarDateParts, MomentDateMetadata, FeedRailDefinition, DeleteFolderOptions, StoryRailCapsule, StoryRailPayload, PlaceRowFields, IndexedFeedImage, ScannerProgress, ViewerScanProgress, IndexedImageDetail, IndexedTrashImage, ScanSummaryRecord, VideoPlaybackSource, ShareAssetContext, FolderSummaryContext } from './shared.js';
-import { REDISCOVER_MIN_AGE_MS, DIVERSIFIED_FETCH_BATCH_SIZE, MAX_DIVERSIFIED_CANDIDATES, THIS_WEEK_RADIUS_DAYS, LAST_YEAR_RADIUS_DAYS, HIGHLIGHT_BATCH_CANDIDATE_LIMIT, HIGHLIGHT_BATCH_COUNT, HIGHLIGHT_CAPSULE_MAX_ITEMS, HIGHLIGHT_FEED_OVERLAP_WINDOW, RAIL_COVER_CANDIDATE_LIMIT, FALLBACK_AVATAR_STORY_LIMIT, FALLBACK_AVATAR_STORY_ID, SUPPORTED_LOCALES, toViewerSafeScanSummary, buildViewerSafeStorageReason, getLocalDayBounds, parseFeedMode, getDefaultHomeFeedMode, parseSupportedLocale, getDefaultLocale, parseReelsFeedMode, getDefaultReelsFeedMode, parseFolderImageOrder, getDefaultFolderImageOrder, VIDEO_PLAYBACK_QUALITIES, getVideoPlaybackQuality, getNestedFolderTitleFormat, getTreatStoriesAsFolders, getTreatCarouselsAsFolders, getCustomExcludedFolders, getExcludedFolderSettings, getStoriesMigrationStatus, getCarouselsMigrationStatus, getDerivativeAssetVersion, toPublicMediaUrl, buildOriginalUrl, buildStreamUrl, resolveVideoPlaybackSource, appendVersion, FOLDER_SHARE_ASSET_BASE_PATH, buildShareThumbnailUrl, buildSharePreviewUrl, buildPreviewUrl, buildVideoPreviewFileUrl, mapPlaceSummaryFromRow, resolveOriginalMediaFile, resolveIndexedOriginalPath, resolveWithinRoot, resolveStoredPathWithinRoot, removeFileIfPresent, removeFileAndPruneAncestors, removeDirectoryIfEmpty, removeDirectoryTree, countDerivativeFilesOnDisk, isSameOrDescendantFolderPath, getParentFolderDisplayName, mapFeedImage, resolvePostRecord, isCoverPost, FOLDER_SHARE_ASSET_CONTEXT, buildShareStreamUrl, mapSharedMediaItem, mapSharedFeedImage, mapImageDetail, mapSharedImageDetail, mapTrashImage, createFolderSummaryContext, buildFolderSummary, buildSharedFolderSummary, mapFeedImageForOwnerFolder, formatStoryDateContext, formatMonthDay, formatShortRange, formatMonthYear, mapFeedItems, mapCollectionSummary, mapCollectionMembership, buildPaginatedPayload, buildTrashPaginatedPayload, sliceItemsForPage } from './shared.js';
+import { REDISCOVER_MIN_AGE_MS, DIVERSIFIED_FETCH_BATCH_SIZE, MAX_DIVERSIFIED_CANDIDATES, THIS_WEEK_RADIUS_DAYS, LAST_YEAR_RADIUS_DAYS, HIGHLIGHT_BATCH_CANDIDATE_LIMIT, HIGHLIGHT_BATCH_COUNT, HIGHLIGHT_CAPSULE_MAX_ITEMS, HIGHLIGHT_FEED_OVERLAP_WINDOW, RAIL_COVER_CANDIDATE_LIMIT, FALLBACK_AVATAR_STORY_LIMIT, FALLBACK_AVATAR_STORY_ID, SUPPORTED_LOCALES, toViewerSafeScanSummary, buildViewerSafeStorageReason, getLocalDayBounds, parseFeedMode, getDefaultHomeFeedMode, parseSupportedLocale, getDefaultLocale, parseReelsFeedMode, getDefaultReelsFeedMode, parseFolderImageOrder, getDefaultFolderImageOrder, VIDEO_PLAYBACK_QUALITIES, getVideoPlaybackQuality, getVideoPlaybackMode, getNestedFolderTitleFormat, getTreatStoriesAsFolders, getTreatCarouselsAsFolders, getCustomExcludedFolders, getExcludedFolderSettings, getStoriesMigrationStatus, getCarouselsMigrationStatus, getDerivativeAssetVersion, toPublicMediaUrl, buildOriginalUrl, buildStreamUrl, resolveVideoPlaybackSource, appendVersion, FOLDER_SHARE_ASSET_BASE_PATH, buildShareThumbnailUrl, buildSharePreviewUrl, buildPreviewUrl, buildVideoPreviewFileUrl, mapPlaceSummaryFromRow, resolveOriginalMediaFile, resolveIndexedOriginalPath, resolveWithinRoot, resolveStoredPathWithinRoot, removeFileIfPresent, removeFileAndPruneAncestors, removeDirectoryIfEmpty, removeDirectoryTree, countDerivativeFilesOnDisk, isSameOrDescendantFolderPath, getParentFolderDisplayName, mapFeedImage, resolvePostRecord, isCoverPost, FOLDER_SHARE_ASSET_CONTEXT, buildShareStreamUrl, mapSharedMediaItem, mapSharedFeedImage, mapImageDetail, mapSharedImageDetail, mapTrashImage, createFolderSummaryContext, buildFolderSummary, buildSharedFolderSummary, mapFeedImageForOwnerFolder, formatStoryDateContext, formatMonthDay, formatShortRange, formatMonthYear, mapFeedItems, mapCollectionSummary, mapCollectionMembership, buildPaginatedPayload, buildTrashPaginatedPayload, sliceItemsForPage } from './shared.js';
 
 export const adminGalleryMethods = {
   getStatus(scanProgress?: ViewerScanProgress) {
@@ -91,6 +93,7 @@ export const adminGalleryMethods = {
     const defaultFolderImageOrder = getDefaultFolderImageOrder();
     const nestedFolderTitleFormat = getNestedFolderTitleFormat();
     const videoPlaybackQuality = getVideoPlaybackQuality();
+    const videoPlaybackMode = getVideoPlaybackMode();
     const treatStoriesAsFolders = getTreatStoriesAsFolders();
     const storiesMigration = getStoriesMigrationStatus();
     const treatCarouselsAsFolders = getTreatCarouselsAsFolders();
@@ -122,7 +125,8 @@ export const adminGalleryMethods = {
         nestedFolderTitleFormat,
         treatStoriesAsFolders,
         treatCarouselsAsFolders,
-        videoPlaybackQuality
+        videoPlaybackQuality,
+        videoPlaybackMode
       },
       storiesMigration,
       carouselsMigration
@@ -166,6 +170,7 @@ export const adminGalleryMethods = {
     const defaultFolderImageOrder = getDefaultFolderImageOrder();
     const nestedFolderTitleFormat = getNestedFolderTitleFormat();
     const videoPlaybackQuality = getVideoPlaybackQuality();
+    const videoPlaybackMode = getVideoPlaybackMode();
     const treatStoriesAsFolders = getTreatStoriesAsFolders();
     const storiesMigration = getStoriesMigrationStatus();
     const treatCarouselsAsFolders = getTreatCarouselsAsFolders();
@@ -210,6 +215,7 @@ export const adminGalleryMethods = {
         treatStoriesAsFolders,
         treatCarouselsAsFolders,
         videoPlaybackQuality,
+        videoPlaybackMode,
         sharePublicBaseUrl
       },
       storiesMigration,
@@ -264,6 +270,14 @@ export const adminGalleryMethods = {
 
     return {
       videoPlaybackQuality
+    };
+  },
+
+  setVideoPlaybackMode(videoPlaybackMode: VideoPlaybackMode) {
+    appSettingsRepository.set(VIDEO_PLAYBACK_MODE_SETTING_KEY, videoPlaybackMode);
+
+    return {
+      videoPlaybackMode
     };
   },
 

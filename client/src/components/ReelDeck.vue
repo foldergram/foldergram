@@ -70,9 +70,10 @@ const scrollerElement = ref<HTMLElement | null>(null);
 const panelElements = new Map<number, HTMLElement>();
 const folderLookup = computed(() => new Map(props.folders.map((folder) => [folder.slug, folder])));
 const activeIndex = computed(() => props.items.findIndex((item) => item.id === props.activeReelId));
-// Five mounted cards keep the previous and next two swipes ready while capping the
-// number of media providers, event listeners and decoders no matter how long the feed grows.
-const REEL_WINDOW_RADIUS = 2;
+// Keep only the active clip plus one neighbour on either side. Once a clip is two
+// swipes behind it is unmounted, releasing its decoder and browser video buffer while
+// retaining an immediate one-swipe back gesture.
+const REEL_WINDOW_RADIUS = 1;
 const windowStartIndex = computed(() => Math.max(0, activeIndex.value < 0 ? 0 : activeIndex.value - REEL_WINDOW_RADIUS));
 const windowEndIndex = computed(() =>
   Math.min(props.items.length - 1, activeIndex.value < 0 ? REEL_WINDOW_RADIUS * 2 : activeIndex.value + REEL_WINDOW_RADIUS)

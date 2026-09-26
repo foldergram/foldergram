@@ -19,7 +19,9 @@ import type {
   UpdateExcludedFoldersSettingResult,
   UpdateScanFoldersResult,
   VideoPlaybackQuality,
-  VideoPlaybackQualitySetting
+  VideoPlaybackQualitySetting,
+  VideoPlaybackMode,
+  VideoPlaybackModeSetting
 } from '../../types/api.js';
 import { requestJson } from '../http.js';
 
@@ -94,6 +96,14 @@ export function updateVideoPlaybackQuality(videoPlaybackQuality: VideoPlaybackQu
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ videoPlaybackQuality })
+  });
+}
+
+export function updateVideoPlaybackMode(videoPlaybackMode: VideoPlaybackMode) {
+  return requestJson<VideoPlaybackModeSetting>('/api/admin/settings/video-playback-mode', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ videoPlaybackMode })
   });
 }
 

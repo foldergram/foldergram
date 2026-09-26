@@ -151,6 +151,7 @@ export function useFeedWindow(options: UseFeedWindowOptions) {
   let overheadSamples = 0;
   let gapPx = FALLBACK_GAP_PX;
   let frame = 0;
+  let measureOnNextFrame = false;
   let appliedPadTop = 0;
   let appliedPadBottom = 0;
   /** Column width the current range was resolved against; `0` means nothing is resolved yet. */
@@ -312,9 +313,18 @@ export function useFeedWindow(options: UseFeedWindowOptions) {
 
     frame = requestFrame(() => {
       frame = 0;
-      measureRendered();
+      const shouldMeasure = measureOnNextFrame;
+      measureOnNextFrame = false;
+      if (shouldMeasure) {
+        measureRendered();
+      }
       update();
     });
+  }
+
+  function scheduleMeasurement() {
+    measureOnNextFrame = true;
+    schedule();
   }
 
   function refresh() {
@@ -332,7 +342,7 @@ export function useFeedWindow(options: UseFeedWindowOptions) {
       // that runs a tick later. Resolving now would use the not-yet-restored offset and
       // swap in the rows at the top of the feed for a frame.
       if (endIndex.value >= 0 && element.clientWidth === resolvedContentWidth) {
-        schedule();
+        scheduleMeasurement();
         return;
       }
     }
@@ -347,13 +357,13 @@ export function useFeedWindow(options: UseFeedWindowOptions) {
       // `capture` also catches scrolling inside any ancestor scroller, and the range is
       // derived from the column's own rect, so the scroller does not need to be known.
       window.addEventListener('scroll', schedule, { passive: true, capture: true });
-      window.addEventListener('resize', schedule, { passive: true });
+      window.addEventListener('resize', scheduleMeasurement, { passive: true });
     }
 
     if (typeof ResizeObserver === 'function' && options.container.value) {
       // The column's own box changes both when the viewport width changes and when a
       // mounted card grows, for instance once a video reports its real aspect ratio.
-      resizeObserver = new ResizeObserver(() => schedule());
+      resizeObserver = new ResizeObserver(() => scheduleMeasurement());
       resizeObserver.observe(options.container.value);
     }
 
@@ -361,12 +371,12 @@ export function useFeedWindow(options: UseFeedWindowOptions) {
   });
 
   onActivated(activate);
-  onUpdated(schedule);
+  onUpdated(scheduleMeasurement);
 
   onBeforeUnmount(() => {
     if (typeof window !== 'undefined') {
       window.removeEventListener('scroll', schedule, { capture: true });
-      window.removeEventListener('resize', schedule);
+      window.removeEventListener('resize', scheduleMeasurement);
     }
 
     resizeObserver?.disconnect();

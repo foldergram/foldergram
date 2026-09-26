@@ -147,6 +147,8 @@ import type { MediaFullscreenChangeEvent, MediaLoadingStrategy, PlayerSrc } from
 
 import { useAppStore } from '../stores/app';
 import {
+  HLS_WARM_SEGMENTS,
+  preferEntryHlsLevel,
   resolveVideoFallbackSource,
   resolveVideoSource,
   seekMediaPlayerAndWait,
@@ -265,6 +267,7 @@ const previewTimeSec = ref<number | null>(null);
 const pendingSeekTargetSec = ref<number | null>(null);
 const isPaused = ref(false);
 const showPausedIndicator = ref(false);
+const userPaused = ref(!props.autoplay);
 /**
  * Browsers refuse audible autoplay until the page has seen a user gesture. That
  * verdict belongs to the document, not to one element, so it is tracked globally in
@@ -308,6 +311,7 @@ function nativeVideoHasPaintedFrame(player: MediaPlayerElement): boolean {
   const videos = [player.querySelector('video'), player.shadowRoot?.querySelector('video')];
   for (const video of videos) {
     if (
+      typeof HTMLVideoElement !== 'undefined' &&
       video instanceof HTMLVideoElement &&
       video.videoWidth > 0 &&
       video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA
@@ -339,9 +343,11 @@ const STALL_RETRY_BASE_DELAY_MS = 160;
 const MAX_STALL_RETRY_DELAY_MS = 1_200;
 const MAX_STALL_RETRIES = 8;
 const STARTUP_FALLBACK_MS = 2_000;
+const SLOW_DIRECT_FALLBACK_MS = 2_500;
 let stallRetryAttempts = 0;
 let stallRetryTimer = 0;
 let startupFallbackTimer = 0;
+let slowDirectFallbackTimer = 0;
 let lastSurfaceTapAt = 0;
 
 function clearStallRetry() {
@@ -356,6 +362,38 @@ function clearStartupFallback() {
     window.clearTimeout(startupFallbackTimer);
     startupFallbackTimer = 0;
   }
+}
+
+function clearSlowDirectFallback() {
+  if (slowDirectFallbackTimer !== 0) {
+    window.clearTimeout(slowDirectFallbackTimer);
+    slowDirectFallbackTimer = 0;
+  }
+}
+
+function scheduleSlowDirectFallback() {
+  const source = managedActiveSource.value;
+  if (!source || source.isStream || fallbackSource.value) {
+    return;
+  }
+
+  // Seek waiting is expected on a cold Range. Do not abandon Direct Play after
+  // the first frame has already painted.
+  if (hasRenderedFrame.value) {
+    return;
+  }
+
+  clearSlowDirectFallback();
+  slowDirectFallbackTimer = window.setTimeout(() => {
+    slowDirectFallbackTimer = 0;
+    const current = playerElement.value;
+    const active = managedActiveSource.value;
+    if (!current || !active || active.isStream || fallbackSource.value) {
+      return;
+    }
+
+    switchToFallbackSource();
+  }, SLOW_DIRECT_FALLBACK_MS);
 }
 
 function resetStallRetry() {
@@ -389,7 +427,14 @@ function scheduleStartupFallback() {
 
 function scheduleStallRetry() {
   const player = playerElement.value;
-  if (!player || !props.autoplay || autoplayCancelled || stallRetryTimer !== 0 || stallRetryAttempts >= MAX_STALL_RETRIES) {
+  if (
+    !player ||
+    !props.autoplay ||
+    autoplayCancelled ||
+    holdSpeed.isScrubbing.value ||
+    stallRetryTimer !== 0 ||
+    stallRetryAttempts >= MAX_STALL_RETRIES
+  ) {
     return;
   }
 
@@ -442,7 +487,9 @@ function warmSeekTarget(seconds: number) {
 
   warmVideoStream(media, appStore.videoPlaybackQuality, {
     fromSeconds: seconds,
-    segments: 2
+    segments: HLS_WARM_SEGMENTS,
+    preferStream: appStore.adaptivePreferStream,
+    playbackMode: appStore.videoPlaybackMode
   });
 }
 
@@ -452,14 +499,7 @@ const holdSpeed = useHoldToSpeed({
   getDuration: () => playerElement.value?.duration ?? 0,
   seekTo,
   previewSeek: (seconds) => {
-    const player = playerElement.value;
-    if (!player) return;
     currentTimeSec.value = seconds;
-    try {
-      safeMediaPlayerSetCurrentTime(player, seconds);
-    } catch {
-      // Seeking before the provider is attached is a no-op.
-    }
   },
   getPlaybackRate: () => playerElement.value?.playbackRate ?? 1,
   setPlaybackRate: (rate) => {
@@ -474,6 +514,12 @@ const holdSpeed = useHoldToSpeed({
   play: () => {
     if (playerElement.value) void safeMediaPlayerPlay(playerElement.value);
   },
+  pause: () => {
+    clearStallRetry();
+    if (playerElement.value) safeMediaPlayerPause(playerElement.value);
+  },
+  // Sampled at scrub start, before this surface freezes the player.
+  isPlaying: () => !userPaused.value,
   // Measured in the picture's own frame. A host that turns the surface with a CSS
   // rotation reports `gestureOrientation`, so the sideways drag the viewer makes while
   // holding the phone sideways still scrubs, and their downward swipe still dismisses.
@@ -520,7 +566,10 @@ const managedPreferredSource = computed<ResolvedVideoSource | null>(() => {
     return props.sourceOverride;
   }
 
-  return resolveVideoSource(props.media, appStore.videoPlaybackQuality);
+  return resolveVideoSource(props.media, appStore.videoPlaybackQuality, {
+    preferStream: appStore.adaptivePreferStream,
+    playbackMode: appStore.videoPlaybackMode
+  });
 });
 
 const managedActiveSource = computed<ResolvedVideoSource | null>(
@@ -667,9 +716,12 @@ function seekTo(seconds: number) {
   const next = Math.min(Math.max(seconds, 0), Math.max(upperBound, 0));
   previewTimeSec.value = null;
   currentTimeSec.value = next;
+  preferEntryHlsLevel(player);
   warmSeekTarget(next);
   pendingSeekTargetSec.value = next;
-  return seekMediaPlayerAndWait(player, next).finally(() => {
+  return seekMediaPlayerAndWait(player, next, {
+    resumePlayback: !userPaused.value
+  }).finally(() => {
     if (pendingSeekTargetSec.value === next) {
       pendingSeekTargetSec.value = null;
     }
@@ -717,6 +769,7 @@ async function togglePlayback() {
 
   if (player.paused) {
     autoplayCancelled = false;
+    userPaused.value = false;
     // Playing from a real tap lifts a previous autoplay-only restriction for every
     // surface. This is intentionally global, not a local player workaround.
     appStore.activateVideoSoundFromUserGesture();
@@ -730,6 +783,7 @@ async function togglePlayback() {
     // The pause was asked for, so the retry loop must not undo it.
     resetStallRetry();
     autoplayCancelled = true;
+    userPaused.value = true;
     safeMediaPlayerPause(player);
     isPaused.value = true;
     showPausedIndicator.value = true;
@@ -787,7 +841,7 @@ function applyStartTime(player: MediaPlayerElement): boolean {
 }
 
 function requestAutoplayAfterReady(player: MediaPlayerElement) {
-  if (!props.autoplay || autoplayCancelled || !player.paused) {
+  if (!props.autoplay || autoplayCancelled || holdSpeed.isScrubbing.value || !player.paused) {
     return;
   }
 
@@ -897,15 +951,20 @@ function setupListeners() {
   };
 
   const onStall = () => {
-    if (props.autoplay && !autoplayCancelled) {
+    scheduleSlowDirectFallback();
+    if (props.autoplay && !autoplayCancelled && !holdSpeed.isScrubbing.value) {
       scheduleStallRetry();
     }
   };
 
   const onTimeUpdate = () => {
+    if (holdSpeed.isScrubbing.value) {
+      return;
+    }
     if (hasPlaybackAdvanced(player) || nativeVideoHasPaintedFrame(player)) {
       resetStallRetry();
       clearStartupFallback();
+      clearSlowDirectFallback();
       hasRenderedFrame.value = true;
     }
 
@@ -931,6 +990,9 @@ function setupListeners() {
   };
 
   const onPause = () => {
+    if (holdSpeed.isScrubbing.value || pendingSeekTargetSec.value !== null) {
+      return;
+    }
     isPaused.value = true;
   };
 
@@ -991,6 +1053,7 @@ onBeforeUnmount(() => {
   if (hidePausedTimer) clearTimeout(hidePausedTimer);
   clearStallRetry();
   clearStartupFallback();
+  clearSlowDirectFallback();
   holdSpeed.stop();
 });
 
@@ -1000,10 +1063,11 @@ watch([basePreviewUrl, () => props.media?.id ?? null], () => {
   holdSpeed.stop();
   resetStallRetry();
   clearStartupFallback();
+  clearSlowDirectFallback();
   fallbackSource.value = null;
   pendingRestoreState = null;
   appliedStartTime = false;
-  autoplayCancelled = false;
+  autoplayCancelled = userPaused.value;
   playbackBaselineSec = 0;
   hasRenderedFrame.value = false;
 });

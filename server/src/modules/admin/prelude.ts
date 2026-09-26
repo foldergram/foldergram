@@ -5,7 +5,7 @@ import { createRateLimiter } from '../../middleware/rate-limit.js';
 import { galleryService } from '../../services/gallery-service.js';
 import { scannerService } from '../../services/scanner-service.js';
 import { storageService } from '../../services/storage-service.js';
-import { changePasswordBodySchema, configurePasswordBodySchema, disablePasswordBodySchema, loginBodySchema, viewerAccessBodySchema } from '../../routes/api-schemas.js';
+import { changePasswordBodySchema, configurePasswordBodySchema, disablePasswordBodySchema, loginBodySchema, patternConfigureBodySchema, patternDisableBodySchema, patternResetBodySchema, patternUnlockBodySchema, viewerAccessBodySchema } from '../../routes/api-schemas.js';
 import { resolveScanProgress } from '../../routes/api-helpers.js';
 
 const authRateLimiter = createRateLimiter({ windowMs: 60 * 1000, max: 10, message: 'Too many authentication attempts. Please try again in a minute.' });
@@ -32,6 +32,38 @@ export function registerAdminPreludeRoutes(router: express.Router): void {
     authService.setNoStoreHeaders(response); if (!authService.isEnabled()) { response.status(400).json({ message: 'Enable the admin password before configuring viewer access.' }); return; }
     if (!authService.hasCapability(request, 'canAccessSettings')) { response.status(403).json({ message: 'Admin access is required.' }); return; }
     const body = viewerAccessBodySchema.parse(request.body); const auth = authService.setViewerAccess(body.mode, body.viewerPassword ?? null); authService.setAuthenticatedSession(response, request, 'admin'); response.json({ ok: true, auth });
+  });
+  router.put('/auth/pattern', authRateLimiter, (request, response) => {
+    authService.setNoStoreHeaders(response); if (!authService.isEnabled()) { response.status(400).json({ message: 'Enable the admin password before configuring the pattern unlock.' }); return; }
+    if (!authService.hasCapability(request, 'canAccessSettings')) { response.status(403).json({ message: 'Admin access is required.' }); return; }
+    const body = patternConfigureBodySchema.parse(request.body);
+    if (!authService.authorizePatternChange(body.currentPattern, body.currentPassword)) { response.status(401).json({ message: 'Current pattern or login password is required.' }); return; }
+    const auth = authService.setPatternUnlock(body.pattern); response.json({ ok: true, auth });
+  });
+  router.delete('/auth/pattern', authRateLimiter, (request, response) => {
+    authService.setNoStoreHeaders(response); if (!authService.hasCapability(request, 'canAccessSettings')) { response.status(403).json({ message: 'Admin access is required.' }); return; }
+    const body = patternDisableBodySchema.parse(request.body ?? {});
+    if (!authService.authorizePatternChange(body.currentPattern, body.currentPassword)) { response.status(401).json({ message: 'Current pattern or login password is required.' }); return; }
+    const auth = authService.setPatternUnlock(null); response.json({ ok: true, auth });
+  });
+  router.post('/auth/pattern/unlock', authRateLimiter, (request, response) => {
+    authService.setNoStoreHeaders(response);
+    if (!authService.isEnabled() || !authService.isPatternUnlockEnabled()) { response.status(400).json({ message: 'Pattern unlock is not enabled.' }); return; }
+    const body = patternUnlockBodySchema.parse(request.body);
+    if (!authService.verifyPattern(body.pattern)) { response.status(401).json({ message: 'Incorrect pattern.' }); return; }
+    authService.setAuthenticatedSession(response, request, 'admin');
+    response.json({ ok: true, auth: authService.getAuthenticatedStatus('admin') });
+  });
+  // Forgotten pattern recovery: the admin password both proves identity and signs
+  // the caller in, so they land back in the app ready to configure a new pattern.
+  router.post('/auth/pattern/reset', authRateLimiter, (request, response) => {
+    authService.setNoStoreHeaders(response);
+    if (!authService.isEnabled()) { response.status(400).json({ message: 'Password protection is not enabled.' }); return; }
+    const body = patternResetBodySchema.parse(request.body);
+    if (!authService.verifyAdminPassword(body.password)) { response.status(401).json({ message: 'Incorrect admin password.' }); return; }
+    const auth = authService.setPatternUnlock(null);
+    authService.setAuthenticatedSession(response, request, 'admin');
+    response.json({ ok: true, auth });
   });
 }
 export function registerAdminStatusRoutes(router: express.Router): void {

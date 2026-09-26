@@ -74,3 +74,35 @@ export function updateViewerAccess(mode: ViewerAccessMode, viewerPassword?: stri
   });
 }
 
+export function configurePatternUnlock(
+  pattern: string | null,
+  proof?: { currentPattern?: string; currentPassword?: string }
+) {
+  return requestJson<AuthMutationResult>('/api/auth/pattern', {
+    body: JSON.stringify(pattern === null ? { ...proof } : { pattern, ...proof }),
+    headers: {
+      'content-type': 'application/json'
+    },
+    method: pattern === null ? 'DELETE' : 'PUT'
+  });
+}
+
+export function unlockWithPattern(pattern: string) {
+  return requestJson<AuthMutationResult>('/api/auth/pattern/unlock', {
+    body: JSON.stringify({ pattern }),
+    headers: {
+      'content-type': 'application/json'
+    },
+    method: 'POST'
+  });
+}
+
+export function resetPatternWithPassword(password: string) {
+  return requestJson<AuthMutationResult>('/api/auth/pattern/reset', {
+    body: JSON.stringify({ password }),
+    headers: {
+      'content-type': 'application/json'
+    },
+    method: 'POST'
+  });
+}

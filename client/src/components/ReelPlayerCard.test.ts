@@ -345,6 +345,12 @@ describe('ReelPlayerCard', () => {
     expect(nextWrapper.get('.reel-player-card__sound-button').attributes('aria-label')).toBe('Mute sound');
   });
 
+  it('lets vertical swipes reach the deck and keeps the browser buffer bounded', async () => {
+    const source = await import('./ReelPlayerCard.vue?raw');
+
+    expect(source.default).toContain(':noSwipeGesture.prop="true"');
+  });
+
   it('matches the home feed scrub activation and sensitivity', async () => {
     const source = await import('./ReelPlayerCard.vue?raw');
     expect(VIDEO_SURFACE_SCRUB_SECONDS_PER_PIXEL).toBe(0.1);

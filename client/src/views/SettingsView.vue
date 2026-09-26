@@ -471,6 +471,82 @@
                 </div>
               </template>
             </div>
+
+            <!-- Pattern unlock (Android-style graphical gate) -->
+            <div v-if="authStore.enabled" class="grid gap-[0.9rem] rounded-[1.05rem] border border-border p-5">
+              <div class="flex items-start justify-between gap-4 max-sm:flex-col max-sm:items-start">
+                <div>
+                  <h3 class="m-0 text-[1rem]">{{ t('settings.access.pattern.title') }}</h3>
+                  <p class="m-0 mt-[0.25rem] text-muted">{{ t('settings.access.pattern.description') }}</p>
+                </div>
+                <span
+                  class="inline-flex items-center justify-center min-h-8 px-[0.7rem] py-[0.35rem] rounded-full text-[0.76rem] font-bold whitespace-nowrap"
+                  :class="authStore.patternUnlock ? 'text-accent-strong bg-[color-mix(in_srgb,var(--accent-soft)_78%,transparent_22%)]' : 'text-muted bg-surface-alt'"
+                >
+                  {{ authStore.patternUnlock ? t('settings.access.pattern.stateOn') : t('settings.access.pattern.off') }}
+                </span>
+              </div>
+
+              <div class="flex flex-wrap gap-3">
+                <button
+                  class="inline-flex min-h-11 items-center justify-center rounded-[0.95rem] border border-[rgba(24,119,242,0.2)] bg-[rgba(24,119,242,0.08)] px-4 text-[0.9rem] font-semibold text-accent-strong transition-colors duration-180 hover:bg-[rgba(24,119,242,0.16)] disabled:cursor-wait disabled:opacity-60"
+                  type="button"
+                  :disabled="authStore.loading || patternSetupStage !== 'idle'"
+                  @click="startPatternSetup"
+                >
+                  {{ authStore.patternUnlock ? t('settings.access.pattern.redoButton') : t('settings.access.pattern.setupButton') }}
+                </button>
+                <button
+                  v-if="authStore.patternUnlock"
+                  class="inline-flex min-h-11 items-center justify-center rounded-[0.95rem] border border-border bg-transparent px-4 text-[0.9rem] font-semibold text-text transition-colors duration-180 hover:bg-surface-alt disabled:cursor-wait disabled:opacity-60"
+                  type="button"
+                  :disabled="authStore.loading || patternSetupStage !== 'idle'"
+                  @click="disablePatternUnlock"
+                >
+                  {{ t('settings.access.pattern.disableButton') }}
+                </button>
+              </div>
+
+              <div v-if="patternSetupStage !== 'idle'" class="grid w-full min-w-0 justify-items-center gap-3 overflow-visible rounded-[0.95rem] bg-surface-alt p-4">
+                <p class="m-0 text-[0.9rem] text-muted">{{ patternSetupHint }}</p>
+                <PatternPad
+                  v-if="patternSetupStage === 'verify' || patternSetupStage === 'first' || patternSetupStage === 'confirm'"
+                  :show-error="patternSetupError !== null"
+                  @complete="onSetupPatternComplete"
+                />
+                <form v-if="patternSetupStage === 'password'" class="grid w-full max-w-[18rem] gap-3" @submit.prevent="submitPatternPassword">
+                  <label class="grid gap-[0.45rem] text-left">
+                    <span class="text-[0.76rem] font-bold uppercase tracking-[0.08em] text-muted">{{ t('settings.access.pattern.loginPasswordLabel') }}</span>
+                    <input
+                      v-model="patternSetupPassword"
+                      class="h-12 rounded-[0.95rem] border border-border bg-[color-mix(in_srgb,var(--surface)_84%,transparent_16%)] px-4 text-[0.95rem] text-text outline-none"
+                      type="password"
+                      autocomplete="current-password"
+                      :disabled="authStore.loading"
+                    />
+                  </label>
+                  <button class="btn-primary min-h-11 justify-center" type="submit" :disabled="authStore.loading || patternSetupPassword.length === 0">
+                    {{ t('settings.access.pattern.confirmPassword') }}
+                  </button>
+                </form>
+                <p v-if="patternSetupError" class="m-0 text-[0.85rem] text-[#c0392b]">{{ patternSetupError }}</p>
+                <button
+                  v-if="patternSetupStage === 'verify'"
+                  class="inline-flex min-h-10 items-center justify-center border-0 bg-transparent px-0 text-[0.88rem] font-semibold text-accent-strong"
+                  type="button"
+                  @click="patternSetupStage = 'password'; patternSetupError = null"
+                >
+                  {{ t('settings.access.pattern.useLoginPassword') }}
+                </button>
+                <button
+                  class="inline-flex min-h-10 items-center justify-center rounded-[0.95rem] border border-border bg-transparent px-4 text-[0.88rem] font-semibold text-text transition-colors duration-180 hover:bg-surface-hover"
+                  type="button"
+                  @click="cancelPatternSetup"
+                >
+                  {{ t('settings.access.pattern.cancel') }}
+                </button>
+              </div>
+            </div>
           </div>
         </template>
 
@@ -926,6 +1002,67 @@
                       >
                         <span class="mt-[0.05rem] inline-flex h-5 w-5 items-center justify-center shrink-0 text-accent-strong">
                           <span v-if="nestedFolderTitleFormat === option.id" class="i-fluent-checkmark-20-filled h-4 w-4" aria-hidden="true" />
+                        </span>
+                        <span class="grid min-w-0 gap-[0.08rem]">
+                          <span class="text-[0.9rem] font-semibold text-text">{{ option.label }}</span>
+                          <span class="text-[0.78rem] text-muted">{{ option.description }}</span>
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="grid gap-3 px-6 py-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+                <div class="min-w-0">
+                  <p class="m-0 text-[0.96rem] font-semibold text-text">{{ t('settings.general.videoPlaybackMode.label') }}</p>
+                  <p class="m-0 mt-[0.25rem] text-[0.84rem] text-muted">{{ t('settings.general.videoPlaybackMode.description') }}</p>
+                </div>
+
+                <div class="relative w-full md:w-[18rem] md:justify-self-end" @keydown.escape.stop.prevent="closeGeneralSettingsMenu">
+                  <button
+                    class="inline-flex w-full items-center justify-between gap-3 rounded-[0.9rem] border border-border bg-[color-mix(in_srgb,var(--surface-alt)_80%,transparent_20%)] px-3 py-[0.85rem] text-left transition-[border-color,box-shadow] duration-180 hover:border-[color-mix(in_srgb,var(--accent)_22%,var(--border)_78%)] hover:bg-surface-hover focus-visible:border-[color-mix(in_srgb,var(--accent)_35%,var(--border)_65%)] focus-visible:shadow-[0_0_0_4px_color-mix(in_srgb,var(--accent-soft)_76%,transparent_24%)]"
+                    type="button"
+                    :aria-expanded="activeGeneralSettingsMenu === 'videoMode'"
+                    :disabled="savingGeneralSettings || waitingForInitialStatus"
+                    @click="toggleGeneralSettingsMenu('videoMode')"
+                  >
+                    <span class="min-w-0 truncate text-[0.9rem] font-semibold text-text">
+                      {{ selectedVideoPlaybackModeOption.label }}
+                    </span>
+                    <span
+                      class="i-fluent-chevron-down-20-regular h-5 w-5 shrink-0 text-muted transition-transform duration-180"
+                      :class="activeGeneralSettingsMenu === 'videoMode' ? 'rotate-180 text-text' : ''"
+                      aria-hidden="true"
+                    />
+                  </button>
+
+                  <button
+                    v-if="activeGeneralSettingsMenu === 'videoMode'"
+                    class="fixed inset-0 z-40 border-0 bg-transparent"
+                    type="button"
+                    :aria-label="t('settings.general.videoPlaybackMode.closeMenuAria')"
+                    @click="closeGeneralSettingsMenu"
+                  />
+
+                  <div
+                    v-if="activeGeneralSettingsMenu === 'videoMode'"
+                    class="absolute right-0 top-[calc(100%+0.45rem)] z-50 w-full overflow-hidden rounded-[1rem] border border-border bg-[color-mix(in_srgb,var(--surface)_97%,var(--bg)_3%)] shadow-[0_28px_70px_rgba(0,0,0,0.16)]"
+                  >
+                    <div class="border-b border-border px-4 py-3">
+                      <p class="m-0 text-[0.83rem] font-semibold text-text">{{ t('settings.general.videoPlaybackMode.label') }}</p>
+                    </div>
+                    <div class="grid gap-1 p-2">
+                      <button
+                        v-for="option in videoPlaybackModeOptions"
+                        :key="option.id"
+                        class="flex items-start gap-3 rounded-[0.85rem] border-0 px-3 py-3 text-left cursor-pointer transition-colors duration-150 hover:bg-surface-hover"
+                        :class="videoPlaybackMode === option.id ? 'bg-[color-mix(in_srgb,var(--accent-soft)_72%,transparent_28%)]' : 'bg-transparent'"
+                        type="button"
+                        @click="selectVideoPlaybackMode(option.id)"
+                      >
+                        <span class="mt-[0.05rem] inline-flex h-5 w-5 items-center justify-center shrink-0 text-accent-strong">
+                          <span v-if="videoPlaybackMode === option.id" class="i-fluent-checkmark-20-filled h-4 w-4" aria-hidden="true" />
                         </span>
                         <span class="grid min-w-0 gap-[0.08rem]">
                           <span class="text-[0.9rem] font-semibold text-text">{{ option.label }}</span>
@@ -1544,6 +1681,7 @@ import { useI18n } from 'vue-i18n';
 import { useRoute } from 'vue-router';
 
 import ConfirmDialog from '../components/ConfirmDialog.vue';
+import PatternPad from '../components/PatternPad.vue';
 import {
   fetchAdminStats,
   fetchScanFolders,
@@ -1558,6 +1696,7 @@ import {
   updateReelsFeedDefault,
   updateSharePublicBaseUrl,
   updateVideoPlaybackQuality,
+  updateVideoPlaybackMode,
   updateStoriesMode,
   updateCarouselsMode,
   updateScanFolders
@@ -1579,6 +1718,7 @@ import type {
   ReelsFeedMode,
   ScanFoldersPayload,
   VideoPlaybackQuality,
+  VideoPlaybackMode,
   ViewerAccessMode
 } from '../types/api';
 
@@ -1625,6 +1765,7 @@ const reelsFeedDefaultMode = ref<ReelsFeedMode>('random');
 const folderImageOrderDefault = ref<FolderImageOrder>('newest');
 const nestedFolderTitleFormat = ref<NestedFolderTitleFormat>('folder');
 const videoPlaybackQuality = ref<VideoPlaybackQuality>('auto');
+const videoPlaybackMode = ref<VideoPlaybackMode>('transcode');
 const sharePublicBaseUrlDraft = ref('');
 const savedLocaleSelection = ref<SupportedLocale | null>(appStore.savedDefaultLocale);
 const localeSelectionHydrated = ref(false);
@@ -1633,7 +1774,7 @@ const carouselsMode = ref(false);
 const feedDefaultsHydrated = ref(false);
 const storiesModeHydrated = ref(false);
 const carouselsModeHydrated = ref(false);
-const activeGeneralSettingsMenu = ref<'home' | 'reels' | 'folder' | 'nestedTitle' | 'videoQuality' | null>(null);
+const activeGeneralSettingsMenu = ref<'home' | 'reels' | 'folder' | 'nestedTitle' | 'videoQuality' | 'videoMode' | null>(null);
 const showStoriesAnnouncementStructure = ref(false);
 const showCarouselsAnnouncementStructure = ref(false);
 const generalSettingsSaveArea = ref<HTMLElement | null>(null);
@@ -1978,6 +2119,7 @@ function syncFeedDefaultsFromSaved() {
   folderImageOrderDefault.value = appStore.defaultFolderImageOrder;
   nestedFolderTitleFormat.value = appStore.nestedFolderTitleFormat;
   videoPlaybackQuality.value = appStore.savedVideoPlaybackQuality;
+  videoPlaybackMode.value = appStore.savedVideoPlaybackMode;
   sharePublicBaseUrlDraft.value = appStore.sharePublicBaseUrl ?? '';
   feedDefaultsHydrated.value = true;
 }
@@ -2069,6 +2211,18 @@ const nestedFolderTitleOptions = computed<Array<{ id: NestedFolderTitleFormat; l
     description: t('settings.general.nestedFolderTitle.options.parentPlusFolder.description')
   }
 ]);
+const videoPlaybackModeOptions = computed<Array<{ id: VideoPlaybackMode; label: string; description: string }>>(() => [
+  {
+    id: 'transcode',
+    label: t('settings.general.videoPlaybackMode.options.transcode.label'),
+    description: t('settings.general.videoPlaybackMode.options.transcode.description')
+  },
+  {
+    id: 'direct',
+    label: t('settings.general.videoPlaybackMode.options.direct.label'),
+    description: t('settings.general.videoPlaybackMode.options.direct.description')
+  }
+]);
 const videoPlaybackQualityOptions = computed<Array<{ id: VideoPlaybackQuality; label: string; description: string }>>(() => [
   {
     id: 'auto',
@@ -2111,6 +2265,7 @@ const savedReelsFeedDefaultMode = computed(() => appStore.defaultReelsFeedMode);
 const savedFolderImageOrderDefault = computed(() => appStore.defaultFolderImageOrder);
 const savedNestedFolderTitleFormat = computed(() => appStore.nestedFolderTitleFormat);
 const savedVideoPlaybackQuality = computed(() => appStore.savedVideoPlaybackQuality);
+const savedVideoPlaybackMode = computed(() => appStore.savedVideoPlaybackMode);
 const savedSharePublicBaseUrl = computed(() => appStore.sharePublicBaseUrl ?? '');
 const videoPlaybackQualityDeviceOverride = computed(() => appStore.videoPlaybackQualityOverride);
 const videoPlaybackQualityOverrideLabel = computed(
@@ -2163,6 +2318,11 @@ const selectedVideoPlaybackQualityOption = computed(
     videoPlaybackQualityOptions.value.find((option) => option.id === videoPlaybackQuality.value) ??
     videoPlaybackQualityOptions.value[0]
 );
+const selectedVideoPlaybackModeOption = computed(
+  () =>
+    videoPlaybackModeOptions.value.find((option) => option.id === videoPlaybackMode.value) ??
+    videoPlaybackModeOptions.value[0]
+);
 const localeDirty = computed(
   () => localeSelectionHydrated.value && (savedLocaleSelection.value === null || appStore.locale !== savedLocaleSelection.value)
 );
@@ -2181,6 +2341,9 @@ const nestedFolderTitleDirty = computed(
 const videoPlaybackQualityDirty = computed(
   () => feedDefaultsHydrated.value && videoPlaybackQuality.value !== savedVideoPlaybackQuality.value
 );
+const videoPlaybackModeDirty = computed(
+  () => feedDefaultsHydrated.value && videoPlaybackMode.value !== savedVideoPlaybackMode.value
+);
 const sharePublicBaseUrlDirty = computed(
   () => feedDefaultsHydrated.value && sharePublicBaseUrlDraft.value.trim() !== savedSharePublicBaseUrl.value
 );
@@ -2193,6 +2356,7 @@ const defaultSettingsDirtyCount = computed(
       folderImageOrderDirty.value,
       nestedFolderTitleDirty.value,
       videoPlaybackQualityDirty.value,
+      videoPlaybackModeDirty.value,
       sharePublicBaseUrlDirty.value
     ].filter(Boolean).length
 );
@@ -2203,6 +2367,7 @@ const feedDefaultsDirty = computed(
     folderImageOrderDirty.value ||
     nestedFolderTitleDirty.value ||
     videoPlaybackQualityDirty.value ||
+    videoPlaybackModeDirty.value ||
     sharePublicBaseUrlDirty.value
 );
 const storiesModeDirty = computed(() => storiesModeHydrated.value && storiesMode.value !== savedStoriesMode.value);
@@ -2294,6 +2459,14 @@ const generalSettingsActionNote = computed(() => {
 
   if (nestedFolderTitleDirty.value) {
     return t('settings.general.actionNote.nestedFolderTitleOnly');
+  }
+
+  if (videoPlaybackModeDirty.value) {
+    return t('settings.general.actionNote.videoPlaybackModeOnly');
+  }
+
+  if (videoPlaybackQualityDirty.value) {
+    return t('settings.general.actionNote.videoPlaybackQualityOnly');
   }
 
   if (sharePublicBaseUrlDirty.value) {
@@ -2560,6 +2733,142 @@ const authProtectionDescription = computed(() =>
     ? t('settings.access.authProtection.enabled')
     : t('settings.access.authProtection.disabled')
 );
+
+// ── Pattern unlock setup (Android-style graphical gate) ───────────────────────
+type PatternSetupStage = 'idle' | 'verify' | 'password' | 'first' | 'confirm';
+type PatternSetupIntent = 'setup' | 'replace' | 'disable';
+const patternSetupStage = ref<PatternSetupStage>('idle');
+const patternSetupIntent = ref<PatternSetupIntent>('setup');
+const patternSetupError = ref<string | null>(null);
+const patternSetupPassword = ref('');
+let firstPatternEntry: string | null = null;
+let verifiedCurrentPattern: string | null = null;
+let verifiedCurrentPassword: string | null = null;
+
+const patternSetupHint = computed(() => {
+  if (patternSetupStage.value === 'verify') {
+    return t('settings.access.pattern.drawCurrent');
+  }
+  if (patternSetupStage.value === 'password') {
+    return t('settings.access.pattern.enterLoginPassword');
+  }
+  if (patternSetupStage.value === 'confirm') {
+    return t('settings.access.pattern.drawConfirm');
+  }
+  return t('settings.access.pattern.drawFirst');
+});
+
+function resetPatternSetupState() {
+  patternSetupStage.value = 'idle';
+  patternSetupIntent.value = 'setup';
+  patternSetupError.value = null;
+  patternSetupPassword.value = '';
+  firstPatternEntry = null;
+  verifiedCurrentPattern = null;
+  verifiedCurrentPassword = null;
+}
+
+function patternChangeProof() {
+  if (verifiedCurrentPattern) {
+    return { currentPattern: verifiedCurrentPattern };
+  }
+  if (verifiedCurrentPassword) {
+    return { currentPassword: verifiedCurrentPassword };
+  }
+  return undefined;
+}
+
+function startPatternSetup() {
+  resetPatternSetupState();
+  if (authStore.patternUnlock) {
+    patternSetupIntent.value = 'replace';
+    patternSetupStage.value = 'verify';
+    return;
+  }
+  patternSetupIntent.value = 'setup';
+  patternSetupStage.value = 'first';
+}
+
+function cancelPatternSetup() {
+  resetPatternSetupState();
+}
+
+async function finishVerifiedDisable() {
+  try {
+    await authStore.configurePatternUnlock(null, patternChangeProof());
+    resetPatternSetupState();
+  } catch {
+    patternSetupError.value = t('settings.access.pattern.wrongCurrent');
+  }
+}
+
+async function onSetupPatternComplete(pattern: string) {
+  if (patternSetupStage.value === 'verify') {
+    try {
+      await authStore.unlockPattern(pattern);
+    } catch {
+      patternSetupError.value = t('settings.access.pattern.wrongCurrent');
+      return;
+    }
+    verifiedCurrentPattern = pattern;
+    verifiedCurrentPassword = null;
+    if (patternSetupIntent.value === 'disable') {
+      await finishVerifiedDisable();
+      return;
+    }
+    patternSetupStage.value = 'first';
+    patternSetupError.value = null;
+    return;
+  }
+
+  if (patternSetupStage.value === 'first') {
+    firstPatternEntry = pattern;
+    patternSetupStage.value = 'confirm';
+    patternSetupError.value = null;
+    return;
+  }
+
+  if (pattern !== firstPatternEntry) {
+    firstPatternEntry = null;
+    patternSetupStage.value = 'first';
+    patternSetupError.value = t('settings.access.pattern.mismatch');
+    return;
+  }
+
+  try {
+    await authStore.configurePatternUnlock(pattern, patternChangeProof());
+    resetPatternSetupState();
+  } catch {
+    patternSetupError.value = t('settings.access.pattern.saveError');
+  }
+}
+
+async function submitPatternPassword() {
+  if (patternSetupPassword.value.length === 0) {
+    return;
+  }
+
+  try {
+    await authStore.login(patternSetupPassword.value);
+  } catch {
+    patternSetupError.value = t('settings.access.pattern.wrongPassword');
+    return;
+  }
+  verifiedCurrentPassword = patternSetupPassword.value;
+  verifiedCurrentPattern = null;
+  if (patternSetupIntent.value === 'disable') {
+    await finishVerifiedDisable();
+    return;
+  }
+  patternSetupStage.value = 'first';
+  patternSetupError.value = null;
+}
+
+function disablePatternUnlock() {
+  resetPatternSetupState();
+  patternSetupIntent.value = 'disable';
+  patternSetupStage.value = 'verify';
+}
 const viewerAccessActive = computed(() => authStore.enabled && authStore.accessMode !== 'off');
 const viewerAccessEnabled = computed(() => authStore.enabled && authStore.accessMode === 'password');
 const viewerAccessStatusLabel = computed(() => {
@@ -3042,7 +3351,7 @@ function closeGeneralSettingsMenu() {
   activeGeneralSettingsMenu.value = null;
 }
 
-function toggleGeneralSettingsMenu(menu: 'home' | 'reels' | 'folder' | 'nestedTitle' | 'videoQuality') {
+function toggleGeneralSettingsMenu(menu: 'home' | 'reels' | 'folder' | 'nestedTitle' | 'videoQuality' | 'videoMode') {
   clearGeneralSettingsFeedback();
   activeGeneralSettingsMenu.value = activeGeneralSettingsMenu.value === menu ? null : menu;
 }
@@ -3124,6 +3433,12 @@ function selectVideoPlaybackQuality(value: VideoPlaybackQuality) {
   closeGeneralSettingsMenu();
 }
 
+function selectVideoPlaybackMode(value: VideoPlaybackMode) {
+  clearGeneralSettingsFeedback();
+  videoPlaybackMode.value = value;
+  closeGeneralSettingsMenu();
+}
+
 function clearVideoPlaybackQualityOverride() {
   clearGeneralSettingsFeedback();
   appStore.setVideoPlaybackQualityOverride(null);
@@ -3143,6 +3458,7 @@ async function saveGeneralSettings() {
   const shouldSaveFolderOrder = folderImageOrderDirty.value;
   const shouldSaveNestedFolderTitle = nestedFolderTitleDirty.value;
   const shouldSaveVideoPlaybackQuality = videoPlaybackQualityDirty.value;
+  const shouldSaveVideoPlaybackMode = videoPlaybackModeDirty.value;
   const shouldSaveSharePublicBaseUrl = sharePublicBaseUrlDirty.value;
   const shouldSaveAnyDefault =
     shouldSaveLocale ||
@@ -3151,6 +3467,7 @@ async function saveGeneralSettings() {
     shouldSaveFolderOrder ||
     shouldSaveNestedFolderTitle ||
     shouldSaveVideoPlaybackQuality ||
+    shouldSaveVideoPlaybackMode ||
     shouldSaveSharePublicBaseUrl;
   const savedDefaultCount = [
     shouldSaveLocale,
@@ -3159,6 +3476,7 @@ async function saveGeneralSettings() {
     shouldSaveFolderOrder,
     shouldSaveNestedFolderTitle,
     shouldSaveVideoPlaybackQuality,
+    shouldSaveVideoPlaybackMode,
     shouldSaveSharePublicBaseUrl
   ].filter(Boolean).length;
   const savedParts: string[] = [];
@@ -3268,6 +3586,15 @@ async function saveGeneralSettings() {
       nestedFolderTitleFormat.value = payload.titleFormat;
     }
 
+    if (shouldSaveVideoPlaybackMode) {
+      const payload = await updateVideoPlaybackMode(videoPlaybackMode.value);
+      savedParts.push(t('settings.general.feedback.parts.videoPlaybackMode'));
+      if (appStore.stats) {
+        appStore.stats.preferences.videoPlaybackMode = payload.videoPlaybackMode;
+      }
+      videoPlaybackMode.value = payload.videoPlaybackMode;
+    }
+
     if (shouldSaveVideoPlaybackQuality) {
       const payload = await updateVideoPlaybackQuality(videoPlaybackQuality.value);
       savedParts.push(t('settings.general.feedback.parts.videoPlaybackQuality'));
@@ -3338,6 +3665,11 @@ async function saveGeneralSettings() {
       setGeneralSettingsFeedback(
         'success',
         t('settings.general.feedback.nestedFolderTitleSaved', { label: selectedNestedFolderTitleOption.value.label })
+      );
+    } else if (shouldSaveVideoPlaybackMode) {
+      setGeneralSettingsFeedback(
+        'success',
+        t('settings.general.feedback.videoPlaybackModeSaved', { label: selectedVideoPlaybackModeOption.value.label })
       );
     } else if (shouldSaveVideoPlaybackQuality) {
       setGeneralSettingsFeedback(

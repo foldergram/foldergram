@@ -18,6 +18,7 @@ import {
   TREAT_CAROUSELS_AS_FOLDERS_SETTING_KEY,
   TREAT_STORIES_AS_FOLDERS_SETTING_KEY,
   VIDEO_PLAYBACK_QUALITY_SETTING_KEY,
+  VIDEO_PLAYBACK_MODE_SETTING_KEY,
   SHARE_PUBLIC_BASE_URL_SETTING_KEY
 } from '../../constants/app-setting-keys.js';
 import { appConfig } from '../../config/env.js';
@@ -55,7 +56,8 @@ import type {
   SharedFolderSummary,
   SharedImageDetail,
   TrashImage,
-  VideoPlaybackQuality
+  VideoPlaybackQuality,
+  VideoPlaybackMode
 } from '../../types/models.js';
 import {
   getEffectiveExcludedFolderRules,
@@ -251,6 +253,15 @@ export function getVideoPlaybackQuality(): VideoPlaybackQuality {
     : 'auto';
 }
 
+export const VIDEO_PLAYBACK_MODES: VideoPlaybackMode[] = ['direct', 'transcode'];
+
+export function getVideoPlaybackMode(): VideoPlaybackMode {
+  const stored = appSettingsRepository.get(VIDEO_PLAYBACK_MODE_SETTING_KEY);
+  return VIDEO_PLAYBACK_MODES.includes(stored as VideoPlaybackMode)
+    ? (stored as VideoPlaybackMode)
+    : 'transcode';
+}
+
 export function getNestedFolderTitleFormat(): NestedFolderTitleFormat {
   return parseNestedFolderTitleFormatSetting(appSettingsRepository.get(NESTED_FOLDER_TITLE_FORMAT_SETTING_KEY));
 }
@@ -418,13 +429,33 @@ export function mapPlaceSummaryFromRow(image: PlaceRowFields) {
   };
 }
 
+const ORIGINAL_MEDIA_PATH_CACHE_TTL_MS = 30_000;
+const originalMediaPathCache = new Map<number, { path: string; filename: string; expiresAt: number }>();
+
+export function invalidateOriginalMediaPathCache(imageIds: readonly number[] = []): void {
+  if (imageIds.length === 0) {
+    originalMediaPathCache.clear();
+    return;
+  }
+
+  for (const imageId of imageIds) {
+    originalMediaPathCache.delete(imageId);
+  }
+}
+
 export function resolveOriginalMediaFile(id: number): { path: string; filename: string } | null {
   if (!storageService.getState().libraryAvailable || scannerService.isLibraryRebuildRequired()) {
     return null;
   }
 
+  const cached = originalMediaPathCache.get(id);
+  if (cached && cached.expiresAt > Date.now()) {
+    return { path: cached.path, filename: cached.filename };
+  }
+
   const detail = imageRepository.getById(id);
   if (!detail || detail.is_deleted || detail.is_trashed) {
+    originalMediaPathCache.delete(id);
     return null;
   }
 
@@ -432,6 +463,7 @@ export function resolveOriginalMediaFile(id: number): { path: string; filename: 
   try {
     resolvedPath = resolveOriginalPath(detail.relative_path);
   } catch {
+    originalMediaPathCache.delete(id);
     return null;
   }
 
@@ -439,9 +471,16 @@ export function resolveOriginalMediaFile(id: number): { path: string; filename: 
     // The index outlived the file. Soft deleting here keeps the feed from
     // handing out the same dead post on every reload, instead of waiting for
     // the next full scan to notice.
+    originalMediaPathCache.delete(id);
     imageRepository.markDeleted(detail.relative_path);
     return null;
   }
+
+  originalMediaPathCache.set(id, {
+    path: resolvedPath,
+    filename: detail.filename,
+    expiresAt: Date.now() + ORIGINAL_MEDIA_PATH_CACHE_TTL_MS
+  });
 
   return {
     path: resolvedPath,
@@ -1046,4 +1085,3 @@ export function sliceItemsForPage(items: FeedImage[], page: number, limit: numbe
   const offset = (page - 1) * limit;
   return items.slice(offset, offset + limit);
 }
-

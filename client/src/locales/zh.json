@@ -62,6 +62,17 @@
       "unlocking": "正在解锁...",
       "unlock": "解锁管理员",
       "unableToUnlock": "无法解锁管理员访问。"
+    },
+    "patternGate": {
+      "title": "绘制解锁图案",
+      "description": "此图库已启用图形图案解锁。",
+      "padLabel": "解锁图案",
+      "wrongPattern": "图案不正确，请重试。",
+      "forgotPattern": "多次错误，用登录密码重置",
+      "adminPasswordLabel": "管理员密码",
+      "backToPattern": "返回",
+      "resetAndSignIn": "用登录密码重置",
+      "wrongAdminPassword": "管理员密码不正确。"
     }
   },
   "nav": {
@@ -275,7 +286,7 @@
         "options": {
           "auto": {
             "label": "自动",
-            "description": "从 480p 流开始播放，网络足够时自动升清晰度；适合外网。"
+            "description": "局域网直推原片；外网从 480p 起播，网络够再升到 720p / 1080p。"
           },
           "480p": {
             "label": "480p（外网优先）",
@@ -341,7 +352,9 @@
         "nestedFolderTitleOnly": "这会更新整个应用中嵌套应用文件夹的标签显示方式。",
         "sharePublicBaseUrlOnly": "这会更新从外网访问时分享链接使用的地址前缀。",
         "carouselReconciliation": "轮播文件夹模式已保存。请完成上方提示的图库操作，将其应用到索引。",
-        "idle": "这些是当前适用于语言、首页、短片、应用文件夹、嵌套文件夹标题、stories 文件夹、轮播文件夹和排除文件夹的全局默认项。"
+        "idle": "这些是当前适用于语言、首页、短片、应用文件夹、嵌套文件夹标题、stories 文件夹、轮播文件夹和排除文件夹的全局默认项。",
+        "videoPlaybackModeOnly": "这会更新视频是直通原片，还是由 NAS 转码后再播。",
+        "videoPlaybackQualityOnly": "这会更新视频播放画质。"
       },
       "rescanNotice": {
         "rebuildRequired": "保存这些更改后，请重建图库索引，以便将所选文件夹行为应用到当前图库位置。",
@@ -378,14 +391,31 @@
           "appFolderOrder": "应用文件夹顺序",
           "nestedFolderTitles": "嵌套文件夹标题",
           "videoPlaybackQuality": "视频播放画质",
-          "sharePublicBaseUrl": "外网分享地址"
+          "sharePublicBaseUrl": "外网分享地址",
+          "videoPlaybackMode": "视频传送方式"
         },
-        "sharePublicBaseUrlSaved": "外网分享地址已保存。"
+        "sharePublicBaseUrlSaved": "外网分享地址已保存。",
+        "videoPlaybackModeSaved": "视频现在以 {label} 传送。"
       },
       "errors": {
         "validateExcludedFolders": "无法验证已排除文件夹规则。",
         "update": "无法更新常规设置。",
         "partialUpdate": "部分设置已保存（{parts}），但更新未能完成：{message}"
+      },
+      "videoPlaybackMode": {
+        "label": "视频传送方式",
+        "description": "直通把原片交给手机解码；转码由 NAS 压成 H.264 小流再播。画质档位仍然单独选择。",
+        "closeMenuAria": "关闭视频传送方式菜单",
+        "options": {
+          "transcode": {
+            "label": "转码",
+            "description": "NAS 压成 H.264，从 480p 起播，网络够再升到 720p / 1080p。外网更稳；拖进度会丢掉旧的转码任务。"
+          },
+          "direct": {
+            "label": "直通",
+            "description": "原片直接给手机解码，不做转码。局域网最快；外网原片码率高时容易起播慢、拖进度卡。"
+          }
+        }
       }
     },
     "library": {
@@ -633,6 +663,27 @@
         "minLength": "密码至少需要 {count} 个字符。",
         "empty": "密码不能为空。",
         "mismatch": "两次输入的密码不一致。"
+      },
+      "pattern": {
+        "title": "图形解锁",
+        "description": "开启后，打开 Foldergram 需要先绘制已保存的图案，任何内容都不可见。忘记图案时可用管理员密码重置。",
+        "stateOn": "已开启",
+        "off": "未开启",
+        "setupButton": "设置图案",
+        "redoButton": "重新设置图案",
+        "disableButton": "关闭图形解锁",
+        "drawFirst": "请绘制新的解锁图案。",
+        "drawConfirm": "请再画一次相同的图案以确认。",
+        "drawCurrent": "请先绘制当前解锁图案。",
+        "enterLoginPassword": "请输入登录密码以继续。",
+        "useLoginPassword": "改用登录密码验证",
+        "loginPasswordLabel": "登录密码",
+        "confirmPassword": "确认",
+        "wrongCurrent": "当前图案不正确。",
+        "wrongPassword": "登录密码不正确。",
+        "mismatch": "两次图案不一致，请重新绘制新图案。",
+        "saveError": "图案保存失败，请重试。",
+        "cancel": "取消"
       }
     },
     "status": {

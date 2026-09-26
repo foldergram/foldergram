@@ -930,6 +930,7 @@ export const postRepository = {
         post.isAnimated = first.isAnimated;
         post.thumbnailUrl = first.thumbnailUrl;
         post.previewUrl = first.previewUrl;
+        post.fileSize = first.fileSize;
       }
     }
 
@@ -1135,6 +1136,7 @@ export const postRepository = {
         images.thumbnail_path AS thumbnailUrl,
         images.preview_path AS previewUrl,
         images.playback_strategy AS playbackStrategy,
+        images.file_size AS fileSize,
         posts.sort_timestamp AS sortTimestamp,
         posts.taken_at AS takenAt,
         ${POST_SAVED_SELECT_SQL},
@@ -1333,6 +1335,7 @@ export const postRepository = {
         images.thumbnail_path AS thumbnailUrl,
         images.preview_path AS previewUrl,
         images.playback_strategy AS playbackStrategy,
+        images.file_size AS fileSize,
         posts.sort_timestamp AS sortTimestamp,
         posts.taken_at AS takenAt,
         ${POST_SAVED_SELECT_SQL},
@@ -2128,6 +2131,7 @@ export const imageRepository = {
         images.thumbnail_path AS thumbnailUrl,
         images.preview_path AS previewUrl,
         images.playback_strategy AS playbackStrategy,
+        images.file_size AS fileSize,
         images.sort_timestamp AS sortTimestamp,
         images.taken_at AS takenAt,
         0 AS isSaved,
@@ -2167,6 +2171,7 @@ export const imageRepository = {
         images.thumbnail_path AS thumbnailUrl,
         images.preview_path AS previewUrl,
         images.playback_strategy AS playbackStrategy,
+        images.file_size AS fileSize,
         images.sort_timestamp AS sortTimestamp,
         images.taken_at AS takenAt,
         0 AS isSaved,
@@ -2492,4 +2497,3 @@ export const imageRepository = {
     ).all(cutoffIso) as Array<Pick<ImageRecord, 'id' | 'thumbnail_path' | 'preview_path'>>;
   }
 };
-

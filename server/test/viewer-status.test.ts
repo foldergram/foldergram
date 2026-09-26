@@ -251,7 +251,8 @@ describe.sequential('viewer-safe status payload', () => {
       nestedFolderTitleFormat: 'folder',
       treatStoriesAsFolders: false,
       treatCarouselsAsFolders: false,
-      videoPlaybackQuality: 'auto'
+      videoPlaybackQuality: 'auto',
+      videoPlaybackMode: 'transcode'
     });
   });
 
@@ -271,7 +272,8 @@ describe.sequential('viewer-safe status payload', () => {
       nestedFolderTitleFormat: 'folder',
       treatStoriesAsFolders: false,
       treatCarouselsAsFolders: false,
-      videoPlaybackQuality: 'auto'
+      videoPlaybackQuality: 'auto',
+      videoPlaybackMode: 'transcode'
     });
   });
 });

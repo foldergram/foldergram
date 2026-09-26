@@ -4,6 +4,7 @@ import { appConfig } from '../../config/env.js';
 import { requireCapability } from '../../middleware/auth-protection.js';
 import { galleryService } from '../../services/gallery-service.js';
 import { imageIdSchema, mediaTypeQuerySchema, originalMediaQuerySchema, patchImageCaptionBodySchema } from '../../routes/api-schemas.js';
+import { applyOriginalMediaHeaders } from '../../utils/media-response.js';
 
 export function registerLibraryRoutes(router: express.Router): void {
   router.get(['/posts/:id', '/images/:id'], (request, response) => {
@@ -33,6 +34,7 @@ export function registerLibraryRoutes(router: express.Router): void {
   router.get('/originals/:id', (request, response) => {
     const params = imageIdSchema.parse(request.params); const query = originalMediaQuerySchema.parse(request.query); const originalMedia = galleryService.getOriginalMediaFile(params.id);
     if (!originalMedia) { response.status(404).json({ message: 'Original media not found' }); return; }
+    applyOriginalMediaHeaders(response);
     if (query.download) { response.download(originalMedia.path, originalMedia.filename); return; }
     if (appConfig.mediaAccelRedirectPrefix) {
       const relativePath = path.relative(appConfig.galleryRoot, originalMedia.path);

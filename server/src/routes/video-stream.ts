@@ -6,13 +6,15 @@ import { scannerService } from '../services/scanner-service.js';
 import { storageService } from '../services/storage-service.js';
 import {
   HLS_SEGMENT_SECONDS,
+  HLS_SEEK_WINDOW_SEGMENTS,
+  getSegmentWindow,
   buildMasterPlaylist,
   buildMediaPlaylist,
-  getSegment,
   getSegmentCount,
   getSourceVideoDurationMs,
   isStreamQuality,
-  resolveOfferedQualities
+  resolveOfferedQualities,
+  scheduleStreamBackfill
 } from '../services/video-stream-service.js';
 import { resolveOriginalPath } from '../utils/media-paths.js';
 import { applyProtectedMediaHeaders } from '../utils/media-response.js';
@@ -27,7 +29,7 @@ const segmentParamSchema = imageIdParamSchema.extend({
 });
 
 const warmQuerySchema = z.object({
-  segments: z.coerce.number().int().min(1).max(4).default(2),
+  segments: z.coerce.number().int().min(1).max(4).default(4),
   /** Playback position in seconds the viewer is about to seek to. */
   from: z.coerce.number().min(0).default(0)
 });
@@ -183,20 +185,39 @@ export function createVideoStreamRouter(options: VideoStreamRouterOptions = {}):
     }
 
     try {
-      const payload = await getSegment({
-        imageId: video.id,
-        sourcePath: video.sourcePath,
-        durationMs: video.durationMs,
-        width: video.width,
-        height: video.height,
-        quality: params.quality,
-        index: params.index
-      });
+      const remaining = Math.max(1, getSegmentCount(video.durationMs) - params.index);
+      const payload = await getSegmentWindow(
+        {
+          imageId: video.id,
+          sourcePath: video.sourcePath,
+          durationMs: video.durationMs,
+          width: video.width,
+          height: video.height,
+          quality: params.quality,
+          index: params.index
+        },
+        Math.min(HLS_SEEK_WINDOW_SEGMENTS, remaining)
+      );
 
       applyProtectedMediaHeaders(response);
       response.setHeader('Content-Type', 'video/mp2t');
       response.setHeader('Content-Length', String(payload.byteLength));
       response.end(payload);
+
+      // The viewer is actually playing this clip, so fill the rest of its playlist in
+      // the background while the transcoder is idle. A later seek then lands on a
+      // cached segment instead of a cold encode.
+      scheduleStreamBackfill(
+        {
+          imageId: video.id,
+          sourcePath: video.sourcePath,
+          durationMs: video.durationMs,
+          width: video.width,
+          height: video.height,
+          quality: params.quality
+        },
+        params.index + 1
+      );
     } catch (error) {
       if (response.headersSent) {
         response.end();
@@ -251,24 +272,28 @@ export function createVideoStreamRouter(options: VideoStreamRouterOptions = {}):
       (_, offset) => firstIndex + offset
     );
 
-    void (async () => {
-      for (const index of indexes) {
-        try {
-          await getSegment({
-            imageId: video.id,
-            sourcePath: video.sourcePath,
-            durationMs: video.durationMs,
-            width: video.width,
-            height: video.height,
-            quality,
-            index
-          });
-        } catch {
-          // A warm-up failure is not user visible; the player will retry the segment.
-          return;
-        }
-      }
-    })();
+    // Two-segment chunks let two encoder processes run side by side where the segment
+    // limiter allows it, so the head of the playlist is warm in about half the time.
+    const WARM_CHUNK_SEGMENTS = 2;
+    for (let chunkStart = 0; chunkStart < indexes.length; chunkStart += WARM_CHUNK_SEGMENTS) {
+      const chunkIndex = indexes[chunkStart]!;
+      const chunkCount = Math.min(WARM_CHUNK_SEGMENTS, indexes.length - chunkStart);
+
+      void getSegmentWindow(
+        {
+          imageId: video.id,
+          sourcePath: video.sourcePath,
+          durationMs: video.durationMs,
+          width: video.width,
+          height: video.height,
+          quality,
+          index: chunkIndex
+        },
+        chunkCount
+      ).catch(() => {
+        // A warm-up failure is not user visible; the player will retry the segment.
+      });
+    }
 
     response.status(202).json({ warming: indexes.length });
   });

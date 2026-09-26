@@ -115,4 +115,44 @@ describe.sequential('video stream service playlists', () => {
     await expect(fs.stat(path.join(tempRoot, 'data', 'hls-cache', '42'))).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(fs.readFile(path.join(siblingDirectory, 'segment-0.ts'), 'utf8')).resolves.toBe('keep');
   });
+
+  it('backfills a session from cached segments without spawning ffmpeg', async () => {
+    // All four segments (two windows) of an 8s clip are already warm, so the
+    // backfill completes by reading the cache alone and never reaches an encoder.
+    const cacheDirectory = path.join(tempRoot, 'data', 'hls-cache', '900', '720p');
+    await fs.mkdir(cacheDirectory, { recursive: true });
+    for (let index = 0; index < 4; index += 1) {
+      await fs.writeFile(path.join(cacheDirectory, `segment-${index}.ts`), 'cached');
+    }
+
+    await expect(
+      service.scheduleStreamBackfill(
+        {
+          imageId: 900,
+          sourcePath: path.join(tempRoot, 'gallery', 'missing.mp4'),
+          durationMs: 8_000,
+          width: 1280,
+          height: 720,
+          quality: '720p'
+        },
+        0
+      )
+    ).resolves.toBeUndefined();
+  });
+
+  it('does nothing for a clip whose duration is unknown', async () => {
+    await expect(
+      service.scheduleStreamBackfill(
+        {
+          imageId: 901,
+          sourcePath: path.join(tempRoot, 'gallery', 'missing.mp4'),
+          durationMs: null,
+          width: 1280,
+          height: 720,
+          quality: '720p'
+        },
+        0
+      )
+    ).resolves.toBeUndefined();
+  });
 });

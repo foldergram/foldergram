@@ -293,6 +293,7 @@ const BASE_POST_SELECT_SQL = `
     images.thumbnail_path AS thumbnailUrl,
     images.preview_path AS previewUrl,
     images.playback_strategy AS playbackStrategy,
+    images.file_size AS fileSize,
     posts.sort_timestamp AS sortTimestamp,
     posts.taken_at AS takenAt,
     ${POST_SAVED_SELECT_SQL},

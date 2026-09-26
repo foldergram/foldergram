@@ -20,7 +20,8 @@ import type {
   FolderImageOrder,
   ReelsFeedMode,
   ScanProgress,
-  VideoPlaybackQuality
+  VideoPlaybackQuality,
+  VideoPlaybackMode
 } from '../types/api';
 import { useAuthStore } from './auth';
 
@@ -40,6 +41,17 @@ interface AppState {
   hasExplicitlyEnabledVideoSound: boolean;
   videoSoundGeneration: number;
   videoPlaybackQualityOverride: VideoPlaybackQuality | null;
+  /**
+   * Transient, never persisted: set by the adaptive quality controller when the
+   * measured HLS throughput cannot sustain the configured tier. Cleared again
+   * once the network recovers so playback returns to the configured quality.
+   */
+  adaptiveVideoQualityOverride: VideoPlaybackQuality | null;
+  /**
+   * Transient: original Range on this device is too slow, so auto should load
+   * the HLS master even on a LAN hostname. Never persisted.
+   */
+  adaptivePreferStream: boolean;
   lastOpenedFolderSlug: string | null;
   recentOpenedFolderSlugs: string[];
   imageModalBackgroundPath: string | null;
@@ -117,6 +129,8 @@ export const useAppStore = defineStore('app', {
     hasExplicitlyEnabledVideoSound: false,
     videoSoundGeneration: 0,
     videoPlaybackQualityOverride: null,
+    adaptiveVideoQualityOverride: null,
+    adaptivePreferStream: false,
     lastOpenedFolderSlug: null,
     recentOpenedFolderSlugs: [],
     imageModalBackgroundPath: null,
@@ -144,12 +158,19 @@ export const useAppStore = defineStore('app', {
     nestedFolderTitleFormat: (state) => state.stats?.preferences.nestedFolderTitleFormat ?? 'folder',
     savedVideoPlaybackQuality: (state): VideoPlaybackQuality =>
       state.stats?.preferences.videoPlaybackQuality ?? 'auto',
+    savedVideoPlaybackMode: (state): VideoPlaybackMode =>
+      state.stats?.preferences.videoPlaybackMode ?? 'transcode',
+    videoPlaybackMode: (state): VideoPlaybackMode =>
+      state.stats?.preferences.videoPlaybackMode ?? 'transcode',
     /** Origin stamped on share links created from outside the LAN. */
     sharePublicBaseUrl: (state): string | null => state.stats?.preferences.sharePublicBaseUrl ?? null,
     // A per-device override wins over the library default so one phone on a weak
     // connection can drop to 720p without changing playback for everyone.
     videoPlaybackQuality: (state): VideoPlaybackQuality =>
-      state.videoPlaybackQualityOverride ?? state.stats?.preferences.videoPlaybackQuality ?? 'auto',
+      state.adaptiveVideoQualityOverride ??
+      state.videoPlaybackQualityOverride ??
+      state.stats?.preferences.videoPlaybackQuality ??
+      'auto',
     treatStoriesAsFolders: (state) => state.stats?.preferences.treatStoriesAsFolders === true,
     treatCarouselsAsFolders: (state) => state.stats?.preferences.treatCarouselsAsFolders === true,
     isCarouselsReconciliationPending: (state) => state.stats?.carouselsMigration?.reconciliationPending === true
@@ -278,6 +299,15 @@ export const useAppStore = defineStore('app', {
       } else {
         window.localStorage.removeItem(VIDEO_PLAYBACK_QUALITY_STORAGE_KEY);
       }
+    },
+
+    /** Network-driven tier change. Deliberately transient: nothing is persisted. */
+    setAdaptiveVideoQualityOverride(quality: VideoPlaybackQuality | null) {
+      this.adaptiveVideoQualityOverride = quality;
+    },
+
+    setAdaptivePreferStream(preferStream: boolean) {
+      this.adaptivePreferStream = preferStream;
     },
 
     setVideoMuted(videoMuted: boolean) {

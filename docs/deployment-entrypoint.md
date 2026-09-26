@@ -13,7 +13,10 @@
 
 - 对外容器名：`foldergram`（Nginx 网关）；应用容器为 `foldergram-web` 和 `foldergram-worker`。
 - 当前性能部署 Compose：`docker-compose.nas-direct.yml`。
-- 部署方式：NAS 上从当前源码目录本地构建 `foldergram:domain-split-20260911`，再启动网关、web 和 worker。
+- 部署方式：NAS 上从当前源码目录本地构建 `foldergram:latest`，再启动网关、web 和 worker。
+- 2026-09-23 本次增量部署：设置新增视频传送方式（直通 / 转码）。转码是默认，auto 走 HLS master，从 480p 起播再爬 720p/1080p；直通仍 Range 推原片。转码拖进度会杀掉同一视频上旧的 ffmpeg 窗口，并先交出已转好的段。Service Worker `foldergram-v17`。运行镜像 `foldergram:latest`。
+- 2026-09-23 直通加速：原片 Range 可缓存，冷 seek 不再全局切转码；外网高码率原片自动走 HLS。Service Worker `foldergram-v18`。
+- 2026-09-23 直通拖进度：拖动只改时间 UI，松手一次 Range seek；seek 时不再预热原片头尾。Service Worker `foldergram-v19`。
 - 禁止使用：`ghcr.io/foldergram/foldergram:latest`。它可能把系统带回未包含本地优化的原始版本。
 - NAS Docker：`27.2.0`
 - NAS Compose：`v2.40.1`
@@ -41,24 +44,11 @@
 
 ## 视频盘 HLS 缓存
 
-`docker-compose.nas-direct.yml` 将可再生的 HLS 视频分片写到图库源盘：
+2026-09-23 起 HLS 分片缓存迁回数据卷（SSD）：容器内路径 `/app/data/hls-cache`，落在 `${FOLDERGRAM_DATA_HOST_PATH}/hls-cache`。缓存命中后的读取是 SSD 延迟，seek 落点更快。
 
-- `${GALLERY_ROOT_HOST_PATH}/.foldergram-cache/hls-cache`
-
-图库源文件仍挂载为 `/app/data/gallery`；ConfigReviews 的 `FOLDERGRAM_DATA_HOST_PATH` 继续保存 SQLite 数据库、设置、缩略图、预览和扫描报告。`.foldergram-cache` 是隐藏目录，因此扫描器与图库监听器会忽略它。
-
-首次切换前，先在 NAS 执行：
-
-```bash
-cd <当前源码目录>
-docker compose -f docker-compose.nas-direct.yml stop foldergram-web foldergram-worker
-mkdir -p "${GALLERY_ROOT_HOST_PATH}/.foldergram-cache/hls-cache"
-rsync -a "${FOLDERGRAM_DATA_HOST_PATH}/hls-cache/" "${GALLERY_ROOT_HOST_PATH}/.foldergram-cache/hls-cache/"
-```
-
-保留 ConfigReviews 上的原 `hls-cache` 目录，直到新容器已验证视频播放正常。回滚时移除 HLS 独立挂载并重新启动应用容器即可。
-
-HLS 缓存按 `hls-cache/<视频ID>/<清晰度>/` 分组。worker 在启动时及每 6 小时清理：先删除 7 天未访问的组；若仍超过 100 GiB，则按最久未使用顺序删除。正在转码或请求中的组不会被当前清理删除。可通过 `HLS_CACHE_DIR`、`HLS_CACHE_MAX_AGE_DAYS`、`HLS_CACHE_MAX_BYTES` 覆盖默认值。
+- 容量上限默认 10 GiB（`FOLDERGRAM_HLS_CACHE_MAX_BYTES` 可覆盖）；超过后按最久未用淘汰，7 天未访问的组也会被清理。
+- 图库源盘上的旧目录 `${GALLERY_ROOT_HOST_PATH}/.foldergram-cache/hls-cache` 已无引用，验证新版本播放正常后可手动删除以回收空间。
+- 播放会话开始后，服务端会用空闲时间在后台补齐当前视频的剩余分片（跟播式补齐），因此往后拖动进度条基本都命中缓存；前台 seek 和起播始终优先于补齐。
 
 ## 部署安全规则
 
@@ -105,7 +95,7 @@ HLS 缓存按 `hls-cache/<视频ID>/<清晰度>/` 分组。worker 在启动时�
 完整契约见 `docs/player-contract.md`。没有用户明确要求，禁止改小窗/沉浸式实例模型、直推源选择和手势。
 
 - 小窗和沉浸式共用**一个** `<media-player>`（claim + Teleport），禁止第二套解码。
-- `auto` 质量走直推原文件；HEVC 可硬解的 preview MP4/MOV 同样直推；失败才 HLS。
+- 设置里的传送方式和画质是两件事。默认 **转码**：`auto` 走 HLS master，从 480p 起播再往上爬。**直通**：`auto` 直推原文件。手动 480p/720p/1080p 仍是 HLS；原片仍直推。失败或 waiting 超时才降到 HLS。转码拖进度会掉掉旧 ffmpeg 窗口。
 - 单击小窗进入沉浸式且不暂停；双击才暂停；左右拖是相对当前进度，不是手指绝对位置。
 - 竖屏里横屏视频 `object-fit: contain` 居中；旋转用 CSS `rotate(90deg)`，手势跟画面坐标。
 

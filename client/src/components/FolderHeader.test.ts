@@ -74,6 +74,7 @@ describe('FolderHeader', () => {
       accessMode: 'off',
       likesMode: 'local',
       defaultLocale: null,
+      patternUnlock: false,
       capabilities: {
         canManageLibrary: false,
         canDeleteMedia: false,

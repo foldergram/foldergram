@@ -23,6 +23,7 @@ type FolderRecord = ModelsModule['FolderRecord'];
 type PlaybackStrategy = ModelsModule['PlaybackStrategy'];
 
 interface MockResponse {
+  setHeader: ReturnType<typeof vi.fn>;
   status: ReturnType<typeof vi.fn>;
   json: ReturnType<typeof vi.fn>;
   sendFile: ReturnType<typeof vi.fn>;
@@ -236,6 +237,7 @@ describe.sequential('original media route download behavior', () => {
 
   function createResponse(): MockResponse {
     return {
+      setHeader: vi.fn().mockReturnThis(),
       status: vi.fn().mockReturnThis(),
       json: vi.fn().mockReturnThis(),
       sendFile: vi.fn().mockReturnThis(),

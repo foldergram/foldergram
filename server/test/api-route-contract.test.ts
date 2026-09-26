@@ -14,6 +14,7 @@ const expectedRoutes = `
 DELETE /admin/folders/:slug/share-links/:linkId
 DELETE /admin/folders/:slug/share-password
 DELETE /auth/password
+DELETE /auth/pattern
 DELETE /collections/:slug
 DELETE /collections/:slug/images/:id
 DELETE /collections/:slug/posts/:id
@@ -83,6 +84,8 @@ POST /admin/settings/carousels-as-folders
 POST /admin/settings/carousels-migration-decision
 POST /auth/login
 POST /auth/logout
+POST /auth/pattern/reset
+POST /auth/pattern/unlock
 POST /auth/unlock-admin
 POST /collections
 POST /collections/:slug/images/:id
@@ -110,8 +113,10 @@ PUT /admin/settings/reels-feed-default
 PUT /admin/settings/scan-folders
 PUT /admin/settings/share-public-base-url
 PUT /admin/settings/stories-mode
+PUT /admin/settings/video-playback-mode
 PUT /admin/settings/video-playback-quality
 PUT /auth/password
+PUT /auth/pattern
 PUT /auth/viewer-access
 `.trim().split('\n');
 

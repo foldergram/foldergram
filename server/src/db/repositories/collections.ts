@@ -165,6 +165,7 @@ export const likeRepository = {
         images.thumbnail_path AS thumbnailUrl,
         images.preview_path AS previewUrl,
         images.playback_strategy AS playbackStrategy,
+        images.file_size AS fileSize,
         posts.sort_timestamp AS sortTimestamp,
         posts.taken_at AS takenAt,
         1 AS isSaved,
@@ -210,6 +211,7 @@ export const likeRepository = {
         images.thumbnail_path AS thumbnailUrl,
         images.preview_path AS previewUrl,
         images.playback_strategy AS playbackStrategy,
+        images.file_size AS fileSize,
         posts.sort_timestamp AS sortTimestamp,
         posts.taken_at AS takenAt,
         1 AS isSaved,
@@ -254,6 +256,7 @@ export const likeRepository = {
         images.thumbnail_path AS thumbnailUrl,
         images.preview_path AS previewUrl,
         images.playback_strategy AS playbackStrategy,
+        images.file_size AS fileSize,
         posts.sort_timestamp AS sortTimestamp,
         posts.taken_at AS takenAt,
         1 AS isSaved,
@@ -622,6 +625,7 @@ export const collectionRepository = {
         images.thumbnail_path AS thumbnailUrl,
         images.preview_path AS previewUrl,
         images.playback_strategy AS playbackStrategy,
+        images.file_size AS fileSize,
         posts.sort_timestamp AS sortTimestamp,
         posts.taken_at AS takenAt,
         1 AS isSaved,
@@ -741,4 +745,3 @@ export const collectionRepository = {
     return true;
   }
 };
-

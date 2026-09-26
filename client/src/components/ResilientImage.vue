@@ -5,7 +5,7 @@
     :alt="alt"
     :width="width"
     :height="height"
-    :loading="loading"
+    :loading="loading" decoding="async"
     :data-loaded="loaded ? 'true' : 'false'"
     @load="handleLoad"
     @error="handleError"

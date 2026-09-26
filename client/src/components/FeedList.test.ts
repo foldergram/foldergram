@@ -6,8 +6,8 @@ import FeedList from './FeedList.vue';
 import { useSharedVideoSurfaceStore } from '../stores/shared-video-surface';
 
 const FeedCardStub = {
-  props: ['item', 'isActiveVideo'],
-  template: '<div :data-id="item.id" :data-active="isActiveVideo" />'
+  props: ['item', 'isActiveVideo', 'prefetchVideo'],
+  template: '<div :data-id="item.id" :data-active="isActiveVideo" :data-prefetch="prefetchVideo" />'
 };
 
 function videoItem(id: number) {
@@ -21,7 +21,8 @@ function videoItem(id: number) {
     filename: `clip-${id}.mp4`,
     width: 1080,
     height: 1920,
-    mediaType: 'video',
+    mediaType: 'video' as const,
+    durationMs: 31_000,
     thumbnailUrl: '/thumb.webp',
     previewUrl: '/video.mp4',
     sortTimestamp: id,
@@ -53,7 +54,8 @@ describe('FeedList', () => {
             filename: 'visible.mp4',
             width: 1080,
             height: 1920,
-            mediaType: 'video',
+            mediaType: 'video' as const,
+            durationMs: 31_000,
             thumbnailUrl: '/thumb.webp',
             previewUrl: '/video.mp4',
             sortTimestamp: 1,
@@ -74,6 +76,25 @@ describe('FeedList', () => {
     await wrapper.vm.$nextTick();
 
     expect(wrapper.get('[data-id="41"]').attributes('data-active')).toBe('true');
+  });
+
+  it('warms the nearest video on both sides of the active home clip', async () => {
+    const items = [videoItem(1), videoItem(2), videoItem(3)];
+    const wrapper = mount(FeedList, {
+      props: { context: 'home', items },
+      global: { stubs: { FeedCard: FeedCardStub } }
+    });
+
+    await wrapper.findAllComponents(FeedCardStub)[1]?.vm.$emit('video-visibility-change', {
+      id: 2,
+      ratio: 0.8,
+      centerOffset: 0
+    });
+    await wrapper.vm.$nextTick();
+
+    const cards = wrapper.findAllComponents(FeedCardStub);
+    expect(cards.map((card) => card.props('isActiveVideo'))).toEqual([false, true, false]);
+    expect(cards.map((card) => card.props('prefetchVideo'))).toEqual([true, false, true]);
   });
 
   it('renders every row while no layout is measurable', () => {

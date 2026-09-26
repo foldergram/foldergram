@@ -62,6 +62,17 @@
       "unlocking": "Desbloqueando...",
       "unlock": "Desbloquear administrador",
       "unableToUnlock": "No se pudo desbloquear el acceso de administrador."
+    },
+    "patternGate": {
+      "title": "Dibuja tu patrón de desbloqueo",
+      "description": "Esta biblioteca está protegida con un patrón gráfico.",
+      "padLabel": "Patrón de desbloqueo",
+      "wrongPattern": "Patrón incorrecto. Inténtalo de nuevo.",
+      "forgotPattern": "Demasiados intentos. Restablecer con la contraseña de acceso",
+      "adminPasswordLabel": "Contraseña de administrador",
+      "backToPattern": "Volver",
+      "resetAndSignIn": "Restablecer con la contraseña de acceso",
+      "wrongAdminPassword": "Contraseña de administrador incorrecta."
     }
   },
   "nav": {
@@ -275,7 +286,7 @@
         "options": {
           "auto": {
             "label": "Automatica",
-            "description": "Empieza con un flujo de 480p y aumenta la calidad cuando la red lo permite; ideal para acceso externo."
+            "description": "Reproduce el original en la red local. Fuera de la LAN, empieza en 480p y sube a 720p / 1080p cuando la conexion lo aguanta."
           },
           "480p": {
             "label": "480p (prioridad externa)",
@@ -341,7 +352,9 @@
         "nestedFolderTitleOnly": "Esto actualiza cómo se etiquetan las carpetas anidadas de la app en toda la aplicación.",
         "sharePublicBaseUrlOnly": "Esto actualiza el prefijo de direccion que usan los enlaces creados desde fuera de la red local.",
         "carouselReconciliation": "El modo de las carpetas de carrusel está guardado. Completa la acción de biblioteca indicada arriba para aplicarlo al índice.",
-        "idle": "Estos son los valores actuales de toda la app para idioma, Inicio, Reels, carpetas de la app, títulos de carpetas anidadas, carpetas stories, carpetas de carrusel y carpetas excluidas."
+        "idle": "Estos son los valores actuales de toda la app para idioma, Inicio, Reels, carpetas de la app, títulos de carpetas anidadas, carpetas stories, carpetas de carrusel y carpetas excluidas.",
+        "videoPlaybackModeOnly": "Esto actualiza si los videos se reproducen en directo o se transcodifican en el NAS.",
+        "videoPlaybackQualityOnly": "Esto actualiza la calidad de reproduccion de video."
       },
       "rescanNotice": {
         "rebuildRequired": "Guarda estos cambios y luego reconstruye el índice de la biblioteca para aplicar el comportamiento de carpetas seleccionado a la ubicación actual de la galería.",
@@ -378,14 +391,31 @@
           "appFolderOrder": "orden de las carpetas de la app",
           "nestedFolderTitles": "títulos de carpetas anidadas",
           "videoPlaybackQuality": "calidad de reproduccion de video",
-          "sharePublicBaseUrl": "direccion publica para compartir"
+          "sharePublicBaseUrl": "direccion publica para compartir",
+          "videoPlaybackMode": "entrega de video"
         },
-        "sharePublicBaseUrlSaved": "Direccion publica para compartir guardada."
+        "sharePublicBaseUrlSaved": "Direccion publica para compartir guardada.",
+        "videoPlaybackModeSaved": "Los videos ahora usan {label}."
       },
       "errors": {
         "validateExcludedFolders": "No se pudieron validar las reglas de carpetas excluidas.",
         "update": "No se pudieron actualizar los ajustes generales.",
         "partialUpdate": "Se guardaron algunos ajustes ({parts}), pero la actualización no terminó: {message}"
+      },
+      "videoPlaybackMode": {
+        "label": "Entrega de video",
+        "description": "Reproduccion directa envia el archivo original al telefono. Transcodificacion deja que el NAS lo comprima a un flujo H.264 mas pequeno. La calidad se elige aparte.",
+        "closeMenuAria": "Cerrar el menu de entrega de video",
+        "options": {
+          "transcode": {
+            "label": "Transcodificacion",
+            "description": "El NAS genera H.264, empieza en 480p y sube a 720p / 1080p si la conexion lo aguanta. Mejor fuera de la LAN; al buscar se descartan transcodificaciones viejas."
+          },
+          "direct": {
+            "label": "Reproduccion directa",
+            "description": "El archivo original se decodifica en el telefono, sin transcodificar. Lo mas rapido en LAN; los originales de alto bitrate se atascan fuera de la red local."
+          }
+        }
       }
     },
     "library": {
@@ -633,6 +663,27 @@
         "minLength": "La contraseña debe tener al menos {count} caracteres.",
         "empty": "La contraseña no puede estar vacía.",
         "mismatch": "La confirmación de la contraseña no coincide."
+      },
+      "pattern": {
+        "title": "Desbloqueo por patrón",
+        "description": "Si se activa, abrir Foldergram requiere dibujar el patrón guardado antes de mostrar nada. Los patrones olvidados se restablecen con la contraseña de administrador.",
+        "stateOn": "Activado",
+        "off": "Desactivado",
+        "setupButton": "Configurar patrón",
+        "redoButton": "Redibujar patrón",
+        "disableButton": "Desactivar",
+        "drawFirst": "Dibuja tu nuevo patrón.",
+        "drawConfirm": "Dibuja el mismo patrón otra vez para confirmar.",
+        "drawCurrent": "Primero dibuja el patrón actual.",
+        "enterLoginPassword": "Introduce la contraseña de acceso para continuar.",
+        "useLoginPassword": "Verificar con la contraseña de acceso",
+        "loginPasswordLabel": "Contraseña de acceso",
+        "confirmPassword": "Confirmar",
+        "wrongCurrent": "El patrón actual es incorrecto.",
+        "wrongPassword": "La contraseña de acceso es incorrecta.",
+        "mismatch": "Los patrones no coinciden. Dibuja el nuevo patrón otra vez.",
+        "saveError": "No se pudo guardar el patrón. Inténtalo de nuevo.",
+        "cancel": "Cancelar"
       }
     },
     "status": {

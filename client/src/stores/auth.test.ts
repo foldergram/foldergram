@@ -7,6 +7,9 @@ const {
   changePasswordProtectionMock,
   disablePasswordProtectionMock,
   enablePasswordProtectionMock,
+  configurePatternUnlockMock,
+  resetPatternWithPasswordMock,
+  unlockWithPatternMock,
   fetchAuthStatusMock,
   loginWithPasswordMock,
   logoutMock,
@@ -16,6 +19,9 @@ const {
   changePasswordProtectionMock: vi.fn(),
   disablePasswordProtectionMock: vi.fn(),
   enablePasswordProtectionMock: vi.fn(),
+  configurePatternUnlockMock: vi.fn(),
+  resetPatternWithPasswordMock: vi.fn(),
+  unlockWithPatternMock: vi.fn(),
   fetchAuthStatusMock: vi.fn(),
   loginWithPasswordMock: vi.fn(),
   logoutMock: vi.fn(),
@@ -27,6 +33,9 @@ vi.mock('../api/gallery', () => ({
   changePasswordProtection: changePasswordProtectionMock,
   disablePasswordProtection: disablePasswordProtectionMock,
   enablePasswordProtection: enablePasswordProtectionMock,
+  configurePatternUnlock: configurePatternUnlockMock,
+  resetPatternWithPassword: resetPatternWithPasswordMock,
+  unlockWithPattern: unlockWithPatternMock,
   fetchAuthStatus: fetchAuthStatusMock,
   loginWithPassword: loginWithPasswordMock,
   logout: logoutMock,
@@ -40,6 +49,10 @@ describe('auth store locale status', () => {
     changePasswordProtectionMock.mockReset();
     disablePasswordProtectionMock.mockReset();
     enablePasswordProtectionMock.mockReset();
+    configurePatternUnlockMock.mockReset();
+    resetPatternWithPasswordMock.mockReset();
+    unlockWithPatternMock.mockReset();
+    window.sessionStorage.clear();
     fetchAuthStatusMock.mockReset();
     loginWithPasswordMock.mockReset();
     logoutMock.mockReset();
@@ -109,6 +122,7 @@ describe('auth store locale status', () => {
       accessMode: 'off',
       likesMode: 'shared',
       defaultLocale: null,
+      patternUnlock: false,
       capabilities: {
         canManageLibrary: true,
         canDeleteMedia: true,
@@ -133,6 +147,7 @@ describe('auth store locale status', () => {
       accessMode: 'off',
       likesMode: 'shared',
       defaultLocale: null,
+      patternUnlock: false,
       capabilities: {
         canManageLibrary: true,
         canDeleteMedia: true,
@@ -173,6 +188,7 @@ describe('auth store locale status', () => {
       accessMode: 'public',
       likesMode: 'local',
       defaultLocale: null,
+      patternUnlock: false,
       capabilities: {
         canManageLibrary: false,
         canDeleteMedia: false,
@@ -202,5 +218,123 @@ describe('auth store locale status', () => {
     });
 
     expect(authStore.canSignOut).toBe(true);
+  });
+});
+
+describe('auth store pattern session', () => {
+  const adminCapabilities = {
+    canManageLibrary: true,
+    canDeleteMedia: true,
+    canAccessSettings: true,
+    canUseSharedLikes: true,
+    canUseLocalFavorites: false,
+    canUseSharedCollections: true,
+    canUseLocalCollections: false
+  };
+
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    window.sessionStorage.clear();
+    unlockWithPatternMock.mockReset();
+    configurePatternUnlockMock.mockReset();
+    resetPatternWithPasswordMock.mockReset();
+    logoutMock.mockReset();
+  });
+
+  it('asks for the pattern again after the tab session is cleared', () => {
+    const authStore = useAuthStore();
+    authStore.$patch({
+      enabled: true,
+      authenticated: true,
+      patternUnlock: true,
+      patternSessionUnlocked: false,
+      capabilities: adminCapabilities
+    });
+
+    expect(authStore.patternRequired).toBe(true);
+  });
+
+  it('keeps the pattern unlocked for the current tab after a successful draw', async () => {
+    const authStore = useAuthStore();
+    authStore.$patch({
+      enabled: true,
+      authenticated: false,
+      patternUnlock: true,
+      patternSessionUnlocked: false,
+      capabilities: adminCapabilities
+    });
+    unlockWithPatternMock.mockResolvedValue({
+      ok: true,
+      auth: {
+        enabled: true,
+        authenticated: true,
+        role: 'admin',
+        accessMode: 'off',
+        likesMode: 'shared',
+        defaultLocale: null,
+        patternUnlock: true,
+        capabilities: adminCapabilities
+      }
+    });
+
+    await authStore.unlockPattern('0-1-2');
+
+    expect(authStore.patternRequired).toBe(false);
+    expect(window.sessionStorage.getItem('foldergram-pattern-session')).toBe('1');
+  });
+
+  it('requires the pattern again after sign out', async () => {
+    const authStore = useAuthStore();
+    authStore.$patch({
+      enabled: true,
+      authenticated: true,
+      patternUnlock: true,
+      patternSessionUnlocked: true,
+      capabilities: adminCapabilities
+    });
+    window.sessionStorage.setItem('foldergram-pattern-session', '1');
+    logoutMock.mockResolvedValue({
+      ok: true,
+      auth: {
+        enabled: true,
+        authenticated: false,
+        role: 'anonymous',
+        accessMode: 'off',
+        likesMode: 'local',
+        defaultLocale: null,
+        patternUnlock: true,
+        capabilities: {
+          canManageLibrary: false,
+          canDeleteMedia: false,
+          canAccessSettings: false,
+          canUseSharedLikes: false,
+          canUseLocalFavorites: true,
+          canUseSharedCollections: false,
+          canUseLocalCollections: true
+        }
+      }
+    });
+
+    await authStore.logout();
+
+    expect(authStore.patternRequired).toBe(true);
+    expect(window.sessionStorage.getItem('foldergram-pattern-session')).toBeNull();
+  });
+
+  it('locks the pattern again after the app is sent to the background', () => {
+    const authStore = useAuthStore();
+    authStore.$patch({
+      enabled: true,
+      authenticated: true,
+      patternUnlock: true,
+      patternSessionUnlocked: true,
+      capabilities: adminCapabilities
+    });
+    window.sessionStorage.setItem('foldergram-pattern-session', '1');
+
+    authStore.lockPatternIfBackgrounded();
+
+    expect(authStore.patternRequired).toBe(true);
+    expect(window.sessionStorage.getItem('foldergram-pattern-session')).toBeNull();
   });
 });

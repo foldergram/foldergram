@@ -37,6 +37,39 @@ export function safeMediaPlayerSetCurrentTime(player: MediaPlayerElement, second
   }
 }
 
+export function getNativeVideoElement(player: MediaPlayerElement | null): HTMLVideoElement | null {
+  if (!player) {
+    return null;
+  }
+
+  const direct = player.querySelector('video');
+  if (direct instanceof HTMLVideoElement) {
+    return direct;
+  }
+
+  const nested = player.shadowRoot?.querySelector('video');
+  return nested instanceof HTMLVideoElement ? nested : null;
+}
+
+/**
+ * Direct Play Range seeks should jump to the nearest keyframe. Safari exposes
+ * `fastSeek` for that; everyone else still gets an exact `currentTime` assignment.
+ */
+export function safeMediaPlayerSeek(player: MediaPlayerElement, seconds: number): boolean {
+  const target = Math.max(0, seconds);
+  const video = getNativeVideoElement(player);
+  if (video && typeof video.fastSeek === 'function') {
+    try {
+      video.fastSeek(target);
+      return true;
+    } catch {
+      // Fall through to the exact currentTime path.
+    }
+  }
+
+  return safeMediaPlayerSetCurrentTime(player, target);
+}
+
 export function safeMediaPlayerSetMuted(player: MediaPlayerElement, muted: boolean): void {
   try {
     player.muted = muted;

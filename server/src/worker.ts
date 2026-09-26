@@ -7,6 +7,7 @@ import { watcherService } from './services/watcher-service.js';
 
 type ScanOperation = 'manual' | 'rebuild' | 'rebuild-thumbnails';
 const HLS_CACHE_CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const DERIVATIVE_CACHE_CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 function startScan(operation: ScanOperation): void {
   if (scannerService.getProgress().isScanning) {
@@ -46,6 +47,17 @@ async function bootstrap(): Promise<void> {
   const hlsCacheCleanupTimer = setInterval(runHlsCacheCleanup, HLS_CACHE_CLEANUP_INTERVAL_MS);
   hlsCacheCleanupTimer.unref();
   runHlsCacheCleanup();
+
+  const { cleanupDerivativeCache } = await import('./services/derivative-cache-service.js');
+  const { scannerService } = await import('./services/scanner-service.js');
+  const runDerivativeCacheCleanup = (): void => {
+    void cleanupDerivativeCache().then(() => scannerService.fillMissingDerivatives()).catch((error: unknown) => {
+      log.error('Derivative cache cleanup failed', error instanceof Error ? error.message : String(error));
+    });
+  };
+  const derivativeCacheCleanupTimer = setInterval(runDerivativeCacheCleanup, DERIVATIVE_CACHE_CLEANUP_INTERVAL_MS);
+  derivativeCacheCleanupTimer.unref();
+  runDerivativeCacheCleanup();
 
   const server = createServer((request, response) => {
     const pathname = new URL(request.url ?? '/', 'http://worker').pathname;
@@ -98,6 +110,7 @@ async function bootstrap(): Promise<void> {
   const shutdown = async (signal: string) => {
     log.info(`Worker received ${signal}, shutting down`);
     clearInterval(hlsCacheCleanupTimer);
+    clearInterval(derivativeCacheCleanupTimer);
     await watcherService.stop();
     server.close(() => process.exit(0));
   };

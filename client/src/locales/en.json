@@ -62,6 +62,17 @@
       "unlocking": "Unlocking...",
       "unlock": "Unlock Admin",
       "unableToUnlock": "Unable to unlock admin access."
+    },
+    "patternGate": {
+      "title": "Draw your unlock pattern",
+      "description": "This library is protected by a graphical pattern.",
+      "padLabel": "Unlock pattern",
+      "wrongPattern": "Incorrect pattern. Try again.",
+      "forgotPattern": "Too many attempts. Reset with login password",
+      "adminPasswordLabel": "Admin password",
+      "backToPattern": "Back",
+      "resetAndSignIn": "Reset with login password",
+      "wrongAdminPassword": "Incorrect admin password."
     }
   },
   "nav": {
@@ -275,7 +286,7 @@
         "options": {
           "auto": {
             "label": "Auto",
-            "description": "Starts from a 480p stream and adapts upward when bandwidth allows; best for WAN use."
+            "description": "Direct-plays the original on the LAN. Outside the LAN, starts at 480p and steps up when the link can hold it."
           },
           "480p": {
             "label": "480p (WAN first)",
@@ -341,7 +352,9 @@
         "nestedFolderTitleOnly": "This updates how nested app folders are labeled throughout the app.",
         "sharePublicBaseUrlOnly": "This updates the address prefix used by share links created from outside the LAN.",
         "carouselReconciliation": "The Carousel folder mode is saved. Complete the library action above to apply it to the index.",
-        "idle": "These are the current app-wide defaults for language, Home, Reels, app folders, nested folder titles, stories folders, carousel folders, and excluded folders."
+        "idle": "These are the current app-wide defaults for language, Home, Reels, app folders, nested folder titles, stories folders, carousel folders, and excluded folders.",
+        "videoPlaybackModeOnly": "This updates whether videos Direct Play the original or are transcoded by the NAS.",
+        "videoPlaybackQualityOnly": "This updates the video playback quality."
       },
       "rescanNotice": {
         "rebuildRequired": "Save these changes, then rebuild the library index so the selected folder behavior is applied to the current gallery location.",
@@ -378,14 +391,31 @@
           "appFolderOrder": "app folder order",
           "nestedFolderTitles": "nested folder titles",
           "videoPlaybackQuality": "video playback quality",
-          "sharePublicBaseUrl": "public share address"
+          "sharePublicBaseUrl": "public share address",
+          "videoPlaybackMode": "video delivery"
         },
-        "sharePublicBaseUrlSaved": "Public share address saved."
+        "sharePublicBaseUrlSaved": "Public share address saved.",
+        "videoPlaybackModeSaved": "Videos now use {label}."
       },
       "errors": {
         "validateExcludedFolders": "Unable to validate the excluded folder rules.",
         "update": "Unable to update the general settings.",
         "partialUpdate": "Some settings were saved ({parts}), but the update did not finish: {message}"
+      },
+      "videoPlaybackMode": {
+        "label": "Video delivery",
+        "description": "Direct Play sends the original file to the phone. Transcode lets the NAS compress it into a smaller H.264 stream. Quality is still chosen separately.",
+        "closeMenuAria": "Close video delivery menu",
+        "options": {
+          "transcode": {
+            "label": "Transcode",
+            "description": "The NAS encodes H.264, starts at 480p, and steps up to 720p / 1080p when the link can hold it. Better for WAN; a seek drops leftover transcode work."
+          },
+          "direct": {
+            "label": "Direct Play",
+            "description": "The original file is decoded on the phone with no transcoding. Fastest on LAN; high-bitrate originals stall easily on a thin WAN link."
+          }
+        }
       }
     },
     "library": {
@@ -633,6 +663,27 @@
         "minLength": "Password must be at least {count} characters.",
         "empty": "Password cannot be empty.",
         "mismatch": "The password confirmation does not match."
+      },
+      "pattern": {
+        "title": "Pattern unlock",
+        "description": "When enabled, opening Foldergram requires drawing the saved pattern before anything is visible. Forgotten patterns can be reset with the admin password.",
+        "stateOn": "Enabled",
+        "off": "Off",
+        "setupButton": "Set pattern",
+        "redoButton": "Redraw pattern",
+        "disableButton": "Disable",
+        "drawFirst": "Draw your new pattern.",
+        "drawConfirm": "Draw the same pattern once more to confirm.",
+        "drawCurrent": "Draw the current pattern first.",
+        "enterLoginPassword": "Enter the login password to continue.",
+        "useLoginPassword": "Verify with login password instead",
+        "loginPasswordLabel": "Login password",
+        "confirmPassword": "Confirm",
+        "wrongCurrent": "The current pattern is incorrect.",
+        "wrongPassword": "The login password is incorrect.",
+        "mismatch": "The two patterns did not match. Draw the new pattern again.",
+        "saveError": "Unable to save the pattern. Please try again.",
+        "cancel": "Cancel"
       }
     },
     "status": {

@@ -33,7 +33,7 @@ interface RouteLayer {
   };
 }
 
-const getSegmentMock = vi.fn(async () => Buffer.from('segment'));
+const getSegmentWindowMock = vi.fn(async () => Buffer.from('segment'));
 
 describe.sequential('HLS segment warm-up route', () => {
   let tempRoot = '';
@@ -59,7 +59,7 @@ describe.sequential('HLS segment warm-up route', () => {
     await fs.mkdir(tempRoot, { recursive: true });
 
     vi.resetModules();
-    getSegmentMock.mockClear();
+    getSegmentWindowMock.mockClear();
 
     // Stubbing the encoder keeps the route contract under test without ffmpeg.
     vi.doMock('../src/services/video-stream-service.js', async () => {
@@ -67,7 +67,7 @@ describe.sequential('HLS segment warm-up route', () => {
         '../src/services/video-stream-service.js'
       );
 
-      return { ...actual, getSegment: getSegmentMock, getSourceVideoCodec: async () => 'h264' };
+      return { ...actual, getSegmentWindow: getSegmentWindowMock, getSourceVideoCodec: async () => 'h264' };
     });
 
     ({ appConfig } = await import('../src/config/env.js'));
@@ -110,9 +110,11 @@ describe.sequential('HLS segment warm-up route', () => {
     expect(response.status).toHaveBeenCalledWith(202);
     expect(response.json).toHaveBeenCalledWith({ warming: 2 });
 
-    await vi.waitFor(() => expect(getSegmentMock).toHaveBeenCalledTimes(2));
-    expect(getSegmentMock.mock.calls.map(([input]: any[]) => input.index)).toEqual([0, 1]);
-    expect((getSegmentMock.mock.calls[0]?.[0] as any).quality).toBe('720p');
+    await vi.waitFor(() => expect(getSegmentWindowMock).toHaveBeenCalledTimes(1));
+    expect(getSegmentWindowMock).toHaveBeenCalledWith(
+      expect.objectContaining({ index: 0, quality: '720p' }),
+      2
+    );
   });
 
   it('warms the segments around a resume position instead of the head of the clip', async () => {
@@ -133,8 +135,19 @@ describe.sequential('HLS segment warm-up route', () => {
     );
 
     expect(response.json).toHaveBeenCalledWith({ warming: 3 });
-    await vi.waitFor(() => expect(getSegmentMock).toHaveBeenCalledTimes(3));
-    expect(getSegmentMock.mock.calls.map(([input]: any[]) => input.index)).toEqual([5, 6, 7]);
+    // Warm runs split into two-segment chunks so two encoders can run side by side
+    // where the segment limiter allows it.
+    await vi.waitFor(() => expect(getSegmentWindowMock).toHaveBeenCalledTimes(2));
+    expect(getSegmentWindowMock).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ index: 5, quality: '720p' }),
+      2
+    );
+    expect(getSegmentWindowMock).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ index: 7, quality: '720p' }),
+      1
+    );
   });
 
   it('clamps a resume position past the end of the clip to the last segment', async () => {
@@ -153,8 +166,11 @@ describe.sequential('HLS segment warm-up route', () => {
     );
 
     expect(response.json).toHaveBeenCalledWith({ warming: 1 });
-    await vi.waitFor(() => expect(getSegmentMock).toHaveBeenCalledTimes(1));
-    expect(getSegmentMock.mock.calls.map(([input]: any[]) => input.index)).toEqual([4]);
+    await vi.waitFor(() => expect(getSegmentWindowMock).toHaveBeenCalledTimes(1));
+    expect(getSegmentWindowMock).toHaveBeenCalledWith(
+      expect.objectContaining({ index: 4, quality: '720p' }),
+      1
+    );
   });
 
   it('never warms more segments than the clip actually has', async () => {
@@ -174,7 +190,11 @@ describe.sequential('HLS segment warm-up route', () => {
 
     // A 3 second clip only has two 2-second segments to warm.
     expect(response.json).toHaveBeenCalledWith({ warming: 2 });
-    await vi.waitFor(() => expect(getSegmentMock).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(getSegmentWindowMock).toHaveBeenCalledTimes(1));
+    expect(getSegmentWindowMock).toHaveBeenCalledWith(
+      expect.objectContaining({ index: 0, quality: '720p' }),
+      2
+    );
   });
 
   it('rejects unknown qualities and unknown videos without transcoding anything', async () => {
@@ -196,7 +216,7 @@ describe.sequential('HLS segment warm-up route', () => {
     );
     expect(missingVideo.status).toHaveBeenCalledWith(404);
 
-    expect(getSegmentMock).not.toHaveBeenCalled();
+    expect(getSegmentWindowMock).not.toHaveBeenCalled();
   });
 
   it('refuses to warm a clip whose duration is unknown', async () => {
@@ -212,7 +232,7 @@ describe.sequential('HLS segment warm-up route', () => {
     );
 
     expect(response.status).toHaveBeenCalledWith(409);
-    expect(getSegmentMock).not.toHaveBeenCalled();
+    expect(getSegmentWindowMock).not.toHaveBeenCalled();
   });
 
   function createResponse(): MockResponse {

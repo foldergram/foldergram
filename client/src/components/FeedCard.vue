@@ -116,7 +116,7 @@
       v-else
       ref="homeVideoTarget"
       class="feed-card__video-shell feed-card__video-shell--interactive relative block overflow-hidden rounded-[0.5rem] border border-border bg-surface-alt"
-      :style="{ aspectRatio: homeVideoAspectRatio }"
+      :style="{ aspectRatio: homeVideoAspectRatio, touchAction: 'pan-y' }"
       :aria-label="t('post.immersive.open')"
       role="button"
       tabindex="0"
@@ -138,6 +138,7 @@
         :loop.prop="true"
         :load="homeVideoLoadMode"
         :preload="homeVideoPreloadMode"
+        :noSwipeGesture.prop="true"
         @pointerdown="handleHomeVideoPointerdown"
         @pointermove="handleHomeVideoPointermove"
         @pointerup="handleHomeVideoPointerup"
@@ -164,6 +165,7 @@
               <media-play-button
                 class="feed-card__player-control"
                 aria-label="Toggle playback"
+                @click="handleHomePlayButtonClick"
               >
                 <span
                   class="feed-card__player-control-icon feed-card__player-play-icon feed-card__player-play-icon--play i-fluent-play-16-filled"
@@ -473,6 +475,8 @@ import { resolveFeedAspectRatio } from '../utils/media-layout';
 import { getOriginalMediaDownloadUrl, getOriginalMediaUrl } from '../utils/original-media';
 import { resolveGesturePoint } from '../utils/gesture-coordinates';
 import {
+  HLS_WARM_SEGMENTS,
+  preferEntryHlsLevel,
   resolveVideoFallbackSource,
   resolveVideoSource,
   seekMediaPlayerAndWait,
@@ -511,11 +515,14 @@ const props = withDefaults(
     hasAvatarStory?: boolean;
     context?: 'default' | 'home';
     isActiveVideo?: boolean;
+    /** Warm the nearest video above and below the playback owner without starting it. */
+    prefetchVideo?: boolean;
   }>(),
   {
     hasAvatarStory: false,
     context: 'default',
-    isActiveVideo: false
+    isActiveVideo: false,
+    prefetchVideo: false
   }
 );
 
@@ -544,6 +551,12 @@ const homePlayerElement = ref<MediaPlayerElement | null>(null);
 const homePlayerGeneration = ref(0);
 const loadedHomeVideoAspectRatio = ref<string | null>(null);
 const isHomeVideoPaused = ref(false);
+/**
+ * The viewer's own play/pause intent, separate from `isHomeVideoPaused` (which is a
+ * live state). Seeks and scrubs pause Direct Play on purpose, so reading the state
+ * to decide how a handover behaves made a playing clip open paused.
+ */
+const homeUserPaused = ref(false);
 const isHomeVideoFullscreen = ref(false);
 const homeVideoDurationMs = ref(props.item.durationMs ?? 0);
 const homeVideoCurrentTimeMs = ref(0);
@@ -552,6 +565,7 @@ let lastSharedImmersiveTapAt = 0;
 const lastHomeImageTapAt = ref(0);
 let homeImmersiveStartupFallbackTimer: ReturnType<typeof setTimeout> | null = null;
 let homeVideoPlaybackRetryTimer: ReturnType<typeof setTimeout> | null = null;
+let homeSlowDirectFallbackTimer: ReturnType<typeof setTimeout> | null = null;
 let homeVideoPlaybackRetryCount = 0;
 let homeLastConfirmedPlaybackSec = 0;
 let homePlayerRecoveryCount = 0;
@@ -607,7 +621,10 @@ const originalMediaUrl = computed(() => getOriginalMediaUrl(activeMediaImageId.v
 const downloadOriginalMediaUrl = computed(() => getOriginalMediaDownloadUrl(activeMediaImageId.value));
 const homeVideoFallbackSource = ref<ResolvedVideoSource | null>(null);
 const homePreferredVideoSource = computed<ResolvedVideoSource>(() =>
-  resolveVideoSource(props.item, appStore.videoPlaybackQuality)
+  resolveVideoSource(props.item, appStore.videoPlaybackQuality, {
+    preferStream: appStore.adaptivePreferStream,
+    playbackMode: appStore.videoPlaybackMode
+  })
 );
 const homeActiveVideoSource = computed<ResolvedVideoSource>(
   () => homeVideoFallbackSource.value ?? homePreferredVideoSource.value
@@ -870,13 +887,11 @@ function syncHomeVideoTimelineState(player: MediaPlayerElement | null = homePlay
 }
 
 function previewHomeVideoTo(seconds: number) {
-  const player = homePlayerElement.value;
-  if (!player || !Number.isFinite(seconds)) {
+  if (!Number.isFinite(seconds)) {
     return;
   }
 
   homeVideoCurrentTimeMs.value = Math.max(0, seconds) * 1000;
-  safeMediaPlayerSetCurrentTime(player, seconds);
 }
 
 function seekHomeVideoTo(seconds: number) {
@@ -887,14 +902,18 @@ function seekHomeVideoTo(seconds: number) {
 
   const duration = Number.isFinite(player.duration) && player.duration > 0 ? player.duration : seconds;
   const next = Math.min(Math.max(seconds, 0), Math.max(duration - 0.25, 0));
+  preferEntryHlsLevel(player);
   warmVideoStream(props.item, appStore.videoPlaybackQuality, {
     fromSeconds: next,
-    segments: 2,
-    source: homeActiveVideoSource.value
+    segments: HLS_WARM_SEGMENTS,
+    source: homeActiveVideoSource.value,
+    playbackMode: appStore.videoPlaybackMode
   });
   homeVideoCurrentTimeMs.value = next * 1000;
   pendingHomeVideoSeek.value = next;
-  return seekMediaPlayerAndWait(player, next).finally(() => {
+  return seekMediaPlayerAndWait(player, next, {
+    resumePlayback: !homeUserPaused.value
+  }).finally(() => {
     if (pendingHomeVideoSeek.value === next) {
       pendingHomeVideoSeek.value = null;
     }
@@ -953,8 +972,15 @@ function startHomeVideoObserver() {
 const homeEffectiveMuted = computed(() => appStore.videoEffectivelyMuted);
 // False while the enclosing route is cached behind another dock tab.
 const isViewActive = useViewActive();
-const homeVideoLoadMode = computed(() => (shouldAutoplayHomeVideo.value ? 'eager' : 'visible'));
-const homeVideoPreloadMode = computed(() => (isViewActive.value ? 'auto' : 'metadata'));
+const homeVideoLoadMode = computed(() =>
+  isViewActive.value && (shouldAutoplayHomeVideo.value || props.prefetchVideo) ? 'eager' : 'visible'
+);
+// Keep the active clip and only its nearest video neighbour on each side buffered.
+// This gives either scroll direction a warm handoff after returning from Reels without
+// reviving every mounted video or competing with the currently playing decoder.
+const homeVideoPreloadMode = computed(() =>
+  isViewActive.value && shouldAutoplayHomeVideo.value ? 'auto' : 'metadata'
+);
 
 function syncHomeVideoMuted(player: MediaPlayerElement, muted: boolean) {
   safeMediaPlayerSetMuted(player, muted);
@@ -964,8 +990,8 @@ function syncHomeVideoMuted(player: MediaPlayerElement, muted: boolean) {
   }
 }
 
-async function playHomeVideo(player: MediaPlayerElement) {
-  await safeMediaPlayerPlay(player);
+async function playHomeVideo(player: MediaPlayerElement): Promise<boolean> {
+  return safeMediaPlayerPlay(player);
 }
 
 function clearHomeImmersiveStartupFallback() {
@@ -973,6 +999,39 @@ function clearHomeImmersiveStartupFallback() {
     clearTimeout(homeImmersiveStartupFallbackTimer);
     homeImmersiveStartupFallbackTimer = null;
   }
+}
+
+function clearHomeSlowDirectFallback() {
+  if (homeSlowDirectFallbackTimer !== null) {
+    clearTimeout(homeSlowDirectFallbackTimer);
+    homeSlowDirectFallbackTimer = null;
+  }
+}
+
+function scheduleHomeSlowDirectFallback() {
+  const source = homeActiveVideoSource.value;
+  if (!source || source.isStream || homeVideoFallbackSource.value) {
+    return;
+  }
+
+  if (hasRenderedHomeVideoFrame.value) {
+    return;
+  }
+
+  clearHomeSlowDirectFallback();
+  homeSlowDirectFallbackTimer = setTimeout(() => {
+    homeSlowDirectFallbackTimer = null;
+    const current = homePlayerElement.value;
+    const active = homeActiveVideoSource.value;
+    if (!current || !active || active.isStream || homeVideoFallbackSource.value) {
+      return;
+    }
+    if (!props.isActiveVideo || !isViewActive.value) {
+      return;
+    }
+
+    recoverStuckHomePlayer();
+  }, 2_500);
 }
 
 function clearHomeVideoPlaybackRetry(options: { resetCount?: boolean } = {}) {
@@ -1033,6 +1092,10 @@ async function syncHomeVideoPlayback() {
     return;
   }
 
+  if (homeHoldSpeed.isScrubbing.value) {
+    return;
+  }
+
   const player = homePlayerElement.value;
   if (!player) {
     return;
@@ -1047,8 +1110,16 @@ async function syncHomeVideoPlayback() {
     syncHomeVideoMuted(player, homeEffectiveMuted.value);
     // Teleporting the same <media-player> into the immersive slot can leave the
     // native element paused even though the viewer just opened a playing clip.
+    // Retry rather than relying on this single provider lifecycle event: a provider
+    // may still be attaching when the first play request is made.
     if (!immersiveVideoStore.startPaused && player.paused) {
-      void playHomeVideo(player).catch(() => {});
+      const started = await playHomeVideo(player);
+      if (!started || player.paused) {
+        scheduleHomeVideoPlaybackRetry();
+      } else {
+        isHomeVideoPaused.value = false;
+        clearHomeVideoPlaybackRetry();
+      }
     }
     return;
   }
@@ -1071,9 +1142,17 @@ async function syncHomeVideoPlayback() {
     return;
   }
 
+  // The viewer paused this clip. Re-activating the card (scroll back, tab switch) must
+  // not turn that into a resume.
+  if (homeUserPaused.value) {
+    syncHomeVideoMuted(player, homeEffectiveMuted.value);
+    isHomeVideoPaused.value = true;
+    return;
+  }
+
   syncHomeVideoMuted(player, homeEffectiveMuted.value);
   warmVideoStream(props.item, appStore.videoPlaybackQuality, {
-    segments: 2,
+    segments: HLS_WARM_SEGMENTS,
     source: homeActiveVideoSource.value
   });
   // Do not wait for play() to resolve: the provider can remain unready forever for
@@ -1121,10 +1200,16 @@ async function syncHomeVideoPlayback() {
 
 function handleHomeVideoPlay() {
   isHomeVideoPaused.value = false;
+  // Playback is running again, so the viewer's intent is "playing" no matter which
+  // surface (button, double tap, resume after a seek) started it.
+  homeUserPaused.value = false;
   syncHomeVideoTimelineState();
 }
 
 function handleHomeVideoPause() {
+  if (homeHoldSpeed.isScrubbing.value || pendingHomeVideoSeek.value !== null) {
+    return;
+  }
   isHomeVideoPaused.value = showHomeVideoSurfaceControls.value;
   syncHomeVideoTimelineState();
 }
@@ -1139,6 +1224,9 @@ function handleHomeVideoDurationChange(event: Event) {
 
 function handleHomeVideoTimeUpdate(event: Event) {
   const nativeVideo = getHomeVideoElement(homePlayerElement.value);
+  if (homeHoldSpeed.isScrubbing.value) {
+    return;
+  }
   if (
     homeVideoHasPaintedFrame(homePlayerElement.value) ||
     (nativeVideo && nativeVideo.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && nativeVideo.currentTime > 0.05)
@@ -1150,6 +1238,7 @@ function handleHomeVideoTimeUpdate(event: Event) {
       homePlayerRecoveryCount = 0;
       clearHomeVideoPlaybackRetry();
       clearHomeImmersiveStartupFallback();
+      clearHomeSlowDirectFallback();
     }
   }
 
@@ -1199,9 +1288,10 @@ function handleHomeVideoEnded() {
 function openImmersiveVideo() {
   const player = homePlayerElement.value;
   const currentTime = player ? safeMediaPlayerGetCurrentTime(player) : 0;
-  // Only a real user pause should carry into immersive. Inactive cards are paused by
-  // the feed to save decoders; treating that as startPaused made a tap open a frozen frame.
-  const startPaused = showHomeVideoSurfaceControls.value && isHomeVideoPaused.value;
+  // Only the viewer's own pause carries into the layer. Inactive cards are paused by
+  // the feed to save decoders, and a seek/scrub pauses the player itself, so neither
+  // of those may be read as "the viewer wanted this paused".
+  const startPaused = homeUserPaused.value;
 
   // Opening the viewer is a direct user action. Preserve the global sound-on choice
   // before Teleport/provider lifecycle events are allowed to run.
@@ -1216,12 +1306,20 @@ function openImmersiveVideo() {
     if (player) safeMediaPlayerPause(player);
   }
 
+  // Starting the same decoder inside the tap's user-activation window avoids an
+  // intermittent provider pause while Teleport moves the node. The layer reasserts
+  // this state after attachment, but that later call is no longer the only chance
+  // for playback to begin.
+  if (player && !startPaused) {
+    void playHomeVideo(player);
+  }
+
   // The fullscreen layer resumes at `currentTime`, which usually lands in a
   // segment the NAS has not transcoded yet. Warming it before the player asks
   // removes the stall that used to show up right after the zoom animation.
   warmVideoStream(props.item, appStore.videoPlaybackQuality, {
     fromSeconds: currentTime,
-    segments: 2,
+    segments: HLS_WARM_SEGMENTS,
     source: homeActiveVideoSource.value
   });
 
@@ -1239,6 +1337,7 @@ function openImmersiveVideo() {
       width: props.item.width,
       height: props.item.height,
       durationMs: props.item.durationMs,
+      fileSize: props.item.fileSize,
       collectionItem: props.item
     },
     {
@@ -1293,11 +1392,13 @@ async function handleSharedImmersiveClick(event: MouseEvent) {
   if (player.paused) {
     await playHomeVideo(player).catch(() => {});
     isHomeVideoPaused.value = false;
+    homeUserPaused.value = false;
     return;
   }
 
   safeMediaPlayerPause(player);
   isHomeVideoPaused.value = true;
+  homeUserPaused.value = true;
 }
 
 function handleHomeVideoSurfaceKeydown(event: KeyboardEvent) {
@@ -1321,20 +1422,27 @@ const homeHoldSpeed = useHoldToSpeed({
   getDuration: () => homePlayerElement.value?.duration ?? 0,
   seekTo: seekHomeVideoTo,
   previewSeek: (seconds) => {
-    const player = homePlayerElement.value;
-    if (!player) return;
     homeVideoCurrentTimeMs.value = seconds * 1000;
-    safeMediaPlayerSetCurrentTime(player, seconds);
   },
   getPlaybackRate: () => homePlayerElement.value?.playbackRate ?? 1,
   setPlaybackRate: (rate) => {
     if (homePlayerElement.value) homePlayerElement.value.playbackRate = rate;
   },
   play: () => {
+    isHomeVideoPaused.value = false;
     if (homePlayerElement.value) {
-      void safeMediaPlayerPlay(homePlayerElement.value);
+      void playHomeVideo(homePlayerElement.value);
     }
   },
+  pause: () => {
+    clearHomeVideoPlaybackRetry();
+    if (homePlayerElement.value) {
+      safeMediaPlayerPause(homePlayerElement.value);
+    }
+  },
+  // Sampled at scrub start, before this surface freezes the player. Reading it at
+  // release time would always report "paused" and stop a playing clip from resuming.
+  isPlaying: () => !homeUserPaused.value,
   // Gesture ownership is decided in the picture's own frame. Turned a quarter by the
   // immersive layer, the swipe the viewer reads as sideways arrives as screen-vertical
   // movement, so without this mapping landscape scrubbing never activated at all.
@@ -1414,6 +1522,22 @@ async function toggleHomeVideoSound() {
       void playHomeVideo(player).catch(() => {});
     }
   }
+}
+
+/**
+ * The play/pause control is Vidstack's own button, so it toggles the player itself.
+ * Recording the intent from the resulting state keeps "the viewer paused this" apart
+ * from the pauses this card performs for seeks, warmups and inactive cards.
+ */
+function handleHomePlayButtonClick() {
+  const player = homePlayerElement.value;
+  if (!player) {
+    return;
+  }
+
+  void nextTick(() => {
+    homeUserPaused.value = homePlayerElement.value?.paused === true;
+  });
 }
 
 function switchHomeVideoToFallbackSource(): boolean {
@@ -1512,7 +1636,17 @@ function bindHomePlayerEventListeners(player: MediaPlayerElement | null) {
     void syncHomeVideoPlayback();
   };
   const handleStall = () => {
-    if (props.isActiveVideo && isViewActive.value && !immersiveVideoStore.isOpen) {
+    // The same card keeps driving playback after it is Teleported into the immersive
+    // slot, so a stall there (a forward seek landing on an unbuffered / not-yet-
+    // transcoded region) must still be recovered. Gating recovery on
+    // `!immersiveVideoStore.isOpen` alone left fullscreen seeks frozen on a frame.
+    const ownsSharedImmersivePlayer =
+      immersiveVideoStore.isOpen && sharedVideoSurfaceStore.ownerId === `feed:${props.item.id}`;
+    const drivesPlayback =
+      (props.isActiveVideo && isViewActive.value && !immersiveVideoStore.isOpen) ||
+      ownsSharedImmersivePlayer;
+    if (drivesPlayback && !homeHoldSpeed.isScrubbing.value) {
+      scheduleHomeSlowDirectFallback();
       clearHomeVideoPlaybackRetry({ resetCount: false });
       scheduleHomeVideoPlaybackRetry();
       scheduleHomeVideoStartupFallback(player);
@@ -1651,6 +1785,7 @@ watch(
   () => {
     loadedHomeVideoAspectRatio.value = null;
     isHomeVideoPaused.value = false;
+    homeUserPaused.value = false;
     homeVideoDurationMs.value = props.item.durationMs ?? 0;
     homeVideoCurrentTimeMs.value = 0;
     homeLastConfirmedPlaybackSec = 0;
@@ -1662,7 +1797,7 @@ watch(
 );
 
 watch(
-  () => appStore.videoPlaybackQuality,
+  () => [appStore.videoPlaybackQuality, appStore.videoPlaybackMode],
   () => {
     homeVideoFallbackSource.value = null;
     homeVideoFallbackHistory.clear();
@@ -1677,11 +1812,32 @@ watch(homeActiveVideoSource, () => {
 
 // A cached view keeps its players mounted, so activation has to drive playback the
 // same way visibility does.
+watch(
+  () => props.prefetchVideo,
+  (prefetch) => {
+    if (prefetch && isViewActive.value) {
+      warmVideoStream(props.item, appStore.videoPlaybackQuality, {
+        segments: 2,
+        source: homeActiveVideoSource.value
+      });
+    }
+  },
+  { immediate: true }
+);
+
 watch(isViewActive, (active) => {
+  if (active && props.prefetchVideo) {
+    warmVideoStream(props.item, appStore.videoPlaybackQuality, {
+      segments: 2,
+      source: homeActiveVideoSource.value
+    });
+  }
+
   if (!active) {
     homeHoldSpeed.stop();
     clearHomeVideoPlaybackRetry();
     clearHomeImmersiveStartupFallback();
+    clearHomeSlowDirectFallback();
     pendingHomeVideoSeek.value = null;
     hasRenderedHomeVideoFrame.value = false;
   }
@@ -1726,6 +1882,9 @@ watch(
       } catch {
         // Seeking before the provider is attached is a no-op.
       }
+      // Carry the play/pause the viewer left the layer in, so returning to the card
+      // neither resumes a clip they paused nor freezes one they were watching.
+      homeUserPaused.value = exitState.paused;
     }
 
     await syncHomeVideoPlayback();
@@ -1794,6 +1953,7 @@ onBeforeUnmount(() => {
   clearHomeImageTapResetTimer();
   clearHomeImmersiveStartupFallback();
   clearHomeVideoPlaybackRetry();
+  clearHomeSlowDirectFallback();
   stopHomeVideoObserver();
   isHomeVideoPaused.value = false;
   removeHomePlayerEventListeners?.();

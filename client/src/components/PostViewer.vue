@@ -726,6 +726,8 @@
   let playerReady = false
   let pendingVideoRestore: { currentTime: number; wasPaused: boolean } | null = null
   let removePlayerEventListeners: (() => void) | null = null
+  const SLOW_DIRECT_FALLBACK_MS = 2_500
+  let slowDirectFallbackTimer = 0
   let sidebarSheetPointerId: number | null = null
   let sidebarSheetCapturedElement: Element | null = null
   let sidebarSheetStartX = 0
@@ -771,7 +773,10 @@
 
     // The HD toggle is a per-playback override that forces the untouched file.
     const quality = isPlayingHd.value ? 'original' : appStore.videoPlaybackQuality
-    return resolveVideoSource(props.image, quality)
+    return resolveVideoSource(props.image, quality, {
+      preferStream: appStore.adaptivePreferStream,
+      playbackMode: appStore.videoPlaybackMode
+    })
   })
   const activeVideoSource = computed<ResolvedVideoSource | null>(
     () => videoFallbackSource.value ?? preferredVideoSource.value,
@@ -1576,6 +1581,13 @@
     isPlayingHd.value = !isPlayingHd.value
   }
 
+  function clearSlowDirectFallback() {
+    if (slowDirectFallbackTimer !== 0) {
+      window.clearTimeout(slowDirectFallbackTimer)
+      slowDirectFallbackTimer = 0
+    }
+  }
+
   function switchVideoToFallbackSource() {
     const image = props.image
     const failed = activeVideoSource.value
@@ -1588,7 +1600,30 @@
       return
     }
 
+    clearSlowDirectFallback()
     videoFallbackSource.value = fallback
+  }
+
+  function scheduleSlowDirectFallback() {
+    const source = activeVideoSource.value
+    if (!source || source.isStream || videoFallbackSource.value) {
+      return
+    }
+
+    if (videoCurrentTimeMs.value > 50) {
+      return
+    }
+
+    clearSlowDirectFallback()
+    slowDirectFallbackTimer = window.setTimeout(() => {
+      slowDirectFallbackTimer = 0
+      const current = activeVideoSource.value
+      if (!current || current.isStream || videoFallbackSource.value) {
+        return
+      }
+
+      switchVideoToFallbackSource()
+    }, SLOW_DIRECT_FALLBACK_MS)
   }
 
   async function handlePlayerReadyForPlayback(): Promise<void> {
@@ -1647,6 +1682,9 @@
         typeof event.detail.currentTime === "number"
       ) {
         videoCurrentTimeMs.value = event.detail.currentTime * 1000
+        if (event.detail.currentTime > 0.05) {
+          clearSlowDirectFallback()
+        }
         return
       }
 
@@ -1661,6 +1699,9 @@
     const handleError = () => {
       switchVideoToFallbackSource()
     }
+    const handleStall = () => {
+      scheduleSlowDirectFallback()
+    }
 
     const removeHlsLibraryBinding = useBundledHlsLibrary(player)
 
@@ -1673,6 +1714,8 @@
     player.addEventListener("time-update", handleTimeUpdate)
     player.addEventListener("ended", handleEnded)
     player.addEventListener("error", handleError)
+    player.addEventListener("waiting", handleStall)
+    player.addEventListener("stalled", handleStall)
 
     removePlayerEventListeners = () => {
       removeHlsLibraryBinding()
@@ -1685,6 +1728,8 @@
       player.removeEventListener("time-update", handleTimeUpdate)
       player.removeEventListener("ended", handleEnded)
       player.removeEventListener("error", handleError)
+      player.removeEventListener("waiting", handleStall)
+      player.removeEventListener("stalled", handleStall)
     }
 
     if (player.hasAttribute("data-can-play")) {
@@ -1954,6 +1999,7 @@
         width: image.width,
         height: image.height,
         durationMs: image.durationMs,
+        fileSize: image.fileSize,
         collectionItem: image,
       },
       { startTime: currentTime },
@@ -2013,6 +2059,7 @@
     resetMediaSheetRevealGesture()
     window.removeEventListener("resize", updateSidebarLayout)
     window.removeEventListener("keydown", handleKeydown)
+    clearSlowDirectFallback()
     removePlayerEventListeners?.()
     removePlayerEventListeners = null
     void playerElement.value?.pause().catch(() => { /* ignore */ })

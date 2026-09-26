@@ -1,6 +1,6 @@
 # AI File Index
 
-Generated: 2026-09-11 10:40:50 +0800
+Generated: 2026-09-26 19:17:16 +0800
 
 Run again after adding/moving files: `scripts/ai-map.sh`.
 
@@ -65,6 +65,7 @@ Do not read `ai/AI_REPOMIX_CONTEXT.md` or graph dumps by default.
 - `server/src/scripts/rescan.ts`
 - `server/src/services/auth-service.ts`
 - `server/src/services/deletion-job-service.ts`
+- `server/src/services/derivative-cache-service.ts`
 - `server/src/services/derivative-migration-service.ts`
 - `server/src/services/derivative-service.ts`
 - `server/src/services/folder-share-service.ts`
@@ -150,6 +151,9 @@ Do not read `ai/AI_REPOMIX_CONTEXT.md` or graph dumps by default.
 - `client/src/components/InfiniteLoader.test.ts`
 - `client/src/components/InfiniteLoader.vue`
 - `client/src/components/OrientationToggleIcon.vue`
+- `client/src/components/PatternLockGate.test.ts`
+- `client/src/components/PatternLockGate.vue`
+- `client/src/components/PatternPad.vue`
 - `client/src/components/PostCaptionModal.test.ts`
 - `client/src/components/PostCaptionModal.vue`
 - `client/src/components/PostViewer.test.ts`
@@ -234,6 +238,8 @@ Do not read `ai/AI_REPOMIX_CONTEXT.md` or graph dumps by default.
 - `client/src/stores/trash.ts`
 - `client/src/stores/viewer.ts`
 - `client/src/types/api.ts`
+- `client/src/utils/adaptive-quality.test.ts`
+- `client/src/utils/adaptive-quality.ts`
 - `client/src/utils/caption.test.ts`
 - `client/src/utils/caption.ts`
 - `client/src/utils/explore.ts`
@@ -249,6 +255,8 @@ Do not read `ai/AI_REPOMIX_CONTEXT.md` or graph dumps by default.
 - `client/src/utils/safe-media-player.ts`
 - `client/src/utils/scan-progress.test.ts`
 - `client/src/utils/scan-progress.ts`
+- `client/src/utils/screen-wake-lock.test.ts`
+- `client/src/utils/screen-wake-lock.ts`
 - `client/src/utils/sidebar-folders.ts`
 - `client/src/utils/video-playback.test.ts`
 - `client/src/utils/video-playback.ts`
@@ -352,6 +360,7 @@ Do not read `ai/AI_REPOMIX_CONTEXT.md` or graph dumps by default.
 - `server/test/trash-flow.test.ts`
 - `server/test/video-derivative-strategy.test.ts`
 - `server/test/video-playback-strategy.test.ts`
+- `server/test/video-stream-abort.test.ts`
 - `server/test/video-stream-service.test.ts`
 - `server/test/video-stream-warm-route.test.ts`
 - `server/test/viewer-status.test.ts`
@@ -375,4 +384,5 @@ Do not read `ai/AI_REPOMIX_CONTEXT.md` or graph dumps by default.
 - `scripts/ai-symbol.sh`
 - `scripts/check-architecture.mjs`
 - `scripts/install-ai-hooks.sh`
+- `scripts/moov-faststart.sh`
 - `scripts/run-workspace-script.mjs`

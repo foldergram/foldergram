@@ -49,7 +49,7 @@ describe.sequential('derivative mode env config', () => {
     expect(appConfig.scanErrorReportDir).toBe(path.join(tempRoot, 'data', 'scan-errors'));
     expect(appConfig.hlsCacheDir).toBe(path.join(tempRoot, 'data', 'hls-cache'));
     expect(appConfig.hlsCacheMaxAgeDays).toBe(7);
-    expect(appConfig.hlsCacheMaxBytes).toBe(100 * 1024 * 1024 * 1024);
+    expect(appConfig.hlsCacheMaxBytes).toBe(10 * 1024 * 1024 * 1024);
     expect(appConfig.galleryExcludedFolders).toEqual([]);
   });
 

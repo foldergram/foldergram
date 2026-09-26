@@ -1,6 +1,7 @@
 services:
   foldergram-migrate:
-    image: foldergram:domain-split-20260911
+    image: foldergram:latest
+    container_name: foldergram-migrate
     build:
       context: .
       dockerfile: Dockerfile
@@ -10,11 +11,11 @@ services:
       - ${FOLDERGRAM_DATA_HOST_PATH:?Set FOLDERGRAM_DATA_HOST_PATH to the existing Foldergram config mount}:/app/data
       - ${FOLDERGRAM_DATA_HOST_PATH:?Set FOLDERGRAM_DATA_HOST_PATH to the existing Foldergram config mount}/thumbnails:/app/data/thumbnails
       - ${FOLDERGRAM_DATA_HOST_PATH:?Set FOLDERGRAM_DATA_HOST_PATH to the existing Foldergram config mount}/previews:/app/data/previews
-      - ${GALLERY_ROOT_HOST_PATH:?Set GALLERY_ROOT_HOST_PATH to the total gallery root}/.foldergram-cache/hls-cache:/app/data/hls-cache
     restart: "no"
 
   foldergram-web:
-    image: foldergram:domain-split-20260911
+    image: foldergram:latest
+    container_name: foldergram-web
     command: ["node", "server/dist/index.js"]
     environment:
       TZ: Asia/Shanghai
@@ -22,25 +23,37 @@ services:
       WORKER_BASE_URL: http://foldergram-worker:4142
       MEDIA_ACCEL_REDIRECT_PREFIX: /__foldergram_media
       LIBRARY_AUTO_SCAN_ENABLED: "false"
+      # Thumbnails/previews cache cap on the SSD volume (3 GiB default, override in .env).
+      DERIVATIVE_CACHE_MAX_BYTES: ${FOLDERGRAM_DERIVATIVE_CACHE_MAX_BYTES:-3221225472}
+      DERIVATIVE_CACHE_MAX_AGE_DAYS: ${FOLDERGRAM_DERIVATIVE_CACHE_MAX_AGE_DAYS:-30}
+      # HLS segment cache lives on the data (SSD) mount: cached seeks read at SSD
+      # latency. 10 GiB default; override with FOLDERGRAM_HLS_CACHE_MAX_BYTES in .env.
+      HLS_CACHE_MAX_BYTES: ${FOLDERGRAM_HLS_CACHE_MAX_BYTES:-10737418240}
     volumes:
       - ${GALLERY_ROOT_HOST_PATH:?Set GALLERY_ROOT_HOST_PATH to the total gallery root}:/app/data/gallery
       - ${FOLDERGRAM_DATA_HOST_PATH:?Set FOLDERGRAM_DATA_HOST_PATH to the existing Foldergram config mount}:/app/data
       - ${FOLDERGRAM_DATA_HOST_PATH:?Set FOLDERGRAM_DATA_HOST_PATH to the existing Foldergram config mount}/thumbnails:/app/data/thumbnails
       - ${FOLDERGRAM_DATA_HOST_PATH:?Set FOLDERGRAM_DATA_HOST_PATH to the existing Foldergram config mount}/previews:/app/data/previews
-      - ${GALLERY_ROOT_HOST_PATH:?Set GALLERY_ROOT_HOST_PATH to the total gallery root}/.foldergram-cache/hls-cache:/app/data/hls-cache
     depends_on:
       foldergram-migrate:
         condition: service_completed_successfully
     restart: unless-stopped
 
   foldergram-worker:
-    image: foldergram:domain-split-20260911
+    image: foldergram:latest
+    container_name: foldergram-worker
     command: ["node", "server/dist/worker.js"]
     environment:
       TZ: Asia/Shanghai
       FOLDERGRAM_RUNTIME: worker
       WORKER_CONTROL_PORT: "4142"
       LIBRARY_AUTO_SCAN_ENABLED: "false"
+      # Thumbnails/previews cache cap on the SSD volume (3 GiB default, override in .env).
+      DERIVATIVE_CACHE_MAX_BYTES: ${FOLDERGRAM_DERIVATIVE_CACHE_MAX_BYTES:-3221225472}
+      DERIVATIVE_CACHE_MAX_AGE_DAYS: ${FOLDERGRAM_DERIVATIVE_CACHE_MAX_AGE_DAYS:-30}
+      # HLS segment cache lives on the data (SSD) mount: cached seeks read at SSD
+      # latency. 10 GiB default; override with FOLDERGRAM_HLS_CACHE_MAX_BYTES in .env.
+      HLS_CACHE_MAX_BYTES: ${FOLDERGRAM_HLS_CACHE_MAX_BYTES:-10737418240}
       # One probe/derivative at a time: playback owns the NAS while people are using it.
       SCAN_DISCOVERY_CONCURRENCY: "1"
       SCAN_DERIVATIVE_CONCURRENCY: "1"
@@ -49,7 +62,6 @@ services:
       - ${FOLDERGRAM_DATA_HOST_PATH:?Set FOLDERGRAM_DATA_HOST_PATH to the existing Foldergram config mount}:/app/data
       - ${FOLDERGRAM_DATA_HOST_PATH:?Set FOLDERGRAM_DATA_HOST_PATH to the existing Foldergram config mount}/thumbnails:/app/data/thumbnails
       - ${FOLDERGRAM_DATA_HOST_PATH:?Set FOLDERGRAM_DATA_HOST_PATH to the existing Foldergram config mount}/previews:/app/data/previews
-      - ${GALLERY_ROOT_HOST_PATH:?Set GALLERY_ROOT_HOST_PATH to the total gallery root}/.foldergram-cache/hls-cache:/app/data/hls-cache
     depends_on:
       foldergram-migrate:
         condition: service_completed_successfully

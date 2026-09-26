@@ -58,6 +58,7 @@ export const galleryService = {
   setDefaultFolderImageOrder: adminGalleryMethods.setDefaultFolderImageOrder,
   setSharePublicBaseUrl: adminGalleryMethods.setSharePublicBaseUrl,
   setVideoPlaybackQuality: adminGalleryMethods.setVideoPlaybackQuality,
+  setVideoPlaybackMode: adminGalleryMethods.setVideoPlaybackMode,
   setNestedFolderTitleFormat: adminGalleryMethods.setNestedFolderTitleFormat,
   setTreatStoriesAsFolders: adminGalleryMethods.setTreatStoriesAsFolders,
   setExcludedFolders: adminGalleryMethods.setExcludedFolders,

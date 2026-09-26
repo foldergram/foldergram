@@ -4,6 +4,7 @@ export type NestedFolderTitleFormat = 'folder' | 'parent-plus-folder';
 export type TakenAtSource = 'exif' | 'mtime' | 'first_seen' | 'sort_timestamp';
 export type PlaybackStrategy = 'preview' | 'original';
 export type VideoPlaybackQuality = 'auto' | 'original' | '1080p' | '720p' | '480p';
+export type VideoPlaybackMode = 'direct' | 'transcode';
 export type FolderAvatarSource = 'auto' | 'manual' | 'cover';
 export type FolderRole = 'normal' | 'story_root' | 'story_capsule' | 'carousel_source';
 export type PlaceKind = 'city' | 'approximate_spot' | 'manual';
@@ -280,6 +281,7 @@ export interface FeedImage {
   playbackStrategy?: PlaybackStrategy | null;
   streamUrl?: string | null;
   originalUrl?: string;
+  fileSize?: number;
   sortTimestamp: number;
   takenAt: number | null;
   isSaved: boolean;

@@ -10,6 +10,7 @@
       :has-avatar-story="folderLookup.get(item.folderSlug)?.hasAvatarStory ?? false"
       :avatar-url="folderLookup.get(item.folderSlug)?.avatarUrl ?? null"
       :is-active-video="context === 'home' && item.id === activeVideoId"
+      :prefetch-video="context === 'home' && prefetchVideoIds.has(item.id)"
       @open-folder-story="emit('openFolderStory', $event)"
       @video-visibility-change="handleVideoVisibilityChange"
     />
@@ -135,6 +136,34 @@ const activeVideoId = computed<number | null>(() => {
   }
 
   return activeId;
+});
+
+const prefetchVideoIds = computed<Set<number>>(() => {
+  if (props.context !== 'home' || activeVideoId.value === null) {
+    return new Set();
+  }
+
+  const activeIndex = windowedItems.value.findIndex((item) => item.id === activeVideoId.value);
+  if (activeIndex < 0) {
+    return new Set();
+  }
+
+  const ids = new Set<number>();
+  for (const direction of [-1, 1]) {
+    for (
+      let index = activeIndex + direction;
+      index >= 0 && index < windowedItems.value.length;
+      index += direction
+    ) {
+      const item = windowedItems.value[index];
+      if (item?.mediaType === 'video') {
+        ids.add(item.id);
+        break;
+      }
+    }
+  }
+
+  return ids;
 });
 
 function handleVideoVisibilityChange(payload: HomeVideoVisibilityChange) {

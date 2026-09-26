@@ -10,6 +10,7 @@ function createHarness(options: {
   getScrubPoint?: (event: PointerEvent) => GesturePoint;
   onGestureEnd?: () => void;
   onGestureStart?: () => void;
+  isPlaying?: () => boolean;
 } = {}) {
   let currentTime = options.currentTime ?? 30;
   let playbackRate = 1;
@@ -37,6 +38,7 @@ function createHarness(options: {
     play: () => {
       playCalls += 1;
     },
+    isPlaying: options.isPlaying,
     getGesturePoint: options.getGesturePoint,
     getScrubPoint: options.getScrubPoint,
     onGestureStart: options.onGestureStart,
@@ -209,6 +211,33 @@ describe('useHoldToSpeed', () => {
 
     expect(harness.getCurrentTime()).toBeCloseTo(312, 5);
     expect(harness.getPlayCalls()).toBe(1);
+  });
+
+  it('resumes a clip that was playing before the scrub', () => {
+    vi.useFakeTimers();
+    const harness = createHarness({ currentTime: 30, isPlaying: () => true });
+
+    harness.press(200);
+    harness.move(300);
+    harness.release(300);
+
+    expect(harness.getPlayCalls()).toBe(1);
+    vi.useRealTimers();
+  });
+
+  it('leaves a clip the viewer paused paused after a scrub', () => {
+    vi.useFakeTimers();
+    // The scrub freezes Direct Play itself, so the intent has to come from the state
+    // sampled at gesture start rather than from the player at release.
+    const harness = createHarness({ currentTime: 30, isPlaying: () => false });
+
+    harness.press(200);
+    harness.move(300);
+    harness.release(300);
+
+    expect(harness.getCurrentTime()).toBeCloseTo(42, 5);
+    expect(harness.getPlayCalls()).toBe(0);
+    vi.useRealTimers();
   });
 
   it('keeps a second swipe relative to the already-scrubbed time, not the finger X', () => {

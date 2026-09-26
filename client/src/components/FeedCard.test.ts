@@ -283,6 +283,63 @@ describe('FeedCard', () => {
     expect(player.paused).toBe(false);
   });
 
+  it('recovers a stalled forward seek while the same card drives the immersive player', async () => {
+    vi.useFakeTimers();
+    try {
+      const immersiveVideoStore = useImmersiveVideoStore();
+      const wrapper = mount(FeedCard, {
+        props: {
+          item: createVideoItem(806),
+          avatarUrl: null,
+          context: 'home',
+          isActiveVideo: true
+        },
+        global: {
+          stubs: globalStubs
+        }
+      });
+
+      await flushPromises();
+
+      const player = wrapper.get('media-player').element as unknown as FakeMediaPlayerElement;
+
+      // Opening immersive claims this exact <media-player>; the card keeps owning the
+      // decoder that the layer displays.
+      await wrapper.get('.feed-card__video-shell').trigger('click');
+      await flushPromises();
+      expect(immersiveVideoStore.isOpen).toBe(true);
+
+      // A forward seek pauses Direct Play to abort the old Range and can leave the
+      // decoder parked on a frame while the new region buffers. Before the fix a
+      // `waiting` event was ignored whenever immersive was open, so the clip stayed
+      // frozen; now the owning card must still nudge playback back to life.
+      player.paused = true;
+      player.playCallCount = 0;
+      player.dispatchEvent(new Event('waiting'));
+
+      await vi.advanceTimersByTimeAsync(400);
+      await flushPromises();
+
+      expect(player.playCallCount).toBeGreaterThanOrEqual(1);
+
+      // Unmount under fake timers so the component clears its own retry/fallback
+      // timers instead of leaking one past the torn-down test environment.
+      wrapper.unmount();
+      await flushPromises();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('leaves vertical swipes on the home preview available and eagerly attaches only active or prefetched video providers', async () => {
+    const source = await import('./FeedCard.vue?raw');
+
+    expect(source.default).toContain("touchAction: 'pan-y'");
+    expect(source.default).toContain(':noSwipeGesture.prop="true"');
+    expect(source.default).toContain("shouldAutoplayHomeVideo.value || props.prefetchVideo");
+    expect(source.default).toContain("isViewActive.value && shouldAutoplayHomeVideo.value ? 'auto' : 'metadata'");
+  });
+
   it('starts an inactive feed clip when opening it in the immersive player', async () => {
     const immersiveVideoStore = useImmersiveVideoStore();
     const wrapper = mount(FeedCard, {

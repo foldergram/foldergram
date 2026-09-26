@@ -9,6 +9,14 @@ export interface HoldToSpeedPlayer {
   setPlaybackRate: (rate: number) => void;
   /** Resumed after a hold so the clip never stays parked on a frame. */
   play?: () => void | Promise<void>;
+  /** Freezes Direct Play during a scrub so mid-drag Range requests never start. */
+  pause?: () => void;
+  /**
+   * Whether the clip is playing right now. Read once when a scrub takes over, so the
+   * release can restore the viewer's own play/pause intent instead of guessing from a
+   * player this gesture just paused itself.
+   */
+  isPlaying?: () => boolean;
 }
 
 export interface GesturePoint {
@@ -92,6 +100,11 @@ export function useHoldToSpeed(options: HoldToSpeedOptions) {
   let previewSeekFrame = 0;
   let pendingPreviewSeek: number | null = null;
   let committingScrub = false;
+  let commitGeneration = 0;
+  // Play/pause intent captured the moment a scrub takes the gesture over. A scrub
+  // freezes Direct Play, so reading the player at release time would always say
+  // "paused" and a playing clip would never come back.
+  let resumeAfterScrub = true;
 
   function clearActivationTimer() {
     if (activationTimer !== null) {
@@ -165,23 +178,54 @@ export function useHoldToSpeed(options: HoldToSpeedOptions) {
    * would never end and the clip stayed at 2x. Window-level listeners guarantee a
    * release is always observed.
    */
-  function commitScrub(target: number) {
-    if (committingScrub) {
-      return;
-    }
+  function endPointerTracking(): boolean {
+    const hadActiveGesture = pointerId !== null;
+    clearActivationTimer();
+    clearPreviewSeek();
+    restorePlaybackRate();
+    releasePointerCapture();
+    detachReleaseFallback();
+    scrubSeconds.value = null;
+    pointerId = null;
+    surfaceElement = null;
+    return hadActiveGesture;
+  }
 
+  function commitScrub(target: number) {
+    const generation = ++commitGeneration;
     committingScrub = true;
     const seekResult = options.seekTo(target);
+    // Drop the pointer immediately so a follow-up scrub can start from the
+    // committed target even while Direct Play is still opening the new Range.
+    const hadActiveGesture = endPointerTracking();
+    if (hadActiveGesture) {
+      options.onGestureEnd?.();
+    }
+
     const finish = () => {
-      // A direct or HLS provider can still report the old decoded segment right
-      // after `currentTime` is assigned. Resume only after the final seek itself
-      // has settled, otherwise the clock can snap back on release.
-      void options.play?.();
-      stop();
+      if (generation !== commitGeneration) {
+        return;
+      }
+
+      committingScrub = false;
+      // A later drag owns the surface now; resuming here would start another Range.
+      if (pointerId !== null || scrubSeconds.value !== null) {
+        return;
+      }
+
+      // Restore exactly what the viewer had before the scrub: playing keeps playing,
+      // paused stays paused.
+      if (resumeAfterScrub) {
+        void options.play?.();
+      }
     };
 
     if (seekResult && typeof (seekResult as Promise<void>).then === 'function') {
-      void seekResult.then(finish, stop);
+      void seekResult.then(finish, () => {
+        if (generation === commitGeneration) {
+          committingScrub = false;
+        }
+      });
       return;
     }
 
@@ -243,16 +287,9 @@ export function useHoldToSpeed(options: HoldToSpeedOptions) {
   }
 
   function stop() {
-    const hadActiveGesture = pointerId !== null;
-    clearActivationTimer();
-    clearPreviewSeek();
-    restorePlaybackRate();
-    releasePointerCapture();
-    detachReleaseFallback();
-    scrubSeconds.value = null;
-    pointerId = null;
-    surfaceElement = null;
+    commitGeneration += 1;
     committingScrub = false;
+    const hadActiveGesture = endPointerTracking();
 
     if (hadActiveGesture) {
       options.onGestureEnd?.();
@@ -292,6 +329,10 @@ export function useHoldToSpeed(options: HoldToSpeedOptions) {
     scrubSeconds.value = scrubOrigin;
     options.onScrub?.(scrubOrigin);
     schedulePreviewSeek(scrubSeconds.value);
+    // Intent is sampled before the freeze below: pausing Direct Play for the drag must
+    // not be mistaken for the viewer pausing the clip.
+    resumeAfterScrub = options.isPlaying?.() ?? true;
+    options.pause?.();
   }
 
   function onPointerdown(event: PointerEvent) {

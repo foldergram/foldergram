@@ -21,7 +21,7 @@ function isPublicApiRoute(request: express.Request): boolean {
 
   return (
     (method === 'GET' && (path === '/health' || path === '/auth/status')) ||
-    (method === 'POST' && (path === '/auth/login' || path === '/auth/logout' || path === '/auth/unlock-admin')) ||
+    (method === 'POST' && (path === '/auth/login' || path === '/auth/logout' || path === '/auth/unlock-admin' || path === '/auth/pattern/unlock' || path === '/auth/pattern/reset')) ||
     isShareReadRoute ||
     isShareUnlockRoute ||
     isPostShareWarmRoute

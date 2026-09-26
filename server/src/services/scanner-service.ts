@@ -53,6 +53,7 @@ import {
 import { generateAssetKey, getPreviewPathForAssetKey, getThumbnailPathForAssetKey } from '../utils/derivative-paths.js';
 import { resolveTakenAt, serializeImageExifData } from '../utils/exif-utils.js';
 import { resolveOriginalPath } from '../utils/media-paths.js';
+import { safeJoin } from '../utils/path-utils.js';
 import {
   getFolderDisplayInfo,
   getRelativeGalleryPath,
@@ -773,6 +774,47 @@ class ScannerService {
   async rebuildThumbnails(reason = 'rebuild-thumbnails'): Promise<ScanRunRecord | undefined> {
     await this.enqueue(async () => this.performThumbnailRebuild(reason));
     return scanRunRepository.latest();
+  }
+
+  /**
+   * Proactively generate any thumbnails or previews that are missing on disk (e.g.
+   * after derivative-cache eviction). Unlike rebuildThumbnails this skips files that
+   * already have their derivatives, so it is cheap to run periodically.
+   */
+  async fillMissingDerivatives(): Promise<void> {
+    if (this.isLibraryRebuildRequired()) return;
+    if (!storageService.refreshAvailability().libraryAvailable) return;
+
+    const indexedImages = imageRepository.listActive();
+    if (indexedImages.length === 0) return;
+
+    const missingJobs: DerivativeJob[] = [];
+    for (const image of indexedImages) {
+      const thumbnailAbs = safeJoin(appConfig.thumbnailsDir, image.thumbnail_path);
+      const previewAbs = safeJoin(appConfig.previewsDir, image.preview_path);
+      let thumbMissing = false;
+      let previewMissing = false;
+      try { await fs.access(thumbnailAbs); } catch { thumbMissing = true; }
+      if (image.media_type === 'image') {
+        try { await fs.access(previewAbs); } catch { previewMissing = true; }
+      }
+      if (!thumbMissing && !previewMissing) continue;
+
+      missingJobs.push({
+        absolutePath: resolveOriginalPath(image.relative_path),
+        relativePath: image.relative_path,
+        thumbnailPath: image.thumbnail_path,
+        previewPath: image.preview_path,
+        force: false,
+        kind: 'all'
+      });
+    }
+
+    if (missingJobs.length === 0) return;
+
+    log.info('Filling missing derivatives', { total: indexedImages.length, missing: missingJobs.length });
+    const errors = new ScanErrorCollector(0, 'fill-missing-derivatives');
+    await this.processDerivativeJobs(missingJobs, errors);
   }
 
   async scanChangedPaths(relativePaths: string[], reason = 'watcher'): Promise<ScanRunRecord | undefined> {

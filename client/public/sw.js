@@ -1,7 +1,8 @@
 // Bumping the version invalidates every previous cache on activate.
-const CACHE_VERSION = 'foldergram-v15';
+const CACHE_VERSION = 'foldergram-v21';
 const APP_SHELL_CACHE = `${CACHE_VERSION}-app-shell`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
+const MEDIA_CACHE = `${CACHE_VERSION}-media`;
 const IS_LOCALHOST = self.location.hostname === 'localhost' || self.location.hostname === '127.0.0.1';
 const APP_SHELL_URLS = [
   '/',
@@ -74,7 +75,7 @@ self.addEventListener('activate', (event) => {
     caches.keys().then((keys) =>
       Promise.all(
         keys
-          .filter((key) => key !== APP_SHELL_CACHE && key !== RUNTIME_CACHE)
+          .filter((key) => key !== APP_SHELL_CACHE && key !== RUNTIME_CACHE && key !== MEDIA_CACHE)
           .map((key) => caches.delete(key))
       )
     )
@@ -112,6 +113,41 @@ async function respondWithStaleWhileRevalidate(request, cacheName, cacheKey) {
   return response ?? Response.error();
 }
 
+/**
+ * Thumbnails and preview stills are immutable once generated (the server versions
+ * them), and they dominate first-paint cost. Cache-first with an entry cap: the
+ * oldest insertions fall out once the feed has grown past the limit.
+ */
+const MEDIA_CACHE_MAX_ENTRIES = 2000;
+
+function isCachedMediaAsset(url) {
+  return url.pathname.startsWith('/thumbnails/') || url.pathname.startsWith('/previews/');
+}
+
+async function respondMediaCacheFirst(request) {
+  const cache = await caches.open(MEDIA_CACHE);
+  const cached = await cache.match(request);
+  if (cached) {
+    return cached;
+  }
+
+  const response = await fetch(request);
+  // Only successful full responses: a 401 while logged out or a partial range
+  // response must never poison the cache.
+  if (!response.ok || response.status === 206 || response.type === 'opaque') {
+    return response;
+  }
+
+  void cache.put(request, response.clone()).then(async () => {
+    const keys = await cache.keys();
+    const excess = keys.length - MEDIA_CACHE_MAX_ENTRIES;
+    for (let index = 0; index < excess; index += 1) {
+      await cache.delete(keys[index]);
+    }
+  });
+  return response;
+}
+
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') {
     return;
@@ -127,10 +163,13 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  if (isCachedMediaAsset(url) && !event.request.headers.has('range')) {
+    event.respondWith(respondMediaCacheFirst(event.request));
+    return;
+  }
+
   if (
     url.pathname.startsWith('/api/') ||
-    url.pathname.startsWith('/thumbnails/') ||
-    url.pathname.startsWith('/previews/') ||
     url.pathname.startsWith('/originals/') ||
     url.pathname.startsWith('/@') ||
     url.pathname.startsWith('/src/') ||

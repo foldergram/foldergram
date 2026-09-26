@@ -6,6 +6,11 @@ vi.mock('../api/http', () => ({
 
 import {
   canDirectPlayHevc,
+  estimateOriginalBitrateMbps,
+  isLanPlaybackHost,
+  isOriginalTooHeavyForConstrainedLink,
+  preferEntryHlsLevel,
+  prefersConstrainedVideoPlayback,
   resetDirectPlayCapabilityCache,
   resolveVideoFallbackSource,
   resolveVideoSource,
@@ -95,6 +100,16 @@ describe('useBundledHlsLibrary', () => {
   });
 });
 
+describe('preferEntryHlsLevel', () => {
+  it('drops the next HLS load back to the 480p rung', () => {
+    const hls = { nextLoadLevel: 2, loadLevel: 2 };
+    const player = { provider: { instance: hls } } as never;
+    preferEntryHlsLevel(player);
+    expect(hls.nextLoadLevel).toBe(0);
+    expect(hls.loadLevel).toBe(0);
+  });
+});
+
 describe('seekMediaPlayerAndWait', () => {
   it('waits for the provider to acknowledge the final seek target', async () => {
     const player = document.createElement('div') as HTMLDivElement & { currentTime: number };
@@ -105,6 +120,158 @@ describe('seekMediaPlayerAndWait', () => {
 
     player.dispatchEvent(new Event('seeked'));
     await expect(committing).resolves.toBeUndefined();
+  });
+
+  it('uses native fastSeek when the video element exposes it', async () => {
+    const video = document.createElement('video');
+    const fastSeek = vi.fn((seconds: number) => {
+      video.currentTime = seconds;
+    });
+    Object.defineProperty(video, 'fastSeek', {
+      configurable: true,
+      value: fastSeek
+    });
+
+    const player = document.createElement('div') as HTMLDivElement & {
+      currentTime: number;
+      paused: boolean;
+      pause: () => void;
+    };
+    player.currentTime = 10;
+    player.paused = false;
+    player.pause = vi.fn(() => {
+      player.paused = true;
+    });
+    player.append(video);
+
+    const committing = seekMediaPlayerAndWait(player, 42, { timeoutMs: 1_000 });
+    expect(player.pause).toHaveBeenCalledTimes(1);
+    expect(fastSeek).toHaveBeenCalledWith(42);
+    expect(player.currentTime).toBe(10);
+
+    player.dispatchEvent(new Event('seeked'));
+    await expect(committing).resolves.toBeUndefined();
+  });
+  it('resumes a Direct Play seek on a later task, never in the pause tick', async () => {
+    const video = document.createElement('video');
+    Object.defineProperty(video, 'fastSeek', {
+      configurable: true,
+      value: (seconds: number) => {
+        video.currentTime = seconds;
+      }
+    });
+
+    const player = document.createElement('div') as HTMLDivElement & {
+      currentTime: number;
+      paused: boolean;
+      pause: () => void;
+      play: () => void;
+    };
+    player.currentTime = 10;
+    player.paused = false;
+    const play = vi.fn(() => {
+      player.paused = false;
+    });
+    player.pause = vi.fn(() => {
+      player.paused = true;
+    });
+    player.play = play;
+    player.append(video);
+
+    const committing = seekMediaPlayerAndWait(player, 42, { timeoutMs: 1_000 });
+
+    // Direct Play reports the new position synchronously, so the old code resumed in
+    // the same task as the pause and Vidstack dropped the play request: the clip stayed
+    // parked on a frame after a progress-bar drag.
+    expect(player.paused).toBe(true);
+    expect(play).not.toHaveBeenCalled();
+
+    await committing;
+    // The resume is handed back on a later task; just let that task run.
+    await new Promise((resolve) => setTimeout(resolve, 40));
+
+    expect(play).toHaveBeenCalledTimes(1);
+  });
+
+  it('stays paused when the caller states the viewer had paused the clip', async () => {
+    const player = document.createElement('div') as HTMLDivElement & {
+      currentTime: number;
+      paused: boolean;
+      pause: () => void;
+      play: () => void;
+    };
+    player.currentTime = 10;
+    player.paused = false;
+    const play = vi.fn();
+    player.pause = vi.fn(() => {
+      player.paused = true;
+    });
+    player.play = play;
+
+    const committing = seekMediaPlayerAndWait(player, 42, { timeoutMs: 1_000, resumePlayback: false });
+    player.dispatchEvent(new Event('seeked'));
+    await committing;
+    await new Promise((resolve) => setTimeout(resolve, 40));
+
+    expect(play).not.toHaveBeenCalled();
+  });
+
+  it('resumes when the caller says the clip was playing even if the player is already paused', async () => {
+    const player = document.createElement('div') as HTMLDivElement & {
+      currentTime: number;
+      paused: boolean;
+      pause: () => void;
+      play: () => void;
+    };
+    player.currentTime = 10;
+    player.paused = true;
+    const play = vi.fn(() => {
+      player.paused = false;
+    });
+    player.pause = vi.fn();
+    player.play = play;
+
+    const committing = seekMediaPlayerAndWait(player, 42, { timeoutMs: 1_000, resumePlayback: true });
+    player.dispatchEvent(new Event('seeked'));
+    await committing;
+
+    expect(play).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('isLanPlaybackHost', () => {
+  it('treats loopback, RFC1918 and .local names as LAN', () => {
+    expect(isLanPlaybackHost('localhost')).toBe(true);
+    expect(isLanPlaybackHost('127.0.0.1')).toBe(true);
+    expect(isLanPlaybackHost('[::1]')).toBe(true);
+    expect(isLanPlaybackHost('192.168.5.11')).toBe(true);
+    expect(isLanPlaybackHost('10.0.0.8')).toBe(true);
+    expect(isLanPlaybackHost('172.16.1.2')).toBe(true);
+    expect(isLanPlaybackHost('nas.local')).toBe(true);
+  });
+
+  it('treats public hostnames and Tailscale as WAN', () => {
+    expect(isLanPlaybackHost('gallery.example.com')).toBe(false);
+    expect(isLanPlaybackHost('100.64.1.2')).toBe(false);
+    expect(prefersConstrainedVideoPlayback('gallery.example.com')).toBe(true);
+    expect(prefersConstrainedVideoPlayback('192.168.5.11')).toBe(false);
+  });
+});
+
+describe('original bitrate helpers', () => {
+  it('estimates megabits from size and duration', () => {
+    expect(estimateOriginalBitrateMbps(1_000_000, 8_000)).toBeCloseTo(1, 5);
+  });
+
+  it('treats a 40 Mbps phone clip as too heavy for WAN Direct Play', () => {
+    expect(isOriginalTooHeavyForConstrainedLink({
+      fileSize: 40 * 1024 * 1024,
+      durationMs: 8_000
+    }, 'gallery.example.com')).toBe(true);
+    expect(isOriginalTooHeavyForConstrainedLink({
+      fileSize: 40 * 1024 * 1024,
+      durationMs: 8_000
+    }, '192.168.5.11')).toBe(false);
   });
 });
 
@@ -133,11 +300,67 @@ describe('resolveVideoSource', () => {
 
   const directMedia = { ...media, playbackStrategy: 'original' as const };
 
-  it('plays a direct-playable post straight from the original file on auto', () => {
-    expect(resolveVideoSource(directMedia, 'auto')).toEqual({
+  it('loads the HLS master on auto in transcode mode even on the LAN', () => {
+    expect(resolveVideoSource(directMedia, 'auto', { hostname: '192.168.5.11', playbackMode: 'transcode' })).toEqual({
+      src: '/api/videos/501/hls/master.m3u8',
+      type: 'application/x-mpegurl',
+      isStream: true
+    });
+  });
+
+  it('plays a direct-playable post straight from the original file in Direct Play', () => {
+    expect(resolveVideoSource(directMedia, 'auto', { hostname: '192.168.5.11', playbackMode: 'direct' })).toEqual({
       src: '/api/originals/501',
       type: 'video/mp4',
       isStream: false
+    });
+  });
+
+  it('plays a direct-playable post straight from the original file on auto', () => {
+    expect(resolveVideoSource(directMedia, 'auto', { playbackMode: 'direct' })).toEqual({
+      src: '/api/originals/501',
+      type: 'video/mp4',
+      isStream: false
+    });
+  });
+
+  it('loads the HLS master on auto outside the LAN', () => {
+    expect(resolveVideoSource(directMedia, 'auto', { hostname: 'gallery.example.com' })).toEqual({
+      src: '/api/videos/501/hls/master.m3u8',
+      type: 'application/x-mpegurl',
+      isStream: true
+    });
+  });
+
+  it('loads the HLS master on auto when original Range already proved too slow', () => {
+    expect(resolveVideoSource(directMedia, 'auto', { hostname: '192.168.5.11', preferStream: true })).toEqual({
+      src: '/api/videos/501/hls/master.m3u8',
+      type: 'application/x-mpegurl',
+      isStream: true
+    });
+  });
+
+  it('keeps Direct Play on the LAN even for a high-bitrate original', () => {
+    expect(resolveVideoSource({
+      ...directMedia,
+      fileSize: 40 * 1024 * 1024,
+      durationMs: 8_000
+    }, 'auto', { hostname: '192.168.5.11', playbackMode: 'direct' })).toEqual({
+      src: '/api/originals/501',
+      type: 'video/mp4',
+      isStream: false
+    });
+  });
+
+  it('sends a high-bitrate original to HLS on a WAN Direct Play setting', () => {
+    expect(resolveVideoSource({
+      ...directMedia,
+      fileSize: 40 * 1024 * 1024,
+      durationMs: 8_000
+    }, 'auto', { hostname: 'gallery.example.com', playbackMode: 'direct' })).toEqual({
+      src: '/api/videos/501/hls/master.m3u8',
+      type: 'application/x-mpegurl',
+      isStream: true
     });
   });
 
@@ -150,20 +373,42 @@ describe('resolveVideoSource', () => {
   });
 
   it('falls back to HLS when a direct original refuses to decode', () => {
-    expect(resolveVideoFallbackSource(directMedia, resolveVideoSource(directMedia, 'auto'))).toEqual({
+    expect(resolveVideoFallbackSource(directMedia, resolveVideoSource(directMedia, 'auto', { playbackMode: 'direct' }))).toEqual({
       src: '/api/videos/501/hls/master.m3u8',
       type: 'application/x-mpegurl',
       isStream: true
     });
   });
 
-  it('never warms a transcode for a direct-playable post', async () => {
+  it('never warms a transcode for a Direct Play original', async () => {
     const { requestJson } = await import('../api/http');
     (requestJson as unknown as { mockClear: () => void }).mockClear();
 
-    warmVideoStream(directMedia, 'auto', { fromSeconds: 30 });
+    const fetchMock = vi.fn(() => Promise.resolve(new Response(null, { status: 206 })));
+    vi.stubGlobal('fetch', fetchMock);
+
+    warmVideoStream(directMedia, 'auto', { fromSeconds: 30, playbackMode: 'direct' });
 
     expect(requestJson).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it('still warms the original head and tail on a Direct Play cold start', async () => {
+    const { requestJson } = await import('../api/http');
+    (requestJson as unknown as { mockClear: () => void }).mockClear();
+
+    const fetchMock = vi.fn(() => Promise.resolve(new Response(null, { status: 206 })));
+    vi.stubGlobal('fetch', fetchMock);
+
+    warmVideoStream(directMedia, 'auto', { fromSeconds: 0, playbackMode: 'direct' });
+
+    expect(requestJson).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledWith('/api/originals/501', {
+      headers: { Range: 'bytes=0-65535' },
+      cache: 'force-cache'
+    });
+    vi.unstubAllGlobals();
   });
 
   it('uses the adaptive HLS playlist by default instead of a legacy preview MP4', () => {
@@ -175,14 +420,19 @@ describe('resolveVideoSource', () => {
     });
   });
 
-  it('direct-plays a preview-strategy MP4 when the device can decode HEVC', () => {
+  it('direct-plays a preview-strategy MP4 when Direct Play and the device can decode HEVC', () => {
     stubHevcSupport(true);
     expect(canDirectPlayHevc()).toBe(true);
-    expect(resolveVideoSource(media, 'auto')).toEqual({
+    expect(resolveVideoSource(media, 'auto', { playbackMode: 'direct' })).toEqual({
       src: '/api/originals/501',
       type: 'video/mp4',
       isStream: false
     });
+  });
+
+  it('keeps a HEVC preview on HLS outside the LAN', () => {
+    stubHevcSupport(true);
+    expect(resolveVideoSource(media, 'auto', { hostname: 'gallery.example.com' }).isStream).toBe(true);
   });
 
   it('keeps HLS for a preview-strategy MP4 when the device cannot decode HEVC', () => {

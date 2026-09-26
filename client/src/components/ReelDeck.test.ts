@@ -51,9 +51,9 @@ describe('ReelDeck', () => {
     });
 
     const renderedIds = wrapper.findAll('.reel-stub').map((stub) => Number(stub.attributes('data-id')));
-    expect(renderedIds).toEqual([13, 14, 15, 16, 17]);
-    expect(wrapper.get('.reel-deck__spacer--before').attributes('style')).toContain('1200%');
-    expect(wrapper.get('.reel-deck__spacer--after').attributes('style')).toContain('1300%');
+    expect(renderedIds).toEqual([14, 15, 16]);
+    expect(wrapper.get('.reel-deck__spacer--before').attributes('style')).toContain('1300%');
+    expect(wrapper.get('.reel-deck__spacer--after').attributes('style')).toContain('1400%');
   });
 
   it('warms only the next card after the active one', () => {
@@ -82,7 +82,7 @@ describe('ReelDeck', () => {
     // videos compete for network, memory and decoder resources.
     expect(prefetchByItemId.get('2')).toBe('0');
     expect(prefetchByItemId.get('3')).toBe('1');
-    expect(prefetchByItemId.get('4')).toBe('0');
+    expect(prefetchByItemId.has('4')).toBe(false);
     expect(prefetchByItemId.has('5')).toBe(false);
     expect(prefetchByItemId.has('6')).toBe(false);
     expect(prefetchByItemId.has('7')).toBe(false);
@@ -107,6 +107,18 @@ describe('ReelDeck', () => {
     });
 
     expect(wrapper.get('.reel-stub').attributes('data-prefetch')).toBe('0');
+  });
+
+  it('keeps the player from claiming vertical deck swipes', async () => {
+    const source = await import('./ReelPlayerCard.vue?raw');
+
+    expect(source.default).toContain(':noSwipeGesture.prop="true"');
+  });
+
+  it('reserves the complete mobile dock footprint for reels', async () => {
+    const source = await import('./AppShell.vue?raw');
+
+    expect(source.default).toContain('--mobile-bottom-nav-height: calc(4.55rem + var(--mobile-safe-area-bottom))');
   });
 
   it('restores the active reel instead of leaving a kept-alive deck at the first card', async () => {

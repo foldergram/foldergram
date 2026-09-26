@@ -1,6 +1,10 @@
 <template>
   <!-- Mobile bottom nav — hidden on desktop (md+) -->
-  <nav class="mobile-nav" :class="{ 'mobile-nav--lens': supportsBackdropLens }" :aria-label="t('nav.primary')">
+  <nav
+    class="mobile-nav"
+    :class="{ 'mobile-nav--lens': supportsBackdropLens, 'mobile-nav--scrolling': isViewportScrolling }"
+    :aria-label="t('nav.primary')"
+  >
     <svg v-if="supportsBackdropLens" class="mobile-nav__lens-defs" aria-hidden="true" focusable="false">
       <filter id="foldergram-nav-lens" x="-25%" y="-25%" width="150%" height="150%" color-interpolation-filters="sRGB">
         <feImage :href="lensMapUrl" result="lensMap" x="0" y="0" preserveAspectRatio="none" />
@@ -307,6 +311,20 @@ const sliderStyle = computed(() => ({
 }));
 
 const lensMapUrl = ref('');
+const isViewportScrolling = ref(false);
+let viewportScrollIdleTimer = 0;
+
+function handleViewportScroll() {
+  isViewportScrolling.value = true;
+  if (viewportScrollIdleTimer !== 0) {
+    window.clearTimeout(viewportScrollIdleTimer);
+  }
+
+  viewportScrollIdleTimer = window.setTimeout(() => {
+    viewportScrollIdleTimer = 0;
+    isViewportScrolling.value = false;
+  }, 140);
+}
 
 // Displacement map for the slider lens: R drives horizontal shift, G vertical.
 // 0.5 means "no shift", so the flat centre stays undistorted while the rounded
@@ -524,11 +542,16 @@ onMounted(() => {
   enableLensIfSupported();
   window.addEventListener('keydown', handleWindowKeydown);
   window.addEventListener('resize', syncActiveSlider);
+  window.addEventListener('scroll', handleViewportScroll, { passive: true, capture: true });
 });
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleWindowKeydown);
   window.removeEventListener('resize', syncActiveSlider);
+  window.removeEventListener('scroll', handleViewportScroll, { capture: true });
+  if (viewportScrollIdleTimer !== 0) {
+    window.clearTimeout(viewportScrollIdleTimer);
+  }
 });
 </script>
 
@@ -546,8 +569,8 @@ onUnmounted(() => {
     z-index: 30;
     display: block;
     padding:
-      0.45rem max(0.72rem, env(safe-area-inset-right))
-      calc(0.45rem + var(--mobile-safe-area-bottom, 0px))
+      0.15rem max(0.72rem, env(safe-area-inset-right))
+      var(--mobile-safe-area-bottom, 0px)
       max(0.72rem, env(safe-area-inset-left));
     border-top: 0;
     background: transparent;
@@ -595,6 +618,21 @@ onUnmounted(() => {
     box-shadow: none;
     -webkit-backdrop-filter: blur(26px) saturate(160%);
     backdrop-filter: blur(26px) saturate(160%);
+  }
+
+  /* Backdrop filters force the browser to re-sample the video behind the fixed dock
+     for every scroll frame. Keep the same tint while motion is active, then restore
+     the expensive glass blur once scrolling has settled. */
+  .mobile-nav--scrolling .mobile-nav__bar {
+    background: color-mix(in srgb, var(--surface) 82%, transparent);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  .mobile-nav--scrolling .mobile-nav__glass-refraction,
+  .mobile-nav--scrolling.mobile-nav--lens .mobile-nav__glass-refraction {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
   }
 
   .mobile-nav__links {

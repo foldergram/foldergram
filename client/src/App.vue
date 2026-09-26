@@ -11,6 +11,7 @@
     </div>
   </section>
   <RouterView v-else-if="isPublicShareRoute" />
+  <PatternLockGate v-else-if="authStore.patternRequired" />
   <AuthGate v-else-if="authStore.requiresLogin" />
   <AppShell v-else>
     <RouterView v-slot="{ Component }" :route="displayRoute">
@@ -24,19 +25,20 @@
       <PostView :id="String(route.params.id ?? '')" modal @close="closeImageModal" />
     </div>
   </AppShell>
-  <AdminUnlockDialog v-if="authStore.unlockDialogOpen" />
-  <ImmersiveImageLayer />
-  <ImmersiveVideoLayer />
+  <AdminUnlockDialog v-if="authStore.unlockDialogOpen && !authStore.patternRequired" />
+  <ImmersiveImageLayer v-if="!authStore.patternRequired" />
+  <ImmersiveVideoLayer v-if="!authStore.patternRequired" />
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onUnmounted, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { RouterView, useRoute, useRouter, type RouteLocationNormalizedLoaded } from 'vue-router';
 
 import AppShell from './components/AppShell.vue';
 import AdminUnlockDialog from './components/AdminUnlockDialog.vue';
 import AuthGate from './components/AuthGate.vue';
+import PatternLockGate from './components/PatternLockGate.vue';
 import ImmersiveImageLayer from './components/ImmersiveImageLayer.vue';
 import ImmersiveVideoLayer from './components/ImmersiveVideoLayer.vue';
 import { canAccessRoute, routeAllowsPublicShareAccess, KEPT_ALIVE_VIEW_NAMES } from './router';
@@ -54,6 +56,8 @@ import { useImmersiveVideoStore } from './stores/immersive-video';
 import { useReelsStore } from './stores/reels';
 import { useTrashStore } from './stores/trash';
 import { useViewerStore } from './stores/viewer';
+import { startAdaptiveVideoQuality } from './utils/adaptive-quality';
+import { startScreenWakeLock } from './utils/screen-wake-lock';
 
 const { t } = useI18n();
 const appStore = useAppStore();
@@ -194,9 +198,36 @@ function unlockModalScroll() {
   modalScrollLocked = false;
 }
 
+let adaptiveQualityController: ReturnType<typeof startAdaptiveVideoQuality> = null;
+let screenWakeLockController: ReturnType<typeof startScreenWakeLock> = null;
+
+function handleAppHidden() {
+  authStore.lockPatternIfBackgrounded();
+}
+
+function handleVisibilityChange() {
+  if (document.visibilityState === 'hidden') {
+    handleAppHidden();
+  }
+}
+
+onMounted(() => {
+  // Network-aware quality ladder: degrade outside the LAN, recover when the
+  // link is healthy again. A no-op when PerformanceObserver is unavailable.
+  adaptiveQualityController = startAdaptiveVideoQuality();
+  // Keep iOS from dimming during playsinline playback. No-op without Wake Lock.
+  screenWakeLockController = startScreenWakeLock();
+  document.addEventListener('visibilitychange', handleVisibilityChange);
+  window.addEventListener('pagehide', handleAppHidden);
+});
+
 onUnmounted(() => {
   unlockModalScroll();
   appStore.stopStatsPolling();
+  adaptiveQualityController?.stop();
+  screenWakeLockController?.stop();
+  document.removeEventListener('visibilitychange', handleVisibilityChange);
+  window.removeEventListener('pagehide', handleAppHidden);
 });
 
 watch(

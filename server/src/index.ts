@@ -23,6 +23,7 @@ import { createApp } from "./app.js";
 import { collectionRepository } from "./db/repositories.js";
 import { deletionJobService } from "./services/deletion-job-service.js";
 import { cleanupHlsCache } from "./services/hls-cache-service.js";
+import { cleanupDerivativeCache } from "./services/derivative-cache-service.js";
 import { log } from "./services/log-service.js";
 import { permanentDeletionService } from "./services/permanent-deletion-service.js";
 import { scannerService } from "./services/scanner-service.js";
@@ -60,6 +61,21 @@ async function bootstrap(): Promise<void> {
   deletionJobService.resumePendingJob();
   const app = createApp();
   const server = createServer(app);
+
+  // Split runtimes hand cache maintenance to the worker; a single-process server
+  // has no worker, so it runs the HLS and derivative cache cleanups itself.
+  let cacheCleanupTimer: NodeJS.Timeout | null = null;
+  if (!appConfig.workerBaseUrl) {
+    cacheCleanupTimer = setInterval(() => {
+      void cleanupHlsCache().catch((error: unknown) => {
+        log.error('HLS cache cleanup failed', error instanceof Error ? error.message : String(error));
+      });
+      void cleanupDerivativeCache().then(() => scannerService.fillMissingDerivatives()).catch((error: unknown) => {
+        log.error('Derivative cache cleanup failed', error instanceof Error ? error.message : String(error));
+      });
+    }, 6 * 60 * 60 * 1000);
+    cacheCleanupTimer.unref();
+  }
   const portVariableName = appConfig.nodeEnv === "production" ? "SERVER_PORT" : "DEV_SERVER_PORT";
   collectionRepository.ensureDefaultCollection();
   const repairedCollectionMemberships = collectionRepository.repairDefaultMemberships();
@@ -104,6 +120,9 @@ async function bootstrap(): Promise<void> {
 
   async function shutdown(signal: string): Promise<void> {
     log.info(`Received ${signal}, shutting down`);
+    if (cacheCleanupTimer) {
+      clearInterval(cacheCleanupTimer);
+    }
     await watcherService.stop();
     server.close(() => process.exit(0));
   }

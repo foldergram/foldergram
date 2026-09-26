@@ -6,6 +6,8 @@ import {
   APP_DEFAULT_LOCALE_SETTING_KEY,
   AUTH_PASSWORD_HASH_SETTING_KEY,
   AUTH_PASSWORD_SALT_SETTING_KEY,
+  AUTH_PATTERN_HASH_SETTING_KEY,
+  AUTH_PATTERN_SALT_SETTING_KEY,
   AUTH_SESSION_SECRET_SETTING_KEY,
   AUTH_SESSION_VERSION_SETTING_KEY,
   AUTH_VIEWER_ACCESS_MODE_SETTING_KEY,
@@ -36,6 +38,8 @@ interface AuthConfigSnapshot {
   adminPasswordSalt: Buffer | null;
   viewerPasswordHash: Buffer | null;
   viewerPasswordSalt: Buffer | null;
+  patternUnlockHash: Buffer | null;
+  patternUnlockSalt: Buffer | null;
   sessionSecret: Buffer | null;
   sessionVersion: number;
   viewerAccessMode: ViewerAccessMode;
@@ -54,6 +58,7 @@ export interface AuthStatus {
   accessMode: ViewerAccessMode;
   likesMode: LikesMode;
   defaultLocale: SupportedLocale | null;
+  patternUnlock: boolean;
   capabilities: AuthCapabilities;
 }
 
@@ -152,6 +157,7 @@ function createStatus(role: AuthRole, authenticated: boolean, enabled: boolean, 
     accessMode,
     likesMode: capabilities.canUseSharedLikes ? 'shared' : 'local',
     defaultLocale: getDefaultLocale(),
+    patternUnlock: enabled && authConfig.patternUnlockHash !== null && authConfig.patternUnlockSalt !== null,
     capabilities
   };
 }
@@ -164,6 +170,8 @@ function loadAuthConfig(): AuthConfigSnapshot {
   const sessionSecret = decodeBase64Url(appSettingsRepository.get(AUTH_SESSION_SECRET_SETTING_KEY));
   const sessionVersion = parseSessionVersion(appSettingsRepository.get(AUTH_SESSION_VERSION_SETTING_KEY));
   const enabled = adminPasswordHash !== null && adminPasswordSalt !== null && sessionSecret !== null && sessionVersion > 0;
+  const patternUnlockHash = enabled ? decodeBase64Url(appSettingsRepository.get(AUTH_PATTERN_HASH_SETTING_KEY)) : null;
+  const patternUnlockSalt = enabled ? decodeBase64Url(appSettingsRepository.get(AUTH_PATTERN_SALT_SETTING_KEY)) : null;
   const rawViewerAccessMode = parseViewerAccessMode(appSettingsRepository.get(AUTH_VIEWER_ACCESS_MODE_SETTING_KEY));
   const viewerAccessMode =
     enabled && rawViewerAccessMode === 'password' && viewerPasswordHash !== null && viewerPasswordSalt !== null
@@ -178,6 +186,8 @@ function loadAuthConfig(): AuthConfigSnapshot {
     adminPasswordSalt: enabled ? adminPasswordSalt : null,
     viewerPasswordHash: viewerAccessMode === 'password' ? viewerPasswordHash : null,
     viewerPasswordSalt: viewerAccessMode === 'password' ? viewerPasswordSalt : null,
+    patternUnlockHash: patternUnlockHash !== null && patternUnlockSalt !== null ? patternUnlockHash : null,
+    patternUnlockSalt: patternUnlockHash !== null && patternUnlockSalt !== null ? patternUnlockSalt : null,
     sessionSecret: enabled ? sessionSecret : null,
     sessionVersion: enabled ? sessionVersion : 0,
     viewerAccessMode
@@ -461,6 +471,51 @@ export const authService = {
     return createAuthenticatedStatus('admin');
   },
 
+  setPatternUnlock(pattern: string | null): AuthStatus {
+    if (!authConfig.enabled) {
+      throw new Error('Enable the admin password before configuring the pattern unlock.');
+    }
+
+    if (pattern === null) {
+      appSettingsRepository.remove(AUTH_PATTERN_HASH_SETTING_KEY);
+      appSettingsRepository.remove(AUTH_PATTERN_SALT_SETTING_KEY);
+    } else {
+      const patternSalt = randomBytes(16);
+      const patternHash = hashPassword(pattern, patternSalt);
+      appSettingsRepository.set(AUTH_PATTERN_HASH_SETTING_KEY, patternHash.toString('base64url'));
+      appSettingsRepository.set(AUTH_PATTERN_SALT_SETTING_KEY, patternSalt.toString('base64url'));
+    }
+
+    this.refresh();
+    return createAuthenticatedStatus('admin');
+  },
+
+  verifyPattern(pattern: string): boolean {
+    if (authConfig.patternUnlockHash === null || authConfig.patternUnlockSalt === null) {
+      return false;
+    }
+
+    const candidate = hashPassword(pattern, authConfig.patternUnlockSalt);
+    return candidate.length === authConfig.patternUnlockHash.length &&
+      timingSafeEqual(candidate, authConfig.patternUnlockHash);
+  },
+
+  isPatternUnlockEnabled(): boolean {
+    return authConfig.enabled && authConfig.patternUnlockHash !== null && authConfig.patternUnlockSalt !== null;
+  },
+
+  authorizePatternChange(currentPattern?: string, currentPassword?: string): boolean {
+    if (!this.isPatternUnlockEnabled()) {
+      return true;
+    }
+
+    if (currentPattern && this.verifyPattern(currentPattern)) {
+      return true;
+    }
+
+    return Boolean(currentPassword && this.verifyAdminPassword(currentPassword));
+  },
+
   disable(): AuthStatus {
     appSettingsRepository.remove(AUTH_PASSWORD_HASH_SETTING_KEY);
     appSettingsRepository.remove(AUTH_PASSWORD_SALT_SETTING_KEY);
@@ -469,6 +524,8 @@ export const authService = {
     appSettingsRepository.remove(AUTH_VIEWER_ACCESS_MODE_SETTING_KEY);
     appSettingsRepository.remove(AUTH_VIEWER_PASSWORD_HASH_SETTING_KEY);
     appSettingsRepository.remove(AUTH_VIEWER_PASSWORD_SALT_SETTING_KEY);
+    appSettingsRepository.remove(AUTH_PATTERN_HASH_SETTING_KEY);
+    appSettingsRepository.remove(AUTH_PATTERN_SALT_SETTING_KEY);
 
     this.refresh();
     return createStatus('admin', true, false, 'off');

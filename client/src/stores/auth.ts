@@ -2,15 +2,20 @@ import { defineStore } from 'pinia';
 
 import {
   changePasswordProtection,
+  configurePatternUnlock as configurePatternUnlockApi,
   disablePasswordProtection,
   enablePasswordProtection,
   fetchAuthStatus,
   loginWithPassword,
+  resetPatternWithPassword as resetPatternWithPasswordApi,
+  unlockWithPattern as unlockWithPatternApi,
   unlockAdmin as unlockAdminSession,
   updateViewerAccess,
   logout
 } from '../api/gallery';
 import type { AuthCapabilities, AuthRole, AuthStatus, LikesMode, ViewerAccessMode } from '../types/api';
+
+const PATTERN_SESSION_STORAGE_KEY = 'foldergram-pattern-session';
 
 interface AuthState {
   ready: boolean;
@@ -22,6 +27,8 @@ interface AuthState {
   accessMode: ViewerAccessMode;
   likesMode: LikesMode;
   defaultLocale: AuthStatus['defaultLocale'];
+  patternUnlock: boolean;
+  patternSessionUnlocked: boolean;
   capabilities: AuthCapabilities;
   error: string | null;
 }
@@ -65,7 +72,8 @@ function createCapabilities(role: AuthRole): AuthCapabilities {
 function createAnonymousStatus(
   enabled: boolean,
   accessMode: ViewerAccessMode,
-  defaultLocale: AuthStatus['defaultLocale']
+  defaultLocale: AuthStatus['defaultLocale'],
+  patternUnlock = false
 ): AuthStatus {
   return {
     enabled,
@@ -74,8 +82,38 @@ function createAnonymousStatus(
     accessMode,
     likesMode: 'local',
     defaultLocale,
+    patternUnlock,
     capabilities: createCapabilities('anonymous')
   };
+}
+
+function readPatternSessionUnlocked(): boolean {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  try {
+    return window.sessionStorage.getItem(PATTERN_SESSION_STORAGE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function writePatternSessionUnlocked(unlocked: boolean): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    if (unlocked) {
+      window.sessionStorage.setItem(PATTERN_SESSION_STORAGE_KEY, '1');
+      return;
+    }
+
+    window.sessionStorage.removeItem(PATTERN_SESSION_STORAGE_KEY);
+  } catch {
+    // Private mode and blocked storage should still let the in-memory flag work.
+  }
 }
 
 async function clearAppCaches(): Promise<void> {
@@ -98,12 +136,17 @@ export const useAuthStore = defineStore('auth', {
     accessMode: 'off',
     likesMode: 'shared',
     defaultLocale: null,
+    patternUnlock: false,
+    patternSessionUnlocked: readPatternSessionUnlocked(),
     capabilities: createCapabilities('admin'),
     error: null
   }),
   getters: {
     accessGranted: (state) => !state.enabled || state.authenticated || state.accessMode === 'public',
     requiresLogin: (state) => state.enabled && state.accessMode !== 'public' && !state.authenticated,
+    // The pattern gate sits on top of password protection: whenever a pattern is
+    // configured, closing the tab or leaving the web app must ask for it again.
+    patternRequired: (state) => state.enabled && state.patternUnlock && !state.patternSessionUnlocked,
     isAdmin: (state) => state.capabilities.canAccessSettings,
     canSignOut: (state) => state.enabled && state.authenticated,
     canManageLibrary: (state) => state.capabilities.canManageLibrary,
@@ -128,8 +171,12 @@ export const useAuthStore = defineStore('auth', {
       this.accessMode = status.accessMode;
       this.likesMode = status.likesMode;
       this.defaultLocale = status.defaultLocale;
+      this.patternUnlock = status.patternUnlock;
       this.capabilities = status.capabilities;
       this.ready = true;
+      if (!status.patternUnlock) {
+        this.clearPatternSession();
+      }
     },
 
     clearError() {
@@ -149,6 +196,24 @@ export const useAuthStore = defineStore('auth', {
       this.unlockDialogOpen = false;
     },
 
+    markPatternSessionUnlocked() {
+      this.patternSessionUnlocked = true;
+      writePatternSessionUnlocked(true);
+    },
+
+    clearPatternSession() {
+      this.patternSessionUnlocked = false;
+      writePatternSessionUnlocked(false);
+    },
+
+    lockPatternIfBackgrounded() {
+      if (!this.enabled || !this.patternUnlock || !this.patternSessionUnlocked) {
+        return;
+      }
+
+      this.clearPatternSession();
+    },
+
     handleUnauthorized(message = 'Your session ended. Log in again.') {
       if (!this.enabled) {
         return;
@@ -156,8 +221,9 @@ export const useAuthStore = defineStore('auth', {
 
       this.ready = true;
       this.loading = false;
-      this.applyStatus(createAnonymousStatus(this.enabled, this.accessMode, this.defaultLocale));
+      this.applyStatus(createAnonymousStatus(this.enabled, this.accessMode, this.defaultLocale, this.patternUnlock));
       this.unlockDialogOpen = false;
+      this.clearPatternSession();
       this.error = this.accessMode === 'public' ? null : message;
     },
 
@@ -192,6 +258,7 @@ export const useAuthStore = defineStore('auth', {
         const payload = await loginWithPassword(password);
         this.applyStatus(payload.auth);
         this.unlockDialogOpen = false;
+        this.markPatternSessionUnlocked();
         this.error = null;
       } catch (error) {
         this.error = error instanceof Error ? error.message : 'Unable to sign in.';
@@ -208,6 +275,7 @@ export const useAuthStore = defineStore('auth', {
         const payload = await logout();
         this.applyStatus(payload.auth);
         this.unlockDialogOpen = false;
+        this.clearPatternSession();
         this.error = null;
         await clearAppCaches();
       } catch (error) {
@@ -297,6 +365,59 @@ export const useAuthStore = defineStore('auth', {
         await clearAppCaches();
       } catch (error) {
         this.error = error instanceof Error ? error.message : 'Unable to unlock admin access.';
+        throw error;
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    async configurePatternUnlock(
+      pattern: string | null,
+      proof?: { currentPattern?: string; currentPassword?: string }
+    ) {
+      this.loading = true;
+
+      try {
+        const payload = await configurePatternUnlockApi(pattern, proof);
+        this.applyStatus(payload.auth);
+        if (pattern) {
+          this.markPatternSessionUnlocked();
+        }
+        this.error = null;
+      } catch (error) {
+        this.error = error instanceof Error ? error.message : 'Unable to update the pattern unlock.';
+        throw error;
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    async unlockPattern(pattern: string) {
+      this.loading = true;
+
+      try {
+        const payload = await unlockWithPatternApi(pattern);
+        this.applyStatus(payload.auth);
+        this.markPatternSessionUnlocked();
+        this.error = null;
+      } catch (error) {
+        this.error = error instanceof Error ? error.message : 'Incorrect pattern.';
+        throw error;
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    async resetPatternWithPassword(password: string) {
+      this.loading = true;
+
+      try {
+        const payload = await resetPatternWithPasswordApi(password);
+        this.applyStatus(payload.auth);
+        this.markPatternSessionUnlocked();
+        this.error = null;
+      } catch (error) {
+        this.error = error instanceof Error ? error.message : 'Incorrect admin password.';
         throw error;
       } finally {
         this.loading = false;

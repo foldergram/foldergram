@@ -30,11 +30,18 @@ sharedVideoSurfaceStore.ownerId === `feed:${target.id}`
 
 ## 直推流
 
-`client/src/utils/video-playback.ts` 的 `resolveVideoSource(media, 'auto')`：
+`client/src/utils/video-playback.ts` 的 `resolveVideoSource(media, quality, { playbackMode })`：
 
-- 扫描标记 `original`：播 `/api/originals/:id`（Range 206），手机解码
-- 扫描标记 `preview` 但文件是 mp4/m4v/mov，且 `canDirectPlayHevc()`：同样直推原文件
-- 直推失败才回 HLS；用户手选 480p/720p 才走固定 HLS
+设置里的**视频传送方式**和画质是两件事。
+
+- 传送方式 `转码` + 画质 `auto`：HLS master，`startLevel: 0` 从 480p 起播；播放器在同一源上一档一档爬 720p / 1080p，不整段重载。局域网、外网都这样。
+- 传送方式 `直通` + 画质 `auto`：直推 `/api/originals/:id`（Range 206）。扫描标记 `preview` 但文件是 mp4/m4v/mov，且 `canDirectPlayHevc()`：同样直推原文件。
+- 直通在外网遇到估算码率高于约 3Mbps 的原片时改走 HLS；局域网仍直推。
+- 直推 Range 允许浏览器缓存；冷 seek 的 `waiting` 不再把整台设备切成转码。
+- 手动 480p / 720p / 1080p：固定 HLS。手动原片：仍直推原文件。
+- 直推解不出来、Range 传得太慢、或 `waiting` 超时：降到 HLS，不要只反复 `play()`。
+- 转码拖进度：先把 HLS 掉回 480p，并杀掉同一视频上旧的 ffmpeg 窗口；已转好的段仍即时跳。
+- 直推拖进度：拖动只改时间 UI 并暂停打断旧 Range，松手才一次 `fastSeek`/seek。seek 预热不再重复拉原片头尾。
 
 小窗和沉浸式都必须走这条源，不要给小窗单独塞 preview MP4 / 现场转码。
 

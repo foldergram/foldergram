@@ -80,6 +80,7 @@ describe('VideoMediaPlayer', () => {
       set: (value) => { currentTime = value; }
     });
     player.play = vi.fn().mockResolvedValue(undefined);
+    player.pause = vi.fn();
     player.dispatchEvent(new Event('time-update'));
     await flushPromises();
 
@@ -96,8 +97,8 @@ describe('VideoMediaPlayer', () => {
     (wrapper.vm as any).handleHoldPointerdown(pointer(40));
     (wrapper.vm as any).handleHoldPointermove(pointer(170));
 
-    await vi.waitFor(() => expect(currentTime).toBeCloseTo(25.6, 5));
-    expect((wrapper.vm as any).holdSpeed.scrubSeconds.value).toBeCloseTo(25.6, 5);
+    await vi.waitFor(() => expect((wrapper.vm as any).holdSpeed.scrubSeconds.value).toBeCloseTo(25.6, 5));
+    expect(currentTime).toBe(10);
     expect(wrapper.get('.video-media-player__hold-indicator').text()).toContain('0:25 / 1:40');
 
     (wrapper.vm as any).handleHoldPointerup(pointer(170));
@@ -365,6 +366,14 @@ describe('VideoMediaPlayer', () => {
   });
 
   it('ignores an HLS handover source and keeps the direct original URL', () => {
+    useAppStore().$patch({
+      stats: {
+        preferences: {
+          videoPlaybackMode: 'direct'
+        }
+      } as never
+    });
+
     const wrapper = mount(VideoMediaPlayer, {
       props: {
         src: '/test-video.mp4',

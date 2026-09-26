@@ -243,7 +243,7 @@ watch(
 
 .app-shell {
   --mobile-safe-area-bottom: 0px;
-  --mobile-bottom-nav-height: calc(3.55rem + var(--mobile-safe-area-bottom));
+  --mobile-bottom-nav-height: calc(4.55rem + var(--mobile-safe-area-bottom));
 }
 
 .app-shell--standalone {
