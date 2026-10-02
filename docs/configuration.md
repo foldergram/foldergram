@@ -126,7 +126,7 @@ Instead:
 
 ## Excluded folders
 
-Folder exclusions can come from two places:
+Folder exclusion rules can come from two places:
 
 - `GALLERY_EXCLUDED_FOLDERS` in `.env` or Docker Compose
 - custom rules saved from `Settings -> General Settings`
@@ -138,6 +138,19 @@ Behavior:
 - env-backed rules appear read-only in `General Settings`
 - custom rules are stored in SQLite `app_settings` and can be changed at runtime
 - after changing custom rules, run a full scan from `Settings -> Scan & Library` so already-indexed matches are soft-removed from the library
+
+You can also exclude an individual subtree by placing an empty regular file
+named exactly `.nofoldergram` inside its containing folder below `GALLERY_ROOT`.
+This works alongside both rule sources without changing them. The marker name
+is fixed: there is no environment variable or Settings control to configure it,
+and the file contents are ignored. A marker directly in `GALLERY_ROOT` is ignored.
+
+In development mode, adding or removing a marker requests a debounced full scan,
+as does replacing a marker with a symlink or replacing a symlink with a regular
+marker file. Content-only changes do not request a scan.
+In Docker or other production deployments, run a manual full scan after changing
+markers. See [How It Works](./how-it-works#excluding-a-subtree-with-nofoldergram)
+for stories, carousel posts, and restoration behavior.
 
 ## Settings sections
 

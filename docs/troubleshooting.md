@@ -73,6 +73,7 @@ Start with the gallery structure rules:
 
 - files directly inside `GALLERY_ROOT` are ignored
 - hidden folders are ignored
+- a regular `.nofoldergram` file in a folder or any ancestor below `GALLERY_ROOT` excludes that entire subtree
 - a folder is indexed when it directly contains supported media
 - in reserved carousel mode, a folder is also indexed when `carousels/` has an immediate child containing supported media directly
 
@@ -193,6 +194,7 @@ Folder exclusions can come from:
 
 - `GALLERY_EXCLUDED_FOLDERS` in `.env` or Docker Compose
 - custom rules in `Settings -> General Settings`
+- a regular file named exactly `.nofoldergram` inside the folder or an ancestor below `GALLERY_ROOT`
 
 Check:
 
@@ -200,9 +202,16 @@ Check:
 - rules with a slash match one exact relative path below `GALLERY_ROOT`
 - env-backed rules require a restart to change
 - custom rules require `Save changes`, then a full scan from `Settings -> Scan & Library`
+- `.nofoldergram` must be a regular file, rather than a directory or symlink; a marker directly in `GALLERY_ROOT` is ignored
+- adding or removing markers triggers a debounced scan only in development mode; Docker and other production deployments require a manual full scan
 
 If the folder was already indexed before the rule existed, it will stay visible
 until that scan finishes and soft-removes it from the index.
+
+If an expected folder is missing, check it and its ancestors for `.nofoldergram`,
+as well as environment and Settings exclusions. Remove the marker and run a full
+scan to restore matching index records. The same check applies to missing story
+capsules and carousel posts.
 
 ## Videos or animated AVIF files fail to index or generate previews
 

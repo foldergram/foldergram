@@ -58,6 +58,7 @@ Foldergram maps directly to your filesystem:
 2. **Posts:** Each supported image or video directly inside an App Folder becomes one indexed post. Media in `AppFolder/carousels/Post name/` is grouped into a carousel post in reserved mode.
 3. **Nested folders stay separate:** Nested local folders are not merged into their parent App Folder. If a nested folder directly contains supported media, it becomes its own App Folder with parent folder name in the route (e.g. /folder/parent-nested).
 4. **Root files are ignored:** Files placed directly in `GALLERY_ROOT` are ignored.
+5. **Folder markers:** A regular file named exactly `.nofoldergram` excludes its containing folder and all descendants. A marker directly in `GALLERY_ROOT` is ignored.
 
 Runtime reads come from SQLite and generated derivatives, not from live filesystem scans on every request.
 
@@ -275,12 +276,32 @@ not read directly by the container.
 
 ### Excluded Folders
 
+- Place an empty `.nofoldergram` file inside a folder to exclude that folder and its entire subtree, including stories and carousel posts. The filename is fixed and contents are ignored.
 - Use `GALLERY_EXCLUDED_FOLDERS` to skip unwanted source folders during discovery and rescans.
 - Rules without a slash match a folder name anywhere in the gallery tree, such as `@eaDir` or `thumbnails`.
 - Rules with a slash match one exact relative folder path beneath `GALLERY_ROOT`, such as `Archive/cache`.
 - The Settings sidebar separates app-wide preferences into `General Settings`. That section includes the instant language selector plus saved app-language default, stories and carousel folder modes, Home/Reels defaults, and the excluded-folder editor.
 - `General Settings` can add or remove custom exclusion rules at runtime. Env-backed rules stay read-only there and still require a restart to change.
 - After changing excluded folders, stories mode, or carousel mode in `General Settings`, follow the action shown in `Scan & Library` so indexed folders and posts are classified correctly. Run a full scan normally; use the index rebuild when the gallery location requires one.
+
+For example, `Archive` and everything below it are excluded, while `Trips` is indexed:
+
+```text
+gallery/
+  Trips/
+    photo.jpg
+  Archive/
+    .nofoldergram
+    old-photo.jpg
+    Nested/
+      another-photo.jpg
+```
+
+Adding or removing a marker triggers a debounced full scan in development mode.
+In Docker and other production deployments, run a scan from `Settings -> Scan & Library`
+after changing a marker. Exclusion soft-deletes existing index records; removing
+the marker and scanning again restores them. Originals remain untouched, and
+derivatives follow the usual retention and cleanup rules.
 
 ### Detail Media and Derivative Timing
 

@@ -21,6 +21,7 @@ Foldergram recursively walks `GALLERY_ROOT` and applies these rules:
 - Hidden paths are skipped.
 - Managed storage paths under the gallery root are skipped.
 - Folder exclusions from `GALLERY_EXCLUDED_FOLDERS` and saved `General Settings` rules are skipped.
+- A regular `.nofoldergram` file below the root prunes its containing folder and all descendants.
 - Any non-hidden folder that directly contains supported media becomes an indexed album.
 - Files directly in `GALLERY_ROOT` are ignored.
 - Nested folders are treated separately from their parent folders.
@@ -59,6 +60,33 @@ Excluded folders are skipped during startup scans, rescans, and watcher-driven
 discovery work. Changing the saved runtime rules updates `app_settings`
 immediately, but a follow-up scan from `Settings -> Scan & Library` is still
 required so already-indexed matches can be soft-removed from the library.
+
+### Excluding a subtree with `.nofoldergram`
+
+Place an empty file named exactly `.nofoldergram` inside any folder below
+`GALLERY_ROOT` to exclude that folder and its complete subtree. Foldergram checks
+only the presence of a regular file; its contents are never read. A directory or
+symlink with that name does not act as a marker, and a marker directly inside
+`GALLERY_ROOT` is ignored.
+
+The marker works alongside environment and Settings exclusion rules. It applies
+to ordinary folders and reserved media: a marker in `AppFolder/stories` excludes
+all of that folder's story data, while a marker in one story capsule excludes
+only that capsule and its descendants. Likewise, a marker in
+`AppFolder/carousels` excludes all carousel posts there, while a marker in one
+post directory excludes only that post. Marking the owner folder excludes its
+direct media and all stories, carousels, and nested folders beneath it.
+
+On the next full scan, already-indexed excluded media is soft-deleted. Removing
+the marker and scanning again reactivates matching records with their existing
+identity and sort order. Originals remain untouched, and generated derivatives
+follow the existing retention and cleanup behavior.
+
+The development watcher requests one debounced full scan when markers are added
+or removed, including atomic replacements that change whether the marker is a
+regular file. Changing its contents or replacing a regular marker with another
+regular file does not request a scan. Docker and other production deployments
+require a manual scan from `Settings -> Scan & Library` after changing markers.
 
 ## Storage layout
 
