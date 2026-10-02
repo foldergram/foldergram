@@ -51,6 +51,7 @@ import {
 import { generateAssetKey, getPreviewPathForAssetKey, getThumbnailPathForAssetKey } from '../utils/derivative-paths.js';
 import { resolveTakenAt, serializeImageExifData } from '../utils/exif-utils.js';
 import { resolveOriginalPath } from '../utils/media-paths.js';
+import { hasAncestorExclusionMarker, hasExclusionMarker } from '../utils/exclusion-marker.js';
 import {
   getFolderDisplayInfo,
   getRelativeGalleryPath,
@@ -1030,7 +1031,7 @@ class ScannerService {
         throw error;
       });
 
-    if (!entries) {
+    if (!entries || (currentRelativePath && hasExclusionMarker(entries))) {
       return;
     }
 
@@ -1152,7 +1153,7 @@ class ScannerService {
         throw error;
       });
 
-    if (!entries) {
+    if (!entries || hasExclusionMarker(entries)) {
       return this.clearIndexedFolder(sourceFolderPath, existingFolders);
     }
 
@@ -1281,7 +1282,7 @@ class ScannerService {
         throw error;
       });
 
-    if (!entries) {
+    if (!entries || hasExclusionMarker(entries)) {
       return [];
     }
 
@@ -1336,7 +1337,7 @@ class ScannerService {
         throw error;
       });
 
-    if (!ownerEntries) {
+    if (!ownerEntries || hasExclusionMarker(ownerEntries)) {
       return [];
     }
 
@@ -1371,7 +1372,7 @@ class ScannerService {
         throw error;
       });
 
-    if (!storiesEntries) {
+    if (!storiesEntries || hasExclusionMarker(storiesEntries)) {
       return [];
     }
 
@@ -1513,7 +1514,7 @@ class ScannerService {
         throw error;
       });
 
-    if (!ownerEntries) {
+    if (!ownerEntries || hasExclusionMarker(ownerEntries)) {
       return { ownerFolder: null, results: [] };
     }
 
@@ -1549,6 +1550,16 @@ class ScannerService {
       });
 
     if (!carouselsEntries) {
+      return { ownerFolder: null, results: [] };
+    }
+
+    if (hasExclusionMarker(carouselsEntries)) {
+      const ownerFolder = existingFolders.find((folder) => (
+        folder.role === 'normal' && normalizePath(folder.folder_path) === normalizePath(sourceFolder.relativePath)
+      ));
+      if (ownerFolder) {
+        postRepository.softDeleteMissingReservedCarousels(ownerFolder.id, carouselsRelativePath, []);
+      }
       return { ownerFolder: null, results: [] };
     }
 
@@ -1592,7 +1603,7 @@ class ScannerService {
         .readdir(postAbsolutePath, { withFileTypes: true })
         .catch(() => null);
 
-      if (!postDirEntries) continue;
+      if (!postDirEntries || hasExclusionMarker(postDirEntries)) continue;
 
       const nestedDirs = postDirEntries.filter((e) => e.isDirectory() && !e.name.startsWith('.'));
       for (const nestedDir of nestedDirs) {
@@ -2476,6 +2487,11 @@ class ScannerService {
       });
 
       for (const sourceFolderPath of impactedSourceFolders) {
+        if (await hasAncestorExclusionMarker(appConfig.galleryRoot, sourceFolderPath) !== false) {
+          fallbackReason = `${reason}:fallback`;
+          break;
+        }
+
         const result = await this.scanSourceFolder(
           {
             absolutePath: path.join(appConfig.galleryRoot, sourceFolderPath),
