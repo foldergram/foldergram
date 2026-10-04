@@ -301,6 +301,11 @@ img[data-loaded="true"] {
   border-radius: 999px;
 }
 
+.viewer--modal {
+  width: 100%;
+  min-width: 0;
+}
+
 .viewer__card-wrapper {
   position: relative;
   display: flex;
@@ -314,6 +319,10 @@ img[data-loaded="true"] {
   width: 100%;
   height: 100%;
   max-height: 100%;
+}
+
+.viewer__card-wrapper--carousel {
+  width: 100%;
 }
 
 .viewer__card-wrapper--compact {
@@ -358,6 +367,10 @@ img[data-loaded="true"] {
 
 .viewer__media--page {
   min-height: 34rem;
+}
+
+.viewer__media--carousel {
+  background: #000;
 }
 
 .viewer__sidebar {
@@ -674,6 +687,23 @@ img[data-loaded="true"] {
 
 .viewer__media-shell--video {
   background: #000;
+}
+
+.viewer__media-shell--carousel {
+  min-width: 0;
+  min-height: 0;
+  background: #000;
+}
+
+.viewer__media-shell--carousel > div {
+  background: #000;
+}
+
+.viewer__media-shell--carousel img,
+.viewer__media-shell--carousel video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 .viewer__media-shell--video-interactive {

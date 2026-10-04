@@ -114,6 +114,7 @@
         {
           'viewer__card-wrapper--modal': isModal,
           'viewer__card-wrapper--compact': isModalSidebarCollapsible,
+          'viewer__card-wrapper--carousel': isCarousel,
         },
       ]"
     >
@@ -125,6 +126,7 @@
             'viewer__media--modal': isModal,
             'viewer__media--page': !isModal,
             'viewer__media--swipe-enabled': isModal,
+            'viewer__media--carousel': isCarousel,
           },
         ]"
         @pointercancel="handleMediaPointercancel"
@@ -132,17 +134,22 @@
         @pointermove="handleMediaPointermove"
         @pointerup="handleMediaPointerup"
       >
-        <CarouselMediaStage
+        <div
           v-if="isCarousel"
-          v-model="carouselIndex"
-          class="viewer__media-shell"
-          :items="image.mediaItems!"
-          prefer-preview
-          :retry-while="appStore.isScanning"
-          loading="eager"
-          :muted="appStore.videoMuted"
-          autoplay
-        />
+          class="viewer__media-shell viewer__media-shell--carousel"
+          :style="mediaShellStyle"
+        >
+          <CarouselMediaStage
+            v-model="carouselIndex"
+            :items="image.mediaItems!"
+            fit-container
+            prefer-preview
+            :retry-while="appStore.isScanning"
+            loading="eager"
+            :muted="appStore.videoMuted"
+            autoplay
+          />
+        </div>
         <template v-else-if="image.mediaType === 'video'">
           <div
             class="viewer__media-shell viewer__media-shell--video viewer__media-shell--video-interactive"

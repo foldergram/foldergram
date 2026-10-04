@@ -1017,6 +1017,26 @@ export const placeRepository = {
 };
 
 export const postRepository = {
+  listCarouselSourceImages(): Array<{
+    postId: number;
+    sourcePath: string;
+    relativePath: string;
+    fileSize: number;
+    mtimeMs: number;
+    extension: string;
+  }> {
+    return database.prepare(`
+      SELECT posts.id AS postId, posts.source_path AS sourcePath,
+        images.relative_path AS relativePath, images.file_size AS fileSize,
+        images.mtime_ms AS mtimeMs, images.extension
+      FROM post_items
+      INNER JOIN posts ON posts.id = post_items.post_id
+      INNER JOIN images ON images.id = post_items.image_id
+      INNER JOIN folders AS source_folders ON source_folders.id = images.folder_id
+      WHERE source_folders.role = 'carousel_source' AND images.is_deleted = 0
+    `).all() as ReturnType<typeof this.listCarouselSourceImages>;
+  },
+
   upsertPost(input: UpsertPostInput): PostRecord {
     const isDeleted = input.isDeleted ?? 0;
     const isTrashed = input.isTrashed ?? 0;
@@ -1238,6 +1258,17 @@ export const postRepository = {
       return this.findById(matchingPosts[0].post_id);
     }
     return undefined;
+  },
+
+  findByUnambiguousImageMembership(imageIds: number[]): PostRecord | undefined {
+    if (imageIds.length === 0) return undefined;
+    const placeholders = imageIds.map(() => '?').join(',');
+    const owners = database.prepare(
+      `SELECT DISTINCT post_id FROM post_items WHERE image_id IN (${placeholders}) LIMIT 2`
+    ).all(...imageIds) as Array<{ post_id: number }>;
+
+    // New or modified slides may have no owner. Never merge multiple existing posts.
+    return owners.length === 1 ? this.findById(owners[0].post_id) : undefined;
   },
 
   isExplicitFolderCover(postId: number): boolean {

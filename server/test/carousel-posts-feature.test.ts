@@ -455,7 +455,9 @@ describe.sequential('carousel posts feature', () => {
     const carouselB = initialFeed.find((post) => post.sourcePath?.endsWith('/carousel-b'))!;
     const carouselAItems = postRepository.listImageRecords(carouselA.id);
     const carouselBItems = postRepository.listImageRecords(carouselB.id);
-    expect(carouselAItems[1].id).toBe(carouselB.id);
+    // Parallel image processing can assign either slide the colliding ID.
+    const collidingImage = carouselAItems.find(image => image.id === carouselB.id);
+    expect(collidingImage).toBeDefined();
 
     const canonicalDetail = await requestApp(app, 'GET', `/api/posts/${carouselB.id}`);
     expect(canonicalDetail.status).toBe(200);
@@ -463,42 +465,42 @@ describe.sequential('carousel posts feature', () => {
     expect(canonicalDetail.body.mediaItems.map((item: { filename: string }) => item.filename)).toEqual(['01.jpg', '02.jpg']);
     expect(canonicalDetail.body.sourcePath).toContain('carousel-b');
 
-    const legacyDetail = await requestApp(app, 'GET', `/api/images/${carouselAItems[1].id}`);
+    const legacyDetail = await requestApp(app, 'GET', `/api/images/${collidingImage!.id}`);
     expect(legacyDetail.status).toBe(200);
     expect(legacyDetail.body.id).toBe(carouselA.id);
     expect(legacyDetail.body.sourcePath).toContain('carousel-a');
 
     expect((await requestApp(app, 'PATCH', `/api/posts/${carouselB.id}/caption`, { caption: 'Canonical B' })).status).toBe(200);
-    expect((await requestApp(app, 'PATCH', `/api/images/${carouselAItems[1].id}/caption`, { caption: 'Legacy A' })).status).toBe(200);
+    expect((await requestApp(app, 'PATCH', `/api/images/${collidingImage!.id}/caption`, { caption: 'Legacy A' })).status).toBe(200);
     expect(postRepository.findById(carouselB.id)?.caption).toBe('Canonical B');
     expect(postRepository.findById(carouselA.id)?.caption).toBe('Legacy A');
 
     expect((await requestApp(app, 'POST', `/api/posts/${carouselB.id}/like`)).body).toMatchObject({ id: carouselB.id, liked: true });
     expect((await requestApp(app, 'DELETE', `/api/posts/${carouselB.id}/like`)).body).toMatchObject({ id: carouselB.id, liked: false });
-    expect((await requestApp(app, 'POST', `/api/images/${carouselAItems[1].id}/like`)).body).toMatchObject({ id: carouselA.id, liked: true });
-    expect((await requestApp(app, 'DELETE', `/api/images/${carouselAItems[1].id}/like`)).body).toMatchObject({ id: carouselA.id, liked: false });
+    expect((await requestApp(app, 'POST', `/api/images/${collidingImage!.id}/like`)).body).toMatchObject({ id: carouselA.id, liked: true });
+    expect((await requestApp(app, 'DELETE', `/api/images/${collidingImage!.id}/like`)).body).toMatchObject({ id: carouselA.id, liked: false });
 
     expect((await requestApp(app, 'POST', `/api/posts/${carouselB.id}/save`)).body).toMatchObject({ id: carouselB.id, isSaved: true });
     expect((await requestApp(app, 'DELETE', `/api/posts/${carouselB.id}/save`)).body).toMatchObject({ id: carouselB.id, isSaved: false });
-    expect((await requestApp(app, 'POST', `/api/images/${carouselAItems[1].id}/save`)).body).toMatchObject({ id: carouselA.id, isSaved: true });
-    expect((await requestApp(app, 'DELETE', `/api/images/${carouselAItems[1].id}/save`)).body).toMatchObject({ id: carouselA.id, isSaved: false });
+    expect((await requestApp(app, 'POST', `/api/images/${collidingImage!.id}/save`)).body).toMatchObject({ id: carouselA.id, isSaved: true });
+    expect((await requestApp(app, 'DELETE', `/api/images/${collidingImage!.id}/save`)).body).toMatchObject({ id: carouselA.id, isSaved: false });
 
     const collectionResponse = await requestApp(app, 'POST', '/api/collections', { name: 'Collision checks' });
     const collectionSlug = collectionResponse.body.collection.slug as string;
     expect((await requestApp(app, 'POST', `/api/collections/${collectionSlug}/posts/${carouselB.id}`)).body.id).toBe(carouselB.id);
     expect((await requestApp(app, 'DELETE', `/api/collections/${collectionSlug}/posts/${carouselB.id}`)).body.id).toBe(carouselB.id);
-    expect((await requestApp(app, 'POST', `/api/collections/${collectionSlug}/images/${carouselAItems[1].id}`)).body.id).toBe(carouselA.id);
-    expect((await requestApp(app, 'DELETE', `/api/collections/${collectionSlug}/images/${carouselAItems[1].id}`)).body.id).toBe(carouselA.id);
+    expect((await requestApp(app, 'POST', `/api/collections/${collectionSlug}/images/${collidingImage!.id}`)).body.id).toBe(carouselA.id);
+    expect((await requestApp(app, 'DELETE', `/api/collections/${collectionSlug}/images/${collidingImage!.id}`)).body.id).toBe(carouselA.id);
 
     expect((await requestApp(app, 'POST', `/api/posts/${carouselB.id}/trash`)).body.id).toBe(carouselB.id);
     expect(postRepository.findById(carouselA.id)?.is_trashed).toBe(0);
     expect((await requestApp(app, 'POST', `/api/posts/${carouselB.id}/restore`)).body.id).toBe(carouselB.id);
-    expect((await requestApp(app, 'POST', `/api/images/${carouselAItems[1].id}/trash`)).body.id).toBe(carouselA.id);
+    expect((await requestApp(app, 'POST', `/api/images/${collidingImage!.id}/trash`)).body.id).toBe(carouselA.id);
     expect(postRepository.findById(carouselB.id)?.is_trashed).toBe(0);
-    expect((await requestApp(app, 'POST', `/api/images/${carouselAItems[1].id}/restore`)).body.id).toBe(carouselA.id);
+    expect((await requestApp(app, 'POST', `/api/images/${collidingImage!.id}/restore`)).body.id).toBe(carouselA.id);
 
     expect((await requestApp(app, 'GET', `/api/share/posts/${carouselB.id}`)).body.id).toBe(carouselB.id);
-    expect((await requestApp(app, 'GET', `/api/share/images/${carouselAItems[1].id}`)).body.id).toBe(carouselA.id);
+    expect((await requestApp(app, 'GET', `/api/share/images/${collidingImage!.id}`)).body.id).toBe(carouselA.id);
 
     expect((await requestApp(app, 'GET', '/api/places')).body).toEqual({ items: [] });
     const place = placeRepository.upsertCity({
@@ -569,7 +571,7 @@ describe.sequential('carousel posts feature', () => {
       await expect(fs.stat(path.join(appConfig.galleryRoot, image.relative_path))).resolves.toBeDefined();
     }
 
-    expect((await requestApp(app, 'DELETE', `/api/images/${carouselAItems[1].id}`)).body.id).toBe(carouselA.id);
+    expect((await requestApp(app, 'DELETE', `/api/images/${collidingImage!.id}`)).body.id).toBe(carouselA.id);
     for (const image of carouselAItems) {
       await expect(fs.stat(path.join(appConfig.galleryRoot, image.relative_path))).rejects.toMatchObject({ code: 'ENOENT' });
       await expect(fs.stat(path.join(appConfig.thumbnailsDir, image.thumbnail_path))).rejects.toMatchObject({ code: 'ENOENT' });
@@ -591,6 +593,8 @@ describe.sequential('carousel posts feature', () => {
     const second = posts.find((post) => post.sourcePath.endsWith('/second'))!;
     const firstItems = postRepository.listImageRecords(first.id);
     const secondItems = postRepository.listImageRecords(second.id);
+
+    expect(postRepository.findByUnambiguousImageMembership([firstItems[0].id, secondItems[0].id])).toBeUndefined();
 
     expect(() =>
       postRepository.upsertPostWithItems({
@@ -643,6 +647,337 @@ describe.sequential('carousel posts feature', () => {
     expect(feedAfter.items[0].id).toBe(originalPostId);
     expect(feedAfter.items[0].caption).toBe('Day 1 memories');
     expect(galleryService.getLikes().items.map((i) => i.id)).toContain(originalPostId);
+  });
+
+  it.each(['added', 'removed', 'modified', 'single'])('preserves a renamed carousel with %s slides and succeeds on repeat scans', async (change) => {
+    const root = path.join(appConfig.galleryRoot, 'album', 'carousels');
+    const oldPath = path.join(root, 'original');
+    const newPath = path.join(root, 'renamed');
+    await fs.mkdir(oldPath, { recursive: true });
+    await fs.writeFile(path.join(oldPath, '01.jpg'), 'first-slide');
+    await fs.writeFile(path.join(oldPath, '02.jpg'), 'second-slide-longer');
+    await fs.writeFile(path.join(oldPath, '03.jpg'), 'third-slide-even-longer');
+    expect((await scannerService.scanAll('manual'))?.status).toBe('completed');
+
+    const original = postRepository.findBySourcePath('album/carousels/original')!;
+    const originalItems = postRepository.listImageRecords(original.id);
+    galleryService.updateImageCaption(original.id, 'Keep these memories');
+    galleryService.likeImage(original.id);
+    galleryService.saveImage(original.id);
+    const collection = await requestApp(app, 'POST', '/api/collections', { name: 'Memories' });
+    const collectionSlug = collection.body.collection.slug as string;
+    expect((await requestApp(app, 'POST', `/api/collections/${collectionSlug}/posts/${original.id}`)).status).toBe(200);
+
+    await fs.rename(oldPath, newPath);
+    if (change === 'added') await fs.writeFile(path.join(newPath, '04.jpg'), 'added-slide');
+    if (change === 'removed' || change === 'single') await fs.rm(path.join(newPath, '03.jpg'));
+    if (change === 'single') await fs.rm(path.join(newPath, '02.jpg'));
+    if (change === 'modified') await fs.writeFile(path.join(newPath, '03.jpg'), 'modified-slide-with-new-size');
+
+    for (const reason of ['manual', 'manual', 'startup']) {
+      const scan = await scannerService.scanAll(reason);
+      expect(scan?.status).toBe('completed');
+      expect(scan?.error_text).toBeNull();
+      const renamed = postRepository.findBySourcePath('album/carousels/renamed')!;
+      expect(renamed.id).toBe(original.id);
+      expect(renamed.caption).toBe('Keep these memories');
+      expect(renamed.sort_timestamp).toBe(original.sort_timestamp);
+      expect(renamed.post_type).toBe(change === 'single' ? 'single' : 'carousel');
+      expect(postRepository.countAll()).toBe(1);
+      const items = postRepository.listImageRecords(original.id);
+      const expectedNames = change === 'added' ? ['01.jpg', '02.jpg', '03.jpg', '04.jpg']
+        : change === 'single' ? ['01.jpg'] : change === 'removed' ? ['01.jpg', '02.jpg'] : ['01.jpg', '02.jpg', '03.jpg'];
+      expect(items.map(image => image.filename)).toEqual(expectedNames);
+      expect(items[0].id).toBe(originalItems[0].id);
+      expect(items.every(image => image.relative_path.startsWith('album/carousels/renamed/'))).toBe(true);
+      expect(galleryService.getLikes().items.map(item => item.id)).toEqual([original.id]);
+      expect(galleryService.getCollectionImages('saved', 1, 10)?.items.map(item => item.id)).toEqual([original.id]);
+      expect(galleryService.getCollectionImages(collectionSlug, 1, 10)?.items.map(item => item.id)).toEqual([original.id]);
+    }
+  });
+
+  it('preserves separate renamed carousels when one slide cannot be matched uniquely', async () => {
+    const root = path.join(appConfig.galleryRoot, 'album', 'carousels');
+    const stableTime = new Date('2025-01-01T00:00:00Z');
+    for (const name of ['first', 'second']) {
+      await fs.mkdir(path.join(root, name), { recursive: true });
+      await fs.writeFile(path.join(root, name, '01.jpg'), 'same-slide');
+      await fs.utimes(path.join(root, name, '01.jpg'), stableTime, stableTime);
+      await fs.writeFile(path.join(root, name, '02.jpg'), `${name}-unique-slide`);
+    }
+    expect((await scannerService.scanAll('manual'))?.status).toBe('completed');
+    const originals = ['first', 'second'].map(name => postRepository.findBySourcePath(`album/carousels/${name}`)!);
+    for (const [index, name] of ['first', 'second'].entries()) {
+      galleryService.updateImageCaption(originals[index].id, `${name} memories`);
+      await fs.rename(path.join(root, name), path.join(root, `${name}-renamed`));
+    }
+
+    expect((await scannerService.scanAll('manual'))?.status).toBe('completed');
+    expect(postRepository.countAll()).toBe(2);
+    for (const [index, name] of ['first', 'second'].entries()) {
+      const renamed = postRepository.findBySourcePath(`album/carousels/${name}-renamed`)!;
+      expect(renamed.id).toBe(originals[index].id);
+      expect(renamed.caption).toBe(`${name} memories`);
+      expect(postRepository.listImageRecords(renamed.id).map(image => image.relative_path)).toEqual([
+        `album/carousels/${name}-renamed/01.jpg`, `album/carousels/${name}-renamed/02.jpg`
+      ]);
+    }
+    expect((await scannerService.scanAll('startup'))?.status).toBe('completed');
+  });
+
+  it.each(['new-first', 'renamed-first', 'different-album'])('does not transfer a split carousel history based on discovery order (%s)', async (order) => {
+    const root = path.join(appConfig.galleryRoot, 'album', 'carousels');
+    const originalPath = path.join(root, 'original');
+    const renamedPath = path.join(root, order === 'renamed-first' ? 'a-renamed' : 'z-renamed');
+    const newPath = order === 'different-album'
+      ? path.join(appConfig.galleryRoot, 'a-album', 'carousels', 'new')
+      : path.join(root, order === 'renamed-first' ? 'z-new' : 'a-new');
+    await fs.mkdir(originalPath, { recursive: true });
+    for (const [index, content] of ['first-slide', 'second-slide-longer', 'third-slide-even-longer'].entries()) {
+      await fs.writeFile(path.join(originalPath, `0${index + 1}.jpg`), content);
+    }
+    expect((await scannerService.scanAll('manual'))?.status).toBe('completed');
+    const original = postRepository.findBySourcePath('album/carousels/original')!;
+    const originalIds = postRepository.listImageRecords(original.id).map(image => image.id);
+    galleryService.updateImageCaption(original.id, 'Original history');
+    galleryService.likeImage(original.id);
+    galleryService.saveImage(original.id);
+    await fs.rename(originalPath, renamedPath);
+    await fs.mkdir(newPath, { recursive: true });
+    await fs.rename(path.join(renamedPath, '01.jpg'), path.join(newPath, '01.jpg'));
+    await fs.writeFile(path.join(newPath, 'new.jpg'), 'entirely-new-slide');
+
+    for (const reason of ['manual', 'startup']) {
+      const scan = await scannerService.scanAll(reason);
+      expect(scan?.status).toBe('failed');
+      expect(scan?.error_text).toContain('multiple carousel destinations');
+      expect(postRepository.findById(original.id)).toMatchObject({
+        source_path: original.source_path, caption: 'Original history', sort_timestamp: original.sort_timestamp, is_deleted: 0
+      });
+      expect(postRepository.listImageRecords(original.id).map(image => image.id)).toEqual(originalIds);
+      expect(postRepository.countAll()).toBe(1);
+      expect(galleryService.getLikes().items.map(item => item.id)).toEqual([original.id]);
+      expect(galleryService.getCollectionImages('saved', 1, 10)?.items.map(item => item.id)).toEqual([original.id]);
+    }
+
+    // Returning the surviving slides to one directory lets the scan preserve history.
+    await fs.rename(path.join(newPath, '01.jpg'), path.join(renamedPath, '01.jpg'));
+    expect((await scannerService.scanAll('manual'))?.status).toBe('completed');
+    expect(postRepository.findById(original.id)?.source_path).toBe(getRelativeGalleryPath(appConfig.galleryRoot, renamedPath));
+    expect(postRepository.findById(original.id)?.caption).toBe('Original history');
+    const restoredItems = postRepository.listImageRecords(original.id);
+    expect(restoredItems.map(image => image.filename)).toEqual(['01.jpg', '02.jpg', '03.jpg']);
+    expect(restoredItems.slice(1).map(image => image.id)).toEqual(originalIds.slice(1));
+  });
+
+  it.each([['EACCES', 'directory'], ['EIO', 'directory'], ['EACCES', 'slide'], ['EIO', 'slide']])('preserves carousel memberships when checking the old source fails with %s (%s)', async (code, location) => {
+    const root = path.join(appConfig.galleryRoot, 'album', 'carousels');
+    const originalPath = path.join(root, 'original');
+    const newPath = path.join(root, 'a-new');
+    await fs.mkdir(originalPath, { recursive: true });
+    for (const [index, content] of ['first-slide', 'second-slide-longer', 'third-slide-even-longer'].entries()) {
+      await fs.writeFile(path.join(originalPath, `0${index + 1}.jpg`), content);
+    }
+    expect((await scannerService.scanAll('manual'))?.status).toBe('completed');
+    const original = postRepository.findBySourcePath('album/carousels/original')!;
+    const originalIds = postRepository.listImageRecords(original.id).map(image => image.id);
+    galleryService.updateImageCaption(original.id, 'Keep original history');
+    await fs.mkdir(newPath, { recursive: true });
+    await fs.rename(path.join(originalPath, '01.jpg'), path.join(newPath, '01.jpg'));
+    await fs.writeFile(path.join(newPath, 'new.jpg'), 'entirely-new-slide');
+    const deniedPath = location === 'directory' ? originalPath : path.join(originalPath, '01.jpg');
+    const originalAccess = fs.access;
+    const accessSpy = vi.spyOn(fs, 'access').mockImplementation(async (target, mode) => {
+      if (String(target) === deniedPath) throw Object.assign(new Error(`${code}: cannot inspect original source`), { code });
+      return originalAccess(target, mode);
+    });
+    try {
+      const scan = await scannerService.scanAll('manual');
+      expect(scan?.status).toBe('failed');
+      expect(scan?.error_text).toContain(code);
+      expect(postRepository.findById(original.id)).toMatchObject({ source_path: original.source_path, caption: 'Keep original history', is_deleted: 0 });
+      expect(postRepository.listImageRecords(original.id).map(image => image.id)).toEqual(originalIds);
+      expect(postRepository.countAll()).toBe(1);
+    } finally {
+      accessSpy.mockRestore();
+    }
+    await expect(fs.stat(originalPath)).resolves.toBeDefined();
+  });
+
+  it.each(['EACCES', 'EIO'])('does not retire a carousel when reading its directory fails with %s', async (code) => {
+    const sourcePath = path.join(appConfig.galleryRoot, 'album', 'carousels', 'original');
+    await fs.mkdir(sourcePath, { recursive: true });
+    await fs.writeFile(path.join(sourcePath, '01.jpg'), 'first-slide');
+    await fs.writeFile(path.join(sourcePath, '02.jpg'), 'second-slide-longer');
+    expect((await scannerService.scanAll('manual'))?.status).toBe('completed');
+    const original = postRepository.findBySourcePath('album/carousels/original')!;
+    const originalIds = postRepository.listImageRecords(original.id).map(image => image.id);
+    galleryService.updateImageCaption(original.id, 'Keep history');
+    const originalReaddir = fs.readdir;
+    const readdirSpy = vi.spyOn(fs, 'readdir').mockImplementation(((target: Parameters<typeof fs.readdir>[0], options: unknown) => {
+      if (String(target) === sourcePath) return Promise.reject(Object.assign(new Error(`${code}: cannot read carousel directory`), { code }));
+      return originalReaddir(target, options as Parameters<typeof fs.readdir>[1]);
+    }) as typeof fs.readdir);
+    try {
+      const scan = await scannerService.scanAll('manual');
+      expect(scan?.status).toBe('failed');
+      expect(scan?.error_text).toContain(code);
+      expect(postRepository.findById(original.id)).toMatchObject({ source_path: original.source_path, caption: 'Keep history', is_deleted: 0 });
+      expect(postRepository.listImageRecords(original.id).map(image => image.id)).toEqual(originalIds);
+      expect(postRepository.listImageRecords(original.id).every(image => image.is_deleted === 0)).toBe(true);
+    } finally {
+      readdirSpy.mockRestore();
+    }
+    expect((await scannerService.scanAll('manual'))?.status).toBe('completed');
+  });
+
+  it.each([['unchanged', 'distinct'], ['added', 'distinct'], ['unchanged', 'overlap'], ['added', 'overlap'], ['added', 'mixed']])('rejects a previously indexed rename destination without merging histories (%s slides, %s filenames)', async (change, filenames) => {
+    const root = path.join(appConfig.galleryRoot, 'album', 'carousels');
+    const originalPath = path.join(root, 'original');
+    const destinationPath = path.join(root, 'destination');
+    for (const name of ['original', 'destination']) {
+      await fs.mkdir(path.join(root, name), { recursive: true });
+      for (const position of ['01', '02']) {
+        const filename = filenames === 'distinct' ? `${name}-${position}.jpg` : `${position}.jpg`;
+        const sameFirstSlide = filenames === 'mixed' && position === '01';
+        const filePath = path.join(root, name, filename);
+        await fs.writeFile(filePath, sameFirstSlide ? 'same-first-slide' : `${name}-${position}-slide`);
+        const timestamp = new Date(name === 'original' || sameFirstSlide ? '2025-01-01T00:00:00Z' : '2025-01-02T00:00:00Z');
+        await fs.utimes(filePath, timestamp, timestamp);
+      }
+    }
+    expect((await scannerService.scanAll('manual'))?.status).toBe('completed');
+    const original = postRepository.findBySourcePath('album/carousels/original')!;
+    const destination = postRepository.findBySourcePath('album/carousels/destination')!;
+    const originalIds = postRepository.listImageRecords(original.id).map(image => image.id);
+    const destinationImages = postRepository.listImageRecords(destination.id);
+    const destinationIds = destinationImages.map(image => image.id);
+    galleryService.likeImage(original.id);
+    galleryService.likeImage(destination.id);
+    galleryService.saveImage(original.id);
+    galleryService.saveImage(destination.id);
+    galleryService.updateImageCaption(original.id, 'Original history');
+    galleryService.updateImageCaption(destination.id, 'Destination history');
+    await fs.rm(destinationPath, { recursive: true });
+    await fs.rename(originalPath, destinationPath);
+    if (change === 'added') await fs.writeFile(path.join(destinationPath, 'new.jpg'), 'newly-added-slide');
+
+    for (const reason of ['manual', 'startup']) {
+      const scan = await scannerService.scanAll(reason);
+      expect(scan?.status).toBe('failed');
+      expect(scan?.error_text).toContain('different indexed post');
+      expect(scan?.error_text).not.toContain('UNIQUE constraint');
+      expect(postRepository.findById(original.id)).toMatchObject({ source_path: original.source_path, caption: 'Original history' });
+      expect(postRepository.findById(destination.id)).toMatchObject({ source_path: destination.source_path, caption: 'Destination history' });
+      expect(postRepository.listImageRecords(original.id).map(image => image.id)).toEqual(originalIds);
+      expect(postRepository.listImageRecords(destination.id).map(image => image.id)).toEqual(destinationIds);
+      expect(postRepository.countAll()).toBe(2);
+      expect(postRepository.listImageRecords(destination.id)).toEqual(destinationImages);
+      expect(postRepository.findById(original.id)?.is_deleted).toBe(0);
+      expect(galleryService.getLikes().items.map(item => item.id).sort()).toEqual([original.id, destination.id].sort());
+      expect(galleryService.getCollectionImages('saved', 1, 10)?.items.map(item => item.id).sort()).toEqual([original.id, destination.id].sort());
+    }
+
+    const freshPath = path.join(root, 'fresh-name');
+    await fs.rename(destinationPath, freshPath);
+    expect((await scannerService.scanAll('manual'))?.status).toBe('completed');
+    expect(postRepository.findById(original.id)).toMatchObject({ source_path: 'album/carousels/fresh-name', caption: 'Original history' });
+    expect(postRepository.findById(destination.id)?.caption).toBe('Destination history');
+    expect(postRepository.findById(destination.id)?.is_deleted).toBe(1);
+  });
+
+  it('rejects an overlapping destination with identical file fingerprints when a slide is added', async () => {
+    const root = path.join(appConfig.galleryRoot, 'album', 'carousels');
+    const timestamp = new Date('2025-01-01T00:00:00Z');
+    for (const name of ['original', 'destination']) {
+      await fs.mkdir(path.join(root, name), { recursive: true });
+      for (const filename of ['01.jpg', '02.jpg']) {
+        const filePath = path.join(root, name, filename);
+        await fs.writeFile(filePath, `same-${filename}-content`);
+        await fs.utimes(filePath, timestamp, timestamp);
+      }
+    }
+    expect((await scannerService.scanAll('manual'))?.status).toBe('completed');
+    const original = postRepository.findBySourcePath('album/carousels/original')!;
+    const destination = postRepository.findBySourcePath('album/carousels/destination')!;
+    const destinationImages = postRepository.listImageRecords(destination.id);
+    galleryService.updateImageCaption(original.id, 'Original history');
+    galleryService.updateImageCaption(destination.id, 'Destination history');
+    galleryService.likeImage(original.id);
+    await fs.rm(path.join(root, 'destination'), { recursive: true });
+    await fs.rename(path.join(root, 'original'), path.join(root, 'destination'));
+    await fs.writeFile(path.join(root, 'destination', '03.jpg'), 'new-slide');
+    for (const reason of ['manual', 'startup']) {
+      const scan = await scannerService.scanAll(reason);
+      expect(scan?.status).toBe('failed');
+      expect(scan?.error_text).toContain('different indexed post');
+      expect(postRepository.findById(original.id)).toMatchObject({ source_path: original.source_path, caption: 'Original history', is_deleted: 0 });
+      expect(postRepository.findById(destination.id)).toMatchObject({ source_path: destination.source_path, caption: 'Destination history', is_deleted: 0 });
+      expect(postRepository.listImageRecords(destination.id)).toEqual(destinationImages);
+      expect(galleryService.getLikes().items.map(item => item.id)).toEqual([original.id]);
+    }
+  });
+
+  it('allows an unchanged destination to remain indexed when a duplicate carousel is removed', async () => {
+    const root = path.join(appConfig.galleryRoot, 'album', 'carousels');
+    const timestamp = new Date('2025-01-01T00:00:00Z');
+    for (const name of ['duplicate', 'destination']) {
+      await fs.mkdir(path.join(root, name), { recursive: true });
+      for (const filename of ['01.jpg', '02.jpg']) {
+        const filePath = path.join(root, name, filename);
+        await fs.writeFile(filePath, `same-${filename}-content`);
+        await fs.utimes(filePath, timestamp, timestamp);
+      }
+    }
+    expect((await scannerService.scanAll('manual'))?.status).toBe('completed');
+    const destination = postRepository.findBySourcePath('album/carousels/destination')!;
+    const duplicate = postRepository.findBySourcePath('album/carousels/duplicate')!;
+    const destinationIds = postRepository.listImageRecords(destination.id).map(image => image.id);
+    await fs.rm(path.join(root, 'duplicate'), { recursive: true });
+    expect((await scannerService.scanAll('manual'))?.status).toBe('completed');
+    expect(postRepository.findById(destination.id)?.is_deleted).toBe(0);
+    expect(postRepository.listImageRecords(destination.id).map(image => image.id)).toEqual(destinationIds);
+    expect(postRepository.findById(duplicate.id)?.is_deleted).toBe(1);
+  });
+
+  it('recovers a previously failed rename scan without rebuilding the library', async () => {
+    const root = path.join(appConfig.galleryRoot, 'album', 'carousels');
+    const oldPath = path.join(root, 'original');
+    const newPath = path.join(root, 'renamed');
+    await fs.mkdir(oldPath, { recursive: true });
+    await fs.writeFile(path.join(oldPath, '01.jpg'), 'first-slide');
+    await fs.writeFile(path.join(oldPath, '02.jpg'), 'second-slide-longer');
+    expect((await scannerService.scanAll('manual'))?.status).toBe('completed');
+    const original = postRepository.findBySourcePath('album/carousels/original')!;
+    galleryService.updateImageCaption(original.id, 'Survives recovery');
+    galleryService.likeImage(original.id);
+    await fs.rename(oldPath, newPath);
+    await fs.writeFile(path.join(newPath, '03.jpg'), 'added-slide');
+
+    // Emulate the old scanner creating a competing post after committing asset moves.
+    const originalUpsert = postRepository.upsertPostWithItems;
+    const upsertSpy = vi.spyOn(postRepository, 'upsertPostWithItems').mockImplementation((input, items) => (
+      originalUpsert.call(postRepository, { ...input, existingPostId: undefined }, items)
+    ));
+    try {
+      const failed = await scannerService.scanAll('manual');
+      expect(failed?.status).toBe('failed');
+      expect(failed?.error_text).toContain('UNIQUE constraint failed: post_items.image_id');
+    } finally {
+      upsertSpy.mockRestore();
+    }
+    expect(postRepository.findById(original.id)?.source_path).toBe('album/carousels/original');
+    expect(imageRepository.getByRelativePath('album/carousels/renamed/01.jpg')).toBeDefined();
+
+    for (const reason of ['manual', 'startup']) {
+      expect((await scannerService.scanAll(reason))?.status).toBe('completed');
+      const renamed = postRepository.findBySourcePath('album/carousels/renamed')!;
+      expect(renamed.id).toBe(original.id);
+      expect(renamed.caption).toBe('Survives recovery');
+      expect(postRepository.listImageRecords(original.id)).toHaveLength(3);
+      expect(galleryService.getLikes().items.map(item => item.id)).toEqual([original.id]);
+      expect(postRepository.countAll()).toBe(1);
+    }
   });
 
   it('repairs and preserves representative Place assignments for posts', async () => {

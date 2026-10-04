@@ -1,7 +1,7 @@
 <template>
   <div
-    class="relative h-full w-full overflow-hidden bg-surface-alt outline-none select-none"
-    :style="{ aspectRatio }"
+    class="relative h-full w-full min-h-0 min-w-0 overflow-hidden bg-surface-alt outline-none select-none"
+    :style="{ aspectRatio: fitContainer ? 'auto' : aspectRatio }"
     role="group"
     aria-roledescription="carousel"
     :aria-label="t('post.carousel.label', { count: items.length })"
@@ -104,6 +104,7 @@ const props = withDefaults(
     loading?: 'eager' | 'lazy';
     muted?: boolean;
     autoplay?: boolean;
+    fitContainer?: boolean;
   }>(),
   {
     modelValue: 0,
@@ -111,7 +112,8 @@ const props = withDefaults(
     retryWhile: false,
     loading: 'lazy',
     muted: true,
-    autoplay: false
+    autoplay: false,
+    fitContainer: false
   }
 );
 
