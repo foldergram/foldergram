@@ -48,6 +48,16 @@ Items use a case-insensitive natural filename sort, so `2-photo.jpg` sorts befor
 
 Renaming files can reorder a post after the next scan without replacing its caption, likes, or saved state. If more than 20 supported files exist, Foldergram uses the first 20 after sorting and reports a warning.
 
+## Renaming and moving carousel posts
+
+You can rename a carousel child folder and add, remove, or replace slides before running a full scan. Foldergram preserves the post ID, caption, likes, saved state, collection membership, and sort date when surviving indexed slides identify one existing post, remain together in one destination, and its old directory is gone. Safe slide matching requires unchanged file size and modification time. If every slide is replaced or no slide can be matched safely, post identity may not be preserved.
+
+If surviving slides from one indexed post are split between carousel directories, the scan stops with an ambiguity error and preserves the existing post memberships. Keep those slides together in one carousel directory and run **Scan Library** again. Permission and I/O failures also stop the scan rather than treating an inaccessible carousel directory as missing; restore access and retry.
+
+Use a directory name that has not been indexed when renaming a carousel. Foldergram does not merge two indexed post histories. When a destination's media or slide membership changes and file size and modification time match slides from another indexed post whose old files are missing, the scan reports a conflict before replacing destination image records, including when filenames overlap. If a conflict is reported, move the renamed carousel to a directory name that has not been indexed, then scan again; post identity can be preserved only when surviving slides can be matched safely to one existing post.
+
+A replacement that has exactly the same paths, sizes, and modification times as the indexed destination cannot be distinguished from an unchanged destination. Detection is also limited when all incoming files have been modified and no longer match the source index.
+
 ## Covers and avatars
 
 The carousel cover and App Folder cover are separate:
@@ -64,6 +74,8 @@ Use **Set as folder cover** in the post viewer to select the currently active ca
 A carousel has one editable caption. Without a custom caption, the display-safe carousel child-folder name is shown, such as `Lions`, even when anonymous-public responses redact the underlying source path. Likes, saves, collection membership, trash, restore, and deletion apply to the whole post, never to one item.
 
 In the viewer, Download original, Open original, dimensions, file size, format, EXIF details, and Set as folder cover follow the active item. Deleting a carousel permanently removes all included originals and generated derivatives.
+
+Carousel photos and videos fit within the same viewer layout as single posts. Wide and tall slides keep their proportions, with black space where needed, and switching slides does not resize the viewer. Feed cards use the first slide's aspect ratio.
 
 ## Item ordering
 
@@ -131,5 +143,6 @@ Structural problems complete the scan with warnings instead of reporting a proce
 - **An emptied carousel disappears:** removing every supported item soft-deletes that post on the next scan; restoring items reactivates the same indexed post when its media identities can be reconciled.
 - **A video is absent from Reels:** videos in a multi-item carousel are intentionally excluded.
 - **Caption fallback is unexpected:** edit the shared caption or rename the carousel child and rescan.
+- **A scan failed with `UNIQUE constraint failed: post_items.image_id` after a rename:** update Foldergram and run **Scan Library** again. Recovery without rebuilding requires surviving slides from one indexed post to remain together in one destination, with no competing indexed post at that path. If the scan reports split destinations or an existing-post conflict, follow [Renaming and moving carousel posts](#renaming-and-moving-carousel-posts) before retrying.
 - **Cover is unexpected:** position 1 controls the post cover; manual or direct `cover.*` rules control the App Folder avatar.
 - **Folder mode has not taken effect:** follow the pending update message in **Settings → Scan & Library**. Run **Scan Library**, or use **Rebuild Library Index** when Settings reports that a rebuild is required.

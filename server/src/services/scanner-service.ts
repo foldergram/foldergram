@@ -87,7 +87,7 @@ import {
   type IndexedFileStatus
 } from '../utils/scan-utils.js';
 import { resolveUniqueSlug, slugifyFolderPath } from '../utils/slug.js';
-import type { FolderRecord, FolderRole, FolderScanStateRecord, ImageRecord, ScanRunRecord } from '../types/models.js';
+import type { FolderRecord, FolderRole, FolderScanStateRecord, ImageRecord, PostRecord, ScanRunRecord } from '../types/models.js';
 
 interface ScanSummary {
   status: string;
@@ -162,6 +162,23 @@ interface ReservedCarouselScanResult {
   results: SourceFolderScanResult[];
 }
 
+interface PendingCarouselPost {
+  folderId: number;
+  sourcePath: string;
+  images: Array<Pick<ImageRecord, 'id' | 'place_id' | 'taken_at' | 'taken_at_source' | 'sort_timestamp'>>;
+}
+
+interface CarouselDiscovery {
+  posts: PendingCarouselPost[];
+  scopes: Array<{ folderId: number; rootPath: string; activePaths: string[] }>;
+}
+
+class SourcePathAccessError extends Error {
+  constructor(targetPath: string, cause: unknown) {
+    super(`Cannot inspect indexed source ${targetPath}: ${cause instanceof Error ? cause.message : String(cause)}`, { cause });
+  }
+}
+
 interface IndexedFileReference {
   absolutePath: string;
   relativePath: string;
@@ -195,6 +212,7 @@ interface ImageProcessingContext {
   moveReconciliationEnabled: boolean;
   claimedMoveImageIds: Set<number>;
   rebuildDerivativeReuseIndex?: RebuildDerivativeReuseIndex;
+  carouselSourceIndex?: Map<string, ReturnType<typeof postRepository.listCarouselSourceImages>>;
 }
 
 interface RebuildDerivativeReuseIndex {
@@ -1501,6 +1519,7 @@ class ScannerService {
     warnings: ScanErrorCollector,
     options: FullScanOptions,
     context: ImageProcessingContext,
+    discovery: CarouselDiscovery,
     excludedFolderRules: string[]
   ): Promise<ReservedCarouselScanResult> {
     const ownerEntries = await fs
@@ -1558,7 +1577,7 @@ class ScannerService {
         folder.role === 'normal' && normalizePath(folder.folder_path) === normalizePath(sourceFolder.relativePath)
       ));
       if (ownerFolder) {
-        postRepository.softDeleteMissingReservedCarousels(ownerFolder.id, carouselsRelativePath, []);
+        discovery.scopes.push({ folderId: ownerFolder.id, rootPath: carouselsRelativePath, activePaths: [] });
       }
       return { ownerFolder: null, results: [] };
     }
@@ -1601,7 +1620,11 @@ class ScannerService {
 
       const postDirEntries = await fs
         .readdir(postAbsolutePath, { withFileTypes: true })
-        .catch(() => null);
+        .catch((error: unknown) => {
+          const code = (error as NodeJS.ErrnoException).code;
+          if (code === 'ENOENT' || code === 'ENOTDIR') return null;
+          throw error;
+        });
 
       if (!postDirEntries || hasExclusionMarker(postDirEntries)) continue;
 
@@ -1663,6 +1686,7 @@ class ScannerService {
       });
 
       const statResult = await this.statIndexedFiles(directFiles, errors);
+      await this.validateCarouselDestination(postRelativePath, statResult.discoveredFiles, context);
       const result = await this.scanIndexedFolderFiles({
         folderPath: postRelativePath,
         scannedFileCount: directFiles.length,
@@ -1690,42 +1714,140 @@ class ScannerService {
       indexedImageRecords.sort((a, b) => compareNaturalFilename(a.filename, b.filename));
 
       if (indexedImageRecords.length > 0) {
-        const imageIds = indexedImageRecords.map((img) => img.id);
-        const existingPost =
-          postRepository.findByExactImageIds(imageIds) ?? postRepository.findBySourcePath(postRelativePath);
-        const firstItem = indexedImageRecords[0];
-        const newestItemTimestamp = Math.max(...indexedImageRecords.map((image) => image.sort_timestamp));
-        const sortTimestamp = existingPost?.sort_timestamp ?? newestItemTimestamp;
-        const takenAt = firstItem.taken_at ?? null;
-
-        const itemsPayload = indexedImageRecords.map((img, idx) => ({
-          imageId: img.id,
-          position: idx + 1
-        }));
-        postRepository.upsertPostWithItems({
-          existingPostId: existingPost?.id,
-          id: !existingPost && indexedImageRecords.length === 1 ? firstItem.id : undefined,
+        discovery.posts.push({
           folderId: ownerFolder.id,
-          placeId: firstItem.place_id,
-          postType: indexedImageRecords.length > 1 ? 'carousel' : 'single',
           sourcePath: postRelativePath,
-          caption: existingPost?.caption ?? null,
-          takenAt,
-          takenAtSource: firstItem.taken_at_source,
-          sortTimestamp,
-          isDeleted: 0,
-          isTrashed: 0
-        }, itemsPayload);
+          images: indexedImageRecords.map(({ id, place_id, taken_at, taken_at_source, sort_timestamp }) => (
+            { id, place_id, taken_at, taken_at_source, sort_timestamp }
+          ))
+        });
       }
 
       carouselResults.push(result);
     }
 
     if (ownerFolder) {
-      postRepository.softDeleteMissingReservedCarousels(ownerFolder.id, carouselsRelativePath, activeCarouselPostPaths);
+      discovery.scopes.push({ folderId: ownerFolder.id, rootPath: carouselsRelativePath, activePaths: activeCarouselPostPaths });
     }
 
     return { ownerFolder, results: carouselResults };
+  }
+
+  private async validateCarouselDestination(
+    sourcePath: string,
+    files: IndexedFileCandidate[],
+    context: ImageProcessingContext
+  ): Promise<void> {
+    const index = context.carouselSourceIndex;
+    if (!index) return;
+    const destinationPost = postRepository.findBySourcePath(sourcePath);
+    if (!destinationPost) return;
+
+    const currentPaths = new Set(files.map(file => file.relativePath));
+    const indexedItems = postRepository.listImageRecords(destinationPost.id);
+    const membershipChanged = indexedItems.length !== files.length || indexedItems.some(image => !currentPaths.has(image.relative_path));
+    const mediaChanged = files.some(file => {
+      const existingByPath = imageRepository.getByRelativePath(file.relativePath);
+      return existingByPath?.checksum_or_fingerprint !== createFingerprint(file.relativePath, file.stats.size, file.stats.mtimeMs);
+    });
+    // Without a change, deleting a duplicate elsewhere is indistinguishable from a rename.
+    if (!membershipChanged && !mediaChanged) return;
+
+    for (const file of files) {
+      const signature = createReusableDerivativeSignature(file.stats.size, file.stats.mtimeMs, path.extname(file.relativePath));
+      for (const candidate of index.get(signature) ?? []) {
+        if (candidate.postId === destinationPost.id) continue;
+        if (await this.pathExists(resolveOriginalPath(candidate.relativePath))) continue;
+        throw new Error(
+          `Cannot safely reconcile ${sourcePath}: incoming slides match a different indexed post (${candidate.sourcePath}). ` +
+          'Move the renamed carousel to a directory name that has not been indexed and scan again.'
+        );
+      }
+    }
+  }
+
+  private async reconcileCarouselPosts(discovery: CarouselDiscovery): Promise<void> {
+    const ownersByImage = new Map<number, number>();
+    const destinationsByPost = new Map<number, Set<string>>();
+    const sourceExists = new Map<number, boolean>();
+
+    // Discover every destination before any carousel can replace its memberships.
+    // Otherwise the first directory visited could claim a split post's history.
+    for (const pending of discovery.posts) {
+      for (const image of pending.images) {
+        const owner = postRepository.findByImageId(image.id);
+        if (!owner) continue;
+        ownersByImage.set(image.id, owner.id);
+        const destinations = destinationsByPost.get(owner.id) ?? new Set<string>();
+        destinations.add(pending.sourcePath);
+        destinationsByPost.set(owner.id, destinations);
+        if (
+          owner.source_path !== pending.sourcePath &&
+          findReservedCarouselsOwnerPath(owner.source_path) !== null &&
+          !sourceExists.has(owner.id)
+        ) {
+          // Access failures must abort validation; only confirmed absence permits a rename.
+          sourceExists.set(owner.id, await this.pathExists(resolveOriginalPath(owner.source_path)));
+        }
+      }
+    }
+
+    for (const [postId, destinations] of destinationsByPost) {
+      if (destinations.size > 1) {
+        throw new Error(
+          `Cannot safely reconcile post ${postId}: its indexed slides have multiple carousel destinations ` +
+          `(${[...destinations].sort().join(', ')}). Keep its surviving slides together in one carousel directory and scan again.`
+        );
+      }
+    }
+
+    const plans: Array<{ pending: PendingCarouselPost; existingPost: PostRecord | undefined }> = [];
+    for (const pending of discovery.posts) {
+      const imageIds = pending.images.map(image => image.id);
+      const destinationPost = postRepository.findBySourcePath(pending.sourcePath);
+      let existingPost = postRepository.findByExactImageIds(imageIds) ?? destinationPost;
+      if (!existingPost) {
+        const previousPost = postRepository.findByUnambiguousImageMembership(imageIds);
+        if (previousPost && sourceExists.get(previousPost.id) === false) existingPost = previousPost;
+      }
+      if (destinationPost && existingPost && destinationPost.id !== existingPost.id) {
+        throw new Error(
+          `Cannot safely reconcile ${pending.sourcePath}: the destination already belongs to a different indexed post. ` +
+          'Move the renamed carousel to a directory name that has not been indexed and scan again.'
+        );
+      }
+      if (imageIds.some(imageId => {
+        const ownerId = ownersByImage.get(imageId);
+        return ownerId !== undefined && ownerId !== existingPost?.id;
+      })) {
+        throw new Error(
+          `Cannot safely reconcile ${pending.sourcePath}: its slides already belong to a different indexed post. ` +
+          'Keep existing posts separate and use a directory name that has not been indexed for a renamed carousel.'
+        );
+      }
+      plans.push({ pending, existingPost });
+    }
+
+    for (const { pending, existingPost } of plans) {
+      const firstItem = pending.images[0];
+      postRepository.upsertPostWithItems({
+        existingPostId: existingPost?.id,
+        id: !existingPost && pending.images.length === 1 ? firstItem.id : undefined,
+        folderId: pending.folderId,
+        placeId: firstItem.place_id,
+        postType: pending.images.length > 1 ? 'carousel' : 'single',
+        sourcePath: pending.sourcePath,
+        caption: existingPost?.caption ?? null,
+        takenAt: firstItem.taken_at ?? null,
+        takenAtSource: firstItem.taken_at_source,
+        sortTimestamp: existingPost?.sort_timestamp ?? Math.max(...pending.images.map(image => image.sort_timestamp)),
+        isDeleted: 0,
+        isTrashed: 0
+      }, pending.images.map((image, index) => ({ imageId: image.id, position: index + 1 })));
+    }
+    for (const scope of discovery.scopes) {
+      postRepository.softDeleteMissingReservedCarousels(scope.folderId, scope.rootPath, scope.activePaths);
+    }
   }
 
   private async scanIndexedFolderFiles({
@@ -1872,7 +1994,7 @@ class ScannerService {
         await errors.add(detail);
         log.error(joinLogParts(['Failed to index media', formatStep('file', file.relativePath), message]));
 
-        if (appConfig.scanMediaErrorMode === 'fail') {
+        if (appConfig.scanMediaErrorMode === 'fail' || error instanceof SourcePathAccessError) {
           throw new Error(detail);
         }
       } finally {
@@ -1887,7 +2009,9 @@ class ScannerService {
         await scanFile(file);
       }
     } else {
-      await Promise.all(discoveredFiles.map((file) => discoveryLimit(() => scanFile(file))));
+      const results = await Promise.allSettled(discoveredFiles.map((file) => discoveryLimit(() => scanFile(file))));
+      const failure = results.find((result) => result.status === 'rejected');
+      if (failure?.status === 'rejected') throw failure.reason;
     }
 
     const removedFiles = imageRepository.markFolderImagesDeleted(folder.id, activeRelativePaths);
@@ -2196,6 +2320,17 @@ class ScannerService {
         !galleryRootChanged && migrationSummary.complete && derivativeMigrationService.isMigrationComplete();
 
       const existingFolders = folderRepository.getAll();
+      if (!treatCarouselsAsFolders && !galleryRootChanged) {
+        const index: NonNullable<ImageProcessingContext['carouselSourceIndex']> = new Map();
+        // Keep original identities even if another folder is processed before the destination.
+        for (const image of postRepository.listCarouselSourceImages()) {
+          const signature = createReusableDerivativeSignature(image.fileSize, image.mtimeMs, image.extension);
+          const candidates = index.get(signature) ?? [];
+          candidates.push(image);
+          index.set(signature, candidates);
+        }
+        imageProcessingContext.carouselSourceIndex = index;
+      }
       if (treatCarouselsAsFolders) {
         postRepository.softDeleteReservedCarouselsForLegacyMode();
       }
@@ -2259,6 +2394,7 @@ class ScannerService {
         }
       };
 
+      const carouselDiscovery: CarouselDiscovery = { posts: [], scopes: [] };
       await this.walkMediaSourceFolders(appConfig.galleryRoot, async (sourceFolder) => {
         discoveredSourceFolders += 1;
         const result = await this.scanSourceFolder(
@@ -2305,6 +2441,7 @@ class ScannerService {
             warnings,
             options,
             imageProcessingContext,
+            carouselDiscovery,
             excludedFolderRules
           );
           const ownerFolder = carouselScan.ownerFolder ?? result.folder;
@@ -2326,6 +2463,8 @@ class ScannerService {
         });
         this.logProgress('folder');
       }, null, treatStoriesAsFolders, treatCarouselsAsFolders, excludedFolderRules);
+
+      await this.reconcileCarouselPosts(carouselDiscovery);
 
       for (const folder of existingFolders) {
         if (!discoveredFolderIds.has(folder.id)) {
@@ -2740,8 +2879,10 @@ class ScannerService {
     try {
       await fs.access(targetPath);
       return true;
-    } catch {
-      return false;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT' || code === 'ENOTDIR') return false;
+      throw new SourcePathAccessError(targetPath, error);
     }
   }
 
@@ -2830,14 +2971,14 @@ class ScannerService {
 
     const missingCandidates: ImageRecord[] = [];
     for (const candidate of candidates) {
-      let candidatePath: string | null = null;
+      let candidatePath: string;
       try {
         candidatePath = resolveOriginalPath(candidate.relative_path);
       } catch {
-        candidatePath = null;
+        continue;
       }
 
-      if (!candidatePath || !(await this.pathExists(candidatePath))) {
+      if (!(await this.pathExists(candidatePath))) {
         missingCandidates.push(candidate);
       }
     }

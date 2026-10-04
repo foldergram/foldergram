@@ -198,6 +198,43 @@ describe('PostViewer', () => {
     document.body.innerHTML = '';
   });
 
+  it('uses the normal media shell for wide carousel photos without resizing when slides change', async () => {
+    const image = {
+      ...createImageDetail(12, { previousImageId: null, nextImageId: null }),
+      width: 2880,
+      height: 1800
+    };
+    const wrapper = mount(PostViewer, {
+      props: { image, isModal: true },
+      global: { stubs: globalStubs }
+    });
+    const singleStyle = wrapper.get('.viewer__media-shell').attributes('style');
+    await wrapper.setProps({
+      image: {
+        ...image,
+        postType: 'carousel',
+        mediaItems: [
+          { ...image, imageId: 12, position: 1 },
+          { ...image, imageId: 13, filename: 'portrait.jpg', width: 1200, height: 1800, position: 2 },
+          { ...createVideoDetail(14), imageId: 14, position: 3 }
+        ]
+      }
+    });
+    const shell = wrapper.get('.viewer__media-shell--carousel');
+    expect(shell.attributes('style')).toBe(singleStyle);
+    expect((shell.element as HTMLElement).style.getPropertyValue('--viewer-media-aspect-ratio')).toBe('2880 / 1800');
+    const stage = wrapper.getComponent({ name: 'CarouselMediaStage' });
+    expect(stage.props('fitContainer')).toBe(true);
+    expect((stage.element as HTMLElement).style.aspectRatio).toBe('auto');
+    await stage.get('button[aria-label="Next carousel item"]').trigger('click');
+    expect(wrapper.text()).toContain('1200 × 1800');
+    expect(shell.attributes('style')).toBe(singleStyle);
+    await stage.get('button[aria-label="Next carousel item"]').trigger('click');
+    expect(stage.findComponent({ name: 'VideoMediaPlayer' }).exists()).toBe(true);
+    expect(wrapper.get('.viewer__card-wrapper').classes()).toContain('viewer__card-wrapper--carousel');
+    expect(shell.attributes('style')).toBe(singleStyle);
+  });
+
   it('uses likes-page neighbors instead of folder neighbors when opened from likes', () => {
     const appStore = useAppStore();
     const likesStore = useLikesStore();

@@ -90,4 +90,24 @@ describe('CarouselMediaStage', () => {
     // Should NOT have navigated because pointerdown was on an ignored element
     expect(wrapper.emitted('update:modelValue')).toBeUndefined();
   });
+
+  it('keeps the first slide aspect ratio in feeds and lets the viewer contain mixed slide sizes', async () => {
+    const items = [
+      { ...mockItems[1], imageId: 1, width: 2880, height: 1800 },
+      { ...mockItems[1], imageId: 2, width: 1200, height: 1800 }
+    ];
+    const wrapper = mount(CarouselMediaStage, {
+      props: { items, preferPreview: true },
+      global: { plugins: [i18n] }
+    });
+    expect((wrapper.element as HTMLElement).style.aspectRatio).toBe('2880 / 1800');
+    await wrapper.setProps({ modelValue: 1 });
+    expect((wrapper.element as HTMLElement).style.aspectRatio).toBe('2880 / 1800');
+    expect(wrapper.get('img').attributes('src')).toBe(items[1].previewUrl);
+
+    await wrapper.setProps({ fitContainer: true });
+    expect((wrapper.element as HTMLElement).style.aspectRatio).toBe('auto');
+    expect(wrapper.get('img').attributes('width')).toBe('1200');
+    expect(wrapper.get('img').attributes('height')).toBe('1800');
+  });
 });
