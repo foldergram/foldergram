@@ -65,7 +65,8 @@ function createAppStatus(
       defaultFolderImageOrder,
       nestedFolderTitleFormat: 'folder',
       treatStoriesAsFolders: false,
-      treatCarouselsAsFolders: false
+      treatCarouselsAsFolders: false,
+      allowDownloads: true
     },
     storiesMigration: {
       hasLegacyStoriesCandidates: false,

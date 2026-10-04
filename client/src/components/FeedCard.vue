@@ -256,7 +256,7 @@
         </div>
         <div class="flex items-center gap-[0.65rem]">
           <a
-            v-if="isHomeContext"
+            v-if="isHomeContext && appStore.allowDownloads"
             class="inline-flex items-center justify-center w-8 h-8 border-0 bg-transparent cursor-pointer color-inherit transition-[opacity,transform] duration-180 hover:opacity-72 hover:-translate-y-px"
             :href="downloadOriginalMediaUrl"
             download

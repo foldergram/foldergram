@@ -3,6 +3,7 @@ import fsPromises from 'node:fs/promises';
 import path from 'node:path';
 
 import {
+  ALLOW_DOWNLOADS_SETTING_KEY,
   APP_DEFAULT_LOCALE_SETTING_KEY,
   CAROUSELS_APPLIED_MODE_SETTING_KEY,
   CAROUSELS_MIGRATION_DECISION_SETTING_KEY,
@@ -233,6 +234,10 @@ function getTreatStoriesAsFolders(): boolean {
 
 function getTreatCarouselsAsFolders(): boolean {
   return parseTreatCarouselsAsFoldersSetting(appSettingsRepository.get(TREAT_CAROUSELS_AS_FOLDERS_SETTING_KEY));
+}
+
+function getAllowDownloads(): boolean {
+  return appSettingsRepository.get(ALLOW_DOWNLOADS_SETTING_KEY) !== 'false';
 }
 
 function getCustomExcludedFolders(): string[] {
@@ -2139,6 +2144,7 @@ export const galleryService = {
     const storiesMigration = getStoriesMigrationStatus();
     const treatCarouselsAsFolders = getTreatCarouselsAsFolders();
     const carouselsMigration = getCarouselsMigrationStatus();
+    const allowDownloads = getAllowDownloads();
     const indexedPosts = storageState.libraryAvailable ? imageRepository.countFeed() : 0;
 
     return {
@@ -2165,7 +2171,8 @@ export const galleryService = {
         defaultFolderImageOrder,
         nestedFolderTitleFormat,
         treatStoriesAsFolders,
-        treatCarouselsAsFolders
+        treatCarouselsAsFolders,
+        allowDownloads
       },
       storiesMigration,
       carouselsMigration
@@ -2211,6 +2218,7 @@ export const galleryService = {
     const storiesMigration = getStoriesMigrationStatus();
     const treatCarouselsAsFolders = getTreatCarouselsAsFolders();
     const carouselsMigration = getCarouselsMigrationStatus();
+    const allowDownloads = getAllowDownloads();
     const excludedFolders = getExcludedFolderSettings();
 
     return {
@@ -2247,7 +2255,8 @@ export const galleryService = {
         defaultFolderImageOrder,
         nestedFolderTitleFormat,
         treatStoriesAsFolders,
-        treatCarouselsAsFolders
+        treatCarouselsAsFolders,
+        allowDownloads
       },
       storiesMigration,
       carouselsMigration,
@@ -2469,5 +2478,10 @@ export const galleryService = {
 
   setCarouselsMigrationDecision(decision: 'restore' | 'carousels') {
     return this.setTreatCarouselsAsFolders(decision === 'restore');
+  },
+
+  setAllowDownloads(allowDownloads: boolean) {
+    appSettingsRepository.set(ALLOW_DOWNLOADS_SETTING_KEY, allowDownloads ? 'true' : 'false');
+    return this.getStats();
   }
 };

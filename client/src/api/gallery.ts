@@ -597,6 +597,14 @@ export function updateCarouselsMode(treatCarouselsAsFolders: boolean) {
   });
 }
 
+export function updateAllowDownloads(allowDownloads: boolean) {
+  return requestJson<AppStats>('/api/admin/settings/allow-downloads', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ allowDownloads })
+  });
+}
+
 export function updateCarouselsMigrationDecision(decision: 'restore' | 'carousels') {
   return requestJson<AppStats>('/api/admin/settings/carousels-migration-decision', {
     method: 'POST',

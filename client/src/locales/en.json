@@ -272,6 +272,11 @@
         "enabledDescription": "Legacy mode is enabled. carousels folders remain ordinary app folders.",
         "disabledDescription": "Reserved carousel mode is enabled. Each direct child of AppFolder/carousels becomes one post."
       },
+      "allowDownloads": {
+        "label": "Allow downloading original files",
+        "toggleLabel": "Toggle download buttons",
+        "description": "When disabled, the download buttons are hidden so viewers cannot download the original images or videos. Useful for public or shared galleries where you want browsing without copying the media."
+      },
       "excludedFolders": {
         "label": "Excluded source folders",
         "description": "Skip matching folders anywhere by name or by exact relative path under the gallery root. Hidden paths and app-managed storage stay excluded automatically.",
@@ -327,6 +332,7 @@
           "excludedFolders": "excluded folders",
           "storiesFolderHandling": "stories folder handling",
           "carouselsFolderHandling": "carousel folder handling",
+          "allowDownloads": "download buttons",
           "homeFeedDefault": "Home feed default",
           "reelsFeedDefault": "Reels feed default",
           "appFolderOrder": "app folder order",

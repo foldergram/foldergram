@@ -585,6 +585,7 @@ export interface AppStatus {
     nestedFolderTitleFormat?: NestedFolderTitleFormat;
     treatStoriesAsFolders: boolean;
     treatCarouselsAsFolders: boolean;
+    allowDownloads: boolean;
   };
   storiesMigration: {
     hasLegacyStoriesCandidates: boolean;

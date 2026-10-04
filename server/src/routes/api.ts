@@ -89,6 +89,9 @@ const nestedFolderTitleFormatBodySchema = z.object({
 const storiesModeBodySchema = z.object({
   treatStoriesAsFolders: z.boolean()
 });
+const allowDownloadsBodySchema = z.object({
+  allowDownloads: z.boolean()
+});
 const excludedFoldersBodySchema = z.object({
   rules: z.array(z.string()).default([])
 });
@@ -574,6 +577,15 @@ router.put(
   (request, response) => {
     const body = storiesModeBodySchema.parse(request.body);
     response.json(galleryService.setTreatStoriesAsFolders(body.treatStoriesAsFolders));
+  }
+);
+
+router.put(
+  '/admin/settings/allow-downloads',
+  requireCapability('canAccessSettings', 'Admin access is required.'),
+  (request, response) => {
+    const body = allowDownloadsBodySchema.parse(request.body);
+    response.json(galleryService.setAllowDownloads(body.allowDownloads));
   }
 );
 
