@@ -19,6 +19,7 @@ import {
   getPreviewPathForAssetKey,
   getThumbnailPathForAssetKey
 } from '../utils/derivative-paths.js';
+import { hasUsableDerivative } from '../utils/derivative-cache.js';
 import { normalizePath, safeJoin } from '../utils/path-utils.js';
 import { generateDerivatives } from './derivative-service.js';
 import { log } from './log-service.js';
@@ -481,8 +482,8 @@ class DerivativeMigrationService {
       callbacks.onPreviewMoved?.();
     }
 
-    const nextThumbnailExists = await fileExists(safeJoin(appConfig.thumbnailsDir, nextThumbnailPath));
-    const nextPreviewExists = await fileExists(safeJoin(appConfig.previewsDir, nextPreviewPath));
+    const nextThumbnailExists = await hasUsableDerivative(safeJoin(appConfig.thumbnailsDir, nextThumbnailPath));
+    const nextPreviewExists = await hasUsableDerivative(safeJoin(appConfig.previewsDir, nextPreviewPath));
     const resolvedThumbnailPath = nextThumbnailExists ? nextThumbnailPath : row.thumbnail_path;
     const resolvedPreviewPath = nextPreviewExists ? nextPreviewPath : row.preview_path;
 
@@ -641,8 +642,8 @@ class DerivativeMigrationService {
     }
 
     const sourceExists = sourcePath ? await fileExists(sourcePath) : false;
-    const thumbnailExistsBeforeGenerate = await fileExists(thumbnailAbsolutePath);
-    const previewExistsBeforeGenerate = await fileExists(previewAbsolutePath);
+    const thumbnailExistsBeforeGenerate = await hasUsableDerivative(thumbnailAbsolutePath);
+    const previewExistsBeforeGenerate = await hasUsableDerivative(previewAbsolutePath);
 
     if ((!thumbnailExistsBeforeGenerate || !previewExistsBeforeGenerate) && sourcePath && sourceExists) {
       try {
@@ -664,8 +665,8 @@ class DerivativeMigrationService {
       }
     }
 
-    const thumbnailExists = await fileExists(thumbnailAbsolutePath);
-    const previewExists = await fileExists(previewAbsolutePath);
+    const thumbnailExists = await hasUsableDerivative(thumbnailAbsolutePath);
+    const previewExists = await hasUsableDerivative(previewAbsolutePath);
     const resolvedThumbnailPath = thumbnailExists ? targetThumbnailPath : row.thumbnail_path;
     const resolvedPreviewPath = previewExists ? targetPreviewPath : row.preview_path;
 
@@ -674,11 +675,11 @@ class DerivativeMigrationService {
     }
 
     let missingFiles = 0;
-    if (!(await fileExists(safeJoin(appConfig.thumbnailsDir, resolvedThumbnailPath)))) {
+    if (!(await hasUsableDerivative(safeJoin(appConfig.thumbnailsDir, resolvedThumbnailPath)))) {
       missingFiles += 1;
     }
 
-    if (!(await fileExists(safeJoin(appConfig.previewsDir, resolvedPreviewPath)))) {
+    if (!(await hasUsableDerivative(safeJoin(appConfig.previewsDir, resolvedPreviewPath)))) {
       missingFiles += 1;
     }
 
@@ -701,7 +702,7 @@ class DerivativeMigrationService {
     const currentAbsolutePath = safeJoin(rootDir, currentPath);
     const nextAbsolutePath = safeJoin(rootDir, nextPath);
 
-    if (await fileExists(nextAbsolutePath)) {
+    if (await hasUsableDerivative(nextAbsolutePath)) {
       if (await removeFileIfPresent(currentAbsolutePath)) {
         await pruneEmptyDirectories(rootDir, currentAbsolutePath);
       }
@@ -709,7 +710,7 @@ class DerivativeMigrationService {
       return 0;
     }
 
-    if (!(await fileExists(currentAbsolutePath))) {
+    if (!(await hasUsableDerivative(currentAbsolutePath))) {
       return 0;
     }
 
@@ -720,7 +721,7 @@ class DerivativeMigrationService {
   }
 
   private async promoteDerivativeCandidate(rootDir: string, targetPath: string, candidates: string[]): Promise<number> {
-    if (await fileExists(safeJoin(rootDir, targetPath))) {
+    if (await hasUsableDerivative(safeJoin(rootDir, targetPath))) {
       return 0;
     }
 
@@ -730,7 +731,7 @@ class DerivativeMigrationService {
       }
 
       const movedFiles = await this.migrateDerivativeFile(rootDir, candidatePath, targetPath);
-      if (movedFiles > 0 || await fileExists(safeJoin(rootDir, targetPath))) {
+      if (movedFiles > 0 || await hasUsableDerivative(safeJoin(rootDir, targetPath))) {
         return movedFiles;
       }
     }
