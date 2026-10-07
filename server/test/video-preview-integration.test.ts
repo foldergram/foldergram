@@ -63,19 +63,32 @@ describe.skipIf(binariesAvailable.includes(false)).sequential('real video previe
     // Replace the PCM sample-entry tag with an unrecognized codec tag. This
     // reproduces an undecodable first track without relying on APAC support
     // remaining absent from newer FFmpeg builds.
+    const originalAudio = (await probe(filePath)).filter((stream) => stream.codec_type === 'audio');
+    expect(originalAudio[0]).toMatchObject({ index: 1, codec_name: 'pcm_s16le', codec_tag_string: 'sowt' });
     const movie = await fs.readFile(filePath);
     const tagOffset = movie.indexOf(Buffer.from('sowt'));
     expect(tagOffset).toBeGreaterThan(0);
+    expect(movie.indexOf(Buffer.from('sowt'), tagOffset + 4)).toBe(-1);
+    // Verify this is the sole sample entry in its enclosing stsd box,
+    // rather than an incidental 'sowt' sequence in compressed media data.
+    const sampleDescriptionOffset = movie.lastIndexOf(Buffer.from('stsd'), tagOffset);
+    expect(sampleDescriptionOffset).toBeGreaterThan(0);
+    expect(tagOffset).toBe(sampleDescriptionOffset + 16);
+    expect(movie.readUInt32BE(sampleDescriptionOffset + 8)).toBe(1);
+    const sampleEntrySize = movie.readUInt32BE(tagOffset - 4);
+    const sampleDescriptionSize = movie.readUInt32BE(sampleDescriptionOffset - 4);
+    expect(sampleEntrySize).toBeGreaterThanOrEqual(36);
+    expect(sampleDescriptionSize).toBe(16 + sampleEntrySize);
     movie.write('zzzz', tagOffset, 'ascii');
     await fs.writeFile(filePath, movie);
   }
 
   async function probe(filePath: string) {
     const { stdout } = await run('ffprobe', ['-v', 'error', '-show_streams', '-of', 'json', filePath]);
-    return JSON.parse(stdout).streams as Array<{ index: number; codec_type: string; codec_name?: string; width?: number; height?: number }>;
+    return JSON.parse(stdout).streams as Array<{ index: number; codec_type: string; codec_name?: string; codec_tag_string?: string; width?: number; height?: number }>;
   }
 
-  it('recovers an empty preview on eager rescan, retains audio, and exposes the item in feed and Reels', async () => {
+  it('recovers an empty preview on eager rescan, retains audio, and includes the item in feed and Reels database queries', async () => {
     const source = path.join(appConfig.galleryRoot, 'album', 'two-tracks.mov');
     await createMovie(source, true);
     const inputStreams = await probe(source);

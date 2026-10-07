@@ -16,7 +16,7 @@ import {
   getPreviewRelativePath,
   getThumbnailRelativePath
 } from '../utils/image-utils.js';
-import { hasUsableDerivative } from '../utils/derivative-cache.js';
+import { isNonemptyDerivative } from '../utils/derivative-cache.js';
 import { safeJoin } from '../utils/path-utils.js';
 
 const execFileAsync = promisify(execFile);
@@ -542,6 +542,8 @@ async function getAudioDecoderCodecs(): Promise<Set<string>> {
     }).then(({ stdout }) => {
       const codecs = new Set<string>();
       for (const line of stdout.split('\n')) {
+        // FFmpeg prints six capability flags followed by the decoder name.
+        // A '(codec ...)' suffix identifies aliases such as mp3float -> mp3.
         const decoder = line.match(/^\s*A[.A-Z]{5}\s+(\S+)\s+(.*)$/);
         if (decoder) {
           codecs.add(decoder[2].match(/\(codec (\S+)\)/)?.[1] ?? decoder[1]);
@@ -622,18 +624,21 @@ async function publishVideoPreview(sourcePath: string, previewAbsolutePath: stri
       '128k',
       temporaryPath
     ]);
-    if (!(await hasUsableDerivative(temporaryPath))) {
+    if (!(await isNonemptyDerivative(temporaryPath))) {
       throw new Error('FFmpeg produced an empty video preview.');
     }
     const output = await readMediaProbe(temporaryPath);
     const video = output.streams?.find((stream) => stream.codec_type === 'video');
     const audio = output.streams?.filter((stream) => stream.codec_type === 'audio') ?? [];
-    if (video?.codec_name !== 'h264' || video.pix_fmt !== 'yuv420p'
-      || (video.width ?? 0) <= 0 || (video.height ?? 0) <= 0
-      || !output.format?.format_name?.includes('mp4')
-      || (parseFfprobeFloat(output.format.duration) ?? 0) <= 0
-      || (audioIndex !== null && (audio.length !== 1 || audio[0].codec_name !== 'aac'))
-      || (audioIndex === null && audio.length !== 0)) {
+    const hasCompatibleVideo = video?.codec_name === 'h264' && video.pix_fmt === 'yuv420p';
+    const hasPositiveDimensions = (video?.width ?? 0) > 0 && (video?.height ?? 0) > 0;
+    const hasMp4Container = output.format?.format_name?.includes('mp4') ?? false;
+    const hasPositiveDuration = (parseFfprobeFloat(output.format?.duration) ?? 0) > 0;
+    const hasExpectedAudio = audioIndex === null
+      ? audio.length === 0
+      : audio.length === 1 && audio[0].codec_name === 'aac';
+    if (!hasCompatibleVideo || !hasPositiveDimensions || !hasMp4Container
+      || !hasPositiveDuration || !hasExpectedAudio) {
       throw new Error('FFmpeg produced an invalid video preview.');
     }
     await fs.rename(temporaryPath, previewAbsolutePath);
@@ -648,8 +653,8 @@ async function generateImageDerivatives(
   previewAbsolutePath: string,
   force: boolean
 ): Promise<Pick<DerivativeResult, 'generatedThumbnail' | 'generatedPreview'>> {
-  const shouldWriteThumbnail = force || !(await hasUsableDerivative(thumbnailAbsolutePath));
-  const shouldWritePreview = force || !(await hasUsableDerivative(previewAbsolutePath));
+  const shouldWriteThumbnail = force || !(await isNonemptyDerivative(thumbnailAbsolutePath));
+  const shouldWritePreview = force || !(await isNonemptyDerivative(previewAbsolutePath));
 
   if (shouldWriteThumbnail) {
     await writeImageThumbnail(sourcePath, thumbnailAbsolutePath);
@@ -672,8 +677,8 @@ async function generateAnimatedAvifDerivatives(
   force: boolean,
   videoStreamIndex: number
 ): Promise<Pick<DerivativeResult, 'generatedThumbnail' | 'generatedPreview'>> {
-  const shouldWriteThumbnail = force || !(await hasUsableDerivative(thumbnailAbsolutePath));
-  const shouldWritePreview = force || !(await hasUsableDerivative(previewAbsolutePath));
+  const shouldWriteThumbnail = force || !(await isNonemptyDerivative(thumbnailAbsolutePath));
+  const shouldWritePreview = force || !(await isNonemptyDerivative(previewAbsolutePath));
 
   if (shouldWriteThumbnail) {
     await writeAnimatedAvifThumbnail(sourcePath, thumbnailAbsolutePath, videoStreamIndex);
@@ -703,8 +708,8 @@ async function generateVideoDerivatives(
   previewAbsolutePath: string,
   force: boolean
 ): Promise<Pick<DerivativeResult, 'generatedThumbnail' | 'generatedPreview'>> {
-  const shouldWriteThumbnail = force || !(await hasUsableDerivative(thumbnailAbsolutePath));
-  const shouldWritePreview = force || !(await hasUsableDerivative(previewAbsolutePath));
+  const shouldWriteThumbnail = force || !(await isNonemptyDerivative(thumbnailAbsolutePath));
+  const shouldWritePreview = force || !(await isNonemptyDerivative(previewAbsolutePath));
 
   if (shouldWriteThumbnail) {
     await writeVideoThumbnail(sourcePath, thumbnailAbsolutePath);
@@ -730,7 +735,7 @@ export async function generateThumbnailDerivative(
   const isAvif = path.extname(relativePath).toLowerCase() === '.avif';
   const thumbnailPath = overrides.thumbnailPath ?? getThumbnailRelativePath(relativePath);
   const thumbnailAbsolutePath = safeJoin(appConfig.thumbnailsDir, thumbnailPath);
-  const shouldWriteThumbnail = force || !(await hasUsableDerivative(thumbnailAbsolutePath));
+  const shouldWriteThumbnail = force || !(await isNonemptyDerivative(thumbnailAbsolutePath));
 
   if (shouldWriteThumbnail) {
     if (mediaType === 'video') {
@@ -770,7 +775,7 @@ export async function generatePreviewDerivative(
   const isAvif = path.extname(relativePath).toLowerCase() === '.avif';
   const previewPath = overrides.previewPath ?? getPreviewRelativePath(relativePath, mediaType);
   const previewAbsolutePath = safeJoin(appConfig.previewsDir, previewPath);
-  const shouldWritePreview = force || !(await hasUsableDerivative(previewAbsolutePath));
+  const shouldWritePreview = force || !(await isNonemptyDerivative(previewAbsolutePath));
 
   if (shouldWritePreview) {
     if (mediaType === 'video') {

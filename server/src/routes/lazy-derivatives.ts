@@ -10,7 +10,7 @@ import { scannerService } from '../services/scanner-service.js';
 import { maintenanceOperationLock } from '../services/maintenance-operation-lock.js';
 import { resolveOriginalPath } from '../utils/media-paths.js';
 import { applyDerivativeErrorHeaders, applyNoStoreMediaHeaders, applyProtectedMediaHeaders } from '../utils/media-response.js';
-import { hasUsableDerivative } from '../utils/derivative-cache.js';
+import { isNonemptyDerivative } from '../utils/derivative-cache.js';
 import { normalizePath, safeJoin } from '../utils/path-utils.js';
 
 // In-memory map to deduplicate concurrent generation requests for the same derivative path.
@@ -71,7 +71,7 @@ function queueLazyGeneration(
 
     // A scan or rebuild may have generated the file while this request waited
     // for the maintenance lock.
-    if (await hasUsableDerivative(absoluteOutputPath)) return;
+    if (await isNonemptyDerivative(absoluteOutputPath)) return;
 
     log.info('Lazy derivative generate', {
       kind,
@@ -165,7 +165,7 @@ async function serveOrGenerate(
   }
 
   // Fast path: reuse only a nonempty cached derivative.
-  if (await hasUsableDerivative(absoluteOutputPath)) {
+  if (await isNonemptyDerivative(absoluteOutputPath)) {
     try {
       const result = await sendDerivativeFile(response, absoluteOutputPath);
       if (result === 'aborted') {
@@ -255,7 +255,7 @@ export async function serveDerivativeForImage(
     return;
   }
 
-  if (await hasUsableDerivative(absoluteOutputPath)) {
+  if (await isNonemptyDerivative(absoluteOutputPath)) {
     try {
       const result = await sendDerivativeFile(response, absoluteOutputPath, options);
       if (result === 'aborted') {

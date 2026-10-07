@@ -19,7 +19,7 @@ import {
   getPreviewPathForAssetKey,
   getThumbnailPathForAssetKey
 } from '../utils/derivative-paths.js';
-import { hasUsableDerivative } from '../utils/derivative-cache.js';
+import { isNonemptyDerivative } from '../utils/derivative-cache.js';
 import { normalizePath, safeJoin } from '../utils/path-utils.js';
 import { generateDerivatives } from './derivative-service.js';
 import { log } from './log-service.js';
@@ -482,8 +482,8 @@ class DerivativeMigrationService {
       callbacks.onPreviewMoved?.();
     }
 
-    const nextThumbnailExists = await hasUsableDerivative(safeJoin(appConfig.thumbnailsDir, nextThumbnailPath));
-    const nextPreviewExists = await hasUsableDerivative(safeJoin(appConfig.previewsDir, nextPreviewPath));
+    const nextThumbnailExists = await isNonemptyDerivative(safeJoin(appConfig.thumbnailsDir, nextThumbnailPath));
+    const nextPreviewExists = await isNonemptyDerivative(safeJoin(appConfig.previewsDir, nextPreviewPath));
     const resolvedThumbnailPath = nextThumbnailExists ? nextThumbnailPath : row.thumbnail_path;
     const resolvedPreviewPath = nextPreviewExists ? nextPreviewPath : row.preview_path;
 
@@ -642,8 +642,8 @@ class DerivativeMigrationService {
     }
 
     const sourceExists = sourcePath ? await fileExists(sourcePath) : false;
-    const thumbnailExistsBeforeGenerate = await hasUsableDerivative(thumbnailAbsolutePath);
-    const previewExistsBeforeGenerate = await hasUsableDerivative(previewAbsolutePath);
+    const thumbnailExistsBeforeGenerate = await isNonemptyDerivative(thumbnailAbsolutePath);
+    const previewExistsBeforeGenerate = await isNonemptyDerivative(previewAbsolutePath);
 
     if ((!thumbnailExistsBeforeGenerate || !previewExistsBeforeGenerate) && sourcePath && sourceExists) {
       try {
@@ -665,8 +665,8 @@ class DerivativeMigrationService {
       }
     }
 
-    const thumbnailExists = await hasUsableDerivative(thumbnailAbsolutePath);
-    const previewExists = await hasUsableDerivative(previewAbsolutePath);
+    const thumbnailExists = await isNonemptyDerivative(thumbnailAbsolutePath);
+    const previewExists = await isNonemptyDerivative(previewAbsolutePath);
     const resolvedThumbnailPath = thumbnailExists ? targetThumbnailPath : row.thumbnail_path;
     const resolvedPreviewPath = previewExists ? targetPreviewPath : row.preview_path;
 
@@ -675,11 +675,11 @@ class DerivativeMigrationService {
     }
 
     let missingFiles = 0;
-    if (!(await hasUsableDerivative(safeJoin(appConfig.thumbnailsDir, resolvedThumbnailPath)))) {
+    if (!(await isNonemptyDerivative(safeJoin(appConfig.thumbnailsDir, resolvedThumbnailPath)))) {
       missingFiles += 1;
     }
 
-    if (!(await hasUsableDerivative(safeJoin(appConfig.previewsDir, resolvedPreviewPath)))) {
+    if (!(await isNonemptyDerivative(safeJoin(appConfig.previewsDir, resolvedPreviewPath)))) {
       missingFiles += 1;
     }
 
@@ -702,7 +702,7 @@ class DerivativeMigrationService {
     const currentAbsolutePath = safeJoin(rootDir, currentPath);
     const nextAbsolutePath = safeJoin(rootDir, nextPath);
 
-    if (await hasUsableDerivative(nextAbsolutePath)) {
+    if (await isNonemptyDerivative(nextAbsolutePath)) {
       if (await removeFileIfPresent(currentAbsolutePath)) {
         await pruneEmptyDirectories(rootDir, currentAbsolutePath);
       }
@@ -710,7 +710,7 @@ class DerivativeMigrationService {
       return 0;
     }
 
-    if (!(await hasUsableDerivative(currentAbsolutePath))) {
+    if (!(await isNonemptyDerivative(currentAbsolutePath))) {
       return 0;
     }
 
@@ -721,7 +721,7 @@ class DerivativeMigrationService {
   }
 
   private async promoteDerivativeCandidate(rootDir: string, targetPath: string, candidates: string[]): Promise<number> {
-    if (await hasUsableDerivative(safeJoin(rootDir, targetPath))) {
+    if (await isNonemptyDerivative(safeJoin(rootDir, targetPath))) {
       return 0;
     }
 
@@ -731,7 +731,7 @@ class DerivativeMigrationService {
       }
 
       const movedFiles = await this.migrateDerivativeFile(rootDir, candidatePath, targetPath);
-      if (movedFiles > 0 || await hasUsableDerivative(safeJoin(rootDir, targetPath))) {
+      if (movedFiles > 0 || await isNonemptyDerivative(safeJoin(rootDir, targetPath))) {
         return movedFiles;
       }
     }

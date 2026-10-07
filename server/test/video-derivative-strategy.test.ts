@@ -252,7 +252,7 @@ function createExecFileAsyncMock(payload: { streams?: Array<Record<string, unkno
       };
     }
     if (args.includes('-decoders')) {
-      return { stdout: ' A....D aac AAC\n A....D pcm_s16le PCM\n A....D libmp3lame MP3 (codec mp3)\n', stderr: '' };
+      return { stdout: ' A....D aac AAC\n A....D pcm_s16le PCM\n A....D mp3float MP3 (codec mp3)\n', stderr: '' };
     }
     await fs.writeFile(args.at(-1)!, 'valid-preview');
     return { stdout: '', stderr: '' };
