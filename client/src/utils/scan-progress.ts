@@ -1,3 +1,4 @@
+import { i18n } from '../locales';
 import type { ScanOperation, ScanProgress } from '../types/api';
 
 export interface ScanBarState {
@@ -10,19 +11,23 @@ export interface ScanStatCard {
   value: string;
 }
 
-const SCAN_OPERATION_LABELS: Record<ScanOperation, string> = {
-  checking_derivatives: 'Checking derivatives',
-  backfilling_asset_key: 'Backfilling asset key',
-  moving_thumbnail: 'Moving thumbnail',
-  moving_preview: 'Moving preview',
-  repairing_thumbnail: 'Repairing thumbnail',
-  repairing_preview: 'Repairing preview',
-  regenerating_derivatives: 'Regenerating derivatives',
-  discovering_media: 'Discovering folders and media',
-  generating_thumbnail: 'Generating thumbnail',
-  generating_preview: 'Generating preview',
-  generating_thumbnail_and_preview: 'Generating thumbnail and preview'
-};
+const SCAN_OPERATIONS = new Set<ScanOperation>([
+  'checking_derivatives',
+  'backfilling_asset_key',
+  'moving_thumbnail',
+  'moving_preview',
+  'repairing_thumbnail',
+  'repairing_preview',
+  'regenerating_derivatives',
+  'discovering_media',
+  'generating_thumbnail',
+  'generating_preview',
+  'generating_thumbnail_and_preview'
+]);
+
+function t(key: string, params?: Record<string, unknown>): string {
+  return params ? i18n.global.t(key, params) : i18n.global.t(key);
+}
 
 function formatRatio(current: number, total: number, fallback = '?'): string {
   return `${current}/${total > 0 ? total : fallback}`;
@@ -38,18 +43,18 @@ function calculateDeterminatePercent(current: number, total: number): number {
 
 export function getScanPhaseLabel(scan: ScanProgress | null): string {
   if (!scan?.isScanning) {
-    return 'Idle';
+    return t('scanProgress.phases.idle');
   }
 
   if (scan.phase === 'migration') {
-    return 'Migration';
+    return t('scanProgress.phases.migration');
   }
 
   if (scan.phase === 'derivatives') {
-    return 'Derivatives';
+    return t('scanProgress.phases.derivatives');
   }
 
-  return 'Discovery';
+  return t('scanProgress.phases.discovery');
 }
 
 export function getScanSummary(scan: ScanProgress | null): string {
@@ -57,23 +62,28 @@ export function getScanSummary(scan: ScanProgress | null): string {
     return '';
   }
 
-  if (scan.currentPhaseMessage) {
-    return scan.currentPhaseMessage;
-  }
-
+  // Built from phase and reason instead of the server's English currentPhaseMessage so it can be localized.
   if (scan.phase === 'migration') {
-    return 'Upgrading legacy thumbnails and previews before indexing starts.';
+    return t('scanProgress.summary.migration');
   }
 
   if (scan.phase === 'derivatives') {
-    return scan.scanReason === 'rebuild-thumbnails'
-      ? 'Generating feed thumbnails, profile thumbnails, and video posters.'
-      : 'Generating thumbnails and previews for queued changes.';
+    if (scan.scanReason === 'rebuild-thumbnails') {
+      return t('scanProgress.summary.derivativesThumbnails');
+    }
+
+    return scan.scanReason === 'rebuild'
+      ? t('scanProgress.summary.derivativesRebuild')
+      : t('scanProgress.summary.derivatives');
   }
 
-  return scan.scanReason === 'rebuild-thumbnails'
-    ? 'Loading indexed media before thumbnail regeneration starts.'
-    : 'Discovering folders and media...';
+  if (scan.scanReason === 'rebuild-thumbnails') {
+    return t('scanProgress.summary.discoveryThumbnails');
+  }
+
+  return scan.scanReason === 'rebuild'
+    ? t('scanProgress.summary.discoveryRebuild')
+    : t('scanProgress.summary.discovery');
 }
 
 export function getScanOperationLabel(scan: ScanProgress | null): string | null {
@@ -81,7 +91,7 @@ export function getScanOperationLabel(scan: ScanProgress | null): string | null 
     return null;
   }
 
-  return SCAN_OPERATION_LABELS[scan.currentOperation] ?? null;
+  return SCAN_OPERATIONS.has(scan.currentOperation) ? t(`scanProgress.operations.${scan.currentOperation}`) : null;
 }
 
 export function getScanLocation(scan: ScanProgress | null): string | null {
@@ -114,24 +124,24 @@ export function getScanMetricLine(scan: ScanProgress | null): string {
 
   if (scan.phase === 'migration') {
     return [
-      `${formatRatio(scan.processedMigrationRows, scan.migrationTotalRows)} assets checked`,
-      `${scan.migratedDerivativeFiles} moved`,
-      `${scan.repairedDerivativeFiles} repaired`,
-      `${scan.missingDerivativeFiles} missing`
+      t('scanProgress.metrics.assetsChecked', { value: formatRatio(scan.processedMigrationRows, scan.migrationTotalRows) }),
+      t('scanProgress.metrics.moved', { count: scan.migratedDerivativeFiles }),
+      t('scanProgress.metrics.repaired', { count: scan.repairedDerivativeFiles }),
+      t('scanProgress.metrics.missing', { count: scan.missingDerivativeFiles })
     ].join(' | ');
   }
 
   if (scan.phase === 'derivatives') {
     return [
-      `${formatRatio(scan.processedDerivativeJobs, scan.queuedDerivativeJobs, '0')} jobs complete`,
-      `${scan.generatedThumbnails} thumbnails`,
-      `${scan.generatedPreviews} previews`
+      t('scanProgress.metrics.jobsComplete', { value: formatRatio(scan.processedDerivativeJobs, scan.queuedDerivativeJobs, '0') }),
+      t('scanProgress.metrics.thumbnails', { count: scan.generatedThumbnails }),
+      t('scanProgress.metrics.previews', { count: scan.generatedPreviews })
     ].join(' | ');
   }
 
   return [
-    `${formatRatio(scan.processedFolders, scan.discoveredFolders, '0')} folders processed`,
-    `${formatRatio(scan.processedImages, scan.discoveredImages, '0')} posts indexed`
+    t('scanProgress.metrics.foldersProcessed', { value: formatRatio(scan.processedFolders, scan.discoveredFolders, '0') }),
+    t('scanProgress.metrics.postsIndexed', { value: formatRatio(scan.processedImages, scan.discoveredImages, '0') })
   ].join(' | ');
 }
 
@@ -166,29 +176,29 @@ export function getScanBarState(scan: ScanProgress | null): ScanBarState {
 export function getInitialScanStats(scan: ScanProgress | null): ScanStatCard[] {
   if (!scan) {
     return [
-      { label: 'Folders', value: '0' },
-      { label: 'Posts', value: '0' },
-      { label: 'Thumbnails', value: '0' },
-      { label: 'Previews', value: '0' }
+      { label: t('scanProgress.stats.folders'), value: '0' },
+      { label: t('scanProgress.stats.posts'), value: '0' },
+      { label: t('scanProgress.stats.thumbnails'), value: '0' },
+      { label: t('scanProgress.stats.previews'), value: '0' }
     ];
   }
 
   if (scan.phase === 'migration') {
     return [
       {
-        label: 'Assets checked',
+        label: t('scanProgress.stats.assetsChecked'),
         value: formatRatio(scan.processedMigrationRows, scan.migrationTotalRows, '0')
       },
       {
-        label: 'Files moved',
+        label: t('scanProgress.stats.filesMoved'),
         value: String(scan.migratedDerivativeFiles)
       },
       {
-        label: 'Files repaired',
+        label: t('scanProgress.stats.filesRepaired'),
         value: String(scan.repairedDerivativeFiles)
       },
       {
-        label: 'Missing files',
+        label: t('scanProgress.stats.missingFiles'),
         value: String(scan.missingDerivativeFiles)
       }
     ];
@@ -197,19 +207,19 @@ export function getInitialScanStats(scan: ScanProgress | null): ScanStatCard[] {
   if (scan.phase === 'derivatives') {
     return [
       {
-        label: 'Jobs complete',
+        label: t('scanProgress.stats.jobsComplete'),
         value: formatRatio(scan.processedDerivativeJobs, scan.queuedDerivativeJobs, '0')
       },
       {
-        label: 'Queued jobs',
+        label: t('scanProgress.stats.queuedJobs'),
         value: String(scan.queuedDerivativeJobs)
       },
       {
-        label: 'Thumbnails',
+        label: t('scanProgress.stats.thumbnails'),
         value: String(scan.generatedThumbnails)
       },
       {
-        label: 'Previews',
+        label: t('scanProgress.stats.previews'),
         value: String(scan.generatedPreviews)
       }
     ];
@@ -217,19 +227,19 @@ export function getInitialScanStats(scan: ScanProgress | null): ScanStatCard[] {
 
   return [
     {
-      label: 'Folders found',
+      label: t('scanProgress.stats.foldersFound'),
       value: String(scan.discoveredFolders)
     },
     {
-      label: 'Folders processed',
+      label: t('scanProgress.stats.foldersProcessed'),
       value: String(scan.processedFolders)
     },
     {
-      label: 'Posts found',
+      label: t('scanProgress.stats.postsFound'),
       value: String(scan.discoveredImages)
     },
     {
-      label: 'Posts indexed',
+      label: t('scanProgress.stats.postsIndexed'),
       value: String(scan.processedImages)
     }
   ];

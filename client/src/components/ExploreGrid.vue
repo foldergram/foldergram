@@ -1,5 +1,5 @@
 <template>
-  <section class="explore-grid" aria-label="Explore posts">
+  <section class="explore-grid" :aria-label="t('explore.gridAria')">
     <RouterLink v-for="(item, index) in items" :key="item.id" custom :to="buildPostRoute(item.id)" v-slot="{ href, navigate }">
       <a
         :href="href"
@@ -20,6 +20,7 @@
 </template>
 
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n';
 import { RouterLink, useRoute } from 'vue-router';
 
 import { useAppStore } from '../stores/app';
@@ -37,6 +38,7 @@ const emit = defineEmits<{
 
 const FEATURE_INDEXES = new Set([2, 8, 13]);
 
+const { t } = useI18n();
 const appStore = useAppStore();
 const route = useRoute();
 

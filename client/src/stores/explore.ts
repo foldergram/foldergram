@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 
 import { fetchFeed, fetchFeedSearch } from '../api/gallery';
+import { i18n } from '../locales';
 import type { FeedItem } from '../types/api';
 import { updateCaptionInItems } from '../utils/caption';
 
@@ -235,7 +236,7 @@ export const useExploreStore = defineStore('explore', {
         this.initialized = true;
       } catch (error) {
         this.error =
-          error instanceof Error ? error.message : 'Unable to load explore feed';
+          error instanceof Error ? error.message : i18n.global.t('explore.errors.load');
       } finally {
         this.loading = false;
       }
@@ -319,7 +320,7 @@ export const useExploreStore = defineStore('explore', {
         }
 
         this.searchError =
-          error instanceof Error ? error.message : 'Unable to search posts';
+          error instanceof Error ? error.message : i18n.global.t('explore.errors.search');
         this.searchHasMore = false;
         this.searchInitialized = true;
       } finally {

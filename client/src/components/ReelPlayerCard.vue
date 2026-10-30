@@ -3,7 +3,7 @@
     <div class="reel-player-card__stage">
       <div
         class="reel-player-card__surface"
-        :aria-label="active ? 'Toggle playback' : undefined"
+        :aria-label="active ? t('post.viewer.togglePlayback') : undefined"
         :role="active ? 'button' : undefined"
         :tabindex="active ? 0 : -1"
         @click="handleSurfaceClick"
@@ -30,7 +30,7 @@
           <div class="reel-player-card__seekbar-shell">
             <media-time-slider
               class="reel-player-card__seekbar"
-              aria-label="Seek video"
+              :aria-label="t('media.seekVideo')"
               @click.stop
               @pointerdown.stop
               @pointerup.stop
@@ -61,7 +61,7 @@
             <RouterLink
               class="reel-player-card__folder-row reel-player-card__folder-link"
               :to="{ name: 'folder', params: { slug: item.folderSlug } }"
-              aria-label="Open folder"
+              :aria-label="t('post.viewer.openFolder')"
               @click.stop
             >
               <Avatar
@@ -91,7 +91,7 @@
             <button
               class="reel-player-card__sound-button"
               type="button"
-              :aria-label="appStore.videoMuted ? 'Enable sound' : 'Mute sound'"
+              :aria-label="appStore.videoMuted ? t('media.enableSound') : t('media.muteSound')"
               @click.stop="toggleSound"
             >
               <span
@@ -115,6 +115,7 @@
 import 'vidstack/bundle';
 
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { RouterLink } from 'vue-router';
 import type { PlayerSrc } from 'vidstack';
 import type { MediaPlayerElement } from 'vidstack/elements';
@@ -131,6 +132,7 @@ const props = defineProps<{
   active: boolean;
 }>();
 
+const { t } = useI18n();
 const appStore = useAppStore();
 const playerElement = ref<MediaPlayerElement | null>(null);
 const isPaused = ref(false);

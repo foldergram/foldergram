@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 
 import { fetchFeed } from '../api/gallery';
+import { i18n } from '../locales';
 import type { FeedItem, FeedMode } from '../types/api';
 import { updateCaptionInItems } from '../utils/caption';
 
@@ -144,7 +145,7 @@ export const useFeedStore = defineStore('feed', {
         this.hasMore = payload.hasMore;
         this.initialized = true;
       } catch (error) {
-        this.error = error instanceof Error ? error.message : 'Unable to load feed';
+        this.error = error instanceof Error ? error.message : i18n.global.t('errors.loadFeed');
       } finally {
         this.loading = false;
 

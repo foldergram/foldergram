@@ -11,6 +11,7 @@ import {
   setFolderSharePassword,
   updateFolderProfile
 } from '../api/gallery';
+import { i18n } from '../locales';
 import type {
   CreateFolderShareLinkInput,
   FeedItem,
@@ -170,7 +171,7 @@ export const useFoldersStore = defineStore('folders', {
       try {
         this.items = await fetchFolders();
       } catch (error) {
-        this.listError = error instanceof Error ? error.message : 'Unable to load folders';
+        this.listError = error instanceof Error ? error.message : i18n.global.t('libraryPage.errors.load');
       } finally {
         this.loadingList = false;
       }
@@ -208,7 +209,7 @@ export const useFoldersStore = defineStore('folders', {
         this.currentHasMore = payload.hasMore;
       } catch (error) {
         this.currentFolder = null;
-        this.folderError = error instanceof Error ? error.message : 'Unable to load folder';
+        this.folderError = error instanceof Error ? error.message : i18n.global.t('errors.loadFolder');
       } finally {
         this.loadingFolder = false;
       }
@@ -245,7 +246,7 @@ export const useFoldersStore = defineStore('folders', {
         this.sharePublicFolderUrl = payload.publicFolderUrl;
         this.sharePublicAccess = payload.publicAccess;
       } catch (error) {
-        this.shareError = error instanceof Error ? error.message : 'Unable to load folder sharing';
+        this.shareError = error instanceof Error ? error.message : i18n.global.t('errors.loadFolderSharing');
         throw error;
       } finally {
         this.loadingShare = false;
@@ -262,7 +263,7 @@ export const useFoldersStore = defineStore('folders', {
         this.lastCreatedShareUrl = payload.shareUrl;
         return payload;
       } catch (error) {
-        this.shareError = error instanceof Error ? error.message : 'Unable to create share link';
+        this.shareError = error instanceof Error ? error.message : i18n.global.t('folder.shareModal.errors.createLink');
         throw error;
       } finally {
         this.loadingShare = false;
@@ -280,7 +281,7 @@ export const useFoldersStore = defineStore('folders', {
           this.lastCreatedShareUrl = null;
         }
       } catch (error) {
-        this.shareError = error instanceof Error ? error.message : 'Unable to revoke share link';
+        this.shareError = error instanceof Error ? error.message : i18n.global.t('folder.shareModal.errors.revokeLink');
         throw error;
       } finally {
         this.loadingShare = false;
@@ -295,7 +296,7 @@ export const useFoldersStore = defineStore('folders', {
         const payload = await setFolderSharePassword(slug, password);
         this.sharePassword = payload.password;
       } catch (error) {
-        this.shareError = error instanceof Error ? error.message : 'Unable to save folder password';
+        this.shareError = error instanceof Error ? error.message : i18n.global.t('folder.shareModal.errors.savePassword');
         throw error;
       } finally {
         this.loadingShare = false;
@@ -310,7 +311,7 @@ export const useFoldersStore = defineStore('folders', {
         const payload = await removeFolderSharePassword(slug);
         this.sharePassword = payload.password;
       } catch (error) {
-        this.shareError = error instanceof Error ? error.message : 'Unable to remove folder password';
+        this.shareError = error instanceof Error ? error.message : i18n.global.t('folder.shareModal.errors.removePassword');
         throw error;
       } finally {
         this.loadingShare = false;

@@ -9,7 +9,7 @@
       {{ t('common.loadMore') }}
     </button>
     <span v-else-if="loading" class="text-muted">{{ t('common.loadingMore') }}</span>
-    <span v-else-if="hasMore" class="sr-only">Loading continues automatically when you reach the end.</span>
+    <span v-else-if="hasMore" class="sr-only">{{ t('common.loadingContinues') }}</span>
     <span v-else class="text-muted">{{ t('common.youAreCaughtUp') }}</span>
   </div>
 </template>

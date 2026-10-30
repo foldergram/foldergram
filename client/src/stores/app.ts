@@ -98,7 +98,7 @@ export const useAppStore = defineStore('app', {
   }),
   getters: {
     isLibraryUnavailable: (state) => state.stats?.storage.available === false,
-    libraryUnavailableReason: (state) => state.stats?.storage.reason ?? 'Configured library storage is unavailable.',
+    libraryUnavailableReason: (state) => state.stats?.storage.reason ?? i18n.global.t('common.libraryUnavailableReason'),
     isLibraryRebuildRequired: (state) => state.stats?.libraryIndex.rebuildRequired === true,
     isScanning: (state) => state.stats?.scan.isScanning === true,
     isRebuilding: (state) => state.stats?.scan.isScanning === true && state.stats?.scan.scanReason === 'rebuild',
@@ -423,7 +423,7 @@ export const useAppStore = defineStore('app', {
           this.stopStatsPolling();
         }
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Unable to load app stats';
+        const message = error instanceof Error ? error.message : i18n.global.t('errors.loadAppStats');
 
         if (options.background) {
           this.statsPollFailures += 1;
@@ -431,7 +431,7 @@ export const useAppStore = defineStore('app', {
           if (this.statsPollFailures >= 3) {
             this.stopStatsPolling();
             this.markScanStatusUnavailable();
-            this.error = 'Lost connection while refreshing scan status.';
+            this.error = i18n.global.t('errors.scanStatusConnectionLost');
           }
         } else {
           this.error = message;
@@ -471,7 +471,7 @@ export const useAppStore = defineStore('app', {
         if (this.statsPollFailures >= 3) {
           this.stopStatsPolling();
           this.markScanStatusUnavailable();
-          this.error = 'Lost connection while refreshing scan status.';
+          this.error = i18n.global.t('errors.scanStatusConnectionLost');
         }
       }
     }

@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 
 import { fetchTrashImages } from '../api/gallery';
+import { i18n } from '../locales';
 import type { TrashItem } from '../types/api';
 import { updateCaptionInItems } from '../utils/caption';
 
@@ -73,7 +74,7 @@ export const useTrashStore = defineStore('trash', {
         this.hasMore = payload.hasMore;
         this.initialized = true;
       } catch (error) {
-        this.error = error instanceof Error ? error.message : 'Unable to load trash';
+        this.error = error instanceof Error ? error.message : i18n.global.t('trashPage.loadErrorTitle');
       } finally {
         this.loading = false;
       }
@@ -94,7 +95,7 @@ export const useTrashStore = defineStore('trash', {
         this.hasMore = payload.hasMore;
         this.initialized = true;
       } catch (error) {
-        this.error = error instanceof Error ? error.message : 'Unable to load trash';
+        this.error = error instanceof Error ? error.message : i18n.global.t('trashPage.loadErrorTitle');
       } finally {
         this.loading = false;
       }

@@ -1483,7 +1483,7 @@ function normalizeExcludedFolderRuleInput(rule: string): string {
     .filter(Boolean);
 
   if (segments.length === 0) {
-    throw new Error('Excluded folder rules cannot be empty.');
+    throw new Error(t('settings.general.errors.excludedFoldersEmpty'));
   }
 
   if (segments.some((segment) => segment === '.' || segment === '..')) {

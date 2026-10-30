@@ -13,7 +13,7 @@
     <div class="video-progress-footer__timeline-shell">
       <media-time-slider
         class="vds-slider vds-time-slider video-progress-footer__slider"
-        aria-label="Seek video"
+        :aria-label="t('media.seekVideo')"
       >
         <div class="vds-slider-track video-progress-footer__track" />
         <div class="vds-slider-track vds-slider-progress video-progress-footer__track-progress" />
@@ -25,6 +25,8 @@
 </template>
 
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n';
+
 withDefaults(
   defineProps<{
     timeLabel: string;
@@ -34,4 +36,6 @@ withDefaults(
     variant: 'feed'
   }
 );
+
+const { t } = useI18n();
 </script>

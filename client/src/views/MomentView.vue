@@ -2,7 +2,7 @@
   <section class="w-[min(100%,58rem)] mx-auto">
     <EmptyState
       v-if="appStore.isLibraryUnavailable"
-      title="Library storage unavailable"
+      :title="t('common.libraryUnavailableTitle')"
       :description="appStore.libraryUnavailableReason"
     />
     <section v-else-if="appStore.isRebuilding && !momentsStore.currentCapsule" class="card p-8 text-center">

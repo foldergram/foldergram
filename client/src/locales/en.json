@@ -21,7 +21,12 @@
       "itemCountOther": "{count} items",
       "latestDate": "Latest {date}",
       "noRecentActivity": "No recent activity"
-    }
+    },
+    "libraryUnavailableTitle": "Library storage unavailable",
+    "libraryUnavailableReason": "Configured library storage is unavailable.",
+    "loadingContinues": "Loading continues automatically when you reach the end.",
+    "deleting": "Deleting...",
+    "loadingLabel": "Loading {label}…"
   },
   "app": {
     "authLoading": {
@@ -337,7 +342,8 @@
       "errors": {
         "validateExcludedFolders": "Unable to validate the excluded folder rules.",
         "update": "Unable to update the general settings.",
-        "partialUpdate": "Some settings were saved ({parts}), but the update did not finish: {message}"
+        "partialUpdate": "Some settings were saved ({parts}), but the update did not finish: {message}",
+        "excludedFoldersEmpty": "Excluded folder rules cannot be empty."
       }
     },
     "library": {
@@ -622,6 +628,40 @@
       "openFolder": "Open",
       "openSourceText": "Foldergram is open source.",
       "viewOnGitHub": "View on GitHub"
+    },
+    "rebuildNotice": {
+      "title": "Library location changed",
+      "description": "The current index may still contain folders and cached media from a previous gallery location. Review the rebuild steps to reset the index, reuse any matching thumbnails and previews, and generate only the missing derivatives for the current library.",
+      "review": "Review Rebuild",
+      "adminRequired": "An admin session needs to rebuild the library."
+    },
+    "initialScan": {
+      "eyebrow": "Startup scan in progress",
+      "title": "Indexing your library",
+      "preparing": "Preparing scan status..."
+    },
+    "feed": {
+      "loadErrorTitle": "Could not load feed",
+      "emptyTitle": "No posts indexed yet",
+      "emptyDescription": "Add folders under the gallery root and the feed will populate after the next scan.",
+      "retryStory": "Retry Story",
+      "indexedSummary": "{posts} posts, {videos} videos across {folders} folders"
+    },
+    "setup": {
+      "eyebrowGalleryRoot": "Gallery Root",
+      "eyebrowGetStarted": "Get Started",
+      "titleIgnored": "Files in the gallery root are being ignored",
+      "titleEmpty": "No folders found yet",
+      "descriptionIgnoredOne": "{count} supported file is being ignored in the gallery root. Move it into a folder inside your gallery root, such as example-album, to create App Folders. Files placed directly in the gallery root are ignored.",
+      "descriptionIgnoredOther": "{count} supported files are being ignored in the gallery root. Move them into a folder inside your gallery root, such as example-album, to create App Folders. Files placed directly in the gallery root are ignored.",
+      "descriptionEmpty": "Create a folder inside your gallery root, such as example-album, and place photos or videos in it to create your first App Folder. Files placed directly in the gallery root are ignored.",
+      "scanning": "Scanning library...",
+      "runScan": "Run Scan Library",
+      "noteRebuild": "Rebuild the library index first because the gallery location changed.",
+      "noteAdmin": "An admin session needs to run the next scan before new folders or moved media will appear here.",
+      "noteScanning": "Scanning the gallery now and refreshing the Home feed when it finishes.",
+      "noteIdle": "Run a scan after adding folders or moving files so the library can index them.",
+      "scanError": "Unable to start a library scan."
     }
   },
   "likes": {
@@ -807,6 +847,17 @@
       "posts": "Posts",
       "reels": "Reels",
       "sections": "Folder sections"
+    },
+    "view": {
+      "rebuilding": "Rebuilding the library index. Folder content will return as soon as this scan reaches it.",
+      "loadErrorTitle": "Could not load folder",
+      "retryStories": "Retry Stories",
+      "emptyReelsTitle": "No reels in this folder",
+      "emptyPostsTitle": "No posts in this folder",
+      "emptyReelsDescription": "Drop supported videos into this folder and rescan to see them in the reels tab.",
+      "emptyPostsDescription": "Drop supported photos or videos into this folder and rescan to see them here.",
+      "noDirectPostsTitle": "No direct posts in this app folder",
+      "noDirectPostsDescription": "This source folder no longer has direct photos or videos. Browse the library to continue."
     }
   },
   "share": {
@@ -824,7 +875,10 @@
     "errorTitle": "Could not open folder share",
     "errorDescription": "Unable to load this folder share.",
     "backToFolder": "Back to shared folder",
-    "postErrorTitle": "Could not load shared post"
+    "postErrorTitle": "Could not load shared post",
+    "emptyTitle": "No posts in this shared folder",
+    "emptyDescription": "This folder share is valid, but there are no visible posts right now.",
+    "fallbackTitle": "Shared folder"
   },
   "reels": {
     "view": {
@@ -836,7 +890,9 @@
       "emptyDescription": "Add indexed videos to your library and they will show up here after the next scan.",
       "navigationAria": "Reel navigation",
       "previous": "Previous reel",
-      "next": "Next reel"
+      "next": "Next reel",
+      "feedAria": "Reels feed",
+      "loadingMore": "Loading more reels..."
     },
     "rail": {
       "hideDetails": "Hide reel details",
@@ -915,7 +971,8 @@
       "setAsCover": "Set as folder cover",
       "downloadOriginalFile": "Download original file",
       "openOriginalFile": "Open original file",
-      "deletePost": "Delete post"
+      "deletePost": "Delete post",
+      "setCoverError": "Failed to set cover"
     },
     "feedCard": {
       "openStories": "Open {name} stories",
@@ -933,6 +990,11 @@
         "deleteOriginalDescription": "Keep this unchecked to move the post to Trash while keeping the source file on disk.",
         "deleteOriginalWarning": "This will permanently delete the original file, thumbnail, and preview from disk. This action cannot be undone."
       }
+    },
+    "view": {
+      "loadErrorTitle": "Could not load post",
+      "loading": "Loading post...",
+      "deleteError": "Unable to delete post"
     }
   },
   "collections": {
@@ -1176,6 +1238,98 @@
     "emptyTitle": "Nothing to explore yet",
     "emptyDescription": "Index a few folders and this page will start surfacing posts here.",
     "folderPostsOne": "{count} post",
-    "folderPostsOther": "{count} posts"
+    "folderPostsOther": "{count} posts",
+    "gridAria": "Explore posts"
+  },
+  "media": {
+    "seekVideo": "Seek video",
+    "enableSound": "Enable sound",
+    "muteSound": "Mute sound",
+    "resumePlayback": "Resume playback",
+    "pausePlayback": "Pause playback",
+    "closeViewer": "Close viewer"
+  },
+  "scanProgress": {
+    "titles": {
+      "rebuild": "Rebuilding library",
+      "thumbnails": "Regenerating thumbnails",
+      "scan": "Scanning library"
+    },
+    "phases": {
+      "idle": "Idle",
+      "migration": "Migration",
+      "derivatives": "Derivatives",
+      "discovery": "Discovery"
+    },
+    "summary": {
+      "migration": "Upgrading legacy thumbnails and previews before indexing starts.",
+      "derivativesThumbnails": "Generating feed thumbnails, profile thumbnails, and video posters.",
+      "derivativesRebuild": "Generating any missing thumbnails and previews for the rebuilt library.",
+      "derivatives": "Generating thumbnails and previews for queued changes.",
+      "discoveryThumbnails": "Loading indexed media before thumbnail regeneration starts.",
+      "discoveryRebuild": "Discovering folders and media for the current gallery root.",
+      "discovery": "Discovering folders and media..."
+    },
+    "operations": {
+      "checking_derivatives": "Checking derivatives",
+      "backfilling_asset_key": "Backfilling asset key",
+      "moving_thumbnail": "Moving thumbnail",
+      "moving_preview": "Moving preview",
+      "repairing_thumbnail": "Repairing thumbnail",
+      "repairing_preview": "Repairing preview",
+      "regenerating_derivatives": "Regenerating derivatives",
+      "discovering_media": "Discovering folders and media",
+      "generating_thumbnail": "Generating thumbnail",
+      "generating_preview": "Generating preview",
+      "generating_thumbnail_and_preview": "Generating thumbnail and preview"
+    },
+    "metrics": {
+      "assetsChecked": "{value} assets checked",
+      "moved": "{count} moved",
+      "repaired": "{count} repaired",
+      "missing": "{count} missing",
+      "jobsComplete": "{value} jobs complete",
+      "thumbnails": "{count} thumbnails",
+      "previews": "{count} previews",
+      "foldersProcessed": "{value} folders processed",
+      "postsIndexed": "{value} posts indexed"
+    },
+    "stats": {
+      "folders": "Folders",
+      "posts": "Posts",
+      "thumbnails": "Thumbnails",
+      "previews": "Previews",
+      "assetsChecked": "Assets checked",
+      "filesMoved": "Files moved",
+      "filesRepaired": "Files repaired",
+      "missingFiles": "Missing files",
+      "jobsComplete": "Jobs complete",
+      "queuedJobs": "Queued jobs",
+      "foldersFound": "Folders found",
+      "foldersProcessed": "Folders processed",
+      "postsFound": "Posts found",
+      "postsIndexed": "Posts indexed"
+    }
+  },
+  "errors": {
+    "loadAppStats": "Unable to load app stats",
+    "scanStatusConnectionLost": "Lost connection while refreshing scan status.",
+    "sessionEnded": "Your session ended. Log in again.",
+    "loadAccessStatus": "Unable to load access protection status.",
+    "updateSavedPost": "Unable to update saved post",
+    "collectionNameExists": "Collection name already exists.",
+    "collectionNotFound": "Collection not found.",
+    "defaultCollectionManaged": "Default collection membership is managed by the bookmark button.",
+    "loadCollection": "Unable to load collection",
+    "loadFeed": "Unable to load feed",
+    "loadFolderStories": "Unable to load folder stories",
+    "loadStoryCapsule": "Unable to load this story capsule",
+    "loadFolder": "Unable to load folder",
+    "loadFolderSharing": "Unable to load folder sharing",
+    "loadHomeRail": "Unable to load the home rail",
+    "loadFeedCapsule": "Unable to load this feed capsule",
+    "unlockFolderShare": "Unable to unlock this folder share.",
+    "loadSharedPost": "Unable to load this shared post.",
+    "loadPost": "Unable to load post"
   }
 }

@@ -21,7 +21,12 @@
       "itemCountOther": "{count} 项",
       "latestDate": "最新 {date}",
       "noRecentActivity": "最近没有活动"
-    }
+    },
+    "libraryUnavailableTitle": "图库存储不可用",
+    "libraryUnavailableReason": "已配置的图库存储不可用。",
+    "loadingContinues": "滚动到底部时会自动继续加载。",
+    "deleting": "正在删除...",
+    "loadingLabel": "正在加载{label}…"
   },
   "app": {
     "authLoading": {
@@ -337,7 +342,8 @@
       "errors": {
         "validateExcludedFolders": "无法验证已排除文件夹规则。",
         "update": "无法更新常规设置。",
-        "partialUpdate": "部分设置已保存（{parts}），但更新未能完成：{message}"
+        "partialUpdate": "部分设置已保存（{parts}），但更新未能完成：{message}",
+        "excludedFoldersEmpty": "排除文件夹规则不能为空。"
       }
     },
     "library": {
@@ -622,6 +628,40 @@
       "openFolder": "打开",
       "openSourceText": "Foldergram 是开源的。",
       "viewOnGitHub": "在 GitHub 上查看"
+    },
+    "rebuildNotice": {
+      "title": "图库位置已更改",
+      "description": "当前索引可能仍包含来自先前图库位置的文件夹和缓存媒体。请查看重建步骤，以重置索引、复用匹配的缩略图和预览，并只为当前图库生成缺失的衍生文件。",
+      "review": "查看重建",
+      "adminRequired": "需要管理员会话来重建图库。"
+    },
+    "initialScan": {
+      "eyebrow": "正在进行启动扫描",
+      "title": "正在为你的图库建立索引",
+      "preparing": "正在准备扫描状态..."
+    },
+    "feed": {
+      "loadErrorTitle": "无法加载动态流",
+      "emptyTitle": "尚未索引任何帖子",
+      "emptyDescription": "在图库根目录下添加文件夹，下次扫描后动态流就会显示内容。",
+      "retryStory": "重试故事",
+      "indexedSummary": "{folders} 个文件夹中共 {posts} 个帖子、{videos} 个视频"
+    },
+    "setup": {
+      "eyebrowGalleryRoot": "图库根目录",
+      "eyebrowGetStarted": "开始使用",
+      "titleIgnored": "图库根目录中的文件被忽略",
+      "titleEmpty": "尚未找到文件夹",
+      "descriptionIgnoredOne": "图库根目录中有 {count} 个受支持的文件被忽略。请将其移动到图库根目录内的文件夹（例如 example-album）中以创建应用文件夹。直接放在图库根目录中的文件会被忽略。",
+      "descriptionIgnoredOther": "图库根目录中有 {count} 个受支持的文件被忽略。请将它们移动到图库根目录内的文件夹（例如 example-album）中以创建应用文件夹。直接放在图库根目录中的文件会被忽略。",
+      "descriptionEmpty": "在图库根目录内创建一个文件夹（例如 example-album），并在其中放入照片或视频，即可创建你的第一个应用文件夹。直接放在图库根目录中的文件会被忽略。",
+      "scanning": "正在扫描图库...",
+      "runScan": "扫描图库",
+      "noteRebuild": "由于图库位置已更改，请先重建图库索引。",
+      "noteAdmin": "需要管理员会话运行下一次扫描，新文件夹或移动的媒体才会显示在这里。",
+      "noteScanning": "正在扫描图库，完成后会刷新首页动态流。",
+      "noteIdle": "添加文件夹或移动文件后请运行扫描，以便图库为它们建立索引。",
+      "scanError": "无法开始扫描图库。"
     }
   },
   "likes": {
@@ -807,6 +847,17 @@
       "posts": "帖子",
       "reels": "短片",
       "sections": "文件夹分区"
+    },
+    "view": {
+      "rebuilding": "正在重建图库索引。扫描到此文件夹后，其内容将重新显示。",
+      "loadErrorTitle": "无法加载文件夹",
+      "retryStories": "重试故事",
+      "emptyReelsTitle": "此文件夹中没有短片",
+      "emptyPostsTitle": "此文件夹中没有帖子",
+      "emptyReelsDescription": "将受支持的视频放入此文件夹并重新扫描，即可在短片标签页中看到它们。",
+      "emptyPostsDescription": "将受支持的照片或视频放入此文件夹并重新扫描，即可在这里看到它们。",
+      "noDirectPostsTitle": "此应用文件夹中没有直接帖子",
+      "noDirectPostsDescription": "此源文件夹中已没有直接的照片或视频。请浏览图库继续。"
     }
   },
   "share": {
@@ -824,7 +875,10 @@
     "errorTitle": "无法打开文件夹共享",
     "errorDescription": "无法加载此文件夹共享。",
     "backToFolder": "返回共享文件夹",
-    "postErrorTitle": "无法加载共享帖子"
+    "postErrorTitle": "无法加载共享帖子",
+    "emptyTitle": "此共享文件夹中没有帖子",
+    "emptyDescription": "此文件夹共享有效，但目前没有可见的帖子。",
+    "fallbackTitle": "共享文件夹"
   },
   "reels": {
     "view": {
@@ -836,7 +890,9 @@
       "emptyDescription": "将已索引的视频添加到图库后，它们会在下一次扫描后出现在这里。",
       "navigationAria": "短片导航",
       "previous": "上一条短片",
-      "next": "下一条短片"
+      "next": "下一条短片",
+      "feedAria": "短片动态流",
+      "loadingMore": "正在加载更多短片..."
     },
     "rail": {
       "hideDetails": "隐藏短片详情",
@@ -915,7 +971,8 @@
       "setAsCover": "设为文件夹封面",
       "downloadOriginalFile": "下载原始文件",
       "openOriginalFile": "打开原始文件",
-      "deletePost": "删除帖子"
+      "deletePost": "删除帖子",
+      "setCoverError": "无法设置封面"
     },
     "feedCard": {
       "openStories": "打开 {name} 的动态",
@@ -933,6 +990,11 @@
         "deleteOriginalDescription": "保持未勾选可将帖子移入回收站，同时保留磁盘上的源文件。",
         "deleteOriginalWarning": "这会从磁盘永久删除原始文件、缩略图和预览图。此操作无法撤销。"
       }
+    },
+    "view": {
+      "loadErrorTitle": "无法加载帖子",
+      "loading": "正在加载帖子...",
+      "deleteError": "无法删除帖子"
     }
   },
   "collections": {
@@ -1176,6 +1238,98 @@
     "emptyTitle": "暂时没有可探索内容",
     "emptyDescription": "先为几个文件夹建立索引，这个页面就会开始在这里展示帖子。",
     "folderPostsOne": "{count} 篇帖子",
-    "folderPostsOther": "{count} 篇帖子"
+    "folderPostsOther": "{count} 篇帖子",
+    "gridAria": "探索帖子"
+  },
+  "media": {
+    "seekVideo": "调整视频进度",
+    "enableSound": "开启声音",
+    "muteSound": "静音",
+    "resumePlayback": "继续播放",
+    "pausePlayback": "暂停播放",
+    "closeViewer": "关闭查看器"
+  },
+  "scanProgress": {
+    "titles": {
+      "rebuild": "正在重建图库",
+      "thumbnails": "正在重新生成缩略图",
+      "scan": "正在扫描图库"
+    },
+    "phases": {
+      "idle": "空闲",
+      "migration": "迁移",
+      "derivatives": "衍生文件",
+      "discovery": "发现"
+    },
+    "summary": {
+      "migration": "正在开始索引前升级旧版缩略图和预览。",
+      "derivativesThumbnails": "正在生成动态流缩略图、个人主页缩略图和视频封面。",
+      "derivativesRebuild": "正在为重建后的图库生成缺失的缩略图和预览。",
+      "derivatives": "正在为排队中的更改生成缩略图和预览。",
+      "discoveryThumbnails": "正在重新生成缩略图前加载已索引的媒体。",
+      "discoveryRebuild": "正在发现当前图库根目录中的文件夹和媒体。",
+      "discovery": "正在发现文件夹和媒体..."
+    },
+    "operations": {
+      "checking_derivatives": "正在检查衍生文件",
+      "backfilling_asset_key": "正在补全资源键",
+      "moving_thumbnail": "正在移动缩略图",
+      "moving_preview": "正在移动预览",
+      "repairing_thumbnail": "正在修复缩略图",
+      "repairing_preview": "正在修复预览",
+      "regenerating_derivatives": "正在重新生成衍生文件",
+      "discovering_media": "正在发现文件夹和媒体",
+      "generating_thumbnail": "正在生成缩略图",
+      "generating_preview": "正在生成预览",
+      "generating_thumbnail_and_preview": "正在生成缩略图和预览"
+    },
+    "metrics": {
+      "assetsChecked": "已检查 {value} 个资源",
+      "moved": "已移动 {count} 个",
+      "repaired": "已修复 {count} 个",
+      "missing": "缺失 {count} 个",
+      "jobsComplete": "已完成 {value} 个任务",
+      "thumbnails": "{count} 个缩略图",
+      "previews": "{count} 个预览",
+      "foldersProcessed": "已处理 {value} 个文件夹",
+      "postsIndexed": "已索引 {value} 个帖子"
+    },
+    "stats": {
+      "folders": "文件夹",
+      "posts": "帖子",
+      "thumbnails": "缩略图",
+      "previews": "预览",
+      "assetsChecked": "已检查资源",
+      "filesMoved": "已移动文件",
+      "filesRepaired": "已修复文件",
+      "missingFiles": "缺失文件",
+      "jobsComplete": "已完成任务",
+      "queuedJobs": "排队任务",
+      "foldersFound": "已找到文件夹",
+      "foldersProcessed": "已处理文件夹",
+      "postsFound": "已找到帖子",
+      "postsIndexed": "已索引帖子"
+    }
+  },
+  "errors": {
+    "loadAppStats": "无法加载应用统计信息",
+    "scanStatusConnectionLost": "刷新扫描状态时连接中断。",
+    "sessionEnded": "你的会话已结束，请重新登录。",
+    "loadAccessStatus": "无法加载访问保护状态。",
+    "updateSavedPost": "无法更新已保存的帖子",
+    "collectionNameExists": "合集名称已存在。",
+    "collectionNotFound": "未找到合集。",
+    "defaultCollectionManaged": "默认合集的收录由书签按钮管理。",
+    "loadCollection": "无法加载合集",
+    "loadFeed": "无法加载动态流",
+    "loadFolderStories": "无法加载文件夹故事",
+    "loadStoryCapsule": "无法加载此故事集",
+    "loadFolder": "无法加载文件夹",
+    "loadFolderSharing": "无法加载文件夹共享设置",
+    "loadHomeRail": "无法加载首页横栏",
+    "loadFeedCapsule": "无法加载此内容集",
+    "unlockFolderShare": "无法解锁此文件夹共享。",
+    "loadSharedPost": "无法加载此共享帖子。",
+    "loadPost": "无法加载帖子"
   }
 }

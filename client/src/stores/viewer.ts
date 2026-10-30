@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 
 import { deleteImage, fetchImage, trashImage } from '../api/gallery';
+import { i18n } from '../locales';
 import type { DeleteImageResult, ImageDetail } from '../types/api';
 
 interface ViewerState {
@@ -46,7 +47,7 @@ export const useViewerStore = defineStore('viewer', {
         }
 
         this.image = null;
-        this.error = error instanceof Error ? error.message : 'Unable to load post';
+        this.error = error instanceof Error ? error.message : i18n.global.t('errors.loadPost');
       } finally {
         if (requestToken === viewerLoadToken) {
           this.loading = false;
@@ -77,7 +78,7 @@ export const useViewerStore = defineStore('viewer', {
 
         return payload;
       } catch (error) {
-        this.error = error instanceof Error ? error.message : 'Unable to delete post';
+        this.error = error instanceof Error ? error.message : i18n.global.t('post.view.deleteError');
         throw error;
       } finally {
         this.deleting = false;

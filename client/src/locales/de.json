@@ -21,7 +21,12 @@
       "itemCountOther": "{count} Elemente",
       "latestDate": "Zuletzt {date}",
       "noRecentActivity": "Keine aktuelle Aktivität"
-    }
+    },
+    "libraryUnavailableTitle": "Bibliotheksspeicher nicht verfügbar",
+    "libraryUnavailableReason": "Der konfigurierte Bibliotheksspeicher ist nicht verfügbar.",
+    "loadingContinues": "Beim Erreichen des Endes wird automatisch weitergeladen.",
+    "deleting": "Wird gelöscht...",
+    "loadingLabel": "{label} wird geladen…"
   },
   "app": {
     "authLoading": {
@@ -337,7 +342,8 @@
       "errors": {
         "validateExcludedFolders": "Die Regeln für ausgeschlossene Ordner konnten nicht geprüft werden.",
         "update": "Die allgemeinen Einstellungen konnten nicht aktualisiert werden.",
-        "partialUpdate": "Einige Einstellungen wurden gespeichert ({parts}), aber die Aktualisierung wurde nicht abgeschlossen: {message}"
+        "partialUpdate": "Einige Einstellungen wurden gespeichert ({parts}), aber die Aktualisierung wurde nicht abgeschlossen: {message}",
+        "excludedFoldersEmpty": "Regeln für ausgeschlossene Ordner dürfen nicht leer sein."
       }
     },
     "library": {
@@ -622,6 +628,40 @@
       "openFolder": "Öffnen",
       "openSourceText": "Foldergram ist Open Source.",
       "viewOnGitHub": "Auf GitHub ansehen"
+    },
+    "rebuildNotice": {
+      "title": "Speicherort der Bibliothek geändert",
+      "description": "Der aktuelle Index enthält möglicherweise noch Ordner und zwischengespeicherte Medien aus einem früheren Galerie-Speicherort. Prüfe die Schritte zum Neuaufbau, um den Index zurückzusetzen, passende Miniaturansichten und Vorschauen wiederzuverwenden und nur die fehlenden abgeleiteten Dateien für die aktuelle Bibliothek zu erzeugen.",
+      "review": "Neuaufbau prüfen",
+      "adminRequired": "Die Bibliothek muss in einer Admin-Sitzung neu aufgebaut werden."
+    },
+    "initialScan": {
+      "eyebrow": "Startscan läuft",
+      "title": "Deine Bibliothek wird indiziert",
+      "preparing": "Scan-Status wird vorbereitet..."
+    },
+    "feed": {
+      "loadErrorTitle": "Feed konnte nicht geladen werden",
+      "emptyTitle": "Noch keine Beiträge indiziert",
+      "emptyDescription": "Füge Ordner im Galerie-Stammverzeichnis hinzu – nach dem nächsten Scan füllt sich der Feed.",
+      "retryStory": "Story erneut laden",
+      "indexedSummary": "{posts} Beiträge, {videos} Videos in {folders} Ordnern"
+    },
+    "setup": {
+      "eyebrowGalleryRoot": "Galerie-Stammverzeichnis",
+      "eyebrowGetStarted": "Erste Schritte",
+      "titleIgnored": "Dateien im Galerie-Stammverzeichnis werden ignoriert",
+      "titleEmpty": "Noch keine Ordner gefunden",
+      "descriptionIgnoredOne": "{count} unterstützte Datei im Galerie-Stammverzeichnis wird ignoriert. Verschiebe sie in einen Ordner innerhalb des Galerie-Stammverzeichnisses, z. B. example-album, um App-Ordner zu erstellen. Dateien direkt im Galerie-Stammverzeichnis werden ignoriert.",
+      "descriptionIgnoredOther": "{count} unterstützte Dateien im Galerie-Stammverzeichnis werden ignoriert. Verschiebe sie in einen Ordner innerhalb des Galerie-Stammverzeichnisses, z. B. example-album, um App-Ordner zu erstellen. Dateien direkt im Galerie-Stammverzeichnis werden ignoriert.",
+      "descriptionEmpty": "Lege im Galerie-Stammverzeichnis einen Ordner an, z. B. example-album, und lege Fotos oder Videos hinein, um deinen ersten App-Ordner zu erstellen. Dateien direkt im Galerie-Stammverzeichnis werden ignoriert.",
+      "scanning": "Bibliothek wird gescannt...",
+      "runScan": "Bibliothek scannen",
+      "noteRebuild": "Baue zuerst den Bibliotheksindex neu auf, da sich der Galerie-Speicherort geändert hat.",
+      "noteAdmin": "Erst nach dem nächsten Scan in einer Admin-Sitzung erscheinen hier neue Ordner oder verschobene Medien.",
+      "noteScanning": "Die Galerie wird jetzt gescannt; danach wird der Start-Feed aktualisiert.",
+      "noteIdle": "Führe nach dem Hinzufügen von Ordnern oder Verschieben von Dateien einen Scan aus, damit die Bibliothek sie indizieren kann.",
+      "scanError": "Der Bibliotheksscan konnte nicht gestartet werden."
     }
   },
   "likes": {
@@ -807,6 +847,17 @@
       "posts": "Beiträge",
       "reels": "Reels",
       "sections": "Ordnerbereiche"
+    },
+    "view": {
+      "rebuilding": "Der Bibliotheksindex wird neu aufgebaut. Der Ordnerinhalt erscheint wieder, sobald der Scan diesen Ordner erreicht.",
+      "loadErrorTitle": "Ordner konnte nicht geladen werden",
+      "retryStories": "Stories erneut laden",
+      "emptyReelsTitle": "Keine Reels in diesem Ordner",
+      "emptyPostsTitle": "Keine Beiträge in diesem Ordner",
+      "emptyReelsDescription": "Lege unterstützte Videos in diesen Ordner und scanne erneut, um sie im Reels-Tab zu sehen.",
+      "emptyPostsDescription": "Lege unterstützte Fotos oder Videos in diesen Ordner und scanne erneut, um sie hier zu sehen.",
+      "noDirectPostsTitle": "Keine direkten Beiträge in diesem App-Ordner",
+      "noDirectPostsDescription": "Dieser Quellordner enthält keine direkten Fotos oder Videos mehr. Stöbere in der Bibliothek weiter."
     }
   },
   "share": {
@@ -824,7 +875,10 @@
     "errorTitle": "Ordnerfreigabe konnte nicht geöffnet werden",
     "errorDescription": "Diese Ordnerfreigabe konnte nicht geladen werden.",
     "backToFolder": "Zurück zum geteilten Ordner",
-    "postErrorTitle": "Geteilter Beitrag konnte nicht geladen werden"
+    "postErrorTitle": "Geteilter Beitrag konnte nicht geladen werden",
+    "emptyTitle": "Keine Beiträge in diesem geteilten Ordner",
+    "emptyDescription": "Diese Ordnerfreigabe ist gültig, aber derzeit gibt es keine sichtbaren Beiträge.",
+    "fallbackTitle": "Geteilter Ordner"
   },
   "reels": {
     "view": {
@@ -836,7 +890,9 @@
       "emptyDescription": "Füge deiner Bibliothek Videos hinzu – nach dem nächsten Scan erscheinen sie hier.",
       "navigationAria": "Reel-Navigation",
       "previous": "Vorheriges Reel",
-      "next": "Nächstes Reel"
+      "next": "Nächstes Reel",
+      "feedAria": "Reels-Feed",
+      "loadingMore": "Weitere Reels werden geladen..."
     },
     "rail": {
       "hideDetails": "Reel-Details ausblenden",
@@ -915,7 +971,8 @@
       "setAsCover": "Als Ordner-Titelbild festlegen",
       "downloadOriginalFile": "Originaldatei herunterladen",
       "openOriginalFile": "Originaldatei öffnen",
-      "deletePost": "Beitrag löschen"
+      "deletePost": "Beitrag löschen",
+      "setCoverError": "Titelbild konnte nicht festgelegt werden"
     },
     "feedCard": {
       "openStories": "Stories von {name} öffnen",
@@ -933,6 +990,11 @@
         "deleteOriginalDescription": "Lass dies deaktiviert, um den Beitrag in den Papierkorb zu verschieben und die Quelldatei auf der Festplatte zu behalten.",
         "deleteOriginalWarning": "Dadurch werden Originaldatei, Miniaturansicht und Vorschau endgültig von der Festplatte gelöscht. Diese Aktion kann nicht rückgängig gemacht werden."
       }
+    },
+    "view": {
+      "loadErrorTitle": "Beitrag konnte nicht geladen werden",
+      "loading": "Beitrag wird geladen...",
+      "deleteError": "Beitrag konnte nicht gelöscht werden"
     }
   },
   "collections": {
@@ -1176,6 +1238,98 @@
     "emptyTitle": "Noch nichts zu entdecken",
     "emptyDescription": "Indiziere ein paar Ordner, dann erscheinen hier Beiträge.",
     "folderPostsOne": "{count} Beitrag",
-    "folderPostsOther": "{count} Beiträge"
+    "folderPostsOther": "{count} Beiträge",
+    "gridAria": "Beiträge entdecken"
+  },
+  "media": {
+    "seekVideo": "Im Video springen",
+    "enableSound": "Ton einschalten",
+    "muteSound": "Ton ausschalten",
+    "resumePlayback": "Wiedergabe fortsetzen",
+    "pausePlayback": "Wiedergabe pausieren",
+    "closeViewer": "Ansicht schließen"
+  },
+  "scanProgress": {
+    "titles": {
+      "rebuild": "Bibliothek wird neu aufgebaut",
+      "thumbnails": "Miniaturansichten werden neu erzeugt",
+      "scan": "Bibliothek wird gescannt"
+    },
+    "phases": {
+      "idle": "Bereit",
+      "migration": "Migration",
+      "derivatives": "Abgeleitete Dateien",
+      "discovery": "Erkennung"
+    },
+    "summary": {
+      "migration": "Alte Miniaturansichten und Vorschauen werden vor Beginn der Indizierung aktualisiert.",
+      "derivativesThumbnails": "Feed- und Profil-Miniaturansichten sowie Video-Vorschaubilder werden erzeugt.",
+      "derivativesRebuild": "Fehlende Miniaturansichten und Vorschauen für die neu aufgebaute Bibliothek werden erzeugt.",
+      "derivatives": "Miniaturansichten und Vorschauen für anstehende Änderungen werden erzeugt.",
+      "discoveryThumbnails": "Indizierte Medien werden vor der Neuerzeugung der Miniaturansichten geladen.",
+      "discoveryRebuild": "Ordner und Medien im aktuellen Galerie-Stammverzeichnis werden erkannt.",
+      "discovery": "Ordner und Medien werden erkannt..."
+    },
+    "operations": {
+      "checking_derivatives": "Abgeleitete Dateien werden geprüft",
+      "backfilling_asset_key": "Asset-Key wird ergänzt",
+      "moving_thumbnail": "Miniaturansicht wird verschoben",
+      "moving_preview": "Vorschau wird verschoben",
+      "repairing_thumbnail": "Miniaturansicht wird repariert",
+      "repairing_preview": "Vorschau wird repariert",
+      "regenerating_derivatives": "Abgeleitete Dateien werden neu erzeugt",
+      "discovering_media": "Ordner und Medien werden erkannt",
+      "generating_thumbnail": "Miniaturansicht wird erzeugt",
+      "generating_preview": "Vorschau wird erzeugt",
+      "generating_thumbnail_and_preview": "Miniaturansicht und Vorschau werden erzeugt"
+    },
+    "metrics": {
+      "assetsChecked": "{value} Assets geprüft",
+      "moved": "{count} verschoben",
+      "repaired": "{count} repariert",
+      "missing": "{count} fehlend",
+      "jobsComplete": "{value} Aufgaben erledigt",
+      "thumbnails": "{count} Miniaturansichten",
+      "previews": "{count} Vorschauen",
+      "foldersProcessed": "{value} Ordner verarbeitet",
+      "postsIndexed": "{value} Beiträge indiziert"
+    },
+    "stats": {
+      "folders": "Ordner",
+      "posts": "Beiträge",
+      "thumbnails": "Miniaturansichten",
+      "previews": "Vorschauen",
+      "assetsChecked": "Geprüfte Assets",
+      "filesMoved": "Verschobene Dateien",
+      "filesRepaired": "Reparierte Dateien",
+      "missingFiles": "Fehlende Dateien",
+      "jobsComplete": "Erledigte Aufgaben",
+      "queuedJobs": "Anstehende Aufgaben",
+      "foldersFound": "Gefundene Ordner",
+      "foldersProcessed": "Verarbeitete Ordner",
+      "postsFound": "Gefundene Beiträge",
+      "postsIndexed": "Indizierte Beiträge"
+    }
+  },
+  "errors": {
+    "loadAppStats": "App-Statistiken konnten nicht geladen werden",
+    "scanStatusConnectionLost": "Verbindung beim Aktualisieren des Scan-Status verloren.",
+    "sessionEnded": "Deine Sitzung ist abgelaufen. Melde dich erneut an.",
+    "loadAccessStatus": "Der Status des Zugriffsschutzes konnte nicht geladen werden.",
+    "updateSavedPost": "Gespeicherter Beitrag konnte nicht aktualisiert werden",
+    "collectionNameExists": "Eine Sammlung mit diesem Namen existiert bereits.",
+    "collectionNotFound": "Sammlung nicht gefunden.",
+    "defaultCollectionManaged": "Die Zugehörigkeit zur Standardsammlung wird über das Lesezeichen gesteuert.",
+    "loadCollection": "Sammlung konnte nicht geladen werden",
+    "loadFeed": "Feed konnte nicht geladen werden",
+    "loadFolderStories": "Ordner-Stories konnten nicht geladen werden",
+    "loadStoryCapsule": "Diese Story konnte nicht geladen werden",
+    "loadFolder": "Ordner konnte nicht geladen werden",
+    "loadFolderSharing": "Ordnerfreigabe konnte nicht geladen werden",
+    "loadHomeRail": "Die Leiste auf der Startseite konnte nicht geladen werden",
+    "loadFeedCapsule": "Diese Zusammenstellung konnte nicht geladen werden",
+    "unlockFolderShare": "Diese Ordnerfreigabe konnte nicht entsperrt werden.",
+    "loadSharedPost": "Dieser geteilte Beitrag konnte nicht geladen werden.",
+    "loadPost": "Beitrag konnte nicht geladen werden"
   }
 }

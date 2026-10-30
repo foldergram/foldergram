@@ -8,6 +8,7 @@ import {
   unlockSharedFolderLink,
   unlockSharedFolderPassword
 } from '../api/gallery';
+import { i18n } from '../locales';
 import type {
   FolderShareAccessState,
   SharedFeedItem,
@@ -73,7 +74,7 @@ export const useShareStore = defineStore('share', {
         await unlockSharedFolderLink(slug, token);
         await this.loadAccess(slug);
       } catch (error) {
-        this.unlockError = error instanceof Error ? error.message : 'Unable to unlock this folder share.';
+        this.unlockError = error instanceof Error ? error.message : i18n.global.t('errors.unlockFolderShare');
         throw error;
       } finally {
         this.unlocking = false;
@@ -88,7 +89,7 @@ export const useShareStore = defineStore('share', {
         await unlockSharedFolderPassword(slug, password);
         await this.loadAccess(slug);
       } catch (error) {
-        this.unlockError = error instanceof Error ? error.message : 'Unable to unlock this folder share.';
+        this.unlockError = error instanceof Error ? error.message : i18n.global.t('errors.unlockFolderShare');
         throw error;
       } finally {
         this.unlocking = false;
@@ -123,7 +124,7 @@ export const useShareStore = defineStore('share', {
           return;
         }
 
-        this.error = error instanceof Error ? error.message : 'Unable to load this folder share.';
+        this.error = error instanceof Error ? error.message : i18n.global.t('share.errorDescription');
       } finally {
         if (requestToken === shareLoadToken) {
           this.loading = false;
@@ -151,7 +152,7 @@ export const useShareStore = defineStore('share', {
         }
 
         this.image = null;
-        this.error = error instanceof Error ? error.message : 'Unable to load this shared post.';
+        this.error = error instanceof Error ? error.message : i18n.global.t('errors.loadSharedPost');
       } finally {
         if (requestToken === shareLoadToken) {
           this.loading = false;

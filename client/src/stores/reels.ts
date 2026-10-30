@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 
 import { fetchReels } from '../api/gallery';
+import { i18n } from '../locales';
 import type { FeedItem, ReelsFeedMode } from '../types/api';
 import { updateCaptionInItems } from '../utils/caption';
 import { resolveReelsAffinitySnapshot, type ReelsAffinitySnapshot } from '../utils/reels';
@@ -157,7 +158,7 @@ export const useReelsStore = defineStore('reels', {
           this.activeReelId = this.items[0]?.id ?? null;
         }
       } catch (error) {
-        this.error = error instanceof Error ? error.message : 'Unable to load reels';
+        this.error = error instanceof Error ? error.message : i18n.global.t('reels.view.loadErrorTitle');
       } finally {
         this.loading = false;
       }

@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 
 import { fetchFolderStories, fetchFolderStoryFeed } from '../api/gallery';
+import { i18n } from '../locales';
 import type { FeedItem, FolderStoriesPayload, RailCapsule } from '../types/api';
 import { updateCaptionInItems } from '../utils/caption';
 
@@ -104,7 +105,7 @@ export const useFolderStoriesStore = defineStore('folderStories', {
         applyStoryRailPayload(this, payload);
       } catch (error) {
         Object.assign(this, createEmptyStoryRail());
-        this.listError = error instanceof Error ? error.message : 'Unable to load folder stories';
+        this.listError = error instanceof Error ? error.message : i18n.global.t('errors.loadFolderStories');
       } finally {
         this.loadingList = false;
       }
@@ -135,7 +136,7 @@ export const useFolderStoriesStore = defineStore('folderStories', {
         this.currentPage += 1;
         this.currentHasMore = payload.hasMore;
       } catch (error) {
-        this.storyError = error instanceof Error ? error.message : 'Unable to load this story capsule';
+        this.storyError = error instanceof Error ? error.message : i18n.global.t('errors.loadStoryCapsule');
       } finally {
         this.loadingStory = false;
       }

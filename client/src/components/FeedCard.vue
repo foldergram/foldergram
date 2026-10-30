@@ -117,7 +117,7 @@
       class="feed-card__video-shell relative block overflow-hidden rounded-[0.5rem] border border-border bg-surface-alt"
       :class="{ 'feed-card__video-shell--interactive': showHomeVideoSurfaceControls }"
       :style="{ aspectRatio: homeVideoAspectRatio }"
-      :aria-label="showHomeVideoSurfaceControls ? 'Toggle playback' : undefined"
+      :aria-label="showHomeVideoSurfaceControls ? t('post.viewer.togglePlayback') : undefined"
       :role="showHomeVideoSurfaceControls ? 'button' : undefined"
       :tabindex="showHomeVideoSurfaceControls ? 0 : -1"
       @click="handleHomeVideoSurfaceClick"
@@ -149,7 +149,7 @@
             <div v-if="showHomeVideoControls" class="feed-card__player-controls-group">
               <media-play-button
                 class="feed-card__player-control"
-                aria-label="Toggle playback"
+                :aria-label="t('post.viewer.togglePlayback')"
               >
                 <span
                   class="feed-card__player-control-icon feed-card__player-play-icon feed-card__player-play-icon--play i-fluent-play-16-filled"
@@ -166,7 +166,7 @@
             <div v-if="showHomeVideoControls" class="feed-card__player-controls-group">
               <media-mute-button
                 class="feed-card__player-control"
-                aria-label="Toggle sound"
+                :aria-label="t('post.viewer.toggleSound')"
               >
                 <span
                   class="feed-card__player-control-icon feed-card__player-mute-icon feed-card__player-mute-icon--on i-fluent-speaker-2-16-regular"
@@ -179,7 +179,7 @@
               </media-mute-button>
               <media-fullscreen-button
                 class="feed-card__player-control"
-                aria-label="Toggle fullscreen"
+                :aria-label="t('post.viewer.toggleFullscreen')"
                 target="media"
               >
                 <span
@@ -1022,7 +1022,7 @@ async function confirmDelete() {
     confirmDeleteOpen.value = false;
     deleteOriginalFromDisk.value = false;
   } catch (error) {
-    deleteError.value = error instanceof Error ? error.message : 'Unable to delete post';
+    deleteError.value = error instanceof Error ? error.message : t('post.view.deleteError');
   } finally {
     deleting.value = false;
   }

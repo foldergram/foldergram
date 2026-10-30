@@ -3,7 +3,7 @@
     <button
       class="rail-viewer__close"
       type="button"
-      aria-label="Close viewer"
+      :aria-label="t('media.closeViewer')"
       data-swipe-ignore="true"
       @click="emit('close')"
     >
@@ -49,7 +49,7 @@
         <button
           class="story-stage__pager story-stage__pager--left"
           type="button"
-          aria-label="Previous post"
+          :aria-label="t('post.viewer.previous')"
           :disabled="!canGoPreviousImage"
           @click="showPreviousImage"
         >
@@ -106,8 +106,8 @@
                 class="story-stage__control-button"
                 :href="downloadOriginalMediaUrl"
                 download
-                aria-label="Download original file"
-                title="Download original file"
+                :aria-label="t('post.viewer.downloadOriginalFile')"
+                :title="t('post.viewer.downloadOriginalFile')"
                 data-swipe-ignore="true"
               >
                 <svg class="h-4 w-4" viewBox="0 0 24 24" role="presentation">
@@ -124,7 +124,7 @@
               <button
                 class="story-stage__control-button"
                 type="button"
-                :aria-label="isPaused ? 'Resume playback' : 'Pause playback'"
+                :aria-label="isPaused ? t('media.resumePlayback') : t('media.pausePlayback')"
                 data-swipe-ignore="true"
                 @click="togglePaused"
               >
@@ -142,14 +142,14 @@
           <button
             class="story-stage__image-nav story-stage__image-nav--left"
             type="button"
-            aria-label="Previous post"
+            :aria-label="t('post.viewer.previous')"
             :disabled="!canGoPreviousImage"
             @click="showPreviousImage"
           />
           <button
             class="story-stage__image-nav story-stage__image-nav--right"
             type="button"
-            aria-label="Next post"
+            :aria-label="t('post.viewer.next')"
             :disabled="!canGoNextImage"
             @click="showNextImage"
           />
@@ -182,7 +182,7 @@
               :retry-while="appStore.isScanning"
             />
             <div v-else class="story-stage__empty">
-              Loading {{ railSingularLabel.toLowerCase() }}…
+              {{ t('common.loadingLabel', { label: inlineRailSingularLabel }) }}
             </div>
           </div>
 
@@ -195,7 +195,7 @@
                 data-swipe-ignore="true"
                 @click="retryCurrentCapsule"
               >
-                Retry
+                {{ t('common.retry') }}
               </button>
             </div>
             <div class="grid gap-[0.18rem]">
@@ -208,7 +208,7 @@
         <button
           class="story-stage__pager story-stage__pager--right"
           type="button"
-          aria-label="Next post"
+          :aria-label="t('post.viewer.next')"
           :disabled="!canGoNextImage"
           @click="showNextImage"
         >
@@ -256,6 +256,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 
 import { useHorizontalSwipe } from '../composables/useHorizontalSwipe';
 import { i18n } from '../locales';
@@ -309,7 +310,12 @@ function formatCapsuleDateContext(capsule: RailCapsule) {
   return capsule.dateContext;
 }
 
+const { t, locale } = useI18n();
 const appStore = useAppStore();
+// German capitalizes nouns, so the rail label keeps its casing when used inline.
+const inlineRailSingularLabel = computed(() =>
+  locale.value === 'de' ? props.railSingularLabel : props.railSingularLabel.toLowerCase()
+);
 const activeCapsuleId = ref(props.initialId);
 const activeImageIndex = ref(0);
 const activeSlideDurationMs = ref(STORY_IMAGE_AUTO_ADVANCE_MS);

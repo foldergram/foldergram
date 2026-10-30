@@ -21,7 +21,12 @@
       "itemCountOther": "{count} elementos",
       "latestDate": "Último {date}",
       "noRecentActivity": "Sin actividad reciente"
-    }
+    },
+    "libraryUnavailableTitle": "Almacenamiento de la biblioteca no disponible",
+    "libraryUnavailableReason": "El almacenamiento configurado de la biblioteca no está disponible.",
+    "loadingContinues": "La carga continúa automáticamente cuando llegas al final.",
+    "deleting": "Eliminando...",
+    "loadingLabel": "Cargando {label}…"
   },
   "app": {
     "authLoading": {
@@ -337,7 +342,8 @@
       "errors": {
         "validateExcludedFolders": "No se pudieron validar las reglas de carpetas excluidas.",
         "update": "No se pudieron actualizar los ajustes generales.",
-        "partialUpdate": "Se guardaron algunos ajustes ({parts}), pero la actualización no terminó: {message}"
+        "partialUpdate": "Se guardaron algunos ajustes ({parts}), pero la actualización no terminó: {message}",
+        "excludedFoldersEmpty": "Las reglas de carpetas excluidas no pueden estar vacías."
       }
     },
     "library": {
@@ -622,6 +628,40 @@
       "openFolder": "Abrir",
       "openSourceText": "Foldergram es de código abierto.",
       "viewOnGitHub": "Ver en GitHub"
+    },
+    "rebuildNotice": {
+      "title": "La ubicación de la biblioteca cambió",
+      "description": "Es posible que el índice actual aún contenga carpetas y medios en caché de una ubicación anterior de la galería. Revisa los pasos de reconstrucción para restablecer el índice, reutilizar las miniaturas y vistas previas que coincidan y generar solo los derivados que falten para la biblioteca actual.",
+      "review": "Revisar reconstrucción",
+      "adminRequired": "Una sesión de administrador debe reconstruir la biblioteca."
+    },
+    "initialScan": {
+      "eyebrow": "Escaneo inicial en curso",
+      "title": "Indexando tu biblioteca",
+      "preparing": "Preparando el estado del escaneo..."
+    },
+    "feed": {
+      "loadErrorTitle": "No se pudo cargar el feed",
+      "emptyTitle": "Aún no hay publicaciones indexadas",
+      "emptyDescription": "Agrega carpetas dentro de la raíz de la galería y el feed se llenará después del próximo escaneo.",
+      "retryStory": "Reintentar historia",
+      "indexedSummary": "{posts} publicaciones, {videos} videos en {folders} carpetas"
+    },
+    "setup": {
+      "eyebrowGalleryRoot": "Raíz de la galería",
+      "eyebrowGetStarted": "Primeros pasos",
+      "titleIgnored": "Se están ignorando archivos en la raíz de la galería",
+      "titleEmpty": "Aún no se encontraron carpetas",
+      "descriptionIgnoredOne": "Se está ignorando {count} archivo compatible en la raíz de la galería. Muévelo a una carpeta dentro de la raíz de la galería, como example-album, para crear carpetas de la app. Los archivos colocados directamente en la raíz de la galería se ignoran.",
+      "descriptionIgnoredOther": "Se están ignorando {count} archivos compatibles en la raíz de la galería. Muévelos a una carpeta dentro de la raíz de la galería, como example-album, para crear carpetas de la app. Los archivos colocados directamente en la raíz de la galería se ignoran.",
+      "descriptionEmpty": "Crea una carpeta dentro de la raíz de la galería, como example-album, y coloca fotos o videos en ella para crear tu primera carpeta de la app. Los archivos colocados directamente en la raíz de la galería se ignoran.",
+      "scanning": "Escaneando biblioteca...",
+      "runScan": "Escanear biblioteca",
+      "noteRebuild": "Primero reconstruye el índice de la biblioteca porque cambió la ubicación de la galería.",
+      "noteAdmin": "Una sesión de administrador debe ejecutar el próximo escaneo antes de que aparezcan aquí carpetas nuevas o medios movidos.",
+      "noteScanning": "Escaneando la galería ahora; el feed de Inicio se actualizará al terminar.",
+      "noteIdle": "Ejecuta un escaneo después de agregar carpetas o mover archivos para que la biblioteca pueda indexarlos.",
+      "scanError": "No se pudo iniciar un escaneo de la biblioteca."
     }
   },
   "likes": {
@@ -807,6 +847,17 @@
       "posts": "Publicaciones",
       "reels": "Reels",
       "sections": "Secciones de carpeta"
+    },
+    "view": {
+      "rebuilding": "Reconstruyendo el índice de la biblioteca. El contenido de la carpeta volverá en cuanto el escaneo llegue a ella.",
+      "loadErrorTitle": "No se pudo cargar la carpeta",
+      "retryStories": "Reintentar historias",
+      "emptyReelsTitle": "No hay reels en esta carpeta",
+      "emptyPostsTitle": "No hay publicaciones en esta carpeta",
+      "emptyReelsDescription": "Coloca videos compatibles en esta carpeta y vuelve a escanear para verlos en la pestaña de reels.",
+      "emptyPostsDescription": "Coloca fotos o videos compatibles en esta carpeta y vuelve a escanear para verlos aquí.",
+      "noDirectPostsTitle": "No hay publicaciones directas en esta carpeta de la app",
+      "noDirectPostsDescription": "Esta carpeta de origen ya no tiene fotos ni videos directos. Explora la biblioteca para continuar."
     }
   },
   "share": {
@@ -824,7 +875,10 @@
     "errorTitle": "No se pudo abrir la carpeta compartida",
     "errorDescription": "No se pudo cargar esta carpeta compartida.",
     "backToFolder": "Volver a la carpeta compartida",
-    "postErrorTitle": "No se pudo cargar la publicación compartida"
+    "postErrorTitle": "No se pudo cargar la publicación compartida",
+    "emptyTitle": "No hay publicaciones en esta carpeta compartida",
+    "emptyDescription": "Este enlace de carpeta es válido, pero ahora mismo no hay publicaciones visibles.",
+    "fallbackTitle": "Carpeta compartida"
   },
   "reels": {
     "view": {
@@ -836,7 +890,9 @@
       "emptyDescription": "Agrega videos indexados a tu biblioteca y aparecerán aquí después del próximo escaneo.",
       "navigationAria": "Navegación de reels",
       "previous": "Reel anterior",
-      "next": "Siguiente reel"
+      "next": "Siguiente reel",
+      "feedAria": "Feed de reels",
+      "loadingMore": "Cargando más reels..."
     },
     "rail": {
       "hideDetails": "Ocultar detalles del reel",
@@ -915,7 +971,8 @@
       "setAsCover": "Establecer como portada de la carpeta",
       "downloadOriginalFile": "Descargar archivo original",
       "openOriginalFile": "Abrir archivo original",
-      "deletePost": "Eliminar publicación"
+      "deletePost": "Eliminar publicación",
+      "setCoverError": "No se pudo establecer la portada"
     },
     "feedCard": {
       "openStories": "Abrir historias de {name}",
@@ -933,6 +990,11 @@
         "deleteOriginalDescription": "Déjalo desmarcado para mover la publicación a la Papelera mientras conservas el archivo fuente en el disco.",
         "deleteOriginalWarning": "Esto eliminará permanentemente del disco el archivo original, la miniatura y la vista previa. Esta acción no se puede deshacer."
       }
+    },
+    "view": {
+      "loadErrorTitle": "No se pudo cargar la publicación",
+      "loading": "Cargando publicación...",
+      "deleteError": "No se pudo eliminar la publicación"
     }
   },
   "collections": {
@@ -1176,6 +1238,98 @@
     "emptyTitle": "Todavía no hay nada para explorar",
     "emptyDescription": "Indexa algunas carpetas y esta página empezará a mostrar publicaciones aquí.",
     "folderPostsOne": "{count} publicación",
-    "folderPostsOther": "{count} publicaciones"
+    "folderPostsOther": "{count} publicaciones",
+    "gridAria": "Explorar publicaciones"
+  },
+  "media": {
+    "seekVideo": "Buscar en el video",
+    "enableSound": "Activar sonido",
+    "muteSound": "Silenciar",
+    "resumePlayback": "Reanudar reproducción",
+    "pausePlayback": "Pausar reproducción",
+    "closeViewer": "Cerrar visor"
+  },
+  "scanProgress": {
+    "titles": {
+      "rebuild": "Reconstruyendo biblioteca",
+      "thumbnails": "Regenerando miniaturas",
+      "scan": "Escaneando biblioteca"
+    },
+    "phases": {
+      "idle": "Inactivo",
+      "migration": "Migración",
+      "derivatives": "Derivados",
+      "discovery": "Detección"
+    },
+    "summary": {
+      "migration": "Actualizando miniaturas y vistas previas heredadas antes de empezar a indexar.",
+      "derivativesThumbnails": "Generando miniaturas del feed, miniaturas de perfil y pósteres de video.",
+      "derivativesRebuild": "Generando las miniaturas y vistas previas que falten para la biblioteca reconstruida.",
+      "derivatives": "Generando miniaturas y vistas previas para los cambios en cola.",
+      "discoveryThumbnails": "Cargando los medios indexados antes de regenerar las miniaturas.",
+      "discoveryRebuild": "Detectando carpetas y medios para la raíz actual de la galería.",
+      "discovery": "Detectando carpetas y medios..."
+    },
+    "operations": {
+      "checking_derivatives": "Comprobando derivados",
+      "backfilling_asset_key": "Completando clave de recurso",
+      "moving_thumbnail": "Moviendo miniatura",
+      "moving_preview": "Moviendo vista previa",
+      "repairing_thumbnail": "Reparando miniatura",
+      "repairing_preview": "Reparando vista previa",
+      "regenerating_derivatives": "Regenerando derivados",
+      "discovering_media": "Detectando carpetas y medios",
+      "generating_thumbnail": "Generando miniatura",
+      "generating_preview": "Generando vista previa",
+      "generating_thumbnail_and_preview": "Generando miniatura y vista previa"
+    },
+    "metrics": {
+      "assetsChecked": "{value} recursos comprobados",
+      "moved": "{count} movidos",
+      "repaired": "{count} reparados",
+      "missing": "{count} faltantes",
+      "jobsComplete": "{value} tareas completadas",
+      "thumbnails": "{count} miniaturas",
+      "previews": "{count} vistas previas",
+      "foldersProcessed": "{value} carpetas procesadas",
+      "postsIndexed": "{value} publicaciones indexadas"
+    },
+    "stats": {
+      "folders": "Carpetas",
+      "posts": "Publicaciones",
+      "thumbnails": "Miniaturas",
+      "previews": "Vistas previas",
+      "assetsChecked": "Recursos comprobados",
+      "filesMoved": "Archivos movidos",
+      "filesRepaired": "Archivos reparados",
+      "missingFiles": "Archivos faltantes",
+      "jobsComplete": "Tareas completadas",
+      "queuedJobs": "Tareas en cola",
+      "foldersFound": "Carpetas encontradas",
+      "foldersProcessed": "Carpetas procesadas",
+      "postsFound": "Publicaciones encontradas",
+      "postsIndexed": "Publicaciones indexadas"
+    }
+  },
+  "errors": {
+    "loadAppStats": "No se pudieron cargar las estadísticas de la app",
+    "scanStatusConnectionLost": "Se perdió la conexión al actualizar el estado del escaneo.",
+    "sessionEnded": "Tu sesión terminó. Inicia sesión de nuevo.",
+    "loadAccessStatus": "No se pudo cargar el estado de la protección de acceso.",
+    "updateSavedPost": "No se pudo actualizar la publicación guardada",
+    "collectionNameExists": "Ya existe una colección con ese nombre.",
+    "collectionNotFound": "No se encontró la colección.",
+    "defaultCollectionManaged": "La pertenencia a la colección predeterminada se gestiona con el botón de guardar.",
+    "loadCollection": "No se pudo cargar la colección",
+    "loadFeed": "No se pudo cargar el feed",
+    "loadFolderStories": "No se pudieron cargar las historias de la carpeta",
+    "loadStoryCapsule": "No se pudo cargar esta historia",
+    "loadFolder": "No se pudo cargar la carpeta",
+    "loadFolderSharing": "No se pudo cargar el uso compartido de la carpeta",
+    "loadHomeRail": "No se pudo cargar la barra de inicio",
+    "loadFeedCapsule": "No se pudo cargar esta selección",
+    "unlockFolderShare": "No se pudo desbloquear esta carpeta compartida.",
+    "loadSharedPost": "No se pudo cargar esta publicación compartida.",
+    "loadPost": "No se pudo cargar la publicación"
   }
 }

@@ -297,7 +297,7 @@ export const useMomentsStore = defineStore('moments', {
         this.railSingularLabel = payload.railSingularLabel;
         this.items = payload.items;
       } catch (error) {
-        this.listError = error instanceof Error ? error.message : 'Unable to load the home rail';
+        this.listError = error instanceof Error ? error.message : i18n.global.t('errors.loadHomeRail');
       } finally {
         this.loadingList = false;
       }
@@ -330,7 +330,7 @@ export const useMomentsStore = defineStore('moments', {
         this.currentHasMore = payload.hasMore;
       } catch (error) {
         this.currentMoment = null;
-        this.momentError = error instanceof Error ? error.message : 'Unable to load this feed capsule';
+        this.momentError = error instanceof Error ? error.message : i18n.global.t('errors.loadFeedCapsule');
       } finally {
         this.loadingMoment = false;
       }

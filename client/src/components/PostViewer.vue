@@ -1789,7 +1789,7 @@
       await foldersStore.setFolderCover(props.image.folderSlug, activeMediaImageId.value ?? props.image.id);
       locallySetCover.value = true;
     } catch (error) {
-      alert(error instanceof Error ? error.message : 'Failed to set cover');
+      alert(error instanceof Error ? error.message : t('post.viewer.setCoverError'));
     } finally {
       settingCover.value = false;
     }

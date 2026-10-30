@@ -22,9 +22,9 @@
       >
         <div class="flex items-start justify-between gap-4 max-sm:flex-col max-sm:items-start">
           <div class="grid gap-[0.2rem]">
-            <strong>Library location changed</strong>
+            <strong>{{ t('home.rebuildNotice.title') }}</strong>
             <p class="m-0 text-muted">
-              The current index may still contain folders and cached media from a previous gallery location. Review the rebuild steps to reset the index, reuse any matching thumbnails and previews, and generate only the missing derivatives for the current library.
+              {{ t('home.rebuildNotice.description') }}
             </p>
           </div>
           <RouterLink
@@ -32,9 +32,9 @@
             class="inline-flex items-center justify-center min-h-10 px-4 rounded-[0.8rem] text-[0.84rem] font-bold text-white bg-[#9f6a00] whitespace-nowrap"
             :to="{ name: 'settings', query: { action: 'rebuild' } }"
           >
-            Review Rebuild
+            {{ t('home.rebuildNotice.review') }}
           </RouterLink>
-          <p v-else class="m-0 text-[0.84rem] text-muted">An admin session needs to rebuild the library.</p>
+          <p v-else class="m-0 text-[0.84rem] text-muted">{{ t('home.rebuildNotice.adminRequired') }}</p>
         </div>
       </section>
 
@@ -110,13 +110,13 @@
       </section>
 
       <!-- States -->
-      <EmptyState v-if="appStore.isLibraryUnavailable" title="Library storage unavailable" :description="appStore.libraryUnavailableReason" />
-      <ErrorState v-else-if="feedStore.error" title="Could not load feed" :message="feedStore.error" />
+      <EmptyState v-if="appStore.isLibraryUnavailable" :title="t('common.libraryUnavailableTitle')" :description="appStore.libraryUnavailableReason" />
+      <ErrorState v-else-if="feedStore.error" :title="t('home.feed.loadErrorTitle')" :message="feedStore.error" />
 
       <!-- Initial scan state (no feed yet) -->
       <section v-else-if="showInitialScanState" class="grid gap-[0.85rem] px-5 py-5 mb-[1.1rem] border border-border rounded-[1rem] shadow-[var(--shadow)]" style="background: radial-gradient(circle at top right, rgba(0,149,246,0.12), transparent 38%), linear-gradient(180deg, var(--surface) 0%, color-mix(in srgb, var(--surface) 90%, var(--accent) 10%) 100%);">
         <div class="flex items-start justify-between gap-3 max-sm:flex-col max-sm:items-start">
-          <span class="text-accent-strong text-[0.75rem] font-bold tracking-[0.08em] uppercase">Startup scan in progress</span>
+          <span class="text-accent-strong text-[0.75rem] font-bold tracking-[0.08em] uppercase">{{ t('home.initialScan.eyebrow') }}</span>
           <span
             data-test="initial-scan-phase"
             class="inline-flex items-center justify-center min-h-8 px-[0.72rem] py-[0.34rem] rounded-full text-[0.73rem] font-bold whitespace-nowrap text-accent-strong"
@@ -125,7 +125,7 @@
             {{ initialScanPhaseLabel }}
           </span>
         </div>
-        <h2 class="m-0">Indexing your library</h2>
+        <h2 class="m-0">{{ t('home.initialScan.title') }}</h2>
         <p class="m-0 text-muted">{{ scanDescription }}</p>
         <p v-if="scanActionLine" class="m-0 text-[0.86rem] font-semibold text-text">{{ scanActionLine }}</p>
         <dl class="grid grid-cols-4 gap-[0.8rem] m-0 max-sm:grid-cols-2">
@@ -164,7 +164,7 @@
           {{ homeScanError }}
         </p>
       </section>
-      <EmptyState v-else-if="feedStore.initialized && feedStore.items.length === 0" title="No posts indexed yet" description="Add folders under the gallery root and the feed will populate after the next scan." />
+      <EmptyState v-else-if="feedStore.initialized && feedStore.items.length === 0" :title="t('home.feed.emptyTitle')" :description="t('home.feed.emptyDescription')" />
       <template v-else>
         <div
           v-if="feedStoryError"
@@ -179,7 +179,7 @@
               :disabled="!feedStoryRetrySlug"
               @click="retryFeedFolderStory"
             >
-              Retry Story
+              {{ t('home.feed.retryStory') }}
             </button>
           </div>
         </div>
@@ -210,7 +210,7 @@
         v-if="activeFeedStoryId && folderStoriesStore.items.length"
         :items="folderStoriesStore.items"
         :initial-id="activeFeedStoryId"
-        :rail-singular-label="folderStoriesStore.railSingularLabel"
+        :rail-singular-label="t('moments.rails.highlights.singularLabel')"
         :store="folderStoriesStore"
         @close="closeFeedFolderStory"
       />
@@ -339,7 +339,11 @@ const indexedSummaryLabel = computed(() => {
     return '';
   }
 
-  return `${formatCount(appStore.stats.indexedImages)} posts, ${formatCount(appStore.stats.indexedVideos)} videos across ${formatCount(appStore.stats.folders)} folders`;
+  return t('home.feed.indexedSummary', {
+    posts: formatCount(appStore.stats.indexedImages),
+    videos: formatCount(appStore.stats.indexedVideos),
+    folders: formatCount(appStore.stats.folders)
+  });
 });
 const formattedIndexedImageCount = computed(() => formatCount(appStore.stats?.indexedImages ?? 0));
 const formattedIndexedVideoCount = computed(() => formatCount(appStore.stats?.indexedVideos ?? 0));
@@ -375,18 +379,20 @@ const showHomeSetupNotice = computed(
     feedStore.items.length === 0 &&
     !hasIndexedFolders.value
 );
-const homeSetupNoticeEyebrow = computed(() => (ignoredRootMediaCount.value > 0 ? 'Gallery Root' : 'Get Started'));
+const homeSetupNoticeEyebrow = computed(() => (ignoredRootMediaCount.value > 0 ? t('home.setup.eyebrowGalleryRoot') : t('home.setup.eyebrowGetStarted')));
 const homeSetupNoticeEyebrowClass = computed(() => (ignoredRootMediaCount.value > 0 ? 'text-[#9f6a00]' : 'text-accent-strong'));
 const homeSetupNoticeTitle = computed(() =>
-  ignoredRootMediaCount.value > 0 ? 'Files in the gallery root are being ignored' : 'No folders found yet'
+  ignoredRootMediaCount.value > 0 ? t('home.setup.titleIgnored') : t('home.setup.titleEmpty')
 );
 const homeSetupNoticeDescription = computed(() => {
   if (ignoredRootMediaCount.value > 0) {
-    const supportedFileLabel = ignoredRootMediaCount.value === 1 ? 'supported file is' : 'supported files are';
-    return `${formatCount(ignoredRootMediaCount.value)} ${supportedFileLabel} being ignored in the gallery root. Move them into a folder inside your gallery root, such as example-album, to create App Folders. Files placed directly in the gallery root are ignored.`;
+    const count = formatCount(ignoredRootMediaCount.value);
+    return ignoredRootMediaCount.value === 1
+      ? t('home.setup.descriptionIgnoredOne', { count })
+      : t('home.setup.descriptionIgnoredOther', { count });
   }
 
-  return 'Create a folder inside your gallery root, such as example-album, and place photos or videos in it to create your first App Folder. Files placed directly in the gallery root are ignored.';
+  return t('home.setup.descriptionEmpty');
 });
 const homeSetupNoticeStyle = computed(() =>
   ignoredRootMediaCount.value > 0
@@ -404,10 +410,10 @@ const homeScanDisabled = computed(
 const canManageLibrary = computed(() => authStore.canManageLibrary);
 const homeScanButtonLabel = computed(() => {
   if (appStore.isScanning || requestingHomeScan.value) {
-    return 'Scanning library...';
+    return t('home.setup.scanning');
   }
 
-  return 'Run Scan Library';
+  return t('home.setup.runScan');
 });
 const homeScanNote = computed(() => {
   if (appStore.isLibraryUnavailable) {
@@ -415,24 +421,24 @@ const homeScanNote = computed(() => {
   }
 
   if (appStore.isLibraryRebuildRequired) {
-    return 'Rebuild the library index first because the gallery location changed.';
+    return t('home.setup.noteRebuild');
   }
 
   if (!authStore.canManageLibrary) {
-    return 'An admin session needs to run the next scan before new folders or moved media will appear here.';
+    return t('home.setup.noteAdmin');
   }
 
   if (appStore.isScanning || requestingHomeScan.value) {
-    return 'Scanning the gallery now and refreshing the Home feed when it finishes.';
+    return t('home.setup.noteScanning');
   }
 
-  return 'Run a scan after adding folders or moving files so the library can index them.';
+  return t('home.setup.noteIdle');
 });
 const initialScanPhaseLabel = computed(() => getScanPhaseLabel(appStore.stats?.scan ?? null));
 const initialScanStats = computed(() => getInitialScanStats(appStore.stats?.scan ?? null));
 const scanDescription = computed(() => {
   const scan = appStore.stats?.scan;
-  return scan ? getScanSummary(scan) : 'Preparing scan status...';
+  return scan ? getScanSummary(scan) : t('home.initialScan.preparing');
 });
 const scanActionLine = computed(() => getScanActionLine(appStore.stats?.scan ?? null));
 
@@ -534,7 +540,7 @@ async function runHomeScan() {
     await appStore.fetchStats({ background: true });
     await Promise.all([foldersStore.fetchFolders(true), feedStore.loadInitial(true), momentsStore.fetchMoments(true)]);
   } catch (error) {
-    homeScanError.value = error instanceof Error ? error.message : 'Unable to start a library scan.';
+    homeScanError.value = error instanceof Error ? error.message : t('home.setup.scanError');
   } finally {
     requestingHomeScan.value = false;
   }

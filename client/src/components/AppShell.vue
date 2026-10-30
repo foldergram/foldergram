@@ -82,6 +82,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { useRoute } from 'vue-router';
 
 import SidebarNav from './SidebarNav.vue';
@@ -96,6 +97,7 @@ import {
   getScanSummary
 } from '../utils/scan-progress';
 
+const { t } = useI18n();
 const appStore = useAppStore();
 const route = useRoute();
 const isStandaloneDisplay = ref(false);
@@ -107,14 +109,14 @@ const showStickyScanStatus = computed(() => Boolean(activeScan.value?.isScanning
 
 const stickyScanTitle = computed(() => {
   if (activeScan.value?.scanReason === 'rebuild') {
-    return 'Rebuilding library';
+    return t('scanProgress.titles.rebuild');
   }
 
   if (activeScan.value?.scanReason === 'rebuild-thumbnails') {
-    return 'Regenerating thumbnails';
+    return t('scanProgress.titles.thumbnails');
   }
 
-  return 'Scanning library';
+  return t('scanProgress.titles.scan');
 });
 
 const stickyScanPhaseLabel = computed(() => getScanPhaseLabel(activeScan.value));

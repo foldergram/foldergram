@@ -12,6 +12,7 @@ import {
   unsaveImage,
   updateCollection as updateCollectionRequest
 } from '../api/gallery';
+import { i18n } from '../locales';
 import type {
   CollectionImagesPayload,
   CollectionMembership,
@@ -372,7 +373,7 @@ export const useCollectionsStore = defineStore('collections', {
 
         this.initialized = true;
       } catch (error) {
-        this.error = error instanceof Error ? error.message : 'Unable to load collections';
+        this.error = error instanceof Error ? error.message : i18n.global.t('collections.bookmark.errors.loadCollections');
       } finally {
         this.loading = false;
       }
@@ -430,7 +431,7 @@ export const useCollectionsStore = defineStore('collections', {
         await this.refreshAfterMembershipChange(item.id);
       } catch (error) {
         this.setSavedState(item.id, wasSaved);
-        this.error = error instanceof Error ? error.message : 'Unable to update saved post';
+        this.error = error instanceof Error ? error.message : i18n.global.t('errors.updateSavedPost');
       } finally {
         this.pendingImageIds = this.pendingImageIds.filter((id) => id !== item.id);
       }
@@ -439,12 +440,12 @@ export const useCollectionsStore = defineStore('collections', {
     async createAndAdd(name: string, item: FeedItem) {
       const trimmedName = name.trim();
       if (!trimmedName) {
-        throw new Error('Collection name is required.');
+        throw new Error(i18n.global.t('collections.detail.edit.required'));
       }
 
       await this.initialize();
       if (this.items.some((collection) => collection.name.toLocaleLowerCase() === trimmedName.toLocaleLowerCase())) {
-        throw new Error('Collection name already exists.');
+        throw new Error(i18n.global.t('errors.collectionNameExists'));
       }
 
       if (this.mode === 'local') {
@@ -473,13 +474,13 @@ export const useCollectionsStore = defineStore('collections', {
     async updateCollectionName(collectionSlug: string, name: string) {
       const trimmedName = name.trim();
       if (!trimmedName) {
-        throw new Error('Collection name is required.');
+        throw new Error(i18n.global.t('collections.detail.edit.required'));
       }
 
       await this.initialize();
       const existingCollection = this.items.find((collection) => collection.slug === collectionSlug);
       if (!existingCollection || existingCollection.isDefault) {
-        throw new Error('Collection not found.');
+        throw new Error(i18n.global.t('errors.collectionNotFound'));
       }
 
       if (
@@ -489,7 +490,7 @@ export const useCollectionsStore = defineStore('collections', {
             collection.name.toLocaleLowerCase() === trimmedName.toLocaleLowerCase()
         )
       ) {
-        throw new Error('Collection name already exists.');
+        throw new Error(i18n.global.t('errors.collectionNameExists'));
       }
 
       const updatedCollection = this.mode === 'local'
@@ -524,7 +525,7 @@ export const useCollectionsStore = defineStore('collections', {
       await this.initialize();
       const existingCollection = this.items.find((collection) => collection.slug === collectionSlug);
       if (!existingCollection || existingCollection.isDefault) {
-        throw new Error('Collection not found.');
+        throw new Error(i18n.global.t('errors.collectionNotFound'));
       }
 
       const visibleCurrentItems = this.currentCollection?.slug === collectionSlug
@@ -558,7 +559,7 @@ export const useCollectionsStore = defineStore('collections', {
     async toggleCollectionMembership(collectionSlug: string, item: FeedItem, forceAdd = false) {
       await this.initialize();
       if (collectionSlug === DEFAULT_COLLECTION_SLUG) {
-        throw new Error('Default collection membership is managed by the bookmark button.');
+        throw new Error(i18n.global.t('errors.defaultCollectionManaged'));
       }
 
       const key = `${collectionSlug}:${item.id}`;
@@ -585,7 +586,7 @@ export const useCollectionsStore = defineStore('collections', {
 
         await this.refreshAfterMembershipChange(item.id);
       } catch (error) {
-        const mutationError = error instanceof Error ? error : new Error('Unable to update collection');
+        const mutationError = error instanceof Error ? error : new Error(i18n.global.t('collections.detail.edit.updateError'));
         this.error = mutationError.message;
         throw mutationError;
       } finally {
@@ -624,7 +625,7 @@ export const useCollectionsStore = defineStore('collections', {
         this.currentHasMore = payload.hasMore;
       } catch (error) {
         this.currentCollection = null;
-        this.collectionError = error instanceof Error ? error.message : 'Unable to load collection';
+        this.collectionError = error instanceof Error ? error.message : i18n.global.t('errors.loadCollection');
       } finally {
         this.loadingCollection = false;
       }
@@ -691,7 +692,7 @@ export const useCollectionsStore = defineStore('collections', {
       }
 
       if (!targetCollection || targetCollection.isDefault) {
-        throw new Error('Collection not found.');
+        throw new Error(i18n.global.t('errors.collectionNotFound'));
       }
 
       if (shouldAdd) {
@@ -713,7 +714,7 @@ export const useCollectionsStore = defineStore('collections', {
       const collections = readLocalCollections();
       const targetCollection = collections.find((collection) => collection.slug === collectionSlug);
       if (!targetCollection || targetCollection.isDefault) {
-        throw new Error('Collection not found.');
+        throw new Error(i18n.global.t('errors.collectionNotFound'));
       }
 
       if (
@@ -723,7 +724,7 @@ export const useCollectionsStore = defineStore('collections', {
             collection.name.toLocaleLowerCase() === name.toLocaleLowerCase()
         )
       ) {
-        throw new Error('Collection name already exists.');
+        throw new Error(i18n.global.t('errors.collectionNameExists'));
       }
 
       targetCollection.name = name;
@@ -737,7 +738,7 @@ export const useCollectionsStore = defineStore('collections', {
       const collections = readLocalCollections();
       const targetCollection = collections.find((collection) => collection.slug === collectionSlug);
       if (!targetCollection || targetCollection.isDefault) {
-        throw new Error('Collection not found.');
+        throw new Error(i18n.global.t('errors.collectionNotFound'));
       }
 
       const deletedSummary = toCollectionSummary(targetCollection);
@@ -757,7 +758,7 @@ export const useCollectionsStore = defineStore('collections', {
       const collections = readLocalCollections();
       const collection = collections.find((entry) => entry.slug === slug);
       if (!collection) {
-        throw new Error('Collection not found.');
+        throw new Error(i18n.global.t('errors.collectionNotFound'));
       }
 
       const defaultCollection = collections.find((entry) => entry.isDefault);

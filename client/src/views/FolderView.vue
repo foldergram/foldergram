@@ -3,7 +3,7 @@
     <EmptyState
       v-if="appStore.isLibraryUnavailable"
       class="mx-auto w-[min(100%,56rem)]"
-      title="Library storage unavailable"
+      :title="t('common.libraryUnavailableTitle')"
       :description="appStore.libraryUnavailableReason"
     />
     <section
@@ -11,14 +11,13 @@
       class="card mx-auto w-[min(100%,56rem)] p-8 text-center"
     >
       <p class="m-0 text-muted">
-        Rebuilding the library index. Folder content will return as soon as this
-        scan reaches it.
+        {{ t('folder.view.rebuilding') }}
       </p>
     </section>
     <ErrorState
       v-else-if="foldersStore.folderError"
       class="mx-auto w-[min(100%,56rem)]"
-      title="Could not load folder"
+      :title="t('folder.view.loadErrorTitle')"
       :message="foldersStore.folderError"
     />
     <template v-else-if="foldersStore.currentFolder">
@@ -42,7 +41,7 @@
               type="button"
               @click="retryFolderStories"
             >
-              Retry Stories
+              {{ t('folder.view.retryStories') }}
             </button>
           </div>
         </div>
@@ -54,13 +53,13 @@
           class="mx-auto w-[min(100%,66.5625rem)]"
           :title="
             activeTab === 'reels'
-              ? 'No reels in this folder'
-              : 'No posts in this folder'
+              ? t('folder.view.emptyReelsTitle')
+              : t('folder.view.emptyPostsTitle')
           "
           :description="
             activeTab === 'reels'
-              ? 'Drop supported videos into this folder and rescan to see them in the reels tab.'
-              : 'Drop supported photos or videos into this folder and rescan to see them here.'
+              ? t('folder.view.emptyReelsDescription')
+              : t('folder.view.emptyPostsDescription')
           "
         />
         <template v-else>
@@ -167,7 +166,7 @@
         v-if="activeStoryViewerId && folderStoriesStore.items.length"
         :items="folderStoriesStore.items"
         :initial-id="activeStoryViewerId"
-        :rail-singular-label="folderStoriesStore.railSingularLabel"
+        :rail-singular-label="t('moments.rails.highlights.singularLabel')"
         :store="folderStoriesStore"
         @close="closeStoryViewer"
       />
@@ -175,8 +174,8 @@
     <EmptyState
       v-else-if="hasLoadedOnce && !foldersStore.loadingFolder"
       class="mx-auto w-[min(100%,56rem)]"
-      title="No direct posts in this app folder"
-      description="This source folder no longer has direct photos or videos. Browse the library to continue."
+      :title="t('folder.view.noDirectPostsTitle')"
+      :description="t('folder.view.noDirectPostsDescription')"
     />
   </section>
 </template>

@@ -10,6 +10,7 @@ import {
   updateViewerAccess,
   logout
 } from '../api/gallery';
+import { i18n } from '../locales';
 import type { AuthCapabilities, AuthRole, AuthStatus, LikesMode, ViewerAccessMode } from '../types/api';
 
 interface AuthState {
@@ -149,7 +150,7 @@ export const useAuthStore = defineStore('auth', {
       this.unlockDialogOpen = false;
     },
 
-    handleUnauthorized(message = 'Your session ended. Log in again.') {
+    handleUnauthorized(message = i18n.global.t('errors.sessionEnded')) {
       if (!this.enabled) {
         return;
       }
@@ -178,7 +179,7 @@ export const useAuthStore = defineStore('auth', {
         this.error = null;
       } catch (error) {
         this.ready = true;
-        this.error = error instanceof Error ? error.message : 'Unable to load access protection status.';
+        this.error = error instanceof Error ? error.message : i18n.global.t('errors.loadAccessStatus');
         throw error;
       } finally {
         this.loading = false;
@@ -194,7 +195,7 @@ export const useAuthStore = defineStore('auth', {
         this.unlockDialogOpen = false;
         this.error = null;
       } catch (error) {
-        this.error = error instanceof Error ? error.message : 'Unable to sign in.';
+        this.error = error instanceof Error ? error.message : i18n.global.t('auth.gate.unableToSignIn');
         throw error;
       } finally {
         this.loading = false;
@@ -211,7 +212,7 @@ export const useAuthStore = defineStore('auth', {
         this.error = null;
         await clearAppCaches();
       } catch (error) {
-        this.error = error instanceof Error ? error.message : 'Unable to sign out.';
+        this.error = error instanceof Error ? error.message : i18n.global.t('settings.access.danger.signOutError');
         throw error;
       } finally {
         this.loading = false;
@@ -228,7 +229,7 @@ export const useAuthStore = defineStore('auth', {
         this.error = null;
         await clearAppCaches();
       } catch (error) {
-        this.error = error instanceof Error ? error.message : 'Unable to enable password protection.';
+        this.error = error instanceof Error ? error.message : i18n.global.t('settings.access.enable.error');
         throw error;
       } finally {
         this.loading = false;
@@ -245,7 +246,7 @@ export const useAuthStore = defineStore('auth', {
         this.error = null;
         await clearAppCaches();
       } catch (error) {
-        this.error = error instanceof Error ? error.message : 'Unable to change the password.';
+        this.error = error instanceof Error ? error.message : i18n.global.t('settings.access.change.error');
         throw error;
       } finally {
         this.loading = false;
@@ -262,7 +263,7 @@ export const useAuthStore = defineStore('auth', {
         this.error = null;
         await clearAppCaches();
       } catch (error) {
-        this.error = error instanceof Error ? error.message : 'Unable to disable password protection.';
+        this.error = error instanceof Error ? error.message : i18n.global.t('settings.access.danger.error');
         throw error;
       } finally {
         this.loading = false;
@@ -279,7 +280,7 @@ export const useAuthStore = defineStore('auth', {
         this.error = null;
         await clearAppCaches();
       } catch (error) {
-        this.error = error instanceof Error ? error.message : 'Unable to update viewer access.';
+        this.error = error instanceof Error ? error.message : i18n.global.t('settings.access.viewer.error');
         throw error;
       } finally {
         this.loading = false;
@@ -296,7 +297,7 @@ export const useAuthStore = defineStore('auth', {
         this.error = null;
         await clearAppCaches();
       } catch (error) {
-        this.error = error instanceof Error ? error.message : 'Unable to unlock admin access.';
+        this.error = error instanceof Error ? error.message : i18n.global.t('auth.adminUnlock.unableToUnlock');
         throw error;
       } finally {
         this.loading = false;
