@@ -75,7 +75,7 @@ const homeFeedDefaultBodySchema = z.object({
   defaultMode: z.enum(['recent', 'rediscover', 'random'])
 });
 const appLocaleBodySchema = z.object({
-  defaultLocale: z.enum(['en', 'es', 'zh'])
+  defaultLocale: z.enum(['en', 'es', 'zh', 'de'])
 });
 const reelsFeedDefaultBodySchema = z.object({
   defaultMode: z.enum(['recommended', 'recent', 'random'])

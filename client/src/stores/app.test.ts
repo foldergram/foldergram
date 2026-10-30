@@ -129,7 +129,7 @@ describe('useAppStore locale preferences', () => {
 
   it('falls back to English when stored and browser locales are unsupported', () => {
     window.localStorage.setItem('foldergram-locale', 'fr');
-    setNavigatorLocales(['de-DE'], 'de-DE');
+    setNavigatorLocales(['fr-FR'], 'fr-FR');
 
     const store = useAppStore();
     store.initializeLocale();
@@ -150,6 +150,17 @@ describe('useAppStore locale preferences', () => {
     expect(i18n.global.locale.value).toBe('es');
     expect(document.documentElement.lang).toBe('es');
     expect(window.localStorage.getItem('foldergram-locale')).toBeNull();
+  });
+
+  it('normalizes German browser locales to de', () => {
+    setNavigatorLocales(['de-AT'], 'de-AT');
+
+    const store = useAppStore();
+    store.initializeLocale();
+
+    expect(store.locale).toBe('de');
+    expect(i18n.global.locale.value).toBe('de');
+    expect(document.documentElement.lang).toBe('de');
   });
 
   it('normalizes Chinese browser locales to zh', () => {

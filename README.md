@@ -378,7 +378,7 @@ only needed when the browser-visible origin differs from the upstream Node host 
 Client translations live under `client/src/locales/`.
 
 - `en.json` is the canonical source locale and the first place new UI copy should be added.
-- `es.json` and `zh.json` are the shipped Spanish and Chinese translations for the client.
+- `es.json`, `zh.json`, and `de.json` are the shipped Spanish, Chinese, and German translations for the client.
 - `client/src/locales/index.ts` wires locale resolution and the Vue I18n runtime.
 - `pnpm --filter @foldergram/client test` includes a locale validation test that checks locale keys against `en.json`.
 

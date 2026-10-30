@@ -1,15 +1,17 @@
 import { createI18n } from 'vue-i18n';
 
 import en from './en.json';
+import de from './de.json';
 import es from './es.json';
 import zh from './zh.json';
 
-export const SUPPORTED_LOCALES = ['en', 'es', 'zh'] as const;
+export const SUPPORTED_LOCALES = ['en', 'es', 'zh', 'de'] as const;
 export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number];
 export const DEFAULT_LOCALE: SupportedLocale = 'en';
 
 const messages: Record<SupportedLocale, typeof en> = {
   en,
+  de,
   es,
   zh
 };

@@ -10,11 +10,11 @@
     </section>
     <ErrorState
       v-else-if="momentsStore.momentError"
-      :title="t('moments.view.loadError', { label: momentsStore.displayRailSingularLabel.toLowerCase() })"
+      :title="t('moments.view.loadError', { label: inlineRailLabel })"
       :message="momentsStore.momentError"
     />
     <section v-else-if="momentsStore.loadingMoment && !momentsStore.currentCapsule" class="card p-8 text-center">
-      <p class="m-0 text-muted">{{ t('moments.view.loading', { label: momentsStore.displayRailSingularLabel.toLowerCase() }) }}</p>
+      <p class="m-0 text-muted">{{ t('moments.view.loading', { label: inlineRailLabel }) }}</p>
     </section>
     <template v-else-if="momentsStore.currentCapsule">
       <header class="grid gap-5 p-5 mb-5 border border-border rounded-[1.25rem] bg-surface shadow-[var(--shadow)] md:grid-cols-[6.5rem_minmax(0,1fr)]">
@@ -48,14 +48,14 @@
     </template>
     <EmptyState
       v-else-if="hasLoadedOnce && !momentsStore.loadingMoment"
-      :title="t('moments.view.emptyTitle', { label: momentsStore.displayRailSingularLabel.toLowerCase() })"
-      :description="t('moments.view.emptyDescription', { label: momentsStore.displayRailSingularLabel.toLowerCase() })"
+      :title="t('moments.view.emptyTitle', { label: inlineRailLabel })"
+      :description="t('moments.view.emptyDescription', { label: inlineRailLabel })"
     />
   </section>
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 
 import EmptyState from '../components/EmptyState.vue';
@@ -72,7 +72,11 @@ const props = defineProps<{
 const appStore = useAppStore();
 const momentsStore = useMomentsStore();
 const hasLoadedOnce = ref(false);
-const { t } = useI18n();
+const { t, locale } = useI18n();
+// German capitalizes nouns, so the rail label keeps its casing when used inline.
+const inlineRailLabel = computed(() =>
+  locale.value === 'de' ? momentsStore.displayRailSingularLabel : momentsStore.displayRailSingularLabel.toLowerCase()
+);
 
 async function loadMoment() {
   if (appStore.isLibraryUnavailable) {

@@ -109,6 +109,16 @@ describe.sequential('auth route validation', () => {
     });
   });
 
+  it('accepts de as a valid app locale default', () => {
+    expect(
+      settingsRequestBodySchemas.appLocale.parse({
+        defaultLocale: 'de'
+      })
+    ).toEqual({
+      defaultLocale: 'de'
+    });
+  });
+
   it('rejects invalid app locale defaults', () => {
     expect(() =>
       settingsRequestBodySchemas.appLocale.parse({

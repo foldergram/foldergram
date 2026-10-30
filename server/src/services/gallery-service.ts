@@ -73,7 +73,7 @@ import { storageService } from './storage-service.js';
 
 type FeedMode = 'recent' | 'rediscover' | 'random';
 type ReelsFeedMode = 'recommended' | 'recent' | 'random';
-type SupportedLocale = 'en' | 'es' | 'zh';
+type SupportedLocale = 'en' | 'es' | 'zh' | 'de';
 
 interface FeedCapsuleDefinition {
   id: string;
@@ -156,7 +156,7 @@ const HIGHLIGHT_FEED_OVERLAP_WINDOW = 18;
 const RAIL_COVER_CANDIDATE_LIMIT = 12;
 const FALLBACK_AVATAR_STORY_LIMIT = 10;
 const FALLBACK_AVATAR_STORY_ID = '__story-avatar-fallback__';
-const SUPPORTED_LOCALES = ['en', 'es', 'zh'] as const;
+const SUPPORTED_LOCALES = ['en', 'es', 'zh', 'de'] as const;
 
 interface PlaceRowFields {
   placeId?: number | null;

@@ -186,7 +186,8 @@
         "options": {
           "en": "English",
           "es": "Spanish",
-          "zh": "Chinese"
+          "zh": "Chinese",
+          "de": "German"
         }
       },
       "homeFeed": {

@@ -1101,6 +1101,7 @@ Allowed values:
 - `en`
 - `es`
 - `zh`
+- `de`
 
 Success:
 

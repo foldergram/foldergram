@@ -1,0 +1,1181 @@
+{
+  "common": {
+    "cancel": "Abbrechen",
+    "close": "Schließen",
+    "copy": "Kopieren",
+    "description": "Beschreibung",
+    "loadMore": "Mehr laden",
+    "loadingMore": "Weitere werden geladen...",
+    "name": "Name",
+    "newFeature": "Neue Funktion",
+    "open": "Öffnen",
+    "retry": "Erneut versuchen",
+    "save": "Speichern",
+    "saveChanges": "Änderungen speichern",
+    "saved": "Gespeichert",
+    "saving": "Wird gespeichert...",
+    "youAreCaughtUp": "Du hast alles gesehen",
+    "loading": "Wird geladen...",
+    "railViewer": {
+      "itemCountOne": "{count} Element",
+      "itemCountOther": "{count} Elemente",
+      "latestDate": "Zuletzt {date}",
+      "noRecentActivity": "Keine aktuelle Aktivität"
+    }
+  },
+  "app": {
+    "authLoading": {
+      "eyebrow": "Zugriffsschutz",
+      "title": "Zugriff wird geprüft",
+      "description": "Der aktuelle Status des Passwortschutzes wird geladen."
+    }
+  },
+  "auth": {
+    "gate": {
+      "eyebrow": "Gemeinsames Passwort",
+      "title": "Foldergram entsperren",
+      "passwordLabel": "Passwort",
+      "descriptionPassword": "Diese Bibliothek akzeptiert für den lokalen Zugriff entweder das Admin-Passwort oder das Betrachter-Passwort.",
+      "descriptionAdmin": "Diese Bibliothek ist für den lokalen und Homelab-Zugriff mit dem Admin-Passwort geschützt.",
+      "placeholderPassword": "Admin- oder Betrachter-Passwort eingeben",
+      "placeholderAdmin": "Admin-Passwort eingeben",
+      "unlocking": "Wird entsperrt...",
+      "unlock": "Bibliothek entsperren",
+      "unableToSignIn": "Anmeldung nicht möglich."
+    },
+    "adminUnlock": {
+      "eyebrow": "Admin-Entsperrung",
+      "title": "Admin-Zugriff entsperren",
+      "closeAria": "Dialog zur Admin-Entsperrung schließen",
+      "description": "Gib das Admin-Passwort ein, um Einstellungen, Papierkorb, Scans, Neuaufbau-Werkzeuge und andere Admin-Aktionen zu öffnen.",
+      "passwordLabel": "Admin-Passwort",
+      "placeholder": "Admin-Passwort eingeben",
+      "unlocking": "Wird entsperrt...",
+      "unlock": "Admin entsperren",
+      "unableToUnlock": "Admin-Zugriff konnte nicht entsperrt werden."
+    }
+  },
+  "nav": {
+    "primary": "Hauptnavigation",
+    "foldergramHome": "Foldergram-Startseite",
+    "home": "Start",
+    "reels": "Reels",
+    "search": "Suche",
+    "library": "Bibliothek",
+    "places": "Orte",
+    "collections": "Sammlungen",
+    "more": "Mehr",
+    "trash": "Papierkorb",
+    "settings": "Einstellungen",
+    "unlockAdmin": "Admin entsperren",
+    "switchAppearance": "Darstellung wechseln",
+    "switchToDarkMode": "Zum dunklen Modus wechseln",
+    "switchToLightMode": "Zum hellen Modus wechseln",
+    "signOut": "Abmelden",
+    "returnToPublicView": "Zur öffentlichen Ansicht zurückkehren",
+    "foldersSpotlight": "Ordner im Fokus",
+    "likesAriaLabel": "{label} ({count})",
+    "folderPosts": "{count} Beiträge"
+  },
+  "settings": {
+    "eyebrow": "Einstellungen",
+    "title": "Bibliotheksverwaltung",
+    "description": "Verwalte Scans, App-Standards, Zugriff und den Bibliotheksindex.",
+    "sections": {
+      "navigation": "Einstellungsbereiche",
+      "library": {
+        "label": "Scan & Bibliothek",
+        "shortLabel": "Scan und Bibliothek",
+        "description": "Medien indizieren, Miniaturansichten neu erzeugen und den Bibliotheksindex pflegen"
+      },
+      "general": {
+        "label": "Allgemeine Einstellungen",
+        "description": "Stories-Modus, ausgeschlossene Ordner und Feed-Standards"
+      },
+      "places": {
+        "label": "Orte",
+        "description": "Offline-Städtesuche und Ortszuordnung"
+      },
+      "access": {
+        "label": "Sicherheit & Zugriff",
+        "shortLabel": "Sicherheit und Zugriff",
+        "description": "Passwortsperren & Betrachterrollen"
+      },
+      "status": {
+        "label": "Systemstatus",
+        "description": "Speicherübersicht & Scan-Verlauf"
+      }
+    },
+    "places": {
+      "banner": {
+        "title": "Orte aus GPS-Daten der Fotos",
+        "description": "Fotos mit GPS-Daten nach Offline-Städte- und Ortsbezeichnungen gruppieren.",
+        "helper": "Bereite den lokalen GeoNames-Datensatz vor und baue dann die Ortszuordnungen für die Fotos in deiner Bibliothek neu auf.",
+        "setup": "Orte einrichten",
+        "dismissAria": "Hinweis zu Orten ausblenden",
+        "availableLater": "Der Download ist optional, und der Bereich Orte bleibt später in den Einstellungen verfügbar."
+      },
+      "section": {
+        "title": "Offline-Orte",
+        "description": "Bereite die GeoNames-Städtedaten vor und baue dann die Ortsverknüpfungen aus vorhandenen Fotokoordinaten neu auf.",
+        "prepared": "Vorbereitet",
+        "notPrepared": "Nicht vorbereitet",
+        "datasetLabel": "Datensatz",
+        "rowsLabel": "Zeilen",
+        "notImported": "Nicht importiert",
+        "importedAt": "Importiert am {value}.",
+        "fallbackDataset": "GeoNames cities500",
+        "prepareButton": "Geodaten vorbereiten",
+        "preparingButton": "Wird vorbereitet...",
+        "rebuildButton": "Ortszuordnungen neu aufbauen",
+        "rebuildingButton": "Wird neu aufgebaut...",
+        "loadStatusError": "Status der Orte konnte nicht geladen werden",
+        "actions": {
+          "ready": "Die Offline-Ortsdaten sind bereit.",
+          "prepareError": "Die Offline-Ortsdaten konnten nicht vorbereitet werden.",
+          "rebuilt": "Orte für {assigned} von {processed} Beiträgen neu aufgebaut.",
+          "rebuildError": "Die Ortszuordnungen konnten nicht neu aufgebaut werden."
+        }
+      }
+    },
+    "general": {
+      "migration": {
+        "eyebrow": "Stories-Migration",
+        "title": "Diese Bibliothek verwendet möglicherweise bereits Ordner namens stories",
+        "description": "Foldergram kann stories/ jetzt standardmäßig als Profil-Stories und Highlights behandeln. Wähle, ob das bisherige Ordnerverhalten beibehalten oder auf den neuen reservierten Stories-Modus umgestellt werden soll, und scanne die Bibliothek anschließend erneut.",
+        "dismissAria": "Hinweis zur Stories-Migration ausblenden",
+        "useFeature": "Stories-Funktion verwenden",
+        "keepLegacy": "Bisheriges Verhalten beibehalten",
+        "helper": "Wähle hier einen Modus und speichere ihn unten. Führe danach einen Bibliotheksscan aus, damit die indizierte Ordnerstruktur übereinstimmt.",
+        "helperSaving": "Warte zuerst, bis die aktuelle Aktualisierung der Einstellungen abgeschlossen ist."
+      },
+      "carouselsMigration": {
+        "eyebrow": "Karussell-Migration",
+        "title": "Diese Bibliothek verwendet möglicherweise bereits Ordner namens carousels",
+        "description": "Wähle, ob AppFolder/carousels Beiträge mit mehreren Elementen erzeugen oder normale Ordner bleiben soll.",
+        "useFeature": "Karussell-Beiträge verwenden",
+        "keepFolders": "Normale Ordner beibehalten",
+        "helper": "Wähle hier einen Modus und speichere ihn unten. Führe danach einen Bibliotheksscan aus, damit indizierte Ordner und Karussell-Beiträge übereinstimmen."
+      },
+      "carouselsAnnouncement": {
+        "title": "Karussell-Beiträge",
+        "headline": "Reservierte carousels/-Ordner können Medien zu einem Beitrag zusammenfassen",
+        "description": "Lege für jedes Karussell einen direkten Unterordner in AppFolder/carousels an und lege darin direkt 2–20 Bilder, animierte Bilder oder Videos ab. Die natürliche Sortierung der Dateinamen bestimmt die Reihenfolge der Slides, das erste Element wird zum Titelbild. Numerische Präfixe im Dateinamen sind optional.",
+        "dismissAria": "Hinweis zu Karussell-Beiträgen ausblenden",
+        "showStructure": "Verzeichnisstruktur für Karussells anzeigen",
+        "hideStructure": "Verzeichnisstruktur für Karussells ausblenden"
+      },
+      "announcement": {
+        "title": "Stories",
+        "headline": "Reservierte stories/-Ordner können Stories für App-Ordner liefern",
+        "description": "Lege Medien direkt in AppFolder/stories ab, um die Avatar-Story zu füllen, und verwende direkte Unterordner für Highlight-Kreise. Tiefer verschachtelte Ordner bleiben im selben Highlight.",
+        "dismissAria": "Hinweis zu Stories ausblenden",
+        "showStructure": "Verzeichnisstruktur anzeigen",
+        "hideStructure": "Verzeichnisstruktur ausblenden"
+      },
+      "card": {
+        "title": "Allgemeine Einstellungen",
+        "description": "App-weite Standards für Sprache, Titel verschachtelter Ordner, stories-Ordner, ausgeschlossene Ordner, Start, Reels und App-Ordner."
+      },
+      "language": {
+        "label": "App-Sprache",
+        "description": "Wähle die Sprache für Navigation, Dialoge und andere übersetzte Oberflächenelemente auf diesem Gerät.",
+        "helper": "Wird in diesem Browser sofort übernommen. Speichere die Änderungen unten, um die gewählte Sprache zum app-weiten Standard zu machen. Fehlende Übersetzungen werden auf Englisch angezeigt.",
+        "overrideNotice": "Der App-Standard ist {savedLabel}. Dieser Browser verwendet vorübergehend {currentLabel} aufgrund einer nur im Browser gespeicherten Einstellung. Speichere die Änderungen, um {currentLabel} zum Standard zu machen.",
+        "selectLabel": "App-Sprache",
+        "options": {
+          "en": "Englisch",
+          "es": "Spanisch",
+          "zh": "Chinesisch",
+          "de": "Deutsch"
+        }
+      },
+      "homeFeed": {
+        "label": "Sortierung des Start-Feeds",
+        "description": "Wähle den Feed-Modus, der auf der Startseite zuerst angezeigt wird.",
+        "closeMenuAria": "Sortiermenü des Start-Feeds schließen",
+        "options": {
+          "random": {
+            "label": "Zufällig",
+            "description": "Gleichbleibend gemischt."
+          },
+          "recent": {
+            "label": "Neueste",
+            "description": "Neueste zuerst."
+          },
+          "rediscover": {
+            "label": "Wiederentdecken",
+            "description": "Holt ältere Beiträge zurück."
+          }
+        }
+      },
+      "reelsFeed": {
+        "label": "Sortierung des Reels-Feeds",
+        "description": "Wähle die Standard-Reihenfolge, wenn Reels geöffnet wird.",
+        "closeMenuAria": "Sortiermenü des Reels-Feeds schließen",
+        "options": {
+          "random": {
+            "label": "Zufällig",
+            "description": "Pro Sitzung gleichbleibend gemischt."
+          },
+          "recent": {
+            "label": "Neueste",
+            "description": "Neueste Videos zuerst."
+          },
+          "recommended": {
+            "label": "Empfohlen",
+            "description": "Mischung nach deinen Vorlieben."
+          }
+        }
+      },
+      "folderOrder": {
+        "label": "Fotoreihenfolge in App-Ordnern",
+        "description": "Wähle die Standardreihenfolge der Fotos in App-Ordnern.",
+        "closeMenuAria": "Menü für die Fotoreihenfolge in App-Ordnern schließen",
+        "options": {
+          "newest": {
+            "label": "Neueste zuerst",
+            "description": "Aktuelle Fotos erscheinen zuerst."
+          },
+          "oldest": {
+            "label": "Älteste zuerst",
+            "description": "Frühere Fotos erscheinen zuerst."
+          }
+        }
+      },
+      "nestedFolderTitle": {
+        "label": "Titelformat verschachtelter Ordner",
+        "description": "Wähle, wie verschachtelte App-Ordner in der gesamten App beschriftet werden. Dies ändert nur die Darstellung.",
+        "closeMenuAria": "Menü für das Titelformat verschachtelter Ordner schließen",
+        "options": {
+          "folder": {
+            "label": "Nur Ordnername",
+            "description": "Nur den Namen des aktuellen Ordners anzeigen."
+          },
+          "parentPlusFolder": {
+            "label": "Übergeordneter + Ordnername",
+            "description": "Verschachtelten Ordnern den direkt übergeordneten Ordner voranstellen."
+          }
+        }
+      },
+      "storiesMode": {
+        "label": "stories-Ordner als normale App-Ordner behandeln",
+        "scanRequired": "Scan erforderlich",
+        "explainAria": "Einstellung für stories-Ordner erklären",
+        "explainDescription": "Solange dies ausgeschaltet ist, dient AppFolder/stories als Quelle für Avatar-Stories und Highlight-Kreise. Schalte es nur ein, wenn Ordner, die tatsächlich stories heißen, überall in der App weiterhin wie normale Ordner funktionieren sollen.",
+        "toggleLabel": "Verhalten von stories-Ordnern umschalten",
+        "enabledDescription": "Der bisherige Modus ist aktiv. stories-Ordner bleiben überall normale App-Ordner.",
+        "disabledDescription": "Der reservierte Stories-Modus ist aktiv. AppFolder/stories liefert Avatar-Stories und Highlight-Kreise."
+      },
+      "carouselsMode": {
+        "label": "carousels-Ordner als normale App-Ordner behandeln",
+        "toggleLabel": "Verhalten von carousels-Ordnern umschalten",
+        "enabledDescription": "Der bisherige Modus ist aktiv. carousels-Ordner bleiben normale App-Ordner.",
+        "disabledDescription": "Der reservierte Karussell-Modus ist aktiv. Jeder direkte Unterordner von AppFolder/carousels wird zu einem Beitrag."
+      },
+      "excludedFolders": {
+        "label": "Ausgeschlossene Quellordner",
+        "description": "Überspringt passende Ordner überall anhand des Namens oder des exakten relativen Pfads unter dem Galerie-Stammverzeichnis. Versteckte Pfade und von der App verwalteter Speicher bleiben automatisch ausgeschlossen.",
+        "customRules": "Eigene Regeln",
+        "envRulesLabel": "Schreibgeschützte Umgebungsregeln",
+        "envRulesDescription": "Ändere GALLERY_EXCLUDED_FOLDERS in .env oder Docker und starte die App neu, um diese zu aktualisieren.",
+        "envRulesEmpty": "Es sind keine Ordnerausschlüsse über Umgebungsvariablen konfiguriert.",
+        "activeRulesLabel": "Aktuell aktive gespeicherte Regeln",
+        "activeRulesDescription": "Hier werden die gespeicherten Regeln aus dem Textfeld mit den Einträgen aus Umgebungsvariablen zusammengeführt. Neue Änderungen im Textfeld erscheinen hier, nachdem du sie gespeichert hast.",
+        "activeRulesEmpty": "Es sind keine gespeicherten eigenen oder über Umgebungsvariablen definierten Ordnerausschlüsse aktiv."
+      },
+      "actionNote": {
+        "loading": "Die aktuellen App-Einstellungen werden geladen...",
+        "excludedAndOther": "Speichere die Ausschlussregeln zusammen mit den anderen app-weiten Änderungen. Führe danach einen Bibliotheksscan aus, damit reservierte Ordnermodi und ausgeschlossene Ordner korrekt neu indiziert werden.",
+        "excludedOnly": "Hiermit werden nur die eigenen ausgeschlossenen Ordner gespeichert. Führe danach einen Bibliotheksscan aus, damit diese Ordner aus dem Index verschwinden.",
+        "storiesAndDefaults": "Speichere das Ordnerverhalten und die aktualisierten App-Standards gemeinsam. Führe danach einen Bibliotheksscan aus, um die betroffenen Ordner neu zu indizieren.",
+        "storiesOnly": "Hiermit wird das Verhalten der reservierten Ordner gespeichert. Führe danach einen Bibliotheksscan aus, um mit dem gewählten Modus neu zu indizieren.",
+        "multipleDefaults": "Speichere diese App-Standards gemeinsam. Die Sprache wird in diesem Browser sofort übernommen; Besucher können den Modus auf der Startseite weiterhin wechseln; Reels, App-Ordner und Titel verschachtelter Ordner verwenden die App-Standards.",
+        "languageOnly": "Damit wird die Sprache in diesem Browser sofort geändert. Speichere sie auch, wenn die gewählte Sprache zum app-weiten Standard werden soll.",
+        "homeOnly": "Damit wird der Feed-Modus geändert, der auf der Startseite dieser App zuerst angezeigt wird. Besucher können den Modus auf der Startseite weiterhin wechseln.",
+        "reelsOnly": "Damit wird die Reihenfolge geändert, die beim Öffnen von Reels in dieser App verwendet wird. Besucher können den Modus auf der Reels-Seite nicht wechseln.",
+        "folderOnly": "Damit wird die Standard-Fotoreihenfolge in den Rasteransichten der App-Ordner geändert.",
+        "nestedFolderTitleOnly": "Damit wird geändert, wie verschachtelte App-Ordner in der gesamten App beschriftet werden.",
+        "carouselReconciliation": "Der Karussell-Ordnermodus ist gespeichert. Schließe die oben angezeigte Bibliotheksaktion ab, um ihn auf den Index anzuwenden.",
+        "idle": "Dies sind die aktuellen app-weiten Standards für Sprache, Start, Reels, App-Ordner, Titel verschachtelter Ordner, stories-Ordner, carousels-Ordner und ausgeschlossene Ordner."
+      },
+      "rescanNotice": {
+        "rebuildRequired": "Speichere diese Änderungen und baue dann den Bibliotheksindex neu auf, damit das gewählte Ordnerverhalten auf den aktuellen Galerie-Speicherort angewendet wird.",
+        "pendingRebuild": "Baue den Bibliotheksindex neu auf, um den gespeicherten Karussell-Ordnermodus auf den aktuellen Galerie-Speicherort anzuwenden.",
+        "pendingCarousels": "Führe einen Bibliotheksscan aus, um den gespeicherten Karussell-Ordnermodus auf indizierte Ordner und Beiträge anzuwenden.",
+        "excludedAndStories": "Speichere diese Änderungen und führe dann einen Bibliotheksscan aus, um das Verhalten reservierter Ordner und die ausgeschlossenen Ordner zu aktualisieren.",
+        "excludedOnly": "Speichere diese Änderung und führe dann einen Bibliotheksscan aus, damit die ausgeschlossenen Ordner aus dem Index verschwinden.",
+        "storiesOnly": "Speichere diese Änderung und führe dann einen Bibliotheksscan aus, damit stories-Ordner, Avatar-Stories und Highlights aktualisiert werden.",
+        "carouselsOnly": "Speichere diese Änderung und führe dann einen Bibliotheksscan aus, damit Karussell-Beiträge und carousels-Ordner aktualisiert werden.",
+        "storiesAndCarousels": "Speichere diese Änderungen und führe dann einen Bibliotheksscan aus, damit das Verhalten der stories- und carousels-Ordner aktualisiert wird."
+      },
+      "feedback": {
+        "folderRulesSavedRebuild": "Das Ordnerverhalten wurde gespeichert. Baue den Bibliotheksindex neu auf, um es auf den aktuellen Galerie-Speicherort anzuwenden.",
+        "settingsAndFolderRulesSaved": "Die Einstellungen wurden gespeichert. Führe einen Bibliotheksscan aus, um die geänderten Ordnerregeln anzuwenden.",
+        "folderRulesSaved": "Das Ordnerverhalten wurde gespeichert. Führe einen Bibliotheksscan aus, um die Änderungen anzuwenden.",
+        "excludedFoldersSaved": "Die ausgeschlossenen Ordner wurden gespeichert. Führe einen Bibliotheksscan aus, um sie anzuwenden.",
+        "settingsAndStoriesSaved": "Die Einstellungen wurden gespeichert. Führe einen Bibliotheksscan aus, um die Änderung an den stories-Ordnern anzuwenden.",
+        "storiesSaved": "Das Verhalten der stories-Ordner wurde gespeichert. Führe einen Bibliotheksscan aus, um es anzuwenden.",
+        "carouselsSaved": "Das Verhalten der carousels-Ordner wurde gespeichert. Führe einen Bibliotheksscan aus, um es anzuwenden.",
+        "defaultsSaved": "Die app-weiten Standards wurden aktualisiert.",
+        "languageSaved": "Standardsprache der App als {label} gespeichert.",
+        "homeSaved": "Die Startseite öffnet jetzt mit {label}.",
+        "reelsSaved": "Reels öffnet jetzt mit {label}.",
+        "folderOrderSaved": "App-Ordner öffnen jetzt mit {label}.",
+        "nestedFolderTitleSaved": "Verschachtelte App-Ordner verwenden jetzt {label}.",
+        "parts": {
+          "appLanguage": "App-Sprache",
+          "excludedFolders": "ausgeschlossene Ordner",
+          "storiesFolderHandling": "Behandlung der stories-Ordner",
+          "carouselsFolderHandling": "Behandlung der carousels-Ordner",
+          "homeFeedDefault": "Standard des Start-Feeds",
+          "reelsFeedDefault": "Standard des Reels-Feeds",
+          "appFolderOrder": "Reihenfolge in App-Ordnern",
+          "nestedFolderTitles": "Titel verschachtelter Ordner"
+        }
+      },
+      "errors": {
+        "validateExcludedFolders": "Die Regeln für ausgeschlossene Ordner konnten nicht geprüft werden.",
+        "update": "Die allgemeinen Einstellungen konnten nicht aktualisiert werden.",
+        "partialUpdate": "Einige Einstellungen wurden gespeichert ({parts}), aber die Aktualisierung wurde nicht abgeschlossen: {message}"
+      }
+    },
+    "library": {
+      "legacyMigration": {
+        "title": "Migration alter abgeleiteter Dateien ausstehend",
+        "messageOne": "{count} indizierter Medieneintrag verwendet noch die alten gespiegelten Pfade für Miniaturansicht und Vorschau. Führe „Bibliothek scannen“ aus, um ihn in den Asset-Key-Speicher zu verschieben.",
+        "messageOther": "{count} indizierte Medieneinträge verwenden noch die alten gespiegelten Pfade für Miniaturansichten und Vorschauen. Führe „Bibliothek scannen“ aus, um sie in den Asset-Key-Speicher zu verschieben."
+      },
+      "carouselReconciliation": {
+        "title": "Aktualisierung der Karussell-Ordner ausstehend",
+        "scanDescription": "Der gespeicherte Karussell-Ordnermodus wurde noch nicht auf den Index angewendet. Führe „Bibliothek scannen“ aus, um Ordner und Beiträge zu aktualisieren.",
+        "rebuildDescription": "Der gespeicherte Karussell-Ordnermodus wurde noch nicht auf den Index angewendet. Verwende unten „Bibliotheksindex neu aufbauen“, um ihn auf den aktuellen Galerie-Speicherort anzuwenden."
+      },
+      "scanCard": {
+        "title": "Bibliothek scannen",
+        "description": "Führe einen Scan aus, nachdem du Ordner hinzugefügt hast oder wenn du indizierte Medien aktualisieren möchtest."
+      },
+      "statusLabel": {
+        "storageUnavailable": "Speicher nicht verfügbar",
+        "scanInProgress": "Scan läuft",
+        "rebuildActive": "Neuaufbau läuft",
+        "ready": "Bereit"
+      },
+      "scanButton": {
+        "active": "Bibliothek wird gescannt...",
+        "idle": "Bibliothek scannen"
+      },
+      "scanActionNote": {
+        "loading": "Aktueller Bibliotheksstatus wird geladen...",
+        "rebuildRequired": "Baue zuerst den Bibliotheksindex neu auf, da sich der Galerie-Speicherort geändert hat.",
+        "otherTaskActive": "Eine andere Bibliotheksaufgabe läuft. Der Fortschritt wird live in der fixierten Statusleiste angezeigt.",
+        "progress": "Der Fortschritt wird live in der fixierten Statusleiste angezeigt.",
+        "legacyMigration": "Führe „Bibliothek scannen“ aus, um alte gespiegelte Miniaturansichten und Vorschauen in die Asset-Key-Speicherstruktur zu verschieben.",
+        "carouselReconciliation": "Führe „Bibliothek scannen“ aus, um den gespeicherten Karussell-Ordnermodus auf indizierte Ordner und Beiträge anzuwenden.",
+        "idle": "Scans erkennen hinzugefügte, geänderte oder fehlende Medien."
+      },
+      "thumbnailCard": {
+        "title": "Miniaturansichten neu erzeugen",
+        "description": "Erzeugt Feed- und Profil-Miniaturansichten sowie Video-Vorschaubilder ausschließlich aus indizierten Medien neu. Originaldateien sind nicht betroffen."
+      },
+      "thumbnailButton": {
+        "active": "Wird neu erzeugt...",
+        "idle": "Miniaturansichten neu erzeugen"
+      },
+      "thumbnailActionNote": {
+        "loading": "Aktueller Bibliotheksstatus wird geladen...",
+        "rebuildRequired": "Nicht verfügbar, bis der Bibliotheksindex für den neuen Galerie-Speicherort neu aufgebaut wurde.",
+        "progress": "Der Fortschritt wird live in der fixierten Statusleiste angezeigt.",
+        "rebuildActive": "Warte zuerst, bis der vollständige Neuaufbau abgeschlossen ist.",
+        "scanActive": "Warte zuerst, bis der aktuelle Scan abgeschlossen ist.",
+        "legacyMigration": "Hierbei bleiben die aktuellen Pfade der Miniaturansichten erhalten, alte gespiegelte abgeleitete Dateien werden nicht migriert. Führe stattdessen „Bibliothek scannen“ aus, um sie in den Asset-Key-Speicher zu verschieben.",
+        "idle": "Verwende dies für eine schnellere Aktualisierung nur der Miniaturansichten."
+      },
+      "dangerZone": {
+        "title": "Gefahrenbereich",
+        "recommended": "Empfohlen",
+        "rebuildTitle": "Bibliotheksindex neu aufbauen",
+        "rebuildDescription": "Setzt den Bibliotheksindex zurück, verwendet passende zwischengespeicherte Medien wieder und erzeugt nur fehlende abgeleitete Dateien aus dem aktuellen Galerie-Stammverzeichnis.",
+        "currentGalleryRoot": "Aktuelles Galerie-Stammverzeichnis",
+        "previousGalleryRoot": "Vorheriges Galerie-Stammverzeichnis"
+      },
+      "rebuildButton": {
+        "active": "Wird neu aufgebaut...",
+        "idle": "Bibliotheksindex neu aufbauen"
+      },
+      "rebuildActionNote": {
+        "loading": "Aktueller Bibliotheksstatus wird geladen...",
+        "progress": "Der Fortschritt wird live in der fixierten Statusleiste angezeigt.",
+        "thumbnailActive": "Warte zuerst, bis die Neuerzeugung der Miniaturansichten abgeschlossen ist.",
+        "scanActive": "Warte zuerst, bis der aktuelle Scan abgeschlossen ist.",
+        "rebuildRequired": "Empfohlen, da sich der Galerie-Speicherort geändert hat.",
+        "idle": "Verwende dies, um den Index zurückzusetzen und passende abgeleitete Dateien aus dem vorherigen Bibliotheksindex wiederzuverwenden."
+      },
+      "dialogs": {
+        "rebuildTitle": "Aktuellen Bibliotheksindex neu aufbauen?",
+        "rebuildMessage": "Dadurch werden die indizierten Datenbanktabellen für Ordner, Beiträge, Likes und Scan-Verlauf geleert und das aktive Galerie-Stammverzeichnis neu gescannt. Vorhandene Miniaturansichten und Vorschauen aus dem vorherigen Index werden wiederverwendet, sofern sie noch zu den aktuellen Dateien passen; nur fehlende oder geänderte abgeleitete Dateien werden neu erzeugt. Originaldateien in der Galerie werden nicht gelöscht.",
+        "rebuildConfirm": "Bibliotheksindex neu aufbauen",
+        "rebuildLoading": "Wird neu aufgebaut...",
+        "thumbnailsTitle": "Nur Miniaturansichten neu erzeugen?",
+        "thumbnailsMessage": "Dadurch werden die erzeugten Feed- und Profil-Miniaturansichten sowie die Video-Vorschaubilder entfernt und anschließend aus der aktuell indizierten Bibliothek unter Verwendung des jeweiligen aktuellen Miniaturansichtspfads neu erzeugt. Vorschauen, Likes, Scan-Verlauf und indizierte Bibliothekseinträge bleiben unverändert. Originaldateien in der Galerie werden nicht gelöscht.",
+        "thumbnailsConfirm": "Miniaturansichten neu erzeugen",
+        "thumbnailsLoading": "Wird neu erzeugt..."
+      },
+      "errors": {
+        "startScan": "Der Bibliotheksscan konnte nicht gestartet werden.",
+        "rebuild": "Der aktuelle Bibliotheksindex konnte nicht neu aufgebaut werden.",
+        "regenerate": "Die Miniaturansichten konnten nicht neu erzeugt werden."
+      }
+    },
+    "notices": {
+      "deletionRecovery": {
+        "eyebrow": "Warnung zur Löschwiederherstellung",
+        "title": "Endgültige Löschungen erfordern Aufmerksamkeit: {count}",
+        "description": "Foldergram konnte den Vorgang weder sicher abschließen noch zurücksetzen. Die in Quarantäne verschobenen Dateien und das Journal wurden nicht verändert. Server und Bibliothek bleiben verfügbar.",
+        "postLabel": "Beitrag {postId}"
+      },
+      "scanWarning": {
+        "eyebrow": "Scan-Warnung",
+        "title": "Scan abgeschlossen – strukturelle Warnungen: {count}",
+        "title_plural": "Scan abgeschlossen – strukturelle Warnungen: {count}"
+      },
+      "scanError": {
+        "eyebrow": "Scan erfordert Aufmerksamkeit",
+        "title": "Der letzte Scan wurde mit Fehlern abgeschlossen",
+        "fullReportPrefix": "Vollständiger Bericht:",
+        "dismissAria": "Scan-Warnung ausblenden",
+        "actionNote": "Führe einen neuen Bibliotheksscan aus, um fehlgeschlagene Medien erneut zu verarbeiten und fehlende Miniaturansichten oder Vorschauen zu ergänzen.",
+        "messages": {
+          "genericNoDetails": "Beim letzten Durchlauf sind bei einigen Medien Fehler aufgetreten. Scanne die Bibliothek erneut, um übersprungene Dateien und die Erzeugung abgeleiteter Dateien zu wiederholen.",
+          "ffmpegMissing": "In der Serverumgebung fehlen Werkzeuge zur Videoverarbeitung. Installiere FFmpeg, damit Scans Video-Metadaten lesen und abgeleitete Videodateien erzeugen können.",
+          "withReport": "Beim letzten Durchlauf sind bei einigen Medien Fehler aufgetreten. Prüfe den Beispielfehler und den Pfad zum vollständigen Bericht unten und scanne die Bibliothek dann erneut, um fehlgeschlagene Medien und die Erzeugung abgeleiteter Dateien zu wiederholen.",
+          "withSample": "Beim letzten Durchlauf sind bei einigen Medien Fehler aufgetreten. Prüfe den Beispielfehler unten und scanne die Bibliothek dann erneut, um übersprungene Dateien und die Erzeugung abgeleiteter Dateien zu wiederholen."
+        },
+        "detailMore": "{line} (+{count} weitere)"
+      },
+      "ignoredRootMedia": {
+        "dismissAria": "Warnung zum Galerie-Stammverzeichnis ausblenden",
+        "messageOne": "{count} unterstützte Datei im Galerie-Stammverzeichnis wird ignoriert. Verschiebe sie in einen Ordner innerhalb des Galerie-Stammverzeichnisses, um App-Ordner zu erstellen. Dateien direkt im Galerie-Stammverzeichnis werden ignoriert.",
+        "messageOther": "{count} unterstützte Dateien im Galerie-Stammverzeichnis werden ignoriert. Verschiebe sie in einen Ordner innerhalb des Galerie-Stammverzeichnisses, um App-Ordner zu erstellen. Dateien direkt im Galerie-Stammverzeichnis werden ignoriert."
+      }
+    },
+    "access": {
+      "section": {
+        "title": "Admin- und Betrachterzugriff",
+        "description": "Schütze Admin-Aktionen mit einem Admin-Passwort und vergib optional ein separates Betrachter-Passwort für Sitzungen, die nur zum Ansehen dienen.",
+        "locked": "Admin gesperrt",
+        "open": "Offener Zugriff"
+      },
+      "fields": {
+        "adminPassword": "Admin-Passwort",
+        "confirmPassword": "Passwort bestätigen",
+        "currentPassword": "Aktuelles Passwort",
+        "newPassword": "Neues Passwort",
+        "confirmNewPassword": "Neues Passwort bestätigen",
+        "viewerPassword": "Betrachter-Passwort",
+        "confirmViewerPassword": "Betrachter-Passwort bestätigen"
+      },
+      "placeholders": {
+        "minimumLength": "Mindestens {count} Zeichen",
+        "repeatPassword": "Passwort wiederholen",
+        "enterNewViewerPassword": "Neues Betrachter-Passwort eingeben",
+        "repeatNewViewerPassword": "Neues Betrachter-Passwort wiederholen",
+        "repeatViewerPassword": "Betrachter-Passwort wiederholen"
+      },
+      "enable": {
+        "description": "Das Admin-Passwort wird als Einweg-Hash gespeichert und entsperrt diesen Browser mit einem signierten Sitzungscookie.",
+        "buttonLoading": "Wird aktiviert...",
+        "buttonIdle": "Admin-Passwort aktivieren",
+        "success": "Das Admin-Passwort ist jetzt für diese Foldergram-Instanz aktiviert.",
+        "error": "Das Admin-Passwort konnte nicht aktiviert werden."
+      },
+      "change": {
+        "title": "Admin-Passwort ändern",
+        "description": "Aktualisiere das Admin-Passwort und mache ältere Sitzungen ungültig.",
+        "showForm": "Passwort ändern",
+        "hideForm": "Formular ausblenden",
+        "helper": "Verwende mindestens 8 Zeichen. Beim Ändern des Passworts werden alle älteren Sitzungen abgemeldet.",
+        "buttonLoading": "Wird aktualisiert...",
+        "buttonIdle": "Admin-Passwort ändern",
+        "missingCurrent": "Gib das aktuelle Passwort ein, um es zu ändern.",
+        "success": "Das Admin-Passwort wurde aktualisiert und bestehende Sitzungen wurden ungültig gemacht.",
+        "error": "Das Admin-Passwort konnte nicht geändert werden."
+      },
+      "viewer": {
+        "title": "Betrachterzugriff",
+        "description": "Vergib ein Passwort nur zum Ansehen für Betrachtersitzungen oder öffne die Bibliothek für anonymes, öffentliches Ansehen.",
+        "modes": {
+          "adminOnlyTitle": "Nur Admin",
+          "adminOnlyDescription": "Nur das Admin-Passwort kann die App entsperren.",
+          "viewerPasswordTitle": "Betrachter-Passwort",
+          "viewerPasswordDescription": "Erlaubt eine separate Betrachter-Anmeldung, die stöbern und gemeinsame Likes nutzen kann, ohne Admin-Steuerelemente zu sehen.",
+          "publicTitle": "Öffentlich",
+          "publicDescription": "Erlaubt anonymes Stöbern mit Favoriten, die lokal im Browser gespeichert werden, während die Admin-Entsperrung unter „Mehr“ verfügbar bleibt."
+        },
+        "status": {
+          "adminPasswordOff": "Admin-Passwort aus",
+          "viewerPasswordOn": "Betrachter-Passwort an",
+          "publicViewerOn": "Öffentlicher Zugriff an",
+          "adminOnly": "Nur Admin"
+        },
+        "summary": {
+          "enableAdminFirst": "Aktiviere zuerst das Admin-Passwort",
+          "viewerPasswordEnabled": "Zugriff per Betrachter-Passwort ist aktiviert",
+          "publicEnabled": "Öffentlicher Betrachterzugriff ist aktiviert",
+          "off": "Betrachterzugriff ist derzeit ausgeschaltet"
+        },
+        "summaryCopy": {
+          "enableAdminFirst": "Die Einstellungen für den Betrachterzugriff stehen zur Verfügung, sobald das Admin-Passwort aktiviert ist.",
+          "viewerPasswordEnabled": "Betrachter können sich mit dem separaten Betrachter-Passwort anmelden, gemeinsame Likes nutzen und ohne Admin-Steuerelemente stöbern. Um dieses Passwort zu ersetzen, gib unten ein neues ein. Das aktuelle Betrachter-Passwort wird nicht benötigt.",
+          "publicEnabled": "Jeder, der dieses Foldergram erreichen kann, kann ohne Anmeldung stöbern. Favoriten bleiben nur im aktuellen Browser gespeichert, und Admins können sich unter „Mehr“ mit dem Admin-Passwort höhere Rechte verschaffen.",
+          "off": "Derzeit kann nur das Admin-Passwort die App entsperren. Aktiviere unten den Modus mit Betrachter-Passwort, wenn du eine Anmeldung nur zum Ansehen möchtest."
+        },
+        "helper": {
+          "viewerPasswordRotate": "Gib unten ein neues Betrachter-Passwort ein, um es zu ersetzen. Das aktuelle Betrachter-Passwort wird nicht benötigt.",
+          "viewerPasswordNew": "Betrachter-Anmeldungen erhalten gemeinsame Likes, haben aber keinen Zugriff auf Einstellungen, Papierkorb oder destruktive Aktionen.",
+          "public": "Anonyme Besucher können sofort stöbern, lokal im Browser gespeicherte Favoriten nutzen und bei Bedarf den Admin-Zugriff unter „Mehr“ entsperren.",
+          "disableFromPassword": "Beim Speichern werden Betrachter-Anmeldungen deaktiviert und die App kehrt zum reinen Admin-Zugriff zurück.",
+          "disableFromPublic": "Beim Speichern wird das öffentliche Stöbern deaktiviert und die App kehrt zum reinen Admin-Zugriff zurück.",
+          "off": "Der Betrachterzugriff ist derzeit ausgeschaltet, daher kann nur das Admin-Passwort die App entsperren."
+        },
+        "buttons": {
+          "updateViewerPassword": "Betrachter-Passwort aktualisieren",
+          "enableViewerAccess": "Betrachterzugriff aktivieren",
+          "savePublicAccess": "Öffentlichen Zugriff speichern",
+          "enablePublicAccess": "Öffentlichen Zugriff aktivieren",
+          "disableViewerAccess": "Betrachterzugriff deaktivieren",
+          "saveViewerAccess": "Betrachterzugriff speichern"
+        },
+        "success": {
+          "password": "Der Zugriff per Betrachter-Passwort ist aktiviert. Das Betrachter-Passwort wurde gespeichert.",
+          "public": "Der öffentliche Betrachterzugriff ist aktiviert. Anonyme Besucher können jetzt mit lokal im Browser gespeicherten Favoriten stöbern.",
+          "off": "Der Betrachterzugriff wurde ausgeschaltet. Es sind jetzt nur noch Admin-Anmeldungen erlaubt."
+        },
+        "error": "Der Betrachterzugriff konnte nicht aktualisiert werden."
+      },
+      "danger": {
+        "title": "Gefahrenbereich",
+        "disableTitle": "Admin-Passwort deaktivieren",
+        "disableDescription": "Schaltet das Admin-Passwort für diese Foldergram-Instanz wieder aus.",
+        "showForm": "Zugriffsschutz deaktivieren",
+        "hideForm": "Formular ausblenden",
+        "buttonLoading": "Wird deaktiviert...",
+        "buttonIdle": "Admin-Passwort deaktivieren",
+        "signOut": "Abmelden",
+        "signOutError": "Abmelden nicht möglich.",
+        "missingCurrent": "Gib das aktuelle Passwort ein, um den Schutz zu deaktivieren.",
+        "success": "Das Admin-Passwort wurde deaktiviert.",
+        "error": "Das Admin-Passwort konnte nicht deaktiviert werden."
+      },
+      "authProtection": {
+        "enabled": "Der Admin-Schutz ist für diese Browsersitzung aktiv. Mit den Steuerelementen unten kannst du das Admin-Passwort ändern, den Betrachterzugriff konfigurieren, dich abmelden oder den Schutz wieder ausschalten.",
+        "disabled": "Der Schutz ist derzeit ausgeschaltet. Jeder, der diese App in deinem Netzwerk erreichen kann, hat vollen lokalen Zugriff auf die Bibliothek, bis du ein Admin-Passwort aktivierst."
+      },
+      "validation": {
+        "minLength": "Das Passwort muss mindestens {count} Zeichen lang sein.",
+        "empty": "Das Passwort darf nicht leer sein.",
+        "mismatch": "Die Passwortbestätigung stimmt nicht überein."
+      }
+    },
+    "status": {
+      "never": "Nie",
+      "storage": {
+        "available": "Verfügbar",
+        "unavailable": "Nicht verfügbar"
+      },
+      "libraryStatus": {
+        "title": "Bibliotheksstatus",
+        "description": "Aktueller Zustand von Speicher und Index.",
+        "storage": "Speicher",
+        "folders": "Ordner",
+        "indexedPosts": "Indizierte Beiträge",
+        "indexedVideos": "Indizierte Videos"
+      },
+      "lastScan": {
+        "title": "Letzter Scan",
+        "description": "Letzter abgeschlossener Durchlauf, den die App erfasst hat.",
+        "status": "Status",
+        "finished": "Beendet",
+        "filesScanned": "Gescannte Dateien",
+        "changes": "Änderungen",
+        "statusValues": {
+          "none": "Noch keine abgeschlossenen Scans",
+          "completed": "abgeschlossen",
+          "completedWithErrors": "mit Fehlern abgeschlossen",
+          "failed": "fehlgeschlagen",
+          "running": "läuft"
+        },
+        "changeValues": {
+          "new": "neu",
+          "updated": "aktualisiert",
+          "removed": "entfernt"
+        }
+      }
+    }
+  },
+  "home": {
+    "sidebar": {
+      "ariaLabel": "Ordnerempfehlungen",
+      "suggestedFolders": "Vorgeschlagene Ordner",
+      "viewLikes": "Likes anzeigen",
+      "viewFavorites": "Favoriten anzeigen",
+      "openFolder": "Öffnen",
+      "openSourceText": "Foldergram ist Open Source.",
+      "viewOnGitHub": "Auf GitHub ansehen"
+    }
+  },
+  "likes": {
+    "labels": {
+      "sharedCollection": "Likes",
+      "localCollection": "Favoriten",
+      "sharedSection": "Gelikte Beiträge",
+      "localSection": "Favorisierte Beiträge"
+    },
+    "view": {
+      "rebuilding": "Der Bibliotheksindex wird neu aufgebaut. {label} sind wieder verfügbar, sobald die aktualisierte Bibliothek geladen ist.",
+      "sectionsAria": "Bereiche: {label}"
+    },
+    "states": {
+      "sharedEmptyTitle": "Noch keine gelikten Beiträge",
+      "localEmptyTitle": "Noch keine Favoriten",
+      "sharedEmptyDescription": "Tippe unter einem Beitrag auf das Herz, und er erscheint hier.",
+      "localEmptyDescription": "Tippe unter einem Beitrag auf das Herz, und er erscheint hier in diesem Browser.",
+      "sharedLoadingLabel": "Likes werden geladen...",
+      "localLoadingLabel": "Favoriten werden geladen...",
+      "sharedErrorTitle": "Likes konnten nicht geladen werden",
+      "localErrorTitle": "Favoriten konnten nicht geladen werden"
+    },
+    "actions": {
+      "likePost": "Beitrag liken",
+      "unlikePost": "Like entfernen",
+      "favoritePost": "Beitrag favorisieren",
+      "removeFavoriteFromPost": "Beitrag aus Favoriten entfernen"
+    },
+    "errors": {
+      "loadShared": "Likes konnten nicht geladen werden",
+      "loadLocal": "Favoriten konnten nicht geladen werden",
+      "updateShared": "Likes konnten nicht aktualisiert werden",
+      "updateLocal": "Favoriten konnten nicht aktualisiert werden"
+    }
+  },
+  "moments": {
+    "rails": {
+      "moments": {
+        "title": "Momente",
+        "description": "Erinnerungen, zusammengestellt anhand der tatsächlichen Aufnahmedaten in deiner Bibliothek.",
+        "singularLabel": "Moment"
+      },
+      "highlights": {
+        "title": "Stories",
+        "description": "Kuratierte Zusammenstellungen im Story-Stil aus deiner Bibliothek, wenn Aufnahmedaten spärlich oder künstlich sind.",
+        "singularLabel": "Story"
+      }
+    },
+    "capsules": {
+      "onThisDay": {
+        "title": "An diesem Tag",
+        "subtitle": "{date} in den vergangenen Jahren"
+      },
+      "thisWeekPreviousYears": {
+        "title": "Diese Woche",
+        "subtitle": "{range} in den vergangenen Jahren"
+      },
+      "fromLastYear": {
+        "title": "Letztes Jahr um diese Zeit",
+        "subtitle": "Ein Wiedersehen mit {monthYear}"
+      },
+      "highlightRecentBatches": {
+        "title": "Neueste Serien",
+        "subtitle": "Die letzten Aufnahmeserien in einer Zusammenstellung",
+        "dateContextOne": "{count} Serie",
+        "dateContextOther": "{count} Serien"
+      },
+      "highlightForgottenFavorites": {
+        "title": "Vergessene Lieblinge",
+        "subtitle": "Ältere gelikte Beiträge, die einen zweiten Blick wert sind",
+        "dateContext": "Gelikt und älter als 6 Monate"
+      },
+      "highlightDeepCuts": {
+        "title": "Verborgene Schätze",
+        "subtitle": "Ältere Beiträge, wieder aus dem Archiv hervorgeholt",
+        "dateContext": "Älter als 6 Monate"
+      },
+      "highlightLuckyDip": {
+        "title": "Wundertüte",
+        "subtitle": "Eine bunte Mischung aus der ganzen Bibliothek",
+        "dateContext": "Gilt für heute"
+      }
+    },
+    "view": {
+      "rebuilding": "Der Bibliotheksindex wird neu aufgebaut. Diese Ansicht wird wieder gefüllt, sobald die aktualisierte Leiste auf der Startseite bereit ist.",
+      "loading": "{label} wird geladen...",
+      "loadError": "{label} konnte nicht geladen werden",
+      "emptyTitle": "{label} ist leer",
+      "emptyDescription": "Wähle auf der Startseite einen anderen Eintrag aus.",
+      "postCount": "{count} Beiträge"
+    }
+  },
+  "folder": {
+    "shared": {
+      "topLevelSourceFolder": "Quellordner der obersten Ebene"
+    },
+    "header": {
+      "openStories": "Ordner-Stories öffnen",
+      "openAvatar": "Ordner-Avatar öffnen",
+      "editButton": "App-Ordner bearbeiten",
+      "shareButton": "Ordner teilen",
+      "posts": "{count} Beiträge",
+      "reels": "{count} Reels",
+      "updated": "Aktualisiert {date}",
+      "libraryPath": "Bibliothekspfad",
+      "expandDescription": "Beschreibung ausklappen",
+      "collapseDescription": "Beschreibung einklappen",
+      "errors": {
+        "updateProfile": "Profil konnte nicht aktualisiert werden"
+      }
+    },
+    "profileModal": {
+      "title": "App-Ordner bearbeiten",
+      "namePlaceholder": "Anzeigename des Ordners",
+      "descriptionPlaceholder": "Beschreibung für diesen Ordner hinzufügen...",
+      "errors": {
+        "nameRequired": "Name ist erforderlich."
+      }
+    },
+    "shareModal": {
+      "title": "Ordner teilen",
+      "publicUrl": "Öffentliche Ordner-URL",
+      "accessSummaryTitle": "Aktueller Zugriff",
+      "accessSummaryBoth": "Aktive Freigabelinks: {count}. Passwortzugriff: aktiviert.",
+      "accessSummaryLinks": "Aktive Freigabelinks: {count}. Passwortzugriff: aus.",
+      "accessSummaryPassword": "Aktive Freigabelinks: 0. Passwortzugriff: aktiviert.",
+      "accessSummaryNone": "Aktive Freigabelinks: 0. Passwortzugriff: aus.",
+      "independentMethods": "Freigabelinks und Passwortzugriff funktionieren unabhängig voneinander. Du kannst eines oder beides aktivieren.",
+      "linkSection": "Freigabelinks",
+      "linkDescription": "Jeder mit einem aktiven Link kann diesen Ordner ohne Passwort öffnen. Jeder Link läuft unabhängig ab oder kann einzeln widerrufen werden.",
+      "activeLinks": "{count} aktiv",
+      "expiration": "Ablauf des Freigabelinks",
+      "customExpiration": "Eigener Ablaufzeitpunkt",
+      "createLink": "Link erstellen",
+      "creating": "Wird erstellt...",
+      "createdLink": "Kopiere diesen Link jetzt",
+      "revoke": "Widerrufen",
+      "noLinks": "Noch keine Freigabelinks.",
+      "passwordSection": "Passwortzugriff",
+      "passwordDescription": "Jeder mit der Ordneradresse und dem Passwort kann ihn öffnen. Freigabelinks werden dadurch nicht mit einem Passwort geschützt.",
+      "passwordEnabled": "Aktiviert",
+      "passwordOff": "Aus",
+      "passwordLabel": "Passwort",
+      "passwordPlaceholder": "Mindestens 8 Zeichen",
+      "setPassword": "Passwort festlegen",
+      "changePassword": "Passwort ändern",
+      "removePassword": "Passwort entfernen",
+      "copyPasswordUrl": "Ordneradresse kopieren",
+      "passwordSharingHint": "Sende Ordneradresse und Passwort getrennt.",
+      "neverExpires": "Läuft nie ab",
+      "expiresAt": "Läuft ab am {date}",
+      "linkMeta": "Token-Präfix {prefix}. Erstellt am {date}.",
+      "presets": {
+        "oneHour": "1 Stunde",
+        "day": "24 Stunden",
+        "week": "7 Tage",
+        "custom": "Benutzerdefiniert",
+        "unlimited": "Kein Ablauf"
+      },
+      "status": {
+        "active": "Aktiv",
+        "expired": "Abgelaufen",
+        "revoked": "Widerrufen"
+      },
+      "notices": {
+        "linkCreated": "Freigabelink erstellt. Er öffnet den Ordner ohne Passwort, bis er abläuft oder widerrufen wird.",
+        "linkRevoked": "Freigabelink widerrufen.",
+        "linkRevokedWithPassword": "Freigabelink widerrufen. Der Passwortzugriff bleibt aktiviert.",
+        "passwordEnabled": "Passwortzugriff aktiviert.",
+        "passwordEnabledWithLinks": "Passwortzugriff aktiviert. Bestehende Freigabelinks funktionieren weiterhin ohne Passwort.",
+        "passwordRemoved": "Passwortzugriff entfernt.",
+        "passwordRemovedWithLinks": "Passwortzugriff entfernt. Aktive Freigabelinks funktionieren weiterhin."
+      },
+      "errors": {
+        "createLink": "Freigabelink konnte nicht erstellt werden.",
+        "savePassword": "Ordnerpasswort konnte nicht gespeichert werden.",
+        "revokeLink": "Freigabelink konnte nicht widerrufen werden.",
+        "removePassword": "Passwortzugriff konnte nicht entfernt werden."
+      }
+    },
+    "tabs": {
+      "posts": "Beiträge",
+      "reels": "Reels",
+      "sections": "Ordnerbereiche"
+    }
+  },
+  "share": {
+    "loadingEyebrow": "Ordnerfreigabe",
+    "loadingTitle": "Geteilter Ordner wird geöffnet",
+    "passwordEyebrow": "Ordnerfreigabe",
+    "passwordTitle": "Ordnerpasswort eingeben",
+    "passwordDescription": "Gib das Ordnerpasswort ein, um fortzufahren.",
+    "passwordFallbackDescription": "Dieser Freigabelink ist nicht mehr verfügbar. Wenn du das Ordnerpasswort kennst, kannst du trotzdem auf diesen Ordner zugreifen.",
+    "passwordLabel": "Passwort",
+    "unlocking": "Wird entsperrt...",
+    "unlock": "Ordner entsperren",
+    "expiredTitle": "Dieser Freigabelink ist nicht verfügbar",
+    "expiredDescription": "Der Link ist möglicherweise abgelaufen, widerrufen oder es fehlt sein Token.",
+    "errorTitle": "Ordnerfreigabe konnte nicht geöffnet werden",
+    "errorDescription": "Diese Ordnerfreigabe konnte nicht geladen werden.",
+    "backToFolder": "Zurück zum geteilten Ordner",
+    "postErrorTitle": "Geteilter Beitrag konnte nicht geladen werden"
+  },
+  "reels": {
+    "view": {
+      "libraryUnavailableTitle": "Bibliotheksspeicher nicht verfügbar",
+      "loadErrorTitle": "Reels konnten nicht geladen werden",
+      "loadingTitle": "Reels werden geladen",
+      "loadingDescription": "Aus deiner indizierten Bibliothek wird eine Warteschlange nur mit Videos zusammengestellt.",
+      "emptyTitle": "Keine Reels verfügbar",
+      "emptyDescription": "Füge deiner Bibliothek Videos hinzu – nach dem nächsten Scan erscheinen sie hier.",
+      "navigationAria": "Reel-Navigation",
+      "previous": "Vorheriges Reel",
+      "next": "Nächstes Reel"
+    },
+    "rail": {
+      "hideDetails": "Reel-Details ausblenden",
+      "showDetails": "Reel-Details anzeigen",
+      "downloadOriginal": "Originaldatei herunterladen",
+      "openFolder": "Ordner öffnen"
+    },
+    "info": {
+      "ariaLabel": "Reel-Details",
+      "eyebrow": "Reel-Details",
+      "hideDetails": "Reel-Details ausblenden",
+      "openFolder": "Ordner öffnen",
+      "topLevelSourceFolder": "Quellordner der obersten Ebene",
+      "unavailable": "Nicht verfügbar",
+      "video": "Video",
+      "loadError": "Reel-Details konnten nicht geladen werden.",
+      "resolution": "Auflösung",
+      "length": "Länge",
+      "size": "Größe",
+      "format": "Format",
+      "loading": "Reel-Details werden geladen...",
+      "folderPath": "Ordnerpfad",
+      "mimeType": "MIME-Typ"
+    }
+  },
+  "post": {
+    "carousel": {
+      "label": "Karussell mit {count} Elementen",
+      "position": "{current} / {count}",
+      "previousItem": "Vorheriges Karussell-Element",
+      "nextItem": "Nächstes Karussell-Element",
+      "open": "Karussell mit {count} Elementen öffnen"
+    },
+    "captionModal": {
+      "title": "Bildunterschrift bearbeiten",
+      "captionLabel": "Bildunterschrift",
+      "placeholder": "Bildunterschrift schreiben...",
+      "resetToFilename": "Auf Dateinamen zurücksetzen",
+      "errors": {
+        "update": "Bildunterschrift konnte nicht aktualisiert werden"
+      }
+    },
+    "viewer": {
+      "close": "Beitrag schließen",
+      "previous": "Vorheriger Beitrag",
+      "next": "Nächster Beitrag",
+      "showDetails": "Beitragsdetails anzeigen",
+      "hideDetails": "Beitragsdetails ausblenden",
+      "togglePlayback": "Wiedergabe umschalten",
+      "toggleSound": "Ton umschalten",
+      "toggleFullscreen": "Vollbild umschalten",
+      "switchToPreviewQuality": "Zur Vorschauqualität wechseln",
+      "switchToHdOriginal": "Zum HD-Original wechseln",
+      "previewQuality": "Vorschauqualität",
+      "hdOriginal": "HD-Original",
+      "openFolder": "Ordner öffnen",
+      "editCaption": "Bildunterschrift bearbeiten",
+      "folderPath": "Ordnerpfad",
+      "stats": {
+        "dimensions": "Abmessungen",
+        "type": "Typ",
+        "duration": "Dauer",
+        "size": "Größe",
+        "place": "Ort"
+      },
+      "metadata": {
+        "location": "Standort",
+        "camera": "Kamera",
+        "lens": "Objektiv",
+        "aperture": "Blende",
+        "shutter": "Belichtungszeit",
+        "iso": "ISO",
+        "focalLength": "Brennweite"
+      },
+      "videoType": "Video ({mimeType})",
+      "setAsCover": "Als Ordner-Titelbild festlegen",
+      "downloadOriginalFile": "Originaldatei herunterladen",
+      "openOriginalFile": "Originaldatei öffnen",
+      "deletePost": "Beitrag löschen"
+    },
+    "feedCard": {
+      "openStories": "Stories von {name} öffnen",
+      "openFolderAvatar": "{name} öffnen",
+      "openReel": "Reel öffnen",
+      "openPost": "Beitrag öffnen",
+      "moreOptions": "Weitere Optionen",
+      "delete": {
+        "title": "Diesen Beitrag löschen?",
+        "messagePermanent": "Dadurch wird der Beitrag endgültig aus der App gelöscht und die Originalmedien werden von der Festplatte entfernt.",
+        "messageTrash": "Dadurch wird der Beitrag aus der App gelöscht und in den Papierkorb verschoben. Die Originaldatei bleibt auf der Festplatte, sofern du nicht das endgültige Löschen wählst.",
+        "confirmPermanent": "Endgültig löschen",
+        "confirm": "Löschen",
+        "deleteOriginalLabel": "Originaldatei auch endgültig von der Festplatte löschen",
+        "deleteOriginalDescription": "Lass dies deaktiviert, um den Beitrag in den Papierkorb zu verschieben und die Quelldatei auf der Festplatte zu behalten.",
+        "deleteOriginalWarning": "Dadurch werden Originaldatei, Miniaturansicht und Vorschau endgültig von der Festplatte gelöscht. Diese Aktion kann nicht rückgängig gemacht werden."
+      }
+    }
+  },
+  "collections": {
+    "shared": {
+      "defaultName": "Alle Beiträge",
+      "postCountOne": "{count} Beitrag",
+      "postCountOther": "{count} Beiträge"
+    },
+    "bookmark": {
+      "dialogLabel": "Sammlungen",
+      "title": "Sammlungen",
+      "createCollection": "Sammlung erstellen",
+      "namePlaceholder": "Name der Sammlung",
+      "empty": "Noch keine Sammlungen",
+      "savePost": "Beitrag speichern",
+      "removeSavedPost": "Gespeicherten Beitrag entfernen",
+      "errors": {
+        "loadCollections": "Sammlungen konnten nicht geladen werden"
+      }
+    },
+    "list": {
+      "libraryUnavailableTitle": "Bibliotheksspeicher nicht verfügbar",
+      "loadErrorTitle": "Sammlungen konnten nicht geladen werden",
+      "loading": "Sammlungen werden geladen...",
+      "emptyTitle": "Noch keine Sammlungen",
+      "emptyDescription": "Gespeicherte Beiträge erscheinen unter „Alle Beiträge“."
+    },
+    "detail": {
+      "fallbackTitle": "Sammlung",
+      "libraryUnavailableTitle": "Bibliotheksspeicher nicht verfügbar",
+      "loadErrorTitle": "Sammlung konnte nicht geladen werden",
+      "back": "Sammlungen",
+      "options": "Sammlungsoptionen",
+      "actionsLabel": "Sammlungsaktionen",
+      "emptyTitle": "{name} ist leer",
+      "emptyDescriptionDefault": "Verwende das Lesezeichen unter einem Beitrag, um ihn hier zu speichern.",
+      "emptyDescriptionCustom": "Mit Lesezeichen versehene Beiträge, die dieser Sammlung zugeordnet sind, erscheinen hier.",
+      "loading": "Sammlung wird geladen...",
+      "menu": {
+        "delete": "Sammlung löschen",
+        "edit": "Sammlung bearbeiten",
+        "cancel": "Abbrechen"
+      },
+      "edit": {
+        "title": "Sammlung bearbeiten",
+        "saving": "Wird gespeichert...",
+        "done": "Fertig",
+        "required": "Name der Sammlung ist erforderlich.",
+        "createError": "Sammlung konnte nicht erstellt werden",
+        "updateError": "Sammlung konnte nicht aktualisiert werden"
+      },
+      "delete": {
+        "title": "Sammlung löschen?",
+        "message": "Wenn du diese Sammlung löschst, bleiben die Fotos und Videos weiterhin gespeichert.",
+        "deleting": "Wird gelöscht...",
+        "confirm": "Löschen",
+        "cancel": "Abbrechen",
+        "error": "Sammlung konnte nicht gelöscht werden"
+      }
+    }
+  },
+  "placesPage": {
+    "eyebrow": "Orte",
+    "title": "Alle Orte",
+    "description": "Beiträge durchsuchen, gruppiert nach Offline-Standortdaten.",
+    "stats": {
+      "places": "Orte",
+      "posts": "Beiträge"
+    },
+    "errors": {
+      "load": "Orte konnten nicht geladen werden"
+    },
+    "searchPlaceholder": "Namen, Regionen oder Koordinaten suchen...",
+    "sort": {
+      "postsDesc": "Meiste Beiträge",
+      "nameAsc": "Name A–Z",
+      "nameDesc": "Name Z–A",
+      "countryAsc": "Land A–Z"
+    },
+    "resultsOne": "{count} Ergebnis",
+    "resultsOther": "{count} Ergebnisse",
+    "loading": "Orte werden geladen...",
+    "emptyTitle": "Noch keine Orte indiziert",
+    "emptyDescription": "Bereite in den Einstellungen die Offline-Ortsdaten vor und baue die Zuordnungen neu auf, um Beiträge nach Standort zu gruppieren.",
+    "noMatch": "Keine passenden Orte. Versuche eine andere Suche oder Sortierung.",
+    "metadataFallback": "Offline-Ort auf Stadtebene",
+    "postCountOne": "{count} Beitrag",
+    "postCountOther": "{count} Beiträge",
+    "kinds": {
+      "manual": "Manueller Ort",
+      "nearestCity": "Nächstgelegene Stadt",
+      "cityMatch": "Stadt-Treffer"
+    },
+    "readiness": {
+      "ready": "Bereit",
+      "empty": "Leer"
+    }
+  },
+  "placePage": {
+    "errors": {
+      "load": "Ort konnte nicht geladen werden"
+    },
+    "badge": "Offline-Ort",
+    "coordinatesLabel": "Koordinaten",
+    "sourceLabel": "Quelle",
+    "approximateBadge": "Ungefähre Stadtzuordnung",
+    "emptyTitle": "Keine Beiträge für diesen Ort",
+    "emptyDescription": "Ortszuordnungen können in den Einstellungen neu aufgebaut werden, sobald die Offline-Ortsdaten vorbereitet sind.",
+    "metadataFallback": "Offline-Ort auf Stadtebene",
+    "heroApproximate": "Anhand gespeicherter GPS-Koordinaten der Fotos gruppiert und für das Offline-Stöbern der nächstgelegenen Stadt zugeordnet.",
+    "heroExact": "Aus gespeicherten GPS-Koordinaten der Fotos ermittelt und offline verfügbar gehalten.",
+    "postCountOne": "Beitrag",
+    "postCountOther": "Beiträge",
+    "kind": {
+      "offline": "Offline",
+      "manual": "Manuell",
+      "nearestCity": "Nächstgelegene Stadt",
+      "city": "Stadt",
+      "place": "festgelegt",
+      "match": "zugeordnet"
+    }
+  },
+  "libraryPage": {
+    "eyebrow": "Bibliothek",
+    "title": "Alle Ordner",
+    "description": "Alle indizierten App-Ordner durchsuchen und ansehen.",
+    "stats": {
+      "folders": "Ordner",
+      "posts": "Beiträge"
+    },
+    "errors": {
+      "load": "Ordner konnten nicht geladen werden"
+    },
+    "searchPlaceholder": "Namen oder Pfadbestandteile suchen...",
+    "sort": {
+      "recentDesc": "Zuletzt aktualisiert",
+      "imagesDesc": "Meiste Beiträge",
+      "nameAsc": "Name A–Z",
+      "nameDesc": "Name Z–A",
+      "pathAsc": "Pfad A–Z"
+    },
+    "resultsOne": "{count} Ergebnis",
+    "resultsOther": "{count} Ergebnisse",
+    "loading": "Ordner werden geladen...",
+    "emptyTitle": "Noch keine Ordner indiziert",
+    "emptyDescription": "Lege Quellordner mit Medien im Galerie-Stammverzeichnis an und führe einen Scan aus.",
+    "noMatch": "Keine passenden Ordner. Versuche eine andere Suche oder einen anderen Filter.",
+    "topLevelSourceFolder": "Quellordner der obersten Ebene",
+    "postsCountOne": "{count} Beitrag",
+    "postsCountOther": "{count} Beiträge",
+    "reelsCountOne": "{count} Reel",
+    "reelsCountOther": "{count} Reels",
+    "readiness": {
+      "ready": "Bereit",
+      "empty": "Leer"
+    },
+    "moreOptions": "Weitere Optionen",
+    "openFolder": "Ordner öffnen",
+    "deleteFolder": "Ordner löschen",
+    "noRecentMedia": "Keine aktuellen Medien",
+    "delete": {
+      "title": "Diesen App-Ordner löschen?",
+      "sourceTooTitle": "Auch den Quellordner löschen",
+      "sourceTooNoChildren": "Entfernt auch den Quellordner selbst, statt nur seine direkten Beiträge zu löschen.",
+      "sourceTooWithChildrenOne": "Entfernt außerdem {count} untergeordneten App-Ordner und alle Dateien im gesamten Teilbaum.",
+      "sourceTooWithChildrenOther": "Entfernt außerdem {count} untergeordnete App-Ordner und alle Dateien im gesamten Teilbaum.",
+      "warning": "Dadurch werden der ausgewählte Quellordner sowie alle darin enthaltenen Unterordner und Dateien endgültig gelöscht, einschließlich nicht unterstützter Dateien. Diese Aktion kann nicht rückgängig gemacht werden.",
+      "directPostsOne": "{count} direkten Beitrag",
+      "directPostsOther": "{count} direkte Beiträge",
+      "childFoldersOne": "{count} untergeordneter App-Ordner",
+      "childFoldersOther": "{count} untergeordnete App-Ordner",
+      "messageDeleteSource": "Damit löschst du {directPosts} endgültig und entfernst diesen Quellordner von der Festplatte.",
+      "messageKeepChildren": "Damit löschst du {directPosts} endgültig. Erhalten bleiben: {childFolders}.",
+      "messageEmptyFolder": "Damit löschst du {directPosts} endgültig. Der Quellordner selbst wird nur entfernt, wenn er danach leer ist.",
+      "confirmSubtree": "Ordner-Teilbaum löschen",
+      "confirmFolder": "App-Ordner löschen",
+      "loadingSubtree": "Teilbaum wird gelöscht...",
+      "loadingFolder": "Wird gelöscht...",
+      "error": "Dieser App-Ordner konnte nicht gelöscht werden."
+    }
+  },
+  "trashPage": {
+    "eyebrow": "Papierkorb",
+    "title": "Gelöschte Beiträge",
+    "description": "Hierher verschobene Beiträge bleiben auf der Festplatte, bis du sie endgültig löschst.",
+    "selectedOne": "{count} Beitrag ausgewählt",
+    "selectedOther": "{count} Beiträge ausgewählt",
+    "restoreButton": "Wiederherstellen",
+    "deleteButton": "Endgültig löschen",
+    "libraryUnavailableTitle": "Bibliotheksspeicher nicht verfügbar",
+    "libraryUnavailableDescription": "Der konfigurierte Bibliotheksspeicher ist nicht verfügbar.",
+    "loadErrorTitle": "Papierkorb konnte nicht geladen werden",
+    "loading": "Papierkorb wird geladen...",
+    "emptyTitle": "Der Papierkorb ist leer",
+    "emptyDescription": "Gelöschte Beiträge erscheinen hier, damit du sie wiederherstellen oder endgültig entfernen kannst.",
+    "selectItem": "{label} auswählen",
+    "deselectItem": "Auswahl von {label} aufheben",
+    "trashedAt": "In den Papierkorb verschoben: {date}",
+    "recently": "kürzlich",
+    "openFolder": "Ordner öffnen",
+    "restoreDialog": {
+      "title": "Ausgewählte Beiträge wiederherstellen?",
+      "messageOne": "{count} ausgewählten Beitrag in der App wiederherstellen?",
+      "messageOther": "{count} ausgewählte Beiträge in der App wiederherstellen?",
+      "confirm": "Wiederherstellen",
+      "loading": "Wird wiederhergestellt..."
+    },
+    "deleteDialog": {
+      "title": "Ausgewählte Beiträge endgültig löschen?",
+      "messageOne": "Dadurch wird {count} ausgewählter Beitrag endgültig gelöscht und die Originaldatei von der Festplatte entfernt.",
+      "messageOther": "Dadurch werden {count} ausgewählte Beiträge endgültig gelöscht und die Originaldateien von der Festplatte entfernt.",
+      "confirm": "Endgültig löschen",
+      "loading": "Wird gelöscht...",
+      "warning": "Originaldateien, Miniaturansichten und Vorschauen werden endgültig entfernt. Diese Aktion kann nicht rückgängig gemacht werden."
+    },
+    "errors": {
+      "refresh": "Der aktualisierte Bibliothekszustand konnte nicht neu geladen werden.",
+      "processOne": "{count} Beitrag konnte nicht verarbeitet werden.",
+      "processOther": "{count} Beiträge konnten nicht verarbeitet werden."
+    }
+  },
+  "explore": {
+    "back": "Zurück zu „Entdecken“",
+    "searchPlaceholder": "Suchen",
+    "clearSearch": "Suche löschen",
+    "recentTitle": "Zuletzt gesucht",
+    "clearAll": "Alle löschen",
+    "tabsAria": "Tabs für Suchergebnisse",
+    "tabs": {
+      "media": "Fotos & Videos",
+      "folders": "App-Ordner"
+    },
+    "errors": {
+      "search": "Beiträge konnten nicht durchsucht werden",
+      "load": "„Entdecken“ konnte nicht geladen werden"
+    },
+    "emptySearchTitle": "Keine passenden Fotos oder Videos",
+    "emptySearchDescription": "Versuche einen anderen Dateinamen oder Ordnerbegriff.",
+    "loadingFolders": "Ordner werden geladen...",
+    "noFoldersFound": "Keine App-Ordner gefunden.",
+    "emptyTitle": "Noch nichts zu entdecken",
+    "emptyDescription": "Indiziere ein paar Ordner, dann erscheinen hier Beiträge.",
+    "folderPostsOne": "{count} Beitrag",
+    "folderPostsOther": "{count} Beiträge"
+  }
+}

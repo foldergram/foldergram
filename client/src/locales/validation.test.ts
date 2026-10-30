@@ -48,6 +48,8 @@ describe('locale validation', () => {
     expect(resolveSupportedLocale('es-MX')).toBe('es');
     expect(resolveSupportedLocale('zh')).toBe('zh');
     expect(resolveSupportedLocale('zh-CN')).toBe('zh');
+    expect(resolveSupportedLocale('de')).toBe('de');
+    expect(resolveSupportedLocale('de-AT')).toBe('de');
     expect(resolveSupportedLocale('EN_gb')).toBe('en');
     expect(resolveSupportedLocale('fr')).toBeNull();
     expect(resolvePreferredLocale('fr-FR', 'es-MX')).toBe('es');
