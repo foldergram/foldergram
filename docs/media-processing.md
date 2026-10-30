@@ -170,6 +170,26 @@ When a video needs a derived preview, Foldergram transcodes it with `ffmpeg` to:
 - portrait and square output that keeps the short edge at or below `720`
 - even-numbered output dimensions for encoder compatibility
 
+Audio selection uses the first audio stream, in source stream order, whose codec
+has a decoder in the installed FFmpeg build. Unsupported tracks are skipped;
+only the selected track is encoded to AAC. Videos without audio remain silent.
+If audio tracks exist but none has an available decoder, generation fails and
+reports an error instead of silently dropping all audio. Decoder availability
+does not guarantee a damaged track can decode; conversion errors still fail the
+preview and remain visible in scan reports.
+
+Video previews are written to unique temporary MP4 files beside the destination.
+After successful conversion, Foldergram checks that the output is nonempty and
+FFprobe reports an MP4 with H.264/yuv420p video, positive dimensions and duration,
+and the expected AAC audio. It then atomically replaces the cached preview.
+Failures remove temporary output and preserve an existing preview.
+
+Empty derivative files are treated as missing during generation, migration,
+repair scans, and lazy requests. Cache reads check file size without probing
+media on every request. Nonempty legacy files are trusted; a nonempty corrupt
+or truncated legacy preview requires forced regeneration. The publication probe
+checks container and stream metadata, rather than decoding the full output.
+
 ## Direct-original video playback
 
 Foldergram can mark the original video as eligible for direct playback in the

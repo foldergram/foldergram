@@ -523,6 +523,36 @@ describe.sequential('DERIVATIVE_MODE lazy behavior', () => {
     expect(response.headers.get('vary')).toBe('Cookie');
   });
 
+  it('retries an empty video preview and reuses the repaired file', async () => {
+    await reset('lazy');
+    const folder = folderRepository.upsert({ slug: 'empty-video', name: 'Videos', folderPath: 'empty-video' });
+    const video = createIndexedMedia(folder, 'clip.mp4', 4000, 'preview', 5000);
+    const output = path.join(appConfig.previewsDir, video.preview_path);
+    await fs.mkdir(path.dirname(output), { recursive: true });
+    await fs.writeFile(output, '');
+    const requestPath = `/${encodeRelativePath(video.preview_path)}`;
+    const first = await dispatchRoute(lazyPreviewsRouter, requestPath);
+    expect(first.statusCode).toBe(200);
+    expect(first.body).toContain('video-preview:');
+    const second = await dispatchRoute(lazyPreviewsRouter, requestPath);
+    expect(second.body).toBe(first.body);
+    expect(generatePreviewDerivativeMock).toHaveBeenCalledOnce();
+  });
+
+  it('returns an error rather than serving an empty video preview when regeneration fails', async () => {
+    await reset('lazy');
+    const folder = folderRepository.upsert({ slug: 'failed-video', name: 'Videos', folderPath: 'failed-video' });
+    const video = createIndexedMedia(folder, 'clip.mp4', 4000, 'preview', 5000);
+    const output = path.join(appConfig.previewsDir, video.preview_path);
+    await fs.mkdir(path.dirname(output), { recursive: true });
+    await fs.writeFile(output, '');
+    generatePreviewDerivativeMock.mockRejectedValueOnce(new Error('No audio track has an available FFmpeg decoder'));
+    const response = await dispatchRoute(lazyPreviewsRouter, `/${encodeRelativePath(video.preview_path)}`);
+    expect(response.statusCode).toBe(500);
+    expect(response.body).toMatchObject({ message: expect.stringContaining('No audio track') });
+    expect(generatePreviewDerivativeMock).toHaveBeenCalledOnce();
+  });
+
   it('generates a missing image preview on first request', async () => {
     await reset('lazy');
 

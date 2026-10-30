@@ -1,5 +1,3 @@
-import fs from 'node:fs/promises';
-
 import express from 'express';
 import pLimit from 'p-limit';
 
@@ -12,6 +10,7 @@ import { scannerService } from '../services/scanner-service.js';
 import { maintenanceOperationLock } from '../services/maintenance-operation-lock.js';
 import { resolveOriginalPath } from '../utils/media-paths.js';
 import { applyDerivativeErrorHeaders, applyNoStoreMediaHeaders, applyProtectedMediaHeaders } from '../utils/media-response.js';
+import { isNonemptyDerivative } from '../utils/derivative-cache.js';
 import { normalizePath, safeJoin } from '../utils/path-utils.js';
 
 // In-memory map to deduplicate concurrent generation requests for the same derivative path.
@@ -57,15 +56,6 @@ function sendDerivativeNotFound(response: express.Response): void {
   response.status(404).json({ message: 'Derivative not found.' });
 }
 
-async function pathExists(targetPath: string): Promise<boolean> {
-  try {
-    await fs.access(targetPath);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function queueLazyGeneration(
   absoluteOutputPath: string,
   requestedPath: string,
@@ -81,7 +71,7 @@ function queueLazyGeneration(
 
     // A scan or rebuild may have generated the file while this request waited
     // for the maintenance lock.
-    if (await pathExists(absoluteOutputPath)) return;
+    if (await isNonemptyDerivative(absoluteOutputPath)) return;
 
     log.info('Lazy derivative generate', {
       kind,
@@ -174,9 +164,8 @@ async function serveOrGenerate(
     return;
   }
 
-  // Fast path: file already exists.
-  try {
-    await fs.access(absoluteOutputPath);
+  // Fast path: reuse only a nonempty cached derivative.
+  if (await isNonemptyDerivative(absoluteOutputPath)) {
     try {
       const result = await sendDerivativeFile(response, absoluteOutputPath);
       if (result === 'aborted') {
@@ -191,9 +180,9 @@ async function serveOrGenerate(
       response.status(500).json({ message: 'Failed to serve derivative.' });
     }
     return;
-  } catch {
-    // File does not exist — fall through to generation.
   }
+
+  // Missing or empty derivatives fall through to generation.
 
   if (scannerService.isLibraryRebuildRequired()) {
     applyDerivativeErrorHeaders(response);
@@ -266,8 +255,7 @@ export async function serveDerivativeForImage(
     return;
   }
 
-  try {
-    await fs.access(absoluteOutputPath);
+  if (await isNonemptyDerivative(absoluteOutputPath)) {
     try {
       const result = await sendDerivativeFile(response, absoluteOutputPath, options);
       if (result === 'aborted') {
@@ -282,9 +270,9 @@ export async function serveDerivativeForImage(
       response.status(500).json({ message: 'Failed to serve derivative.' });
     }
     return;
-  } catch {
-    // File does not exist — fall through to generation.
   }
+
+  // Missing or empty derivatives fall through to generation.
 
   if (scannerService.isLibraryRebuildRequired()) {
     applyDerivativeErrorHeaders(response);

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -15,6 +16,7 @@ import {
   getPreviewRelativePath,
   getThumbnailRelativePath
 } from '../utils/image-utils.js';
+import { isNonemptyDerivative } from '../utils/derivative-cache.js';
 import { safeJoin } from '../utils/path-utils.js';
 
 const execFileAsync = promisify(execFile);
@@ -24,6 +26,7 @@ export const VIDEO_PREVIEW_MAX_LONG_EDGE = 1280;
 export const VIDEO_PREVIEW_MAX_SHORT_EDGE = 720;
 
 interface FfprobeStream {
+  index?: number;
   codec_type?: string;
   codec_name?: string;
   width?: number;
@@ -100,15 +103,6 @@ async function ensureParentDirectory(filePath: string): Promise<void> {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
 }
 
-async function fileExists(filePath: string): Promise<boolean> {
-  try {
-    await fs.access(filePath);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 async function runBinary(command: string, args: string[]): Promise<void> {
   await execFileAsync(command, args, {
     maxBuffer: 8 * 1024 * 1024
@@ -122,7 +116,7 @@ async function readMediaProbe(sourcePath: string): Promise<FfprobePayload> {
       '-v',
       'error',
       '-show_entries',
-      'format=duration,format_name,nb_streams:format_tags=creation_time,major_brand,compatible_brands:stream=codec_type,codec_name,width,height,pix_fmt,duration,nb_frames:stream_tags=creation_time,rotate,title,handler_name:stream_side_data=rotation',
+      'format=duration,format_name,nb_streams:format_tags=creation_time,major_brand,compatible_brands:stream=index,codec_type,codec_name,width,height,pix_fmt,duration,nb_frames:stream_tags=creation_time,rotate,title,handler_name:stream_side_data=rotation',
       '-of',
       'json',
       sourcePath
@@ -538,43 +532,119 @@ async function writeVideoThumbnail(sourcePath: string, thumbnailAbsolutePath: st
   ]);
 }
 
+let audioDecoderCodecs: Promise<Set<string>> | undefined;
+const inflightVideoPreviews = new Map<string, Promise<void>>();
+
+async function getAudioDecoderCodecs(): Promise<Set<string>> {
+  if (!audioDecoderCodecs) {
+    audioDecoderCodecs = execFileAsync('ffmpeg', ['-hide_banner', '-decoders'], {
+      maxBuffer: 2 * 1024 * 1024
+    }).then(({ stdout }) => {
+      const codecs = new Set<string>();
+      for (const line of stdout.split('\n')) {
+        // FFmpeg prints six capability flags followed by the decoder name.
+        // A '(codec ...)' suffix identifies aliases such as mp3float -> mp3.
+        const decoder = line.match(/^\s*A[.A-Z]{5}\s+(\S+)\s+(.*)$/);
+        if (decoder) {
+          codecs.add(decoder[2].match(/\(codec (\S+)\)/)?.[1] ?? decoder[1]);
+        }
+      }
+      return codecs;
+    }).catch((error: unknown) => {
+      audioDecoderCodecs = undefined;
+      throw error;
+    });
+  }
+  return audioDecoderCodecs;
+}
+
+async function selectPreviewAudio(sourcePath: string): Promise<number | null> {
+  const payload = await readMediaProbe(sourcePath);
+  const streams = payload.streams?.filter((stream) => stream.codec_type === 'audio') ?? [];
+  if (streams.length === 0) return null;
+
+  const codecs = await getAudioDecoderCodecs();
+  const selected = streams.find((stream) => stream.codec_name && codecs.has(stream.codec_name));
+  if (!selected || typeof selected.index !== 'number' || !Number.isInteger(selected.index) || selected.index < 0) {
+    throw new Error('No audio track has an available FFmpeg decoder; refusing to create a silent preview.');
+  }
+  return selected.index;
+}
+
 export async function writeVideoPreview(sourcePath: string, previewAbsolutePath: string): Promise<void> {
+  const outputPath = path.resolve(previewAbsolutePath);
+  const existing = inflightVideoPreviews.get(outputPath);
+  if (existing) return existing;
+
+  const generation = publishVideoPreview(sourcePath, outputPath);
+  inflightVideoPreviews.set(outputPath, generation);
+  try {
+    await generation;
+  } finally {
+    inflightVideoPreviews.delete(outputPath);
+  }
+}
+
+async function publishVideoPreview(sourcePath: string, previewAbsolutePath: string): Promise<void> {
   await ensureParentDirectory(previewAbsolutePath);
-  // Landscape videos target up to 1280x720. Portrait and square videos cap their
-  // short edge at 720 while preserving aspect ratio. Output dimensions are rounded
-  // to even numbers for yuv420p compatibility.
-  const scaleFilter =
-    `scale=` +
-    `'trunc(if(gt(iw,ih),min(${VIDEO_PREVIEW_MAX_LONG_EDGE},iw),min(${VIDEO_PREVIEW_MAX_SHORT_EDGE},iw))/2)*2':` +
-    `'trunc(if(gt(iw,ih),min(${VIDEO_PREVIEW_MAX_LONG_EDGE},iw)*ih/iw,min(${VIDEO_PREVIEW_MAX_SHORT_EDGE},iw)*ih/iw)/2)*2':flags=lanczos`;
-  await runBinary('ffmpeg', [
-    '-y',
-    '-v',
-    'error',
-    '-i',
-    sourcePath,
-    '-map',
-    '0:v:0',
-    '-map',
-    '0:a?',
-    '-vf',
-    scaleFilter,
-    '-c:v',
-    'libx264',
-    '-preset',
-    'veryfast',
-    '-crf',
-    '24',
-    '-pix_fmt',
-    'yuv420p',
-    '-movflags',
-    '+faststart',
-    '-c:a',
-    'aac',
-    '-b:a',
-    '128k',
-    previewAbsolutePath
-  ]);
+  const audioIndex = await selectPreviewAudio(sourcePath);
+  const temporaryPath = path.join(path.dirname(previewAbsolutePath), `.preview-${randomUUID()}.mp4`);
+  try {
+    // Landscape videos target up to 1280x720. Portrait and square videos cap their
+    // short edge at 720 while preserving aspect ratio. Output dimensions are rounded
+    // to even numbers for yuv420p compatibility.
+    const scaleFilter =
+      `scale=` +
+      `'trunc(if(gt(iw,ih),min(${VIDEO_PREVIEW_MAX_LONG_EDGE},iw),min(${VIDEO_PREVIEW_MAX_SHORT_EDGE},iw))/2)*2':` +
+      `'trunc(if(gt(iw,ih),min(${VIDEO_PREVIEW_MAX_LONG_EDGE},iw)*ih/iw,min(${VIDEO_PREVIEW_MAX_SHORT_EDGE},iw)*ih/iw)/2)*2':flags=lanczos`;
+    await runBinary('ffmpeg', [
+      '-y',
+      '-v',
+      'error',
+      '-i',
+      sourcePath,
+      '-map',
+      '0:v:0',
+      ...(audioIndex === null ? ['-an'] : ['-map', `0:${audioIndex}`]),
+      '-vf',
+      scaleFilter,
+      '-c:v',
+      'libx264',
+      '-preset',
+      'veryfast',
+      '-crf',
+      '24',
+      '-pix_fmt',
+      'yuv420p',
+      '-movflags',
+      '+faststart',
+      '-c:a',
+      'aac',
+      '-b:a',
+      '128k',
+      temporaryPath
+    ]);
+    if (!(await isNonemptyDerivative(temporaryPath))) {
+      throw new Error('FFmpeg produced an empty video preview.');
+    }
+    const output = await readMediaProbe(temporaryPath);
+    const video = output.streams?.find((stream) => stream.codec_type === 'video');
+    const audio = output.streams?.filter((stream) => stream.codec_type === 'audio') ?? [];
+    const hasCompatibleVideo = video?.codec_name === 'h264' && video.pix_fmt === 'yuv420p';
+    const hasPositiveDimensions = (video?.width ?? 0) > 0 && (video?.height ?? 0) > 0;
+    const hasMp4Container = output.format?.format_name?.includes('mp4') ?? false;
+    const hasPositiveDuration = (parseFfprobeFloat(output.format?.duration) ?? 0) > 0;
+    const hasExpectedAudio = audioIndex === null
+      ? audio.length === 0
+      : audio.length === 1 && audio[0].codec_name === 'aac';
+    if (!hasCompatibleVideo || !hasPositiveDimensions || !hasMp4Container
+      || !hasPositiveDuration || !hasExpectedAudio) {
+      throw new Error('FFmpeg produced an invalid video preview.');
+    }
+    await fs.rename(temporaryPath, previewAbsolutePath);
+  } finally {
+    await fs.rm(temporaryPath, { force: true });
+  }
 }
 
 async function generateImageDerivatives(
@@ -583,8 +653,8 @@ async function generateImageDerivatives(
   previewAbsolutePath: string,
   force: boolean
 ): Promise<Pick<DerivativeResult, 'generatedThumbnail' | 'generatedPreview'>> {
-  const shouldWriteThumbnail = force || !(await fileExists(thumbnailAbsolutePath));
-  const shouldWritePreview = force || !(await fileExists(previewAbsolutePath));
+  const shouldWriteThumbnail = force || !(await isNonemptyDerivative(thumbnailAbsolutePath));
+  const shouldWritePreview = force || !(await isNonemptyDerivative(previewAbsolutePath));
 
   if (shouldWriteThumbnail) {
     await writeImageThumbnail(sourcePath, thumbnailAbsolutePath);
@@ -607,8 +677,8 @@ async function generateAnimatedAvifDerivatives(
   force: boolean,
   videoStreamIndex: number
 ): Promise<Pick<DerivativeResult, 'generatedThumbnail' | 'generatedPreview'>> {
-  const shouldWriteThumbnail = force || !(await fileExists(thumbnailAbsolutePath));
-  const shouldWritePreview = force || !(await fileExists(previewAbsolutePath));
+  const shouldWriteThumbnail = force || !(await isNonemptyDerivative(thumbnailAbsolutePath));
+  const shouldWritePreview = force || !(await isNonemptyDerivative(previewAbsolutePath));
 
   if (shouldWriteThumbnail) {
     await writeAnimatedAvifThumbnail(sourcePath, thumbnailAbsolutePath, videoStreamIndex);
@@ -638,8 +708,8 @@ async function generateVideoDerivatives(
   previewAbsolutePath: string,
   force: boolean
 ): Promise<Pick<DerivativeResult, 'generatedThumbnail' | 'generatedPreview'>> {
-  const shouldWriteThumbnail = force || !(await fileExists(thumbnailAbsolutePath));
-  const shouldWritePreview = force || !(await fileExists(previewAbsolutePath));
+  const shouldWriteThumbnail = force || !(await isNonemptyDerivative(thumbnailAbsolutePath));
+  const shouldWritePreview = force || !(await isNonemptyDerivative(previewAbsolutePath));
 
   if (shouldWriteThumbnail) {
     await writeVideoThumbnail(sourcePath, thumbnailAbsolutePath);
@@ -665,7 +735,7 @@ export async function generateThumbnailDerivative(
   const isAvif = path.extname(relativePath).toLowerCase() === '.avif';
   const thumbnailPath = overrides.thumbnailPath ?? getThumbnailRelativePath(relativePath);
   const thumbnailAbsolutePath = safeJoin(appConfig.thumbnailsDir, thumbnailPath);
-  const shouldWriteThumbnail = force || !(await fileExists(thumbnailAbsolutePath));
+  const shouldWriteThumbnail = force || !(await isNonemptyDerivative(thumbnailAbsolutePath));
 
   if (shouldWriteThumbnail) {
     if (mediaType === 'video') {
@@ -705,7 +775,7 @@ export async function generatePreviewDerivative(
   const isAvif = path.extname(relativePath).toLowerCase() === '.avif';
   const previewPath = overrides.previewPath ?? getPreviewRelativePath(relativePath, mediaType);
   const previewAbsolutePath = safeJoin(appConfig.previewsDir, previewPath);
-  const shouldWritePreview = force || !(await fileExists(previewAbsolutePath));
+  const shouldWritePreview = force || !(await isNonemptyDerivative(previewAbsolutePath));
 
   if (shouldWritePreview) {
     if (mediaType === 'video') {

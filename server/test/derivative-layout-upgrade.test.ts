@@ -576,7 +576,7 @@ describe.sequential('derivative layout upgrade', () => {
     });
   });
 
-  it('repairs broken rows by moving legacy mirrored derivatives into the current asset-key layout', async () => {
+  it.each(['missing', 'empty'])('repairs %s cached outputs by moving valid legacy derivatives into the current asset-key layout', async (cacheState) => {
     const folder = folderRepository.upsert({
       slug: 'repair-upgrade',
       name: 'repair-upgrade',
@@ -598,6 +598,17 @@ describe.sequential('derivative layout upgrade', () => {
     await fs.writeFile(absolutePath, 'source:repair-upgrade/photo.jpg');
     await fs.writeFile(path.join(appConfig.thumbnailsDir, legacyThumbnailPath), 'legacy-thumb');
     await fs.writeFile(path.join(appConfig.previewsDir, legacyPreviewPath), 'legacy-preview');
+    if (cacheState === 'empty') {
+      for (const [root, relative] of [
+        [appConfig.thumbnailsDir, brokenThumbnailPath],
+        [appConfig.previewsDir, brokenPreviewPath],
+        [appConfig.thumbnailsDir, repairedThumbnailPath],
+        [appConfig.previewsDir, repairedPreviewPath]
+      ]) {
+        await fs.mkdir(path.dirname(path.join(root, relative)), { recursive: true });
+        await fs.writeFile(path.join(root, relative), '');
+      }
+    }
 
     imageRepository.upsert({
       folderId: folder.id,
