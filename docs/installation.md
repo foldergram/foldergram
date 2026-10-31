@@ -164,7 +164,7 @@ The shipped `.env.example` keeps the development ports aligned like this:
 
 | Requirement | Why it matters |
 | --- | --- |
-| Node.js 22 | Used across the workspace and CI configuration. |
+| Node.js 22 | Use 22.23.4 or a newer patched Node.js 22 release. The Docker image bundles Node.js 22.23.4. |
 | `pnpm` | Matches the workspace scripts and lockfile. |
 | Writable local storage | Foldergram creates and maintains the gallery, database, thumbnails, and previews directories. |
 | FFmpeg and FFprobe | Needed only when you run the app outside Docker and want supported video processing or animated AVIF image-sequence processing. The backend calls `ffprobe` for metadata and `ffmpeg` for video thumbnails, video previews, and animated AVIF derivatives. |
@@ -283,3 +283,59 @@ If the configured database directory is unavailable, Foldergram falls back to an
 in-memory SQLite database. If the gallery, thumbnails, or previews directories
 are unavailable, the library is reported as unavailable instead of serving stale
 filesystem assumptions.
+
+## Upgrading an existing installation
+
+Keep your existing configuration, data directories, and volume mounts when
+upgrading. Stop Foldergram before backing up its data so the SQLite backup is
+consistent. Include the database, original gallery, and any other configured
+data directories in the backup.
+
+### Docker Compose
+
+Stop the app, then take the backup of the host directories mounted by Compose:
+
+```bash
+docker compose stop foldergram
+```
+
+To pin this release, set the service image in `docker-compose.yml` to:
+
+```yaml
+image: ghcr.io/foldergram/foldergram:1.3.0
+```
+
+The default `latest` tag follows stable releases. Pull the selected image and
+start the service again:
+
+```bash
+docker compose pull foldergram
+docker compose up -d foldergram
+docker compose logs --tail=100 foldergram
+```
+
+Pending SQLite migrations run automatically before requests are served. Check
+the logs and open your existing library after startup.
+
+### Source installs
+
+Stop the server and back up its configured data before updating the checkout
+to the desired release. Then install the locked dependencies and rebuild:
+
+```bash
+pnpm install --frozen-lockfile
+pnpm build
+pnpm start
+```
+
+### Carousel folders when upgrading from v1.2.2
+
+If the existing index contains folders named `carousels`, open
+**Settings → General Settings** and choose **Use Carousel Posts** for the
+reserved post structure or **Keep Normal Folders** to preserve the previous
+folder behavior. Save the choice, then run **Scan Library** from
+**Settings → Scan & Library** to apply it. Use **Rebuild Library Index** only
+when Settings requires it for a changed gallery location.
+
+See [Carousel settings and migration](/carousel-posts#settings-and-migration)
+for the folder rules and migration notices.

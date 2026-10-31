@@ -126,6 +126,8 @@ changes.
 
 On later upgrades, startup automatically applies pending SQLite migrations
 before the app reuses the existing database.
+See [Upgrading an existing installation](/installation#upgrading-an-existing-installation)
+for backup, image-update, and Carousel migration steps.
 
 If you want the lowest upfront derivative work for a large library in Docker,
 edit `docker-compose.yml` before startup:
@@ -176,7 +178,7 @@ Use the source workflow when you want to develop or modify the app itself.
 
 | Requirement | Notes |
 | --- | --- |
-| Node.js 22 | The repo is configured for Node 22. |
+| Node.js 22 | Use 22.23.4 or a newer patched Node.js 22 release. |
 | `pnpm` | Matches the workspace scripts and lockfile. |
 | FFmpeg and FFprobe | Required on the host if you run the app outside Docker and want video support. |
 

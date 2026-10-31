@@ -153,7 +153,7 @@ This command uses the same runtime settings and volumes, but builds the image lo
 
 Requirements:
 
-- Node.js 22
+- Node.js 22.23.4 or a newer patched Node.js 22 release
 - `npm` or `pnpm`
 - `ffmpeg` and `ffprobe` if you want video support or animated AVIF image-sequence processing outside Docker
 
@@ -193,6 +193,8 @@ want to apply pending migrations without starting the app.
 On the first start after upgrading from an older supported Foldergram release,
 the app automatically baselines the existing SQLite database and then applies
 later ordered migrations on future upgrades.
+
+For existing installations, follow the [upgrade instructions](docs/installation.md#upgrading-an-existing-installation) to preserve your data and review any Carousel folder migration choice.
 
 Development ports:
 

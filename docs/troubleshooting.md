@@ -164,6 +164,27 @@ supported images and videos. Unsupported extensions, excluded folders, hidden
 paths, and files placed directly in `GALLERY_ROOT` are still ignored before
 this stage.
 
+## A video preview fails or an old cached preview will not play
+
+For source installs, make sure both `ffmpeg` and `ffprobe` are available to the
+server process. Docker images include them.
+
+Foldergram selects the first audio track whose codec has a decoder in the
+installed FFmpeg build, skipping unsupported tracks before it. A video with
+no audio remains silent. If audio exists but no track has an available decoder,
+preview generation reports an error. Check the scan error report for details;
+an available decoder does not guarantee that a damaged track can be decoded.
+
+Empty cached thumbnails and previews are treated as missing. Run **Scan Library**
+to repair them in eager mode, or request the media again in lazy mode.
+Nonempty corrupt or truncated previews still require forced regeneration;
+Foldergram does not probe every cached video on each request.
+**Regenerate Thumbnails** only rebuilds thumbnails and video posters, so it
+does not repair a nonempty corrupt video preview.
+
+See [Video preview generation](/media-processing#video-preview-generation)
+for audio selection, output validation, and cache behavior.
+
 ## Moments are missing and highlights appear instead
 
 That is expected when the library does not have enough EXIF-backed timestamps.

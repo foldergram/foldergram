@@ -157,10 +157,38 @@ for stories, carousel posts, and restoration behavior.
 The Settings sidebar is split into:
 
 - `Scan & Library` for manual scans, thumbnail rebuilds, and library-index rebuilds
-- `General Settings` for Home/Reels defaults, default folder order, nested folder title format, stories and carousel folder modes, excluded folders, and save-and-scan notices tied to those app-wide rules
+- `General Settings` for app language, Home/Reels defaults, default folder order, nested folder title format, stories and carousel folder modes, excluded folders, and save-and-scan notices tied to those app-wide rules
 - `Places` for offline GeoNames preparation status and place-assignment rebuilds
 - `Security & Access` for admin, viewer, and public-mode controls
 - `System Status` for storage, index, and last-scan details
+
+## App language
+
+Choose the interface language in **Settings → General Settings**:
+
+| Language | Locale |
+| --- | --- |
+| English | `en` |
+| Spanish | `es` |
+| Chinese | `zh` |
+| German | `de` |
+
+Changing the selector applies immediately in the current browser and saves a
+local preference. Clicking **Save changes** also saves the selected language
+as the app-wide default for browsers without their own local preference,
+including the login screen.
+
+Foldergram uses the first available choice in this order:
+
+1. The browser's saved Foldergram language preference.
+2. The saved app-wide default.
+3. A supported browser language.
+4. English.
+
+Regional browser locales such as `de-AT` resolve to their supported base
+language. The language setting changes interface text; folder names and
+user-written captions remain as entered. There is no language environment
+variable.
 
 ## Path resolution rules
 

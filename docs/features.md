@@ -84,8 +84,8 @@ Library supports two delete flows:
 
 | Flow | Behavior |
 | --- | --- |
-| Delete app folder | Deletes the folder's direct posts and their derivatives. Child app folders are kept. The source folder is only removed if it becomes empty. |
-| Delete folder subtree | Removes the source folder subtree from disk, removes matching derivative subtrees, and deletes all affected indexed folders below that path. |
+| Delete app folder | Deletes the folder's media, including owned reserved stories and Carousel items, and their derivatives. Independent child App Folders are kept. The source folder is only removed if it becomes empty. |
+| Delete folder subtree | Removes the source folder subtree from disk, removes the cached derivatives for its indexed media, and deletes all affected indexed folders below that path. |
 
 ## Folder pages
 
@@ -135,7 +135,7 @@ clarifies which methods remain available after an access setting changes.
 Shared visitors use `/share/:slug`, not the normal authenticated folder route.
 They can browse only that folder and its shared post view. They do not get Home,
 Explore, Reels, Places, Settings, Likes, Collections, Trash, scans, rebuild
-actions, captions, cover editing, delete actions, or original-file downloads.
+actions, caption editing, cover editing, delete actions, or original-file downloads.
 
 Shared thumbnails and previews are served through `/api/share/images/:id/...`
 after the server checks the folder grant for that image.
@@ -320,6 +320,10 @@ Current non-admin behavior:
 | Rebuild Library Index | Clears indexed folders, posts, likes, folder scan state, and scan history, then rescans the active gallery root and reuses matching cached derivatives when possible. In lazy derivative mode it does not pre-generate missing thumbnails or previews. |
 
 ## Theme, language, and local UI preferences
+
+The interface supports English, Spanish, Chinese, and German. See
+[App language](/configuration#app-language) for language selection and how
+browser preferences interact with the app-wide default.
 
 The client also persists a few local browser preferences:
 

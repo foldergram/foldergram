@@ -406,13 +406,13 @@ single-image shared links continue to work. New shared links should use
 
 ### `GET /api/share/images/:id/thumbnail`
 
-Serves or lazily generates the thumbnail for one shared post after checking the
-folder grant.
+Serves or lazily generates the thumbnail for one physical media asset after
+checking its folder grant. The ID is an `images.id`, including for Carousel slides.
 
 ### `GET /api/share/images/:id/preview`
 
-Serves or lazily generates the preview for one shared post after checking the
-folder grant.
+Serves or lazily generates the preview for one physical media asset after
+checking its folder grant. The ID is an `images.id`, including for Carousel slides.
 
 ### `GET /api/places`
 
@@ -778,8 +778,11 @@ Notable fields:
 | Field | Notes |
 | --- | --- |
 | `folders` | Active indexed folders. |
-| `indexedImages` | Active indexed posts. The name is historical and still includes videos in the total feed count. |
-| `indexedVideos` | Active indexed videos only. |
+| `indexedImages` | Historical alias for `indexedPosts`, including single-video and Carousel posts. |
+| `indexedPosts` | Active visible posts. Each Carousel counts as one post. |
+| `indexedMediaAssets` | Active visible physical media assets, including every Carousel item. |
+| `indexedCarousels` | Active visible Carousel posts. |
+| `indexedVideos` | Active visible single-video posts. Videos inside multi-item Carousels are excluded. |
 | `scan` | Viewer-safe live scan progress snapshot. It uses the same shape as `GET /api/scan-progress`, with `currentFolder` and `currentFile` redacted and `lastCompletedScan.error_text` forced to `null`. Scan-report paths never appear here. |
 | `storage` | Availability with a generic unavailable message only. |
 | `libraryIndex` | Rebuild requirement plus ignored root-media count. Gallery-root paths are omitted. |
@@ -1162,6 +1165,23 @@ Success:
   "defaultOrder": "newest"
 }
 ```
+
+### `PUT /api/admin/settings/nested-folder-title-format`
+
+Sets how nested App Folder names are displayed. Requires admin access and the
+mutation trust header.
+
+Body:
+
+```json
+{
+  "titleFormat": "parent-plus-folder"
+}
+```
+
+Allowed values are `folder` and `parent-plus-folder`. The response contains the
+saved `titleFormat`. This changes presentation immediately and does not require
+a scan or rebuild.
 
 ### `PUT /api/admin/settings/stories-mode`
 
@@ -1656,14 +1676,14 @@ Query parameters:
 
 When `deleteSourceFolder=false`:
 
-- direct posts in that folder are permanently deleted
-- child folders below that path are kept
+- media owned by that App Folder, including reserved stories and Carousel items, is permanently deleted along with its derivatives
+- independent child App Folders below that path are kept
 - Foldergram tries to remove now-empty directories
 
 When `deleteSourceFolder=true`:
 
 - the source folder subtree is removed from disk
-- matching derivative subtrees are removed
+- cached derivatives for the indexed media in that subtree are removed
 - all indexed child folders under that subtree are removed
 
 Success shape:
