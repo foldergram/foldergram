@@ -19,9 +19,11 @@ import {
 import { appConfig } from '../config/env.js';
 import {
   appSettingsRepository,
+  createSharedPreviewRequirementLookup,
   folderRepository,
   folderScanStateRepository,
   imageRepository,
+  listFolderIdsRequiringSharedPreviews,
   maintenanceRepository,
   postRepository,
   scanRunRepository
@@ -58,7 +60,8 @@ import {
   matchesRelativeRoot,
   getSourceFolderPathFromRelativePath,
   isHiddenPath,
-  normalizePath
+  normalizePath,
+  safeJoin
 } from '../utils/path-utils.js';
 import {
   getEffectiveExcludedFolderRules,
@@ -87,6 +90,7 @@ import {
   type IndexedFileStatus
 } from '../utils/scan-utils.js';
 import { resolveUniqueSlug, slugifyFolderPath } from '../utils/slug.js';
+import { resolveVideoPlaybackSource, type VideoPlaybackSource } from '../utils/video-playback-policy.js';
 import type { FolderRecord, FolderRole, FolderScanStateRecord, ImageRecord, PostRecord, ScanRunRecord } from '../types/models.js';
 
 interface ScanSummary {
@@ -103,10 +107,12 @@ interface ScanSummary {
 interface DerivativeJob {
   absolutePath: string;
   relativePath: string;
+  folderId: number;
   thumbnailPath: string;
   previewPath?: string;
   force: boolean;
   kind: 'all' | 'thumbnail';
+  videoPlaybackSource?: VideoPlaybackSource | null;
 }
 
 interface ProcessedFileSummary {
@@ -1919,6 +1925,9 @@ class ScannerService {
     const storedFolderState = folderScanStates.get(normalizedFolderPath);
     const hasCompleteTakenAtMetadata = imageRepository.countMissingTimestampMetadataByFolder(folder.id) === 0;
     const hasCompletePlaybackStrategyMetadata = imageRepository.countMissingPlaybackStrategyByFolder(folder.id) === 0;
+    const needsAvifMetadataRepair = context.avifMetadataRepairPending && discoveredFiles.some(
+      (file) => path.extname(file.relativePath).toLowerCase() === '.avif'
+    );
     const hasMatchingIndexedFiles =
       discoveredFiles.length > 0 &&
       hasCompleteTakenAtMetadata &&
@@ -1931,6 +1940,7 @@ class ScannerService {
 
     if (
       !folderHadErrors &&
+      !needsAvifMetadataRepair &&
       shouldSkipFolderBySignature({
         currentSignature: folderSignature.signature,
         galleryRootChanged: context.galleryRootChanged,
@@ -2119,10 +2129,12 @@ class ScannerService {
       const derivativeJobs: DerivativeJob[] = indexedImages.map((image) => ({
         absolutePath: resolveOriginalPath(image.relative_path),
         relativePath: image.relative_path,
+        folderId: image.folder_id,
         thumbnailPath: image.thumbnail_path,
         previewPath: image.preview_path,
         force: true,
-        kind: 'thumbnail'
+        kind: 'thumbnail',
+        videoPlaybackSource: null
       }));
 
       summary.scanned_files = indexedImages.length;
@@ -2217,6 +2229,7 @@ class ScannerService {
     const treatStoriesAsFolders = this.shouldTreatStoriesAsFolders();
     const treatCarouselsAsFolders = this.shouldTreatCarouselsAsFolders();
     const excludedFolderRules = this.getEffectiveExcludedFolderRules();
+    let sharedPreviewFolderIds = listFolderIdsRequiringSharedPreviews();
 
     if (!storageService.refreshAvailability().libraryAvailable) {
       return this.finishUnavailableRun(runId, reason);
@@ -2295,6 +2308,7 @@ class ScannerService {
       };
       if (requiresDerivativeMigration) {
         migrationSummary = await derivativeMigrationService.ensureMigrated({
+          sharedPreviewFolderIds,
           onProgress: (progress) => {
             this.updateMigrationProgress(progress);
           },
@@ -2479,6 +2493,7 @@ class ScannerService {
 
       metrics.discoveryDurationMs = elapsedMilliseconds(discoveryStartedAt);
       metrics.derivativeJobsQueued = derivativeJobs.size;
+      sharedPreviewFolderIds = listFolderIdsRequiringSharedPreviews();
 
       log.table('Discovery complete', [
         ['Folders', discoveredSourceFolders],
@@ -2491,7 +2506,14 @@ class ScannerService {
         ['Duration', formatDuration(metrics.discoveryDurationMs)]
       ]);
 
-      derivativeSummary = await this.processDerivativeJobs([...derivativeJobs.values()], errors);
+      derivativeSummary = await this.processDerivativeJobs([...derivativeJobs.values()], errors, sharedPreviewFolderIds);
+
+      if (options.repairUnchangedDerivatives && summary.status !== 'failed' && derivativeMigrationService.isMigrationComplete()) {
+        const reclaimedPreviews = await this.reclaimObsoleteVideoPreviews(errors);
+        if (reclaimedPreviews > 0) {
+          log.table('Obsolete video previews reclaimed', [['Files', reclaimedPreviews]], 'success');
+        }
+      }
 
       if (summary.status !== 'failed' && !errors.hasErrors && derivativeMigrationService.isMigrationComplete()) {
         await derivativeMigrationService.cleanupStaleDerivatives();
@@ -2705,7 +2727,114 @@ class ScannerService {
     });
   }
 
-  private async processDerivativeJobs(jobs: DerivativeJob[], errors: ScanErrorCollector): Promise<DerivativeProcessingSummary> {
+  private async reclaimObsoleteVideoPreviews(errors: ScanErrorCollector): Promise<number> {
+    const getSharedPreviewFolderIds = createSharedPreviewRequirementLookup();
+    const sharedPreviewFolderIds = getSharedPreviewFolderIds();
+    const previewReferenceCounts = new Map<string, number>();
+    for (const reference of imageRepository.listDerivativeReferences()) {
+      if (!reference.preview_path) {
+        continue;
+      }
+
+      previewReferenceCounts.set(
+        reference.preview_path,
+        (previewReferenceCounts.get(reference.preview_path) ?? 0) + 1
+      );
+    }
+
+    let reclaimed = 0;
+    for (const image of imageRepository.listActive()) {
+      if (image.media_type !== 'video' || !image.preview_path) {
+        continue;
+      }
+
+      const playbackSource = resolveVideoPlaybackSource({
+        mediaType: image.media_type,
+        extension: image.extension || path.extname(image.relative_path),
+        fileSize: image.file_size,
+        width: image.width,
+        height: image.height,
+        playbackStrategy: image.playback_strategy
+      });
+      if (playbackSource !== 'original' || sharedPreviewFolderIds.has(image.folder_id)) {
+        continue;
+      }
+
+      if ((previewReferenceCounts.get(image.preview_path) ?? 0) !== 1) {
+        continue;
+      }
+
+      let sourcePath: string;
+      try {
+        sourcePath = resolveOriginalPath(image.relative_path);
+      } catch {
+        continue;
+      }
+
+      try {
+        const sourceStats = await fs.stat(sourcePath);
+        const currentFingerprint = createFingerprint(image.relative_path, sourceStats.size, sourceStats.mtimeMs);
+        if (!sourceStats.isFile() || currentFingerprint !== image.checksum_or_fingerprint) {
+          continue;
+        }
+      } catch {
+        continue;
+      }
+
+      let previewAbsolutePath: string;
+      try {
+        previewAbsolutePath = safeJoin(appConfig.previewsDir, image.preview_path);
+      } catch {
+        continue;
+      }
+
+      try {
+        // Share settings can change while the source stat is pending. Nothing
+        // yields between this live check and submitting the removal.
+        if (getSharedPreviewFolderIds().has(image.folder_id)) {
+          continue;
+        }
+        await fs.unlink(previewAbsolutePath);
+        reclaimed += 1;
+        log.info(joinLogParts([
+          'Obsolete video preview removed',
+          formatStep('file', image.relative_path),
+          formatStep('preview', image.preview_path)
+        ]));
+      } catch (error) {
+        const filesystemError = error as NodeJS.ErrnoException;
+        if (filesystemError.code === 'ENOENT') {
+          continue;
+        }
+
+        const message = error instanceof Error ? error.message : String(error);
+        const detail = formatScanError(
+          image.relative_path,
+          `Unable to remove obsolete video preview: ${message}`,
+          { sourcePath: previewAbsolutePath }
+        );
+        await errors.add(detail);
+        log.error(joinLogParts([
+          'Failed to remove obsolete video preview',
+          formatStep('file', image.relative_path),
+          formatStep('preview', image.preview_path),
+          message
+        ]));
+
+        if (appConfig.scanMediaErrorMode === 'fail') {
+          throw new Error(detail);
+        }
+      }
+    }
+
+    return reclaimed;
+  }
+
+  private async processDerivativeJobs(
+    jobs: DerivativeJob[],
+    errors: ScanErrorCollector,
+    sharedPreviewFolderIds = listFolderIdsRequiringSharedPreviews()
+  ): Promise<DerivativeProcessingSummary> {
     const startedAt = performance.now();
     let generatedThumbnails = 0;
     let generatedPreviews = 0;
@@ -2767,9 +2896,14 @@ class ScannerService {
             });
           }
         } else {
+          const previewRequired =
+            job.videoPlaybackSource !== 'original' || sharedPreviewFolderIds.has(job.folderId);
           const derivatives = await generateDerivatives(job.absolutePath, job.relativePath, job.force, {
             thumbnailPath: job.thumbnailPath,
-            previewPath: job.previewPath
+            previewPath: job.previewPath,
+            ...(job.videoPlaybackSource
+              ? { videoPreviewPolicy: previewRequired ? 'required' as const : 'skip' as const }
+              : {})
           });
 
           if (derivatives.generatedThumbnail) {
@@ -3086,6 +3220,16 @@ class ScannerService {
           : null;
       }
 
+      const videoPlaybackSource = mediaType === 'video'
+        ? resolveVideoPlaybackSource({
+            mediaType,
+            extension,
+            fileSize: file.stats.size,
+            width: metadataWidth,
+            height: metadataHeight,
+            playbackStrategy: metadataPlaybackStrategy
+          })
+        : null;
       const shouldResetLegacyAnimatedAvifTakenAt = needsAvifMetadataRepair
         && existingByPath.taken_at_source === 'exif'
         && metadataIsAnimated
@@ -3149,10 +3293,12 @@ class ScannerService {
             ? {
                 absolutePath: file.absolutePath,
                 relativePath: file.relativePath,
+                folderId: folder.id,
                 thumbnailPath,
                 previewPath,
                 force: false,
-                kind: 'all'
+                kind: 'all',
+                videoPlaybackSource
               }
             : null)
           : null,
@@ -3197,6 +3343,23 @@ class ScannerService {
           storeEmptyObject: true
         })
       : null;
+    const videoPlaybackSource = mediaType === 'video'
+      ? resolveVideoPlaybackSource({
+          mediaType,
+          extension,
+          fileSize: file.stats.size,
+          width: metadata.width,
+          height: metadata.height,
+          playbackStrategy: metadata.playbackStrategy
+        })
+      : null;
+
+    // Invalidate before committing the replacement fingerprint so failures can
+    // be retried. Lazy scans also need this: a later share must never reuse the
+    // previous source's preview, even when normal playback now uses originals.
+    if (existing && !canReuseDerivativeFiles && mediaType === 'video') {
+      await fs.rm(safeJoin(appConfig.previewsDir, previewPath), { force: true });
+    }
 
     if (moveCandidate) {
       const image = imageRepository.reconcileMove({
@@ -3259,10 +3422,12 @@ class ScannerService {
         : {
             absolutePath: file.absolutePath,
             relativePath: file.relativePath,
+            folderId: folder.id,
             thumbnailPath,
             previewPath,
             force: existing ? !canReuseDerivativeFiles : options.forceNewFileDerivatives,
-            kind: 'all'
+            kind: 'all',
+            videoPlaybackSource
           },
       refreshedIndexedRow: false,
       relativePath: file.relativePath

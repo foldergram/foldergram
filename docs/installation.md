@@ -333,7 +333,7 @@ pnpm start
 If the existing index contains folders named `carousels`, open
 **Settings → General Settings** and choose **Use Carousel Posts** for the
 reserved post structure or **Keep Normal Folders** to preserve the previous
-folder behavior. Save the choice, then run **Scan Library** from
+folder behavior. Save the choice, then run **Scan for changes** from
 **Settings → Scan & Library** to apply it. Use **Rebuild Library Index** only
 when Settings requires it for a changed gallery location.
 

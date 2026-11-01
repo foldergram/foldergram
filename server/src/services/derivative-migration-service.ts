@@ -8,7 +8,7 @@ import {
   STALE_DERIVATIVE_GC_LAST_RUN_AT_SETTING_KEY
 } from '../constants/app-setting-keys.js';
 import { appConfig } from '../config/env.js';
-import { appSettingsRepository, imageRepository } from '../db/repositories.js';
+import { appSettingsRepository, imageRepository, listFolderIdsRequiringSharedPreviews } from '../db/repositories.js';
 import type { ImageRecord } from '../types/models.js';
 import { getMediaTypeFromExtension, getPreviewRelativePath, getThumbnailRelativePath } from '../utils/image-utils.js';
 import { resolveOriginalPath } from '../utils/media-paths.js';
@@ -20,6 +20,7 @@ import {
   getThumbnailPathForAssetKey
 } from '../utils/derivative-paths.js';
 import { isNonemptyDerivative } from '../utils/derivative-cache.js';
+import { shouldGenerateVideoPreview } from '../utils/video-playback-policy.js';
 import { normalizePath, safeJoin } from '../utils/path-utils.js';
 import { generateDerivatives } from './derivative-service.js';
 import { log } from './log-service.js';
@@ -53,6 +54,7 @@ export interface DerivativeMigrationProgress {
 interface EnsureMigratedOptions {
   onProgress?: (progress: DerivativeMigrationProgress) => void;
   onError?: (error: DerivativeMigrationRepairError) => void | Promise<void>;
+  sharedPreviewFolderIds?: Set<number>;
 }
 
 export interface DerivativeMigrationSummary extends DerivativeMigrationProgress {
@@ -239,6 +241,7 @@ class DerivativeMigrationService {
       };
     }
 
+    const sharedPreviewFolderIds = options.sharedPreviewFolderIds ?? listFolderIdsRequiringSharedPreviews();
     let cursor = Number.parseInt(appSettingsRepository.get(DERIVATIVE_STORAGE_MIGRATION_CURSOR_SETTING_KEY) ?? '0', 10);
     if (!Number.isFinite(cursor) || cursor < 0) {
       cursor = 0;
@@ -301,7 +304,7 @@ class DerivativeMigrationService {
               currentFile
             });
           }
-        });
+        }, sharedPreviewFolderIds);
 
         migratedRows += 1;
         cursor = row.id;
@@ -359,7 +362,7 @@ class DerivativeMigrationService {
             sourcePath
           });
         }
-      });
+      }, sharedPreviewFolderIds);
       repairedRows = repairSummary.repairedRows;
       repairErrors = repairSummary.repairErrors;
     }
@@ -456,7 +459,8 @@ class DerivativeMigrationService {
       onBackfilledAssetKey?: () => void;
       onThumbnailMoved?: () => void;
       onPreviewMoved?: () => void;
-    } = {}
+    } = {},
+    sharedPreviewFolderIds = listFolderIdsRequiringSharedPreviews()
   ): Promise<{ missingFiles: number }> {
     let assetKey = row.asset_key;
 
@@ -491,7 +495,7 @@ class DerivativeMigrationService {
       missingFiles += 1;
     }
 
-    if (!nextPreviewExists) {
+    if (!nextPreviewExists && this.expectsPreview(row, sharedPreviewFolderIds)) {
       missingFiles += 1;
     }
 
@@ -511,7 +515,8 @@ class DerivativeMigrationService {
       onRegeneratingDerivatives?: (currentFile: string, repairedFiles: number) => void;
       onMissingFilesCounted?: (missingFiles: number) => void;
       onRepairError?: (currentFile: string, message: string, sourcePath: string | null) => void | Promise<void>;
-    } = {}
+    } = {},
+    sharedPreviewFolderIds = listFolderIdsRequiringSharedPreviews()
   ): Promise<MissingDerivativeRepairSummary> {
     let repairedFiles = 0;
     let repairedRows = 0;
@@ -533,7 +538,7 @@ class DerivativeMigrationService {
           onRegeneratingDerivatives: (repairedFiles) => {
             callbacks.onRegeneratingDerivatives?.(currentFile, repairedFiles);
           }
-        });
+        }, sharedPreviewFolderIds);
 
         if (repairSummary.regenerationError) {
           repairErrors += 1;
@@ -589,7 +594,8 @@ class DerivativeMigrationService {
       onRepairingThumbnail?: () => void;
       onRepairingPreview?: () => void;
       onRegeneratingDerivatives?: (repairedFiles: number) => void;
-    } = {}
+    } = {},
+    sharedPreviewFolderIds = listFolderIdsRequiringSharedPreviews()
   ): Promise<{ repairedFiles: number; missingFiles: number; repaired: boolean; regenerationError: RepairRowError | null }> {
     let assetKey = row.asset_key;
     let repairedFiles = 0;
@@ -644,12 +650,16 @@ class DerivativeMigrationService {
     const sourceExists = sourcePath ? await fileExists(sourcePath) : false;
     const thumbnailExistsBeforeGenerate = await isNonemptyDerivative(thumbnailAbsolutePath);
     const previewExistsBeforeGenerate = await isNonemptyDerivative(previewAbsolutePath);
+    const previewExpected = this.expectsPreview(row, sharedPreviewFolderIds);
 
-    if ((!thumbnailExistsBeforeGenerate || !previewExistsBeforeGenerate) && sourcePath && sourceExists) {
+    if ((!thumbnailExistsBeforeGenerate || (previewExpected && !previewExistsBeforeGenerate)) && sourcePath && sourceExists) {
       try {
         const derivatives = await generateDerivatives(sourcePath, row.relative_path, false, {
           thumbnailPath: targetThumbnailPath,
-          previewPath: targetPreviewPath
+          previewPath: targetPreviewPath,
+          ...(row.media_type === 'video'
+            ? { videoPreviewPolicy: previewExpected ? 'required' as const : 'skip' as const }
+            : {})
         });
         const regeneratedFiles = Number(derivatives.generatedThumbnail) + Number(derivatives.generatedPreview);
         if (regeneratedFiles > 0) {
@@ -679,7 +689,7 @@ class DerivativeMigrationService {
       missingFiles += 1;
     }
 
-    if (!(await isNonemptyDerivative(safeJoin(appConfig.previewsDir, resolvedPreviewPath)))) {
+    if (previewExpected && !(await isNonemptyDerivative(safeJoin(appConfig.previewsDir, resolvedPreviewPath)))) {
       missingFiles += 1;
     }
 
@@ -692,6 +702,21 @@ class DerivativeMigrationService {
         row.thumbnail_path !== resolvedThumbnailPath ||
         row.preview_path !== resolvedPreviewPath
     };
+  }
+
+  private expectsPreview(row: ImageRecord, sharedPreviewFolderIds: Set<number>): boolean {
+    if (row.media_type !== 'video') {
+      return true;
+    }
+
+    return shouldGenerateVideoPreview({
+      mediaType: row.media_type,
+      extension: row.extension || path.extname(row.relative_path),
+      fileSize: row.file_size,
+      width: row.width,
+      height: row.height,
+      playbackStrategy: row.playback_strategy
+    }, sharedPreviewFolderIds.has(row.folder_id) ? 'share' : 'normal');
   }
 
   private async migrateDerivativeFile(rootDir: string, currentPath: string, nextPath: string): Promise<number> {

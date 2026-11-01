@@ -57,8 +57,8 @@
 
       <div class="flex items-center gap-4 max-sm:flex-col-reverse max-sm:items-stretch">
         <p class="m-0 text-muted">{{ t('settings.notices.scanError.actionNote') }}</p>
-        <button class="btn-primary min-w-[11.5rem]" type="button" :disabled="scanActionDisabled" @click="runManualScan">
-          {{ scanButtonLabel }}
+        <button class="btn-primary min-w-[11.5rem]" type="button" :disabled="scanActionDisabled" @click="runManualScan('repair')">
+          {{ scanRepairButtonLabel }}
         </button>
       </div>
     </section>
@@ -1214,14 +1214,24 @@
 
             <div class="flex flex-col md:flex-row items-center gap-4 max-sm:items-stretch mt-4">
               <p class="m-0 flex-1 text-muted">{{ scanActionNote }}</p>
-              <button
-                class="btn-primary min-w-[13rem]"
-                type="button"
-                :disabled="scanActionDisabled"
-                @click="runManualScan"
-              >
-                {{ scanButtonLabel }}
-              </button>
+              <div class="flex flex-col gap-2 sm:flex-row">
+                <button
+                  class="btn-primary min-w-[13rem]"
+                  type="button"
+                  :disabled="scanActionDisabled"
+                  @click="runManualScan('changes')"
+                >
+                  {{ scanChangesButtonLabel }}
+                </button>
+                <button
+                  class="inline-flex min-h-11 w-full items-center justify-center rounded-[0.95rem] border border-border bg-surface-alt px-4 text-center text-[0.9rem] font-semibold text-text transition-colors duration-180 hover:bg-surface-hover disabled:cursor-wait disabled:opacity-60 sm:w-auto"
+                  type="button"
+                  :disabled="scanActionDisabled"
+                  @click="runManualScan('repair')"
+                >
+                  {{ scanRepairButtonLabel }}
+                </button>
+              </div>
             </div>
 
             <p v-if="scanError" class="m-0 px-4 py-[0.85rem] border border-[rgba(214,48,49,0.24)] rounded-[0.9rem] text-[#c0392b] bg-[rgba(214,48,49,0.08)]">{{ scanError }}</p>
@@ -1414,6 +1424,7 @@ const scanError = ref<string | null>(null);
 const rebuildError = ref<string | null>(null);
 const thumbnailRebuildError = ref<string | null>(null);
 const requestingScan = ref(false);
+const selectedScanMode = ref<'changes' | 'repair' | null>(null);
 const rebuilding = ref(false);
 const rebuildingThumbnails = ref(false);
 const savingGeneralSettings = ref(false);
@@ -2092,12 +2103,19 @@ const statusLabel = computed(() => {
 
   return t('settings.library.statusLabel.ready');
 });
-const scanButtonLabel = computed(() => {
-  if (scanProgressActive.value) {
+const scanChangesButtonLabel = computed(() => {
+  if (scanProgressActive.value && selectedScanMode.value === 'changes') {
     return t('settings.library.scanButton.active');
   }
 
-  return t('settings.library.scanButton.idle');
+  return t('settings.library.scanButton.changes');
+});
+const scanRepairButtonLabel = computed(() => {
+  if (scanProgressActive.value && selectedScanMode.value === 'repair') {
+    return t('settings.library.scanButton.active');
+  }
+
+  return t('settings.library.scanButton.repair');
 });
 const scanActionNote = computed(() => {
   if (waitingForInitialStatus.value) {
@@ -2117,6 +2135,14 @@ const scanActionNote = computed(() => {
   }
 
   if (scanProgressActive.value) {
+    if (selectedScanMode.value === 'repair') {
+      return t('settings.library.scanActionNote.progressRepair');
+    }
+
+    if (selectedScanMode.value === 'changes') {
+      return t('settings.library.scanActionNote.progressChanges');
+    }
+
     return t('settings.library.scanActionNote.progress');
   }
 
@@ -2981,16 +3007,19 @@ async function loadAdminStats() {
   }
 }
 
-async function runManualScan() {
+async function runManualScan(mode: 'changes' | 'repair' = 'changes') {
   if (scanActionDisabled.value) {
     return;
   }
 
   requestingScan.value = true;
+  selectedScanMode.value = mode;
   scanError.value = null;
 
   try {
-    const request = triggerManualScan();
+    const request = triggerManualScan({
+      repairDerivatives: mode === 'repair'
+    });
     void warmScanStatus();
     await request;
     await appStore.fetchStats({ background: true });
@@ -3000,6 +3029,7 @@ async function runManualScan() {
     scanError.value = error instanceof Error ? error.message : t('settings.library.errors.startScan');
   } finally {
     requestingScan.value = false;
+    selectedScanMode.value = null;
   }
 }
 

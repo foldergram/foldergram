@@ -189,8 +189,8 @@ Behavior depends on how the route is opened:
 The detail view includes:
 
 - image detail media sourced from either generated previews or originals, depending on `IMAGE_DETAIL_SOURCE`
-- video detail playback that defaults to the generated preview source
-- an optional `HD` toggle for compatible higher-resolution MP4 originals
+- video detail playback that uses the selected ordinary source: the original for qualifying direct-playback videos, or a generated preview otherwise
+- an optional `HD` toggle for compatible higher-resolution MP4 originals that use a generated preview
 - previous and next navigation within the same folder and active media filter
 - folder link and breadcrumb context
 - caption text that uses a saved custom caption when present and otherwise falls back to a readable filename
@@ -315,7 +315,8 @@ Current non-admin behavior:
 
 | Action | What changes |
 | --- | --- |
-| Scan Library | Runs a normal scan against the current gallery root. In `SCAN_MEDIA_ERROR_MODE=skip`, supported-media failures are reported, skipped, and the run finishes as `completed_with_errors`. |
+| Scan for changes | Discovers additions, updates, removals, and exclusions without verifying generated media for unchanged assets. In `SCAN_MEDIA_ERROR_MODE=skip`, supported-media failures are reported, skipped, and the run finishes as `completed_with_errors`. |
+| Scan and repair derivatives | Performs the same discovery and also verifies generated media for unchanged assets. This action also reclaims obsolete video previews for qualifying direct-playback videos. |
 | Regenerate Thumbnails | Clears generated thumbnails and video poster images, then rebuilds them from indexed media only. |
 | Rebuild Library Index | Clears indexed folders, posts, likes, folder scan state, and scan history, then rescans the active gallery root and reuses matching cached derivatives when possible. In lazy derivative mode it does not pre-generate missing thumbnails or previews. |
 

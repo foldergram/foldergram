@@ -225,6 +225,7 @@ const BASE_POST_SELECT_SQL = `
     images.is_animated AS isAnimated,
     images.thumbnail_path AS thumbnailUrl,
     images.preview_path AS previewUrl,
+    images.file_size AS fileSize,
     images.playback_strategy AS playbackStrategy,
     posts.sort_timestamp AS sortTimestamp,
     posts.taken_at AS takenAt,
@@ -1442,6 +1443,7 @@ export const postRepository = {
         post.isAnimated = first.isAnimated;
         post.thumbnailUrl = first.thumbnailUrl;
         post.previewUrl = first.previewUrl;
+        (post as FeedPost & { fileSize?: number }).fileSize = first.fileSize;
       }
     }
 
@@ -2591,6 +2593,7 @@ export const imageRepository = {
         images.is_animated AS isAnimated,
         images.thumbnail_path AS thumbnailUrl,
         images.preview_path AS previewUrl,
+        images.file_size AS fileSize,
         images.playback_strategy AS playbackStrategy,
         images.sort_timestamp AS sortTimestamp,
         images.taken_at AS takenAt,
@@ -2630,6 +2633,7 @@ export const imageRepository = {
         images.is_animated AS isAnimated,
         images.thumbnail_path AS thumbnailUrl,
         images.preview_path AS previewUrl,
+        images.file_size AS fileSize,
         images.playback_strategy AS playbackStrategy,
         images.sort_timestamp AS sortTimestamp,
         images.taken_at AS takenAt,
@@ -3653,6 +3657,62 @@ export const folderShareLinkRepository = {
 };
 
 export const folderShareRepository = folderShareLinkRepository;
+
+export function listFolderIdsRequiringSharedPreviews(now = nowIso()): Set<number> {
+  const activeLinkFolderIds = database.prepare(
+    `
+    SELECT DISTINCT folder_id
+    FROM folder_share_links
+    WHERE revoked_at IS NULL
+      AND (expires_at IS NULL OR expires_at > ?)
+    `
+  ).all(now) as Array<{ folder_id: number }>;
+  const passwordFolderIds = database.prepare(
+    'SELECT folder_id FROM folder_share_passwords'
+  ).all() as Array<{ folder_id: number }>;
+  const requiringFolderIds = new Set([
+    ...activeLinkFolderIds.map((row) => row.folder_id),
+    ...passwordFolderIds.map((row) => row.folder_id)
+  ]);
+
+  const carouselSourceFolders = database.prepare(
+    `
+    SELECT id, carousel_owner_folder_id
+    FROM folders
+    WHERE role = 'carousel_source'
+      AND carousel_owner_folder_id IS NOT NULL
+    `
+  ).all() as Array<{ id: number; carousel_owner_folder_id: number }>;
+  for (const folder of carouselSourceFolders) {
+    if (requiringFolderIds.has(folder.carousel_owner_folder_id)) {
+      requiringFolderIds.add(folder.id);
+    }
+  }
+
+  return requiringFolderIds;
+}
+
+// Reclamation yields while validating sources. Refresh its batched share lookup
+// when SQLite changes, including writes from another connection, instead of
+// querying share tables separately for each media item.
+export function createSharedPreviewRequirementLookup(): () => ReadonlySet<number> {
+  const changesStatement = database.prepare('SELECT total_changes() AS changes');
+  const versionStatement = database.prepare('PRAGMA data_version');
+  let lastChanges = -1;
+  let lastVersion = -1;
+  let folderIds: ReadonlySet<number> = new Set();
+
+  return () => {
+    const { changes } = changesStatement.get() as { changes: number };
+    const { data_version: version } = versionStatement.get() as { data_version: number };
+    if (changes !== lastChanges || version !== lastVersion) {
+      folderIds = listFolderIdsRequiringSharedPreviews();
+      lastChanges = changes;
+      lastVersion = version;
+    }
+    return folderIds;
+  };
+}
 
 export const folderSharePasswordRepository = {
   get(folderId: number): FolderSharePasswordRecord | undefined {

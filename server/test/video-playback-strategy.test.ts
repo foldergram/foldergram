@@ -27,6 +27,7 @@ describe.sequential('video playback strategy mapping', () => {
   let folderRepository: RepositoriesModule['folderRepository'];
   let imageRepository: RepositoriesModule['imageRepository'];
   let maintenanceRepository: RepositoriesModule['maintenanceRepository'];
+  let postRepository: RepositoriesModule['postRepository'];
   let scanRunRepository: RepositoriesModule['scanRunRepository'];
 
   beforeAll(async () => {
@@ -43,7 +44,7 @@ describe.sequential('video playback strategy mapping', () => {
 
     ({ appConfig } = await import('../src/config/env.js'));
     ({ galleryService } = await import('../src/services/gallery-service.js'));
-    ({ folderRepository, imageRepository, maintenanceRepository, scanRunRepository } = await import('../src/db/repositories.js'));
+    ({ folderRepository, imageRepository, maintenanceRepository, postRepository, scanRunRepository } = await import('../src/db/repositories.js'));
   });
 
   afterAll(async () => {
@@ -66,7 +67,7 @@ describe.sequential('video playback strategy mapping', () => {
     ]);
   });
 
-  it('uses generated previews by default for videos while preserving original playback eligibility', async () => {
+  it('uses indexed originals for qualifying normal videos while larger compatible videos keep previews', async () => {
     const folder = folderRepository.upsert({
       slug: 'clips',
       name: 'Clips',
@@ -75,6 +76,10 @@ describe.sequential('video playback strategy mapping', () => {
 
     const image = createIndexedMedia(folder, 'photo-1.jpg', 1_000, 'preview');
     const compatibleVideo = createIndexedMedia(folder, 'reel-1.mp4', 2_000, 'original', 14_000);
+    const largeCompatibleVideo = createIndexedMedia(folder, 'reel-large.mp4', 2_500, 'original', 15_000, {
+      width: 2160,
+      height: 3840
+    });
     const transcodedVideo = createIndexedMedia(folder, 'reel-2.webm', 3_000, 'preview', 17_000);
 
     folderRepository.setAvatar(folder.id, image.id);
@@ -82,13 +87,22 @@ describe.sequential('video playback strategy mapping', () => {
     const feedItems = new Map(galleryService.getFeed(1, 10, 'recent').items.map((item) => [item.id, item]));
 
     expect(feedItems.get(image.id)?.previewUrl).toBe('/previews/clips/photo-1.webp');
-    expect(feedItems.get(compatibleVideo.id)?.previewUrl).toBe('/previews/clips/reel-1.mp4');
+    expect(feedItems.get(compatibleVideo.id)?.previewUrl).toBe(`/api/originals/${compatibleVideo.id}`);
+    expect(feedItems.get(compatibleVideo.id)?.videoPlaybackSource).toBe('original');
+    expect(feedItems.get(largeCompatibleVideo.id)?.previewUrl).toBe('/previews/clips/reel-large.mp4');
+    expect(feedItems.get(largeCompatibleVideo.id)?.videoPlaybackSource).toBe('preview');
     expect(feedItems.get(transcodedVideo.id)?.previewUrl).toBe('/previews/clips/reel-2.mp4');
+    expect(feedItems.get(transcodedVideo.id)?.videoPlaybackSource).toBe('preview');
 
     const compatibleVideoDetail = galleryService.getImageDetail(compatibleVideo.id, 'video');
-    expect(compatibleVideoDetail?.previewUrl).toBe('/previews/clips/reel-1.mp4');
+    expect(compatibleVideoDetail?.previewUrl).toBe(`/api/originals/${compatibleVideo.id}`);
     expect(compatibleVideoDetail?.originalUrl).toBe(`/api/originals/${compatibleVideo.id}`);
     expect(compatibleVideoDetail?.playbackStrategy).toBe('original');
+    expect(compatibleVideoDetail?.videoPlaybackSource).toBe('original');
+
+    const largeCompatibleVideoDetail = galleryService.getImageDetail(largeCompatibleVideo.id, 'video');
+    expect(largeCompatibleVideoDetail?.previewUrl).toBe('/previews/clips/reel-large.mp4');
+    expect(largeCompatibleVideoDetail?.videoPlaybackSource).toBe('preview');
 
     await fs.mkdir(path.join(appConfig.previewsDir, 'clips'), { recursive: true });
     await Promise.all([
@@ -98,7 +112,52 @@ describe.sequential('video playback strategy mapping', () => {
     ]);
 
     const stats = galleryService.getStats();
-    expect(stats.previewCount).toBe(3);
+    expect(stats.previewCount).toBe(4);
+  });
+
+  it('applies the selected playback source to carousel media items', async () => {
+    const folder = folderRepository.upsert({
+      slug: 'carousel-clips',
+      name: 'Carousel Clips',
+      folderPath: 'carousel-clips'
+    });
+    const sourceFolder = folderRepository.upsert({
+      slug: 'carousel-clips-source',
+      name: 'Trip',
+      folderPath: 'carousel-clips/carousels/trip',
+      role: 'carousel_source',
+      carouselOwnerFolderId: folder.id
+    });
+    const image = createIndexedMedia(sourceFolder, 'cover.jpg', 1_000, 'preview');
+    const eligibleVideo = createIndexedMedia(sourceFolder, 'reel-3.mp4', 2_000, 'original', 14_000);
+    const largeVideo = createIndexedMedia(sourceFolder, 'reel-large-2.mp4', 3_000, 'original', 17_000, {
+      width: 2160,
+      height: 3840
+    });
+    const post = postRepository.upsertPostWithItems({
+      folderId: folder.id,
+      sourcePath: 'carousel-clips/carousels/trip',
+      postType: 'carousel',
+      sortTimestamp: 5_000,
+      takenAt: 5_000,
+      takenAtSource: 'mtime'
+    }, [
+      { imageId: eligibleVideo.id, position: 1 },
+      { imageId: image.id, position: 2 },
+      { imageId: largeVideo.id, position: 3 }
+    ]);
+
+    const detail = galleryService.getImageDetail(post.id);
+    const feedItem = galleryService.getFeed(1, 10, 'recent').items.find((item) => item.id === post.id);
+    const eligibleItem = detail?.mediaItems?.find((item) => item.imageId === eligibleVideo.id);
+    const largeItem = detail?.mediaItems?.find((item) => item.imageId === largeVideo.id);
+
+    expect(detail?.previewUrl).toBe(`/api/originals/${eligibleVideo.id}`);
+    expect(feedItem?.previewUrl).toBe(`/api/originals/${eligibleVideo.id}`);
+    expect(eligibleItem?.previewUrl).toBe(`/api/originals/${eligibleVideo.id}`);
+    expect(eligibleItem?.videoPlaybackSource).toBe('original');
+    expect(largeItem?.previewUrl).toBe('/previews/carousel-clips/carousels/trip/reel-large-2.mp4');
+    expect(largeItem?.videoPlaybackSource).toBe('preview');
   });
 
   it('reports the latest completed scan in stats even when a newer run is still in progress', () => {
@@ -126,12 +185,13 @@ describe.sequential('video playback strategy mapping', () => {
     filename: string,
     mtimeMs: number,
     playbackStrategy: PlaybackStrategy,
-    durationMs: number | null = null
+    durationMs: number | null = null,
+    dimensions?: { width: number; height: number }
   ) {
+    const mediaType = getMediaTypeFromExtension(path.extname(filename).toLowerCase());
     const relativePath = `${folder.folder_path}/${filename}`;
     const absolutePath = path.join(appConfig.galleryRoot, relativePath);
     const extension = path.extname(filename).toLowerCase();
-    const mediaType = getMediaTypeFromExtension(extension);
     const previewRelativePath = getPreviewRelativePath(relativePath, mediaType);
     const thumbnailRelativePath = getThumbnailRelativePath(relativePath);
     const fileSize = 2_048 + mtimeMs;
@@ -143,8 +203,8 @@ describe.sequential('video playback strategy mapping', () => {
       relativePath,
       absolutePath,
       fileSize,
-      width: mediaType === 'video' ? 1080 : 1600,
-      height: mediaType === 'video' ? 1920 : 1200,
+      width: dimensions?.width ?? (mediaType === 'video' ? 1080 : 1600),
+      height: dimensions?.height ?? (mediaType === 'video' ? 1920 : 1200),
       mediaType,
       mimeType: getMimeTypeFromExtension(extension),
       durationMs,

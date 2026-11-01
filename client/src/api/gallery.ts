@@ -499,9 +499,19 @@ export function updateViewerAccess(mode: ViewerAccessMode, viewerPassword?: stri
   });
 }
 
-export function triggerManualScan() {
+export interface ManualScanOptions {
+  repairDerivatives: boolean;
+}
+
+export function triggerManualScan(options?: ManualScanOptions) {
   return requestJson<ManualScanResult>('/api/admin/rescan', {
-    method: 'POST'
+    method: 'POST',
+    ...(options
+      ? {
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(options)
+        }
+      : {})
   });
 }
 

@@ -67,6 +67,7 @@ import { getLeafPathName, getParentRelativePath, getPathBreadcrumb } from '../ut
 import { measureOperation } from '../utils/perf-timing.js';
 import { buildReelQueue, shuffleReelCandidates, type ReelAffinitySignals } from '../utils/reels-utils.js';
 import { parseTreatStoriesAsFoldersSetting, serializeTreatStoriesAsFoldersSetting } from '../utils/stories-utils.js';
+import { resolveVideoPlaybackSource, type VideoDeliveryContext, type VideoPlaybackSource } from '../utils/video-playback-policy.js';
 import { geodataService, placeResolutionService } from './place-service.js';
 import { permanentDeletionService } from './permanent-deletion-service.js';
 import { scannerService } from './scanner-service.js';
@@ -167,7 +168,7 @@ interface PlaceRowFields {
   placeIsApproximate?: number | null;
 }
 
-type IndexedFeedImage = FeedImage & PlaceRowFields & { playbackStrategy?: PlaybackStrategy | null };
+type IndexedFeedImage = FeedImage & PlaceRowFields & { playbackStrategy?: PlaybackStrategy | null; fileSize?: number | null };
 type IndexedImageDetail = ImageDetail & PlaceRowFields & { playbackStrategy?: PlaybackStrategy | null; exifJson?: string | null };
 type IndexedTrashImage = TrashImage & PlaceRowFields & { playbackStrategy?: PlaybackStrategy | null };
 type ScanSummaryRecord = ReturnType<typeof scanRunRepository.latestCompleted>;
@@ -312,15 +313,44 @@ function buildPreviewUrl(
     id: number;
     mediaType: MediaType;
     previewUrl: string;
+    videoPlaybackSource?: VideoPlaybackSource | null;
   },
   useOriginalForImages = false,
   version?: string | null
 ): string {
-  if (useOriginalForImages && image.mediaType === 'image') {
+  if (image.mediaType === 'image') {
+    return useOriginalForImages
+      ? buildOriginalUrl(image.id)
+      : toPublicMediaUrl('/previews', image.previewUrl, version);
+  }
+
+  if (image.videoPlaybackSource === 'original') {
     return buildOriginalUrl(image.id);
   }
 
   return toPublicMediaUrl('/previews', image.previewUrl, version);
+}
+
+function getVideoPlaybackSource(image: {
+  mediaType: MediaType;
+  filename?: string | null;
+  fileSize?: number | null;
+  width?: number | null;
+  height?: number | null;
+  playbackStrategy?: PlaybackStrategy | null;
+}, context: VideoDeliveryContext = 'normal'): VideoPlaybackSource | null {
+  if (image.mediaType !== 'video') {
+    return null;
+  }
+
+  return resolveVideoPlaybackSource({
+    mediaType: image.mediaType,
+    extension: path.extname(image.filename ?? ''),
+    fileSize: image.fileSize,
+    width: image.width,
+    height: image.height,
+    playbackStrategy: image.playbackStrategy
+  }, context);
 }
 
 function mapPlaceSummaryFromRow(image: PlaceRowFields) {
@@ -482,7 +512,17 @@ function getParentFolderDisplayName(folderPath: string): string | null {
 }
 
 function mapFeedImage(image: IndexedFeedImage, derivativeVersion = getDerivativeAssetVersion()): FeedImage {
-  const { playbackStrategy, placeId, placeSlug, placeName, placeKind, placeIsApproximate, isSaved, mediaItems, itemCount, ...rest } = image as any;
+  const { playbackStrategy, fileSize, placeId, placeSlug, placeName, placeKind, placeIsApproximate, isSaved, mediaItems, itemCount, ...rest } = image as any;
+  const representativeMediaItem = mediaItems?.[0];
+  const representativeImageId = representativeMediaItem?.imageId ?? rest.id;
+  const videoPlaybackSource = getVideoPlaybackSource({
+    mediaType: rest.mediaType,
+    filename: rest.filename,
+    fileSize,
+    width: rest.width,
+    height: rest.height,
+    playbackStrategy
+  });
   return {
     ...rest,
     postType: rest.postType ?? 'single',
@@ -493,33 +533,47 @@ function mapFeedImage(image: IndexedFeedImage, derivativeVersion = getDerivative
     folderBreadcrumb: getPathBreadcrumb(rest.folderPath),
     thumbnailUrl: toPublicMediaUrl('/thumbnails', rest.thumbnailUrl, derivativeVersion),
     previewUrl: buildPreviewUrl({
-      id: rest.id,
+      id: representativeImageId,
       mediaType: rest.mediaType,
-      previewUrl: rest.previewUrl
+      previewUrl: rest.previewUrl,
+      videoPlaybackSource
     }, false, derivativeVersion),
+    videoPlaybackSource: videoPlaybackSource ?? undefined,
     place: mapPlaceSummaryFromRow({ placeId, placeSlug, placeName, placeKind, placeIsApproximate }),
-    mediaItems: (mediaItems ?? []).map((item: any) => ({
-      imageId: item.imageId,
-      position: item.position,
-      filename: item.filename,
-      mediaType: item.mediaType,
-      width: item.width,
-      height: item.height,
-      durationMs: item.durationMs,
-      isAnimated: Boolean(item.isAnimated),
-      thumbnailUrl: toPublicMediaUrl('/thumbnails', item.thumbnailUrl, derivativeVersion),
-      previewUrl: buildPreviewUrl({
-        id: item.imageId,
+    mediaItems: (mediaItems ?? []).map((item: any) => {
+      const itemPlaybackSource = getVideoPlaybackSource({
         mediaType: item.mediaType,
-        previewUrl: item.previewUrl
-      }, false, derivativeVersion),
-      originalUrl: buildOriginalUrl(item.imageId),
-      playbackStrategy: item.playbackStrategy ?? 'preview',
-      mimeType: item.mimeType,
-      fileSize: item.fileSize,
-      relativePath: item.relativePath,
-      exif: item.exif ?? null
-    })),
+        filename: item.filename,
+        fileSize: item.fileSize,
+        width: item.width,
+        height: item.height,
+        playbackStrategy: item.playbackStrategy
+      });
+      return {
+        imageId: item.imageId,
+        position: item.position,
+        filename: item.filename,
+        mediaType: item.mediaType,
+        width: item.width,
+        height: item.height,
+        durationMs: item.durationMs,
+        isAnimated: Boolean(item.isAnimated),
+        thumbnailUrl: toPublicMediaUrl('/thumbnails', item.thumbnailUrl, derivativeVersion),
+        previewUrl: buildPreviewUrl({
+          id: item.imageId,
+          mediaType: item.mediaType,
+          previewUrl: item.previewUrl,
+          videoPlaybackSource: itemPlaybackSource
+        }, false, derivativeVersion),
+        originalUrl: buildOriginalUrl(item.imageId),
+        playbackStrategy: item.playbackStrategy ?? 'preview',
+        videoPlaybackSource: itemPlaybackSource ?? undefined,
+        mimeType: item.mimeType,
+        fileSize: item.fileSize,
+        relativePath: item.relativePath,
+        exif: item.exif ?? null
+      };
+    }),
     itemCount: itemCount ?? (mediaItems ? mediaItems.length : 1)
   };
 }
@@ -548,6 +602,14 @@ function mapSharedMediaItem(item: PostMediaItem, derivativeVersion: string | nul
     thumbnailUrl: buildShareThumbnailUrl(item.imageId, derivativeVersion),
     previewUrl: buildSharePreviewUrl(item.imageId, derivativeVersion),
     playbackStrategy: item.playbackStrategy ?? 'preview',
+    videoPlaybackSource: getVideoPlaybackSource({
+      mediaType: item.mediaType,
+      filename: item.filename,
+      fileSize: item.fileSize,
+      width: item.width,
+      height: item.height,
+      playbackStrategy: item.playbackStrategy
+    }, 'share') ?? undefined,
     mimeType: item.mimeType,
     fileSize: item.fileSize
   };
@@ -571,6 +633,14 @@ function mapSharedFeedImage(image: IndexedFeedImage, derivativeVersion = getDeri
     isAnimated: Boolean(image.isAnimated),
     thumbnailUrl: buildShareThumbnailUrl(representativeImageId, derivativeVersion),
     previewUrl: buildSharePreviewUrl(representativeImageId, derivativeVersion),
+    videoPlaybackSource: getVideoPlaybackSource({
+      mediaType: image.mediaType,
+      filename: image.filename,
+      fileSize: image.fileSize,
+      width: image.width,
+      height: image.height,
+      playbackStrategy: image.playbackStrategy
+    }, 'share') ?? undefined,
     sortTimestamp: image.sortTimestamp,
     postType: image.postType ?? 'single',
     itemCount: image.itemCount ?? (mediaItems.length || 1),
@@ -582,6 +652,14 @@ function mapImageDetail(image: IndexedImageDetail, derivativeVersion = getDeriva
   const { playbackStrategy, exifJson, placeId, placeSlug, placeName, placeKind, placeIsApproximate, isSaved, mediaItems, itemCount, ...rest } = image as any;
   const useOriginalForImages = appConfig.imageDetailSource === 'original';
   const representativeImageId = mediaItems?.[0]?.imageId ?? rest.id;
+  const videoPlaybackSource = getVideoPlaybackSource({
+    mediaType: rest.mediaType,
+    filename: rest.filename,
+    fileSize: rest.fileSize,
+    width: rest.width,
+    height: rest.height,
+    playbackStrategy
+  });
   return {
     ...rest,
     postType: rest.postType ?? 'single',
@@ -595,33 +673,47 @@ function mapImageDetail(image: IndexedImageDetail, derivativeVersion = getDeriva
     previewUrl: buildPreviewUrl({
       id: representativeImageId,
       mediaType: rest.mediaType,
-      previewUrl: rest.previewUrl
+      previewUrl: rest.previewUrl,
+      videoPlaybackSource
     }, useOriginalForImages, derivativeVersion),
     originalUrl: buildOriginalUrl(representativeImageId),
     playbackStrategy,
+    videoPlaybackSource: videoPlaybackSource ?? undefined,
     place: mapPlaceSummaryFromRow({ placeId, placeSlug, placeName, placeKind, placeIsApproximate }),
-    mediaItems: (mediaItems ?? []).map((item: any) => ({
-      imageId: item.imageId,
-      position: item.position,
-      filename: item.filename,
-      mediaType: item.mediaType,
-      width: item.width,
-      height: item.height,
-      durationMs: item.durationMs,
-      isAnimated: Boolean(item.isAnimated),
-      thumbnailUrl: toPublicMediaUrl('/thumbnails', item.thumbnailUrl, derivativeVersion),
-      previewUrl: buildPreviewUrl({
-        id: item.imageId,
+    mediaItems: (mediaItems ?? []).map((item: any) => {
+      const itemPlaybackSource = getVideoPlaybackSource({
         mediaType: item.mediaType,
-        previewUrl: item.previewUrl
-      }, false, derivativeVersion),
-      originalUrl: buildOriginalUrl(item.imageId),
-      playbackStrategy: item.playbackStrategy ?? 'preview',
-      mimeType: item.mimeType,
-      fileSize: item.fileSize,
-      relativePath: item.relativePath,
-      exif: item.exif ?? null
-    })),
+        filename: item.filename,
+        fileSize: item.fileSize,
+        width: item.width,
+        height: item.height,
+        playbackStrategy: item.playbackStrategy
+      });
+      return {
+        imageId: item.imageId,
+        position: item.position,
+        filename: item.filename,
+        mediaType: item.mediaType,
+        width: item.width,
+        height: item.height,
+        durationMs: item.durationMs,
+        isAnimated: Boolean(item.isAnimated),
+        thumbnailUrl: toPublicMediaUrl('/thumbnails', item.thumbnailUrl, derivativeVersion),
+        previewUrl: buildPreviewUrl({
+          id: item.imageId,
+          mediaType: item.mediaType,
+          previewUrl: item.previewUrl,
+          videoPlaybackSource: itemPlaybackSource
+        }, false, derivativeVersion),
+        originalUrl: buildOriginalUrl(item.imageId),
+        playbackStrategy: item.playbackStrategy ?? 'preview',
+        videoPlaybackSource: itemPlaybackSource ?? undefined,
+        mimeType: item.mimeType,
+        fileSize: item.fileSize,
+        relativePath: item.relativePath,
+        exif: item.exif ?? null
+      };
+    }),
     itemCount: itemCount ?? (mediaItems ? mediaItems.length : 1)
   };
 }
@@ -645,6 +737,14 @@ function mapSharedImageDetail(image: IndexedImageDetail, derivativeVersion = get
     isAnimated: Boolean(image.isAnimated),
     thumbnailUrl: buildShareThumbnailUrl(representativeImageId, derivativeVersion),
     previewUrl: buildSharePreviewUrl(representativeImageId, derivativeVersion),
+    videoPlaybackSource: getVideoPlaybackSource({
+      mediaType: image.mediaType,
+      filename: image.filename,
+      fileSize: image.fileSize,
+      width: image.width,
+      height: image.height,
+      playbackStrategy: image.playbackStrategy
+    }, 'share') ?? undefined,
     sortTimestamp: image.sortTimestamp,
     nextImageId: image.nextImageId,
     previousImageId: image.previousImageId,

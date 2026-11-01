@@ -95,6 +95,9 @@ const excludedFoldersBodySchema = z.object({
 const collectionBodySchema = z.object({
   name: z.string().trim().min(1).max(80)
 });
+export const manualRescanBodySchema = z.object({
+  repairDerivatives: z.boolean().optional()
+});
 
 const slugSchema = z.object({
   slug: z.string().min(1).max(240)
@@ -1285,7 +1288,9 @@ router.post(
   requireCapability('canManageLibrary', 'Admin access is required.'),
   adminMutationRateLimiter,
   requireNoScanInProgress,
-  async (_request, response) => {
+  async (request, response) => {
+  const body = manualRescanBodySchema.parse(request.body === undefined ? {} : request.body);
+
   try {
     if (scannerService.isLibraryRebuildRequired()) {
       response.status(409).json({
@@ -1294,7 +1299,9 @@ router.post(
       return;
     }
 
-    const lastScan = await scannerService.scanAll('manual');
+    const lastScan = await scannerService.scanAll('manual', {
+      repairUnchangedDerivatives: body.repairDerivatives ?? true
+    });
     await watcherService.start();
     response.json({
       ok: true,

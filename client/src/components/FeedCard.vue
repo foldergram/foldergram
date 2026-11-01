@@ -552,7 +552,9 @@ const mediaAspectRatio = computed(() => resolveFeedAspectRatio(props.item.width,
 const homeVideoAspectRatio = computed(() => loadedHomeVideoAspectRatio.value ?? mediaAspectRatio.value);
 const homeImageSrc = computed(() => (props.item.isAnimated ? props.item.previewUrl : props.item.thumbnailUrl));
 const activeMediaImageId = computed(() =>
-  isCarousel.value ? props.item.mediaItems?.[carouselIndex.value]?.imageId ?? props.item.id : props.item.id
+  isCarousel.value
+    ? props.item.mediaItems?.[carouselIndex.value]?.imageId ?? props.item.id
+    : props.item.mediaItems?.[0]?.imageId ?? props.item.id
 );
 const originalMediaUrl = computed(() => getOriginalMediaUrl(activeMediaImageId.value));
 const downloadOriginalMediaUrl = computed(() => getOriginalMediaDownloadUrl(activeMediaImageId.value));

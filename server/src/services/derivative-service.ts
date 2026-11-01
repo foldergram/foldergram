@@ -18,6 +18,7 @@ import {
 } from '../utils/image-utils.js';
 import { isNonemptyDerivative } from '../utils/derivative-cache.js';
 import { safeJoin } from '../utils/path-utils.js';
+import { shouldGenerateVideoPreview } from '../utils/video-playback-policy.js';
 
 const execFileAsync = promisify(execFile);
 const DIRECT_VIDEO_PLAYBACK_ALLOWED_AUDIO_CODECS = new Set(['aac']);
@@ -93,6 +94,12 @@ export interface PreviewDerivativeResult {
 export interface DerivativePathOverrides {
   thumbnailPath?: string;
   previewPath?: string;
+}
+
+export type VideoPreviewPolicy = 'auto' | 'required' | 'skip';
+
+export interface DerivativeGenerationOptions extends DerivativePathOverrides {
+  videoPreviewPolicy?: VideoPreviewPolicy;
 }
 
 interface ReadMediaMetadataOptions {
@@ -385,11 +392,13 @@ async function resolveVideoPlaybackStrategy(
   const hasCompatibleVideoCodec = videoStream.codec_name === 'h264';
   const hasCompatiblePixelFormat = DIRECT_VIDEO_PLAYBACK_ALLOWED_PIXEL_FORMATS.has(videoStream.pix_fmt ?? '');
   const hasCompatibleAudioCodec = !audioStream || DIRECT_VIDEO_PLAYBACK_ALLOWED_AUDIO_CODECS.has(audioStream.codec_name ?? '');
+  const hasKnownDimensions = (videoStream.width ?? 0) > 0 && (videoStream.height ?? 0) > 0;
 
   return hasCompatibleContainer &&
     hasCompatibleVideoCodec &&
     hasCompatiblePixelFormat &&
-    hasCompatibleAudioCodec
+    hasCompatibleAudioCodec &&
+    hasKnownDimensions
     ? 'original'
     : 'preview';
 }
@@ -706,10 +715,14 @@ async function generateVideoDerivatives(
   sourcePath: string,
   thumbnailAbsolutePath: string,
   previewAbsolutePath: string,
-  force: boolean
+  force: boolean,
+  generatePreview: boolean
 ): Promise<Pick<DerivativeResult, 'generatedThumbnail' | 'generatedPreview'>> {
+  if (force && !generatePreview) {
+    await fs.rm(previewAbsolutePath, { force: true });
+  }
   const shouldWriteThumbnail = force || !(await isNonemptyDerivative(thumbnailAbsolutePath));
-  const shouldWritePreview = force || !(await isNonemptyDerivative(previewAbsolutePath));
+  const shouldWritePreview = generatePreview && (force || !(await isNonemptyDerivative(previewAbsolutePath)));
 
   if (shouldWriteThumbnail) {
     await writeVideoThumbnail(sourcePath, thumbnailAbsolutePath);
@@ -725,11 +738,36 @@ async function generateVideoDerivatives(
   };
 }
 
+async function resolveVideoPreviewRequirement(
+  sourcePath: string,
+  relativePath: string,
+  metadata: MediaMetadata,
+  policy: VideoPreviewPolicy
+): Promise<boolean> {
+  if (policy === 'required') {
+    return true;
+  }
+
+  if (policy === 'skip') {
+    return false;
+  }
+
+  const sourceStats = await fs.stat(sourcePath);
+  return shouldGenerateVideoPreview({
+    mediaType: 'video',
+    extension: path.extname(relativePath),
+    fileSize: sourceStats.size,
+    width: metadata.width,
+    height: metadata.height,
+    playbackStrategy: metadata.playbackStrategy
+  });
+}
+
 export async function generateThumbnailDerivative(
   sourcePath: string,
   relativePath: string,
   force = false,
-  overrides: DerivativePathOverrides = {}
+  overrides: DerivativeGenerationOptions = {}
 ): Promise<ThumbnailDerivativeResult> {
   const mediaType = getMediaTypeFromExtension(path.extname(relativePath));
   const isAvif = path.extname(relativePath).toLowerCase() === '.avif';
@@ -769,7 +807,7 @@ export async function generatePreviewDerivative(
   sourcePath: string,
   relativePath: string,
   force = false,
-  overrides: DerivativePathOverrides = {}
+  overrides: DerivativeGenerationOptions = {}
 ): Promise<PreviewDerivativeResult> {
   const mediaType = getMediaTypeFromExtension(path.extname(relativePath));
   const isAvif = path.extname(relativePath).toLowerCase() === '.avif';
@@ -779,6 +817,24 @@ export async function generatePreviewDerivative(
 
   if (shouldWritePreview) {
     if (mediaType === 'video') {
+      const policy = overrides.videoPreviewPolicy ?? 'required';
+      if (policy === 'skip') {
+        return {
+          previewPath,
+          generatedPreview: false
+        };
+      }
+
+      if (policy === 'auto') {
+        const metadata = await readVideoMetadata(sourcePath);
+        if (!await resolveVideoPreviewRequirement(sourcePath, relativePath, metadata, policy)) {
+          return {
+            previewPath,
+            generatedPreview: false
+          };
+        }
+      }
+
       await writeVideoPreview(sourcePath, previewAbsolutePath);
     } else if (isAvif) {
       const avifSource = await inspectAvifSource(sourcePath, {
@@ -809,7 +865,7 @@ export async function generateDerivatives(
   sourcePath: string,
   relativePath: string,
   force = false,
-  overrides: DerivativePathOverrides = {}
+  overrides: DerivativeGenerationOptions = {}
 ): Promise<DerivativeResult> {
   const mediaType = getMediaTypeFromExtension(path.extname(relativePath));
   const isAvif = path.extname(relativePath).toLowerCase() === '.avif';
@@ -822,7 +878,19 @@ export async function generateDerivatives(
 
   if (mediaType === 'video') {
     metadata = await readVideoMetadata(sourcePath);
-    generated = await generateVideoDerivatives(sourcePath, thumbnailAbsolutePath, previewAbsolutePath, force);
+    const shouldGeneratePreview = await resolveVideoPreviewRequirement(
+      sourcePath,
+      relativePath,
+      metadata,
+      overrides.videoPreviewPolicy ?? 'auto'
+    );
+    generated = await generateVideoDerivatives(
+      sourcePath,
+      thumbnailAbsolutePath,
+      previewAbsolutePath,
+      force,
+      shouldGeneratePreview
+    );
   } else if (isAvif) {
     const avifSource = await inspectAvifSource(sourcePath, {
       requireAnimatedVideoStreamIndex: true

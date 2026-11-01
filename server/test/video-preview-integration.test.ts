@@ -4,7 +4,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
+import type express from 'express';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+
+import { requestTestApp } from './http-test-utils.js';
 
 const run = promisify(execFile);
 const binariesAvailable = await Promise.all(['ffmpeg', 'ffprobe'].map(async (binary) => {
@@ -24,6 +27,7 @@ describe.skipIf(binariesAvailable.includes(false)).sequential('real video previe
   let scannerService: typeof import('../src/services/scanner-service.js')['scannerService'];
   let imageRepository: typeof import('../src/db/repositories.js')['imageRepository'];
   let writeVideoPreview: typeof import('../src/services/derivative-service.js')['writeVideoPreview'];
+  let generateDerivatives: typeof import('../src/services/derivative-service.js')['generateDerivatives'];
 
   beforeAll(async () => {
     tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'foldergram-real-video-'));
@@ -38,7 +42,7 @@ describe.skipIf(binariesAvailable.includes(false)).sequential('real video previe
     ({ appConfig } = await import('../src/config/env.js'));
     ({ scannerService } = await import('../src/services/scanner-service.js'));
     ({ imageRepository } = await import('../src/db/repositories.js'));
-    ({ writeVideoPreview } = await import('../src/services/derivative-service.js'));
+    ({ writeVideoPreview, generateDerivatives } = await import('../src/services/derivative-service.js'));
     await fs.mkdir(path.join(appConfig.galleryRoot, 'album'), { recursive: true });
   });
 
@@ -117,6 +121,64 @@ describe.skipIf(binariesAvailable.includes(false)).sequential('real video previe
     expect((await fs.stat(preview)).mtimeMs).toBe(publishedMtime);
   });
 
+  it('shares the replacement video after a quick scan switches from preview to original playback', async () => {
+    const relativePath = 'replacement/changed.mp4';
+    const source = path.join(appConfig.galleryRoot, relativePath);
+    await fs.mkdir(path.dirname(source), { recursive: true });
+    async function createReplacement(color: string, pixelFormat: string) {
+      await run('ffmpeg', [
+        '-y', '-v', 'error', '-f', 'lavfi', '-i',
+        `color=c=${color}:s=96x64:r=10:d=0.5`,
+        '-c:v', 'libx264', '-pix_fmt', pixelFormat, source
+      ]);
+    }
+    await createReplacement('red', 'yuv444p');
+    expect((await scannerService.scanAll('manual', { repairUnchangedDerivatives: false }))?.status).toBe('completed');
+    const first = imageRepository.getByRelativePath(relativePath)!;
+    expect(first.playback_strategy).toBe('preview');
+    const preview = path.join(appConfig.previewsDir, first.preview_path);
+    const oldPreviewBytes = await fs.readFile(preview);
+
+    await createReplacement('blue', 'yuv420p');
+    expect((await scannerService.scanAll('manual', { repairUnchangedDerivatives: false }))?.status).toBe('completed');
+    const changed = imageRepository.getByRelativePath(relativePath)!;
+    expect(changed.playback_strategy).toBe('original');
+    expect(changed.id).toBe(first.id);
+    await expect(fs.stat(preview)).rejects.toMatchObject({ code: 'ENOENT' });
+
+    const { folderShareService } = await import('../src/services/folder-share-service.js');
+    const { folderRepository } = await import('../src/db/repositories.js');
+    const { authService } = await import('../src/services/auth-service.js');
+    const { createApp } = await import('../src/app.js');
+    const folder = folderRepository.getAll().find((entry) => entry.id === changed.folder_id)!;
+    const link = folderShareService.createLink(folder.slug, { expiresAt: null })!;
+    const grant = folderShareService.verifyLinkToken(folder.slug, link.rawToken)!;
+    const mockResponse = { cookie: vi.fn().mockReturnThis(), setHeader: vi.fn() };
+    folderShareService.setShareSession(
+      mockResponse as unknown as express.Response,
+      { secure: false, get: () => undefined } as unknown as express.Request,
+      grant
+    );
+    authService.setAdminPassword('admin12345');
+    const headers = { Cookie: `foldergram_share_session=${mockResponse.cookie.mock.calls.at(-1)?.[1]}` };
+    const app = createApp();
+    const shared = await requestTestApp(app, 'GET', `/api/share/images/${changed.id}/preview`, headers);
+    expect(shared.status).toBe(200);
+    expect(shared.body).not.toBe(oldPreviewBytes.toString('utf8'));
+    const replacementBytes = await fs.readFile(preview);
+    const { stdout: pixel } = await run('ffmpeg', [
+      '-v', 'error', '-i', preview, '-frames:v', '1', '-vf', 'scale=1:1',
+      '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'
+    ], { encoding: 'buffer' });
+    expect(pixel[2]).toBeGreaterThan(200);
+    expect(pixel[0]).toBeLessThan(30);
+    expect((await requestTestApp(app, 'GET', `/api/originals/${changed.id}`, headers)).status).toBe(401);
+
+    expect((await scannerService.scanAll('manual', { repairUnchangedDerivatives: true }))?.status).toBe('completed');
+    expect(await fs.readFile(preview)).toEqual(replacementBytes);
+    expect((await requestTestApp(app, 'GET', `/api/share/images/${changed.id}/preview`, headers)).body).toBe(shared.body);
+  });
+
   it('reports no-decodable-audio failures on initial scan and repair rescan', async () => {
     const source = path.join(appConfig.galleryRoot, 'album', 'unsupported.mov');
     await createMovie(source, false);
@@ -131,6 +193,31 @@ describe.skipIf(binariesAvailable.includes(false)).sequential('real video previe
     const rescan = await scannerService.scanAll('manual');
     expect(rescan?.status).toBe('completed_with_errors');
     expect(rescan?.error_text).toContain('No audio track');
+  });
+
+  it('skips playable preview transcoding for a real compatible MP4 within the direct-playback budgets', async () => {
+    const source = path.join(appConfig.galleryRoot, 'album', 'direct-playback.mp4');
+    await run('ffmpeg', [
+      '-y', '-v', 'error',
+      '-f', 'lavfi', '-i', 'color=c=blue:s=96x64:r=10:d=0.5',
+      '-f', 'lavfi', '-i', 'sine=frequency=440:duration=0.5',
+      '-map', '0:v', '-map', '1:a',
+      '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
+      '-c:a', 'aac',
+      '-movflags', '+faststart',
+      source
+    ]);
+
+    const result = await generateDerivatives(source, 'album/direct-playback.mp4', false, {
+      thumbnailPath: 'integration/direct-playback.webp',
+      previewPath: 'integration/direct-playback.mp4'
+    });
+
+    expect(result.playbackStrategy).toBe('original');
+    expect(result.generatedThumbnail).toBe(true);
+    expect(result.generatedPreview).toBe(false);
+    expect((await fs.stat(path.join(appConfig.thumbnailsDir, 'integration/direct-playback.webp'))).size).toBeGreaterThan(0);
+    await expect(fs.stat(path.join(appConfig.previewsDir, 'integration/direct-playback.mp4'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('produces a decodable silent preview for a genuinely silent movie', async () => {

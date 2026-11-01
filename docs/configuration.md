@@ -239,10 +239,16 @@ Accepted values:
 
 Behavior:
 
-- `eager` generates thumbnails and previews during scans
-- `lazy` still indexes metadata during scans, but missing files are generated on the first request to `/thumbnails/...` or `/previews/...` and then cached on disk
-- lazy mode applies to thumbnails and previews
-- lazy mode keeps derivative URLs deterministic because the stored asset-key derivative paths are still persisted in SQLite
+- `eager` generates required thumbnails and previews during scans. Qualifying
+  direct-playback videos still receive posters but skip the playable preview.
+- `lazy` still indexes metadata during scans, but missing required files are
+  generated on the first request to `/thumbnails/...` or `/previews/...` and
+  then cached on disk
+- lazy mode applies to thumbnails and required previews
+- lazy mode keeps derivative URLs deterministic because the stored asset-key
+  derivative paths are still persisted in SQLite
+- old normal video preview URLs resolve to the indexed original when the asset
+  qualifies for direct playback
 
 ### Recommended combinations
 
@@ -270,12 +276,46 @@ Behavior:
 
 ### Settings actions and lazy mode
 
-- `Scan Library` always refreshes index metadata.
+- **Scan for changes** is the primary scan action. It discovers additions,
+  updates, removals, and exclusions without verifying generated media for
+  unchanged assets. It sends `{"repairDerivatives": false}`.
+- **Scan and repair derivatives** is the secondary scan action. It performs the
+  same discovery and also checks generated media for unchanged files. It sends
+  `{"repairDerivatives": true}`.
 - `Rebuild Library Index` resets and rebuilds the SQLite-backed index. Existing sharded derivatives remain reusable when the same indexed rows survive the upgrade path.
-- In `DERIVATIVE_MODE=lazy`, neither a normal scan nor `Rebuild Library Index` pre-generates missing thumbnails or previews.
+- In `DERIVATIVE_MODE=lazy`, neither scan action nor `Rebuild Library Index` pre-generates missing thumbnails or required previews.
 - `Regenerate Thumbnails` remains a manual thumbnail and video-poster rebuild only. It does not rebuild previews.
 - When `SCAN_MEDIA_ERROR_MODE=skip` records media failures, the admin Settings view shows the full report path for that scan.
 - Runtime-only app-wide controls such as stories mode, carousel mode, and excluded folders live under `Settings -> General Settings`, while scan and rebuild actions live under `Settings -> Scan & Library`.
+
+External scripts can use the optional request body directly:
+
+```http
+POST /api/admin/rescan
+Content-Type: application/json
+
+{"repairDerivatives": false}
+```
+
+Omitting the body preserves the existing repair-default behavior. The
+`pnpm rescan` script keeps that default.
+
+### Direct-playback video previews
+
+A video plays from its indexed original during normal browsing only when it is
+an `.mp4` with compatible container, H.264 video, `yuv420p` pixels, AAC or no
+audio, a known size of at most `24 MiB`, and a known display width of at most
+`1500` pixels. Posters are always generated. Other videos continue to use
+generated previews.
+
+Active folder-share links and configured share passwords can require a
+generated preview for shared delivery even when normal playback uses the
+original. Those previews are created during eager processing of new or repaired
+media, or on authorized shared first access.
+
+Run **Scan and repair derivatives** to reclaim obsolete previews for
+already-indexed qualifying videos. Quick scans do not perform bulk preview
+cleanup.
 
 ## Derivative layout upgrade
 
@@ -431,4 +471,4 @@ from `GET /api/admin/scan-progress` and from the `scan` field in
 
 ## Carousel-folder mode
 
-The SQLite setting `library.treat_carousels_as_folders` controls folders named `carousels`. Its default `false` value reserves `AppFolder/carousels/<post>/` for multi-item posts. Enable **Treat carousels folders as normal app folders** from **Settings → General Settings** to index those paths as ordinary folders instead. When no indexed path conflicts with the reserved name, Settings can show a dismissible Carousel Posts introduction with an expandable folder example. Existing path collisions produce a migration decision card that remains available until a mode is saved. Settings shows a pending update until a successful full scan has applied the saved mode. Use **Scan Library** under normal conditions, or **Rebuild Library Index** when the gallery location requires a new index. There is no `.env` equivalent.
+The SQLite setting `library.treat_carousels_as_folders` controls folders named `carousels`. Its default `false` value reserves `AppFolder/carousels/<post>/` for multi-item posts. Enable **Treat carousels folders as normal app folders** from **Settings → General Settings** to index those paths as ordinary folders instead. When no indexed path conflicts with the reserved name, Settings can show a dismissible Carousel Posts introduction with an expandable folder example. Existing path collisions produce a migration decision card that remains available until a mode is saved. Settings shows a pending update until a successful full scan has applied the saved mode. Use **Scan for changes** under normal conditions, or **Rebuild Library Index** when the gallery location requires a new index. There is no `.env` equivalent.

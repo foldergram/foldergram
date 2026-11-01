@@ -404,6 +404,27 @@ describe('PostViewer', () => {
     expect(player.playCallCount).toBeGreaterThanOrEqual(2);
   });
 
+  it('does not show the HD switch when the video already plays its original source', async () => {
+    const image = {
+      ...createHdVideoDetail(26),
+      previewUrl: '/api/originals/26',
+      videoPlaybackSource: 'original' as const
+    };
+    const wrapper = mount(PostViewer, {
+      props: {
+        image,
+        isModal: true
+      },
+      global: {
+        stubs: globalStubs
+      }
+    });
+
+    await flushPromises();
+
+    expect(wrapper.find('button[aria-label="Switch to HD original"]').exists()).toBe(false);
+  });
+
   it('shows the paused indicator when autoplay is blocked on load', async () => {
     const wrapper = mount(PostViewer, {
       props: {

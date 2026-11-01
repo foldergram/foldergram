@@ -1,3 +1,5 @@
+import path from 'node:path';
+
 import express from 'express';
 import pLimit from 'p-limit';
 
@@ -7,11 +9,13 @@ import type { ImageRecord } from '../types/models.js';
 import { log } from '../services/log-service.js';
 import { generatePreviewDerivative, generateThumbnailDerivative } from '../services/derivative-service.js';
 import { scannerService } from '../services/scanner-service.js';
+import { galleryService } from '../services/gallery-service.js';
 import { maintenanceOperationLock } from '../services/maintenance-operation-lock.js';
 import { resolveOriginalPath } from '../utils/media-paths.js';
 import { applyDerivativeErrorHeaders, applyNoStoreMediaHeaders, applyProtectedMediaHeaders } from '../utils/media-response.js';
 import { isNonemptyDerivative } from '../utils/derivative-cache.js';
 import { normalizePath, safeJoin } from '../utils/path-utils.js';
+import { resolveVideoPlaybackSource } from '../utils/video-playback-policy.js';
 
 // In-memory map to deduplicate concurrent generation requests for the same derivative path.
 const inflightGenerations = new Map<string, Promise<void>>();
@@ -54,6 +58,29 @@ function findCurrentImageRecord(
 function sendDerivativeNotFound(response: express.Response): void {
   applyDerivativeErrorHeaders(response);
   response.status(404).json({ message: 'Derivative not found.' });
+}
+
+function isEligibleNormalVideo(imageRecord: ImageRecord): boolean {
+  if (imageRecord.is_deleted || imageRecord.is_trashed) {
+    return false;
+  }
+
+  return resolveVideoPlaybackSource({
+    mediaType: imageRecord.media_type,
+    extension: imageRecord.extension || path.extname(imageRecord.relative_path),
+    fileSize: imageRecord.file_size,
+    width: imageRecord.width,
+    height: imageRecord.height,
+    playbackStrategy: imageRecord.playback_strategy
+  }) === 'original';
+}
+
+function resolveEligibleOriginalPath(imageRecord: ImageRecord): string | null {
+  if (!isEligibleNormalVideo(imageRecord)) {
+    return null;
+  }
+
+  return galleryService.getOriginalMediaFile(imageRecord.id)?.path ?? null;
 }
 
 function queueLazyGeneration(
@@ -129,6 +156,13 @@ function sendDerivativeFile(
           return;
         }
 
+        if ('status' in error && error.status === 416) {
+          applyDerivativeErrorHeaders(response);
+          response.status(416).end();
+          resolve('sent');
+          return;
+        }
+
         reject(error);
         return;
       }
@@ -164,6 +198,21 @@ async function serveOrGenerate(
     return;
   }
 
+  if (kind === 'preview' && initialImageRecord.media_type === 'video') {
+    const originalPath = resolveEligibleOriginalPath(initialImageRecord);
+    if (originalPath) {
+      try {
+        await sendDerivativeFile(response, originalPath, { noStore: true });
+      } catch {
+        if (!response.headersSent) {
+          applyDerivativeErrorHeaders(response);
+          response.status(500).json({ message: 'Failed to serve derivative.' });
+        }
+      }
+      return;
+    }
+  }
+
   // Fast path: reuse only a nonempty cached derivative.
   if (await isNonemptyDerivative(absoluteOutputPath)) {
     try {
@@ -183,6 +232,11 @@ async function serveOrGenerate(
   }
 
   // Missing or empty derivatives fall through to generation.
+
+  if (kind === 'preview' && isEligibleNormalVideo(initialImageRecord)) {
+    sendDerivativeNotFound(response);
+    return;
+  }
 
   if (scannerService.isLibraryRebuildRequired()) {
     applyDerivativeErrorHeaders(response);
@@ -326,6 +380,7 @@ export async function serveDerivativeForImage(
 
 const lazyThumbnailsRouter = express.Router();
 const lazyPreviewsRouter = express.Router();
+const previewOriginalResolutionRouter = express.Router();
 
 lazyThumbnailsRouter.get('/*path', async (request, response) => {
   await serveOrGenerate(request, response, appConfig.thumbnailsDir, 'thumbnail');
@@ -335,4 +390,40 @@ lazyPreviewsRouter.get('/*path', async (request, response) => {
   await serveOrGenerate(request, response, appConfig.previewsDir, 'preview');
 });
 
-export { lazyThumbnailsRouter, lazyPreviewsRouter };
+previewOriginalResolutionRouter.get('/*path', async (request, response, next) => {
+  const requestedPath = getRequestedPath(request);
+  if (!requestedPath) {
+    next();
+    return;
+  }
+
+  const imageRecord = findCurrentImageRecord(requestedPath, 'preview');
+  if (!imageRecord || imageRecord.media_type !== 'video') {
+    next();
+    return;
+  }
+
+  const originalPath = resolveEligibleOriginalPath(imageRecord);
+  if (!originalPath) {
+    const cachedPreviewPath = resolveDerivativePath(appConfig.previewsDir, requestedPath);
+    if (cachedPreviewPath && await isNonemptyDerivative(cachedPreviewPath)) {
+      next();
+      return;
+    }
+
+    sendDerivativeNotFound(response);
+    return;
+  }
+
+  try {
+    await sendDerivativeFile(response, originalPath, { noStore: true });
+  } catch {
+    if (response.headersSent) {
+      return;
+    }
+
+    sendDerivativeNotFound(response);
+  }
+});
+
+export { lazyThumbnailsRouter, lazyPreviewsRouter, previewOriginalResolutionRouter };

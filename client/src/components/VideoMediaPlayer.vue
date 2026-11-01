@@ -133,6 +133,7 @@ const props = withDefaults(
     src: string | PlayerSrc;
     originalUrl?: string;
     playbackStrategy?: 'preview' | 'original' | null;
+    videoPlaybackSource?: 'original' | 'preview' | null;
     width?: number | null;
     height?: number | null;
     poster?: string;
@@ -151,6 +152,7 @@ const props = withDefaults(
   {
     originalUrl: '',
     playbackStrategy: null,
+    videoPlaybackSource: null,
     width: null,
     height: null,
     poster: '',
@@ -192,6 +194,7 @@ let removeEventListeners: (() => void) | null = null;
 const hasHdOption = computed(() => {
   return (
     props.playbackStrategy === 'original' &&
+    props.videoPlaybackSource !== 'original' &&
     Boolean(props.originalUrl) &&
     videoPreviewWouldDownscale(props.width, props.height)
   );

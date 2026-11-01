@@ -31,12 +31,14 @@ cached on disk.
 
 ## Output sizes
 
-These values are defined in `server/src/utils/image-utils.ts`.
+Image sizing values are defined in `server/src/utils/image-utils.ts`. Video direct-playback limits are defined in `server/src/utils/video-playback-policy.ts`.
 
 | Constant | Value | Used for |
 | --- | --- | --- |
 | `THUMBNAIL_SIZE` | `640` | Feed cards, folder grids, avatars, and video posters |
-| `PREVIEW_MAX_WIDTH` | `1500` | Detail-view previews and transcodes |
+| `PREVIEW_MAX_WIDTH` | `1500` | Detail-view image previews and animated AVIF preview width |
+| `DIRECT_VIDEO_PLAYBACK_MAX_BYTES` | `24 * 1024 * 1024` | Largest source file that may play directly |
+| `DIRECT_VIDEO_PLAYBACK_MAX_DISPLAY_WIDTH` | `1500` | Widest orientation-correct display width that may play directly |
 
 ## Derivative timing
 
@@ -44,13 +46,18 @@ These values are defined in `server/src/utils/image-utils.ts`.
 
 | Mode | Behavior |
 | --- | --- |
-| `eager` | Scans queue derivative generation during indexing. |
-| `lazy` | Scans index metadata only. Missing thumbnails and previews are generated when `/thumbnails/...` or `/previews/...` is first requested. |
+| `eager` | Scans queue required thumbnails and previews during indexing. Qualifying direct-playback videos still receive posters but skip the playable preview. |
+| `lazy` | Scans index metadata only. Missing thumbnails and required previews are generated when `/thumbnails/...` or `/previews/...` is first requested. |
 
 Lazy mode still writes the generated files to the configured derivative
 directories, so subsequent requests use the cached file on disk. It also uses
 the same media-specific generation rules as eager mode, including animated AVIF
-preview generation.
+preview generation and the direct-playback video policy.
+
+For an eligible direct-playback video, a request to a previously issued
+`/previews/...mp4` URL resolves to the indexed original instead of recreating a
+preview. Folder-share preview routes remain scoped to generated media and can
+create a shared preview on authorized first access.
 
 ## Scan-time media failures
 
@@ -123,9 +130,11 @@ Foldergram uses:
 This hybrid path keeps static AVIF on the normal Sharp image pipeline while still supporting animated AVIF sequences that Sharp cannot decode reliably in the current runtime.
 
 Existing libraries with already indexed AVIF files receive a one-time AVIF
-metadata repair on the next successful full scan after upgrade. That pass
+metadata repair on the next successful full scan after upgrade, including
+**Scan for changes** even when folder contents are unchanged. That pass
 refreshes legacy animated flags and AVIF timestamp fallbacks for stored rows,
 then stops re-reading unchanged AVIF files on later scans.
+If metadata inspection fails, the repair stays pending for a later scan.
 
 ## Image detail source
 
@@ -160,7 +169,9 @@ Video thumbnails are generated with `ffmpeg`:
 
 ## Video preview generation
 
-When a video needs a derived preview, Foldergram transcodes it with `ffmpeg` to:
+A video needs a derived preview when it is not eligible for direct playback
+under the policy below, or when an active folder share requires a scoped
+preview. Foldergram transcodes that preview with `ffmpeg` to:
 
 - H.264 video
 - AAC audio when audio is present
@@ -192,21 +203,77 @@ checks container and stream metadata, rather than decoding the full output.
 
 ## Direct-original video playback
 
-Foldergram can mark the original video as eligible for direct playback in the
-detail player when all of these are true:
+Foldergram can use the original video as the ordinary playback source when all
+of these are true:
 
 - the file extension is `.mp4`
 - the container is compatible with MP4
 - the video codec is H.264
 - the pixel format is `yuv420p`
 - the audio codec is AAC, or there is no audio track
+- the source size is known, positive, and at most `24 MiB` inclusive
+- the orientation-correct display width is known, positive, and at most `1500` pixels inclusive
 
-When that happens:
+Unknown or incomplete compatibility metadata conservatively keeps the generated
+preview until a later indexing or backfill pass can establish eligibility. The
+width budget uses display width, so rotated and portrait videos follow the same
+orientation-correct dimensions shown by the app. It is not a bitrate or
+pixel-count limit.
 
-- `playbackStrategy` is set to `original`
-- generated previews still remain the default playback source
-- the detail player can expose an `HD` switch when the original is compatible and higher resolution than the generated preview
-- feed cards and other list surfaces continue to use generated preview media
+When a video qualifies:
+
+- Foldergram still generates the thumbnail/poster.
+- Normal playback uses the indexed original-media endpoint. For example,
+  `previewUrl` resolves to `/api/originals/:id`.
+- `playbackStrategy` continues to report original-playback compatibility.
+- `videoPlaybackSource` reports the selected ordinary source as `original`.
+- Feed cards, folder pages, Reels, stories, likes, collections, and Carousel
+  members use that same selected source.
+- The detail player does not show an HD switch when playback is already the
+  original. Larger compatible videos that use a generated preview keep the
+  existing preview/HD switch behavior.
+
+When a video is above either budget, or compatibility metadata does not qualify:
+
+- A generated preview remains required for ordinary playback.
+- `videoPlaybackSource` is `preview`.
+- The original may still be offered through the detail player's HD switch when
+  `playbackStrategy` is `original`.
+
+### Folder shares
+
+Folder-share visitors do not receive ordinary `/api/originals/:id` access.
+Shared payloads continue to use `/api/share/images/:id/preview`. A qualifying
+video may still need a generated preview when a folder has an active,
+unexpired link share or a configured share password. Eager processing of new or
+repaired media can create or retain those shared previews. Lazy shared delivery
+can create one on authorized first access.
+
+### Upgrade, old URLs, and reclamation
+
+Existing indexed metadata is enough to select originals. No library rebuild or
+all-library FFprobe pass is required.
+
+Previously issued normal `/previews/...mp4` URLs keep working in both eager and
+lazy modes. For a currently eligible asset, the preview URL resolves to the same
+original-media serving path. The response does not use the immutable derivative
+cache policy because it is serving a mutable original.
+
+**Scan and repair derivatives** reclaims obsolete video previews for
+already-indexed qualifying videos. It validates the current source, checks live
+derivative references and active share requirements, and removes only the
+generated preview file. Thumbnails and originals are preserved. Quick scans do
+not perform this bulk cleanup.
+
+When a source video changes, both scan modes invalidate its previous generated
+preview, including when the replacement qualifies for direct playback. A folder
+share enabled afterward generates a preview from the replacement. Repair scans
+also recheck share requirements immediately before removing an obsolete preview,
+so links or passwords enabled during source validation retain the cached file.
+
+During derivative-layout migration and repair, an intentionally absent normal
+video preview is treated as expected rather than as corruption, so it does not
+trigger repeated transcoding or prevent migration completion.
 
 ## GIF handling
 

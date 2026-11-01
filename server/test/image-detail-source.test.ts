@@ -97,9 +97,10 @@ describe.sequential('IMAGE_DETAIL_SOURCE config', () => {
     const detail = galleryService.getImageDetail(video.id);
     expect(detail?.previewUrl).toMatch(/^\/previews\//);
     expect(detail?.playbackStrategy).toBe('preview');
+    expect(detail?.videoPlaybackSource).toBe('preview');
   });
 
-  it('keeps preview URLs for compatible videos while exposing playbackStrategy=original', async () => {
+  it('uses the original URL for compatible videos within the direct-playback budgets', async () => {
     await setup('preview');
 
     maintenanceRepository.resetLibraryIndex();
@@ -107,9 +108,10 @@ describe.sequential('IMAGE_DETAIL_SOURCE config', () => {
     const compatibleMp4 = createIndexedMedia(folder, 'compatible.mp4', 3000, 'original', 5000);
 
     const detail = galleryService.getImageDetail(compatibleMp4.id);
-    expect(detail?.previewUrl).toBe('/previews/vids2/compatible.mp4');
+    expect(detail?.previewUrl).toBe(`/api/originals/${compatibleMp4.id}`);
     expect(detail?.originalUrl).toBe(`/api/originals/${compatibleMp4.id}`);
     expect(detail?.playbackStrategy).toBe('original');
+    expect(detail?.videoPlaybackSource).toBe('original');
   });
 
   it('feed items always use preview URLs regardless of IMAGE_DETAIL_SOURCE=original', async () => {
