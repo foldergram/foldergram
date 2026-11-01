@@ -7,6 +7,7 @@ import { appConfig, repositoryRoot } from './config/env.js';
 import { requireApiAuthentication, requireMediaAuthentication } from './middleware/auth-protection.js';
 import { requireTrustedMutationRequest } from './middleware/csrf-protection.js';
 import { blockPublicDemoMutations } from './middleware/public-demo-mode.js';
+import { routeTimingMiddleware } from './middleware/route-timing.js';
 import { apiRouter } from './routes/api.js';
 import { authService } from './services/auth-service.js';
 import { lazyThumbnailsRouter, lazyPreviewsRouter } from './routes/lazy-derivatives.js';
@@ -32,7 +33,7 @@ export function createApp() {
     app.use('/previews', requireMediaAuthentication, express.static(appConfig.previewsDir, createProtectedStaticOptions()));
   }
 
-  app.use('/api', (_request, response, next) => {
+  app.use('/api', routeTimingMiddleware, (_request, response, next) => {
     applyApiNoStoreHeaders(response);
     next();
   });

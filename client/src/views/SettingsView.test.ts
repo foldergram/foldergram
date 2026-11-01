@@ -190,6 +190,22 @@ describe('SettingsView', () => {
     expect(warning.text()).toContain('The server and library remain available.');
   });
 
+  it('fetches the full admin stats payload exactly once when settings opens', async () => {
+    const appStore = useAppStore();
+    appStore.$patch({ stats: createAppStatus() });
+
+    const wrapper = mountSettingsView();
+    await flushPromises();
+    await flushPromises();
+
+    expect(vi.mocked(galleryApi.fetchAdminStats)).toHaveBeenCalledTimes(1);
+
+    await openGeneralSettingsSidebarTab(wrapper);
+    await flushPromises();
+
+    expect(vi.mocked(galleryApi.fetchAdminStats)).toHaveBeenCalledTimes(1);
+  });
+
   it('renders the combined feed defaults card with separate home and reels groups', async () => {
     const appStore = useAppStore();
     appStore.$patch({

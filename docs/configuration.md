@@ -305,6 +305,16 @@ Scan phases behave as follows:
 - `derivatives` is determinate and reports queued-versus-completed jobs plus generated thumbnails and previews
 - completed runs can finish as `completed_with_errors` when `SCAN_MEDIA_ERROR_MODE=skip` records supported-media failures
 
+## Slow request logging
+
+To help profile large local libraries, the API logs slow work to the server console:
+
+- API requests that finish above 1000 ms log one line such as `Slow API request: GET /admin/stats` with the elapsed duration
+- internal indexed work that exceeds the same threshold logs a line such as `Slow request work: status.folder_count`
+- with `LOG_VERBOSE=1` the slow threshold drops to 250 ms so near-slow requests and scans are easier to spot
+- log lines use stable route names and never include query strings, file paths, or request contents
+- in development mode, API responses may also carry a `Server-Timing` header so browsers can show request timing in DevTools
+
 ## Managed path ignores
 
 If your configured database, thumbnails, or previews directories live inside the

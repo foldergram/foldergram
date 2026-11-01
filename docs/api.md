@@ -850,8 +850,8 @@ additional fields below and uses the same admin-detailed `scan` payload as
 | Field | Notes |
 | --- | --- |
 | `deletedImages` | Soft-deleted post count. |
-| `thumbnailCount` | Actual generated thumbnail files currently present on disk. |
-| `previewCount` | Actual generated preview files currently present on disk. |
+| `thumbnailCount` | Count of indexed media-asset rows that store a non-empty thumbnail target. Independent of physical file existence. |
+| `previewCount` | Count of indexed media-asset rows that store a non-empty preview target. Independent of physical file existence. |
 | `storage.usingInMemoryDatabase` | Whether SQLite had to fall back to in-memory mode. |
 | `libraryIndex.currentGalleryRoot` | Current configured gallery root. |
 | `libraryIndex.previousGalleryRoot` | Prior configured gallery root when the root changed. |
@@ -861,6 +861,16 @@ additional fields below and uses the same admin-detailed `scan` payload as
 | `excludedFolders` | Env-backed, custom, and effective exclusion rules. |
 | `deletionRecovery` | Failed permanent-deletion recovery count and admin-safe journal details. A failed journal remains quarantined and does not stop the server or scans. |
 | `lastScan` | Last completed scan run. |
+
+`thumbnailCount` and `previewCount` are computed directly from the library
+index rather than by walking derivative directories, so requests stay fast on
+large libraries. The values count indexed media-asset rows with stored
+derivative targets, not posts: a single carousel post with three media members
+can contribute three rows to each count. Soft-deleted rows remain counted while
+their indexed targets stay stored; a rescan or physical derivative cleanup does
+not necessarily lower these values. The counts do not verify file existence, so
+missing or orphaned derivative files are not reflected. Use
+`POST /api/admin/rescan` to reconcile derivative state.
 
 The same `preferences.treatStoriesAsFolders` and `storiesMigration` fields from
 `GET /api/status` are also present here.

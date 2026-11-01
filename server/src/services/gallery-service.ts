@@ -64,6 +64,7 @@ import { parseNestedFolderTitleFormatSetting, serializeNestedFolderTitleFormatSe
 import { countSupportedRootMediaFiles } from '../utils/gallery-root-utils.js';
 import { resolveOriginalPath } from '../utils/media-paths.js';
 import { getLeafPathName, getParentRelativePath, getPathBreadcrumb } from '../utils/path-utils.js';
+import { measureOperation } from '../utils/perf-timing.js';
 import { buildReelQueue, shuffleReelCandidates, type ReelAffinitySignals } from '../utils/reels-utils.js';
 import { parseTreatStoriesAsFoldersSetting, serializeTreatStoriesAsFoldersSetting } from '../utils/stories-utils.js';
 import { geodataService, placeResolutionService } from './place-service.js';
@@ -459,35 +460,6 @@ async function removeDirectoryTree(targetPath: string | null): Promise<void> {
     if (directoryError.code !== 'ENOENT') {
       throw error;
     }
-  }
-}
-
-function countDerivativeFilesOnDisk(rootPath: string): number {
-  try {
-    const entries = fs.readdirSync(rootPath, { withFileTypes: true });
-    let count = 0;
-
-    for (const entry of entries) {
-      const entryPath = path.join(rootPath, entry.name);
-
-      if (entry.isDirectory()) {
-        count += countDerivativeFilesOnDisk(entryPath);
-        continue;
-      }
-
-      if (entry.isFile() && entry.name !== '.gitkeep') {
-        count += 1;
-      }
-    }
-
-    return count;
-  } catch (error) {
-    const filesystemError = error as NodeJS.ErrnoException;
-    if (filesystemError.code === 'ENOENT') {
-      return 0;
-    }
-
-    throw error;
   }
 }
 
@@ -1352,7 +1324,7 @@ export const galleryService = {
       };
     }
 
-    const candidates = imageRepository.listVisibleVideoCandidates();
+    const candidates = measureOperation('reels.candidate_selection', () => imageRepository.listVisibleVideoCandidates());
     const total = candidates.length;
     if (total === 0) {
       return {
@@ -1474,7 +1446,7 @@ export const galleryService = {
       return [];
     }
 
-    return folderRepository.getAllSummaries().map(buildFolderSummary);
+    return measureOperation('folders.summary_selection', () => folderRepository.getAllSummaries().map(buildFolderSummary));
   },
 
   listPlaces() {
@@ -2139,15 +2111,24 @@ export const galleryService = {
     const storiesMigration = getStoriesMigrationStatus();
     const treatCarouselsAsFolders = getTreatCarouselsAsFolders();
     const carouselsMigration = getCarouselsMigrationStatus();
-    const indexedPosts = storageState.libraryAvailable ? imageRepository.countFeed() : 0;
+    const indexedPosts = measureOperation('status.feed_count', () => (storageState.libraryAvailable ? imageRepository.countFeed() : 0));
+    const indexedMediaAssets = measureOperation('status.media_assets_count', () =>
+      storageState.libraryAvailable ? imageRepository.countVisibleMediaAssets() : 0
+    );
+    const indexedCarousels = measureOperation('status.carousel_count', () =>
+      storageState.libraryAvailable ? imageRepository.countVisibleCarousels() : 0
+    );
+    const indexedVideos = measureOperation('status.video_count', () =>
+      storageState.libraryAvailable ? imageRepository.countVisibleSingleVideos() : 0
+    );
 
     return {
-      folders: storageState.libraryAvailable ? folderRepository.count() : 0,
+      folders: measureOperation('status.folder_count', () => (storageState.libraryAvailable ? folderRepository.count() : 0)),
       indexedImages: indexedPosts,
       indexedPosts,
-      indexedMediaAssets: storageState.libraryAvailable ? imageRepository.countVisibleMediaAssets() : 0,
-      indexedCarousels: storageState.libraryAvailable ? imageRepository.countVisibleCarousels() : 0,
-      indexedVideos: storageState.libraryAvailable ? imageRepository.countVisibleSingleVideos() : 0,
+      indexedMediaAssets,
+      indexedCarousels,
+      indexedVideos,
       scan: this.getScanProgress(),
       storage: {
         available: storageState.libraryAvailable,
@@ -2201,7 +2182,6 @@ export const galleryService = {
     const previousGalleryRoot = appSettingsRepository.get(PREVIOUS_GALLERY_ROOT_SETTING_KEY);
     const rebuildRequired = appSettingsRepository.get(LIBRARY_REBUILD_REQUIRED_SETTING_KEY) === '1';
     const lastSuccessfulGalleryRoot = appSettingsRepository.get(LAST_SUCCESSFUL_GALLERY_ROOT_SETTING_KEY);
-    const pendingDerivativeMigrationRows = storageState.libraryAvailable ? imageRepository.countPendingDerivativeMigrationRows() : 0;
     const defaultHomeFeedMode = getDefaultHomeFeedMode();
     const defaultLocale = getDefaultLocale();
     const defaultReelsFeedMode = getDefaultReelsFeedMode();
@@ -2213,47 +2193,52 @@ export const galleryService = {
     const carouselsMigration = getCarouselsMigrationStatus();
     const excludedFolders = getExcludedFolderSettings();
 
-    return {
-      folders: storageState.libraryAvailable ? folderRepository.count() : 0,
-      indexedImages: storageState.libraryAvailable ? imageRepository.countFeed() : 0,
-      indexedPosts: storageState.libraryAvailable ? imageRepository.countFeed() : 0,
-      indexedMediaAssets: storageState.libraryAvailable ? imageRepository.countVisibleMediaAssets() : 0,
-      indexedCarousels: storageState.libraryAvailable ? imageRepository.countVisibleCarousels() : 0,
-      indexedVideos: storageState.libraryAvailable ? imageRepository.countVisibleSingleVideos() : 0,
-      deletedImages: storageState.libraryAvailable ? imageRepository.countDeleted() : 0,
-      thumbnailCount: storageState.libraryAvailable ? countDerivativeFilesOnDisk(appConfig.thumbnailsDir) : 0,
-      previewCount: storageState.libraryAvailable ? countDerivativeFilesOnDisk(appConfig.previewsDir) : 0,
-      lastScan: lastCompletedScan,
-      scan: this.getAdminScanProgress(),
-      storage: {
-        available: storageState.libraryAvailable,
-        reason: storageState.reason,
-        usingInMemoryDatabase: storageState.usingInMemoryDatabase
-      },
-      libraryIndex: {
-        rebuildRequired,
-        reason: rebuildRequired ? 'gallery_root_changed' : null,
-        currentGalleryRoot,
-        previousGalleryRoot,
-        lastSuccessfulGalleryRoot,
-        legacyDerivativeMigrationPending: pendingDerivativeMigrationRows > 0,
-        pendingDerivativeMigrationRows,
-        ignoredRootMediaCount: storageState.libraryAvailable ? countSupportedRootMediaFiles(currentGalleryRoot) : 0
-      },
-      preferences: {
-        defaultLocale,
-        defaultHomeFeedMode,
-        defaultReelsFeedMode,
-        defaultFolderImageOrder,
-        nestedFolderTitleFormat,
-        treatStoriesAsFolders,
-        treatCarouselsAsFolders
-      },
-      storiesMigration,
-      carouselsMigration,
-      excludedFolders,
-      deletionRecovery: permanentDeletionService.getRecoveryStatus()
-    };
+    return measureOperation('admin_stats.construction', () => {
+      const indexedPosts = storageState.libraryAvailable ? imageRepository.countFeed() : 0;
+      const pendingDerivativeMigrationRows = storageState.libraryAvailable ? imageRepository.countPendingDerivativeMigrationRows() : 0;
+
+      return {
+        folders: storageState.libraryAvailable ? folderRepository.count() : 0,
+        indexedImages: indexedPosts,
+        indexedPosts,
+        indexedMediaAssets: storageState.libraryAvailable ? imageRepository.countVisibleMediaAssets() : 0,
+        indexedCarousels: storageState.libraryAvailable ? imageRepository.countVisibleCarousels() : 0,
+        indexedVideos: storageState.libraryAvailable ? imageRepository.countVisibleSingleVideos() : 0,
+        deletedImages: storageState.libraryAvailable ? imageRepository.countDeleted() : 0,
+        thumbnailCount: storageState.libraryAvailable ? imageRepository.countWithThumbnail() : 0,
+        previewCount: storageState.libraryAvailable ? imageRepository.countWithPreview() : 0,
+        lastScan: lastCompletedScan,
+        scan: this.getAdminScanProgress(),
+        storage: {
+          available: storageState.libraryAvailable,
+          reason: storageState.reason,
+          usingInMemoryDatabase: storageState.usingInMemoryDatabase
+        },
+        libraryIndex: {
+          rebuildRequired,
+          reason: rebuildRequired ? 'gallery_root_changed' : null,
+          currentGalleryRoot,
+          previousGalleryRoot,
+          lastSuccessfulGalleryRoot,
+          legacyDerivativeMigrationPending: pendingDerivativeMigrationRows > 0,
+          pendingDerivativeMigrationRows,
+          ignoredRootMediaCount: storageState.libraryAvailable ? countSupportedRootMediaFiles(currentGalleryRoot) : 0
+        },
+        preferences: {
+          defaultLocale,
+          defaultHomeFeedMode,
+          defaultReelsFeedMode,
+          defaultFolderImageOrder,
+          nestedFolderTitleFormat,
+          treatStoriesAsFolders,
+          treatCarouselsAsFolders
+        },
+        storiesMigration,
+        carouselsMigration,
+        excludedFolders,
+        deletionRecovery: permanentDeletionService.getRecoveryStatus()
+      };
+    });
   },
 
   setDefaultHomeFeedMode(mode: FeedMode) {

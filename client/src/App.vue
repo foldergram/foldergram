@@ -100,7 +100,14 @@ const displayRoute = computed<RouteLocationNormalizedLoaded | undefined>(() =>
 );
 const showAuthLoading = computed(() => !authStore.ready && authStore.loading);
 
+let protectedStateGeneration = 0;
+let protectedStateLoadPromise: Promise<void> | null = null;
+let protectedStateLoadGeneration = -1;
+
 function resetProtectedState() {
+  protectedStateGeneration += 1;
+  protectedStateLoadPromise = null;
+  protectedStateLoadGeneration = -1;
   unlockModalScroll();
   appStore.resetProtectedState();
   feedStore.resetForRebuild();
@@ -114,7 +121,7 @@ function resetProtectedState() {
   viewerStore.reset();
 }
 
-async function loadProtectedState(force = false) {
+async function startProtectedStateLoad(force: boolean): Promise<void> {
   const tasks: Array<Promise<unknown>> = [appStore.fetchStats(force ? { background: true } : {}), foldersStore.fetchFolders(force)];
 
   if (authStore.canUseSavedItems) {
@@ -126,6 +133,27 @@ async function loadProtectedState(force = false) {
   }
 
   await Promise.all(tasks);
+}
+
+async function loadProtectedState(force = false) {
+  if (!force && protectedStateLoadPromise && protectedStateLoadGeneration === protectedStateGeneration) {
+    await protectedStateLoadPromise;
+    return;
+  }
+
+  const loadGeneration = protectedStateGeneration;
+  const load = startProtectedStateLoad(force);
+  protectedStateLoadPromise = load;
+  protectedStateLoadGeneration = loadGeneration;
+
+  try {
+    await load;
+  } finally {
+    if (protectedStateLoadPromise === load) {
+      protectedStateLoadPromise = null;
+      protectedStateLoadGeneration = -1;
+    }
+  }
 }
 
 function lockModalScroll() {

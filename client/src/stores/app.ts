@@ -2,7 +2,6 @@ import { defineStore } from 'pinia';
 
 import {
   fetchAdminScanProgress,
-  fetchAdminStats,
   fetchScanProgress,
   fetchStats as fetchStatus
 } from '../api/gallery';
@@ -39,6 +38,9 @@ const LAST_OPENED_FOLDER_STORAGE_KEY = 'foldergram-last-opened-folder';
 const RECENT_OPENED_FOLDERS_STORAGE_KEY = 'foldergram-recent-opened-folders';
 const RECENT_OPENED_FOLDERS_LIMIT = 24;
 const SCAN_PROGRESS_POLL_INTERVAL_MS = 1000;
+
+let protectedStateGeneration = 0;
+let inFlightStatusRequest: Promise<AppStatus> | null = null;
 
 function parseStoredRecentFolderSlugs(value: string | null): string[] {
   if (!value) {
@@ -357,6 +359,8 @@ export const useAppStore = defineStore('app', {
     },
 
     resetProtectedState() {
+      protectedStateGeneration += 1;
+      inFlightStatusRequest = null;
       this.stopStatsPolling();
       this.stats = null;
       this.loadingStats = false;
@@ -401,15 +405,24 @@ export const useAppStore = defineStore('app', {
     },
 
     async fetchStats(options: { background?: boolean } = {}) {
+      const requestGeneration = protectedStateGeneration;
+
       if (!options.background) {
         this.loadingStats = true;
         this.error = null;
       }
 
+      const statusRequest = inFlightStatusRequest ?? fetchStatus();
+      inFlightStatusRequest = statusRequest;
+
       try {
-        this.stats = this.shouldUseAdminScanProgress()
-          ? await fetchAdminStats()
-          : await fetchStatus();
+        const stats = await statusRequest;
+
+        if (requestGeneration !== protectedStateGeneration) {
+          return;
+        }
+
+        this.stats = stats;
         this.syncLocaleFromStats(this.stats);
         this.statsPollFailures = 0;
 
@@ -423,6 +436,10 @@ export const useAppStore = defineStore('app', {
           this.stopStatsPolling();
         }
       } catch (error) {
+        if (requestGeneration !== protectedStateGeneration) {
+          return;
+        }
+
         const message = error instanceof Error ? error.message : i18n.global.t('errors.loadAppStats');
 
         if (options.background) {
@@ -437,13 +454,19 @@ export const useAppStore = defineStore('app', {
           this.error = message;
         }
       } finally {
-        if (!options.background) {
+        if (inFlightStatusRequest === statusRequest) {
+          inFlightStatusRequest = null;
+        }
+
+        if (!options.background && requestGeneration === protectedStateGeneration) {
           this.loadingStats = false;
         }
       }
     },
 
     async refreshScanProgress() {
+      const requestGeneration = protectedStateGeneration;
+
       if (!this.stats) {
         await this.fetchStats({ background: true });
         return;
@@ -453,6 +476,10 @@ export const useAppStore = defineStore('app', {
         const progress = this.shouldUseAdminScanProgress()
           ? await fetchAdminScanProgress()
           : await fetchScanProgress();
+
+        if (requestGeneration !== protectedStateGeneration) {
+          return;
+        }
 
         this.updateScanProgress(progress);
         this.statsPollFailures = 0;
@@ -466,6 +493,10 @@ export const useAppStore = defineStore('app', {
           await this.fetchStats({ background: true });
         }
       } catch {
+        if (requestGeneration !== protectedStateGeneration) {
+          return;
+        }
+
         this.statsPollFailures += 1;
 
         if (this.statsPollFailures >= 3) {

@@ -2907,6 +2907,26 @@ export const imageRepository = {
     return Number((database.prepare('SELECT COUNT(*) AS count FROM images WHERE is_deleted = 1').get() as { count: number }).count);
   },
 
+  countWithThumbnail(): number {
+    return Number(
+      (
+        database
+          .prepare("SELECT COUNT(*) AS count FROM images WHERE thumbnail_path IS NOT NULL AND TRIM(thumbnail_path) != ''")
+          .get() as { count: number }
+      ).count
+    );
+  },
+
+  countWithPreview(): number {
+    return Number(
+      (
+        database
+          .prepare("SELECT COUNT(*) AS count FROM images WHERE preview_path IS NOT NULL AND TRIM(preview_path) != ''")
+          .get() as { count: number }
+      ).count
+    );
+  },
+
   listMoveCandidates(fileSize: number, mtimeMs: number, extension: string): ImageRecord[] {
     return database.prepare(
       `
