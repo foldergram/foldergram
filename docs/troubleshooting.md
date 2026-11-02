@@ -346,6 +346,27 @@ that normally plays from its original.
 
 See [Media Processing](/media-processing) for the exact conditions.
 
+## Video seeking is slow or playback stalls behind a reverse proxy
+
+Foldergram serves original media with `ETag`, `Last-Modified`, `Accept-Ranges`,
+and revalidation-friendly `Cache-Control` headers. The browser should revalidate
+metadata and request bounded byte ranges while seeking.
+
+If seeking works directly but fails through a reverse proxy:
+
+- forward `Range`, `If-Range`, `If-None-Match`, `If-Modified-Since`, `Cookie`, and `Host`
+- allow `206 Partial Content` responses through
+- avoid buffering long video responses when the proxy supports streaming controls
+- remove rules that ignore Foldergram's `Cache-Control` headers on protected endpoints
+- do not cache API responses by URL alone when cookies or folder-share grants affect access
+- do not alias `/thumbnails` or `/previews` to their filesystem directories without equivalent authorization
+- test against Foldergram directly to separate proxy behavior from the app
+
+Direct connections remain fully supported.
+
+See [Security](/security#reverse-proxy-deployments) and
+[Configuration](/configuration#reverse-proxy-deployments).
+
 ## The development watcher is not reacting
 
 The watcher is not a permanent always-on background process for every startup

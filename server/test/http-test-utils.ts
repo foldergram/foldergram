@@ -6,6 +6,7 @@ export interface TestHttpResponse {
   status: number;
   headers: Headers;
   body: any;
+  rawBody: Buffer;
 }
 
 export async function requestTestApp(
@@ -57,7 +58,8 @@ export async function requestTestApp(
               responseHeaders.append(response.rawHeaders[index], response.rawHeaders[index + 1]);
             }
 
-            const rawBody = Buffer.concat(chunks).toString('utf8');
+            const rawBodyBuffer = Buffer.concat(chunks);
+            const rawBody = rawBodyBuffer.toString('utf8');
             const contentType = responseHeaders.get('content-type') ?? '';
             let responseBody: any = rawBody;
 
@@ -72,7 +74,8 @@ export async function requestTestApp(
             resolve({
               status: response.statusCode ?? 0,
               headers: responseHeaders,
-              body: responseBody
+              body: responseBody,
+              rawBody: rawBodyBuffer
             });
           });
         }

@@ -15,6 +15,18 @@ All documented routes come from `server/src/routes/api.ts`.
 | `/thumbnails` | Protected thumbnail derivatives, served from cache or generated on demand in lazy mode |
 | `/previews` | Protected preview derivatives, served from cache or generated on demand in lazy mode |
 
+## Media cache behavior
+
+- JSON API responses use `Cache-Control: no-store`.
+- `/thumbnails/...` and `/previews/...` derivatives use the immutable protected-derivative policy: `private, max-age=604800, immutable` with `Vary: Cookie` when password protection is enabled, or `public, max-age=604800, immutable` when it is disabled.
+- Folder-share media under `/api/share/images/:id/...` always uses `private, no-store`.
+- Original media uses a revalidation-friendly policy instead of an immutable lifetime because a file can change without its image ID changing:
+  - password protection enabled: `Cache-Control: private, no-cache` with `Vary: Cookie`
+  - password protection disabled: `Cache-Control: public, no-cache`
+- Original responses still include `ETag`, `Last-Modified`, and `Accept-Ranges`, so browsers can revalidate and seek with bounded range requests.
+
+This applies to `/api/originals/:id` and to legacy `/previews/...` URLs that resolve to an original.
+
 ## Authentication and protected routes
 
 Foldergram can optionally require a role-bearing password session.
@@ -772,11 +784,14 @@ Rules:
 - original delivery is unavailable while library storage is unavailable or a library rebuild is required
 - without `download=1`, the route streams the original inline/open behavior
 - with `download=1`, the route serves the same file as a download attachment
+- responses use the original-media cache policy described above; downloads keep the same policy and never become shared-cacheable when password protection is enabled
 - inline delivery supports `HEAD` and byte ranges; valid single ranges return `206`
+- conditional requests with `If-None-Match` or `If-Modified-Since` return `304` when the file has not changed
+- `ETag`, `Last-Modified`, and `Accept-Ranges` are preserved by the underlying file response
 
 Previously issued `/previews/...mp4` URLs for qualifying direct-playback videos
-use the same original-file availability checks and range behavior in both eager
-and lazy modes.
+use the same original-file availability checks, cache policy, conditional
+request handling, and range behavior in both eager and lazy modes.
 
 Errors:
 

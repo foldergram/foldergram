@@ -12,7 +12,12 @@ import { scannerService } from '../services/scanner-service.js';
 import { galleryService } from '../services/gallery-service.js';
 import { maintenanceOperationLock } from '../services/maintenance-operation-lock.js';
 import { resolveOriginalPath } from '../utils/media-paths.js';
-import { applyDerivativeErrorHeaders, applyNoStoreMediaHeaders, applyProtectedMediaHeaders } from '../utils/media-response.js';
+import {
+  applyDerivativeErrorHeaders,
+  applyNoStoreMediaHeaders,
+  applyOriginalMediaHeaders,
+  applyProtectedMediaHeaders
+} from '../utils/media-response.js';
 import { isNonemptyDerivative } from '../utils/derivative-cache.js';
 import { normalizePath, safeJoin } from '../utils/path-utils.js';
 import { resolveVideoPlaybackSource } from '../utils/video-playback-policy.js';
@@ -140,10 +145,12 @@ function isConnectionTerminationError(error: unknown): boolean {
 function sendDerivativeFile(
   response: express.Response,
   absolutePath: string,
-  options?: { noStore?: boolean }
+  options?: { noStore?: boolean; original?: boolean }
 ): Promise<SendDerivativeResult> {
   if (options?.noStore) {
     applyNoStoreMediaHeaders(response);
+  } else if (options?.original) {
+    applyOriginalMediaHeaders(response);
   } else {
     applyProtectedMediaHeaders(response);
   }
@@ -202,7 +209,7 @@ async function serveOrGenerate(
     const originalPath = resolveEligibleOriginalPath(initialImageRecord);
     if (originalPath) {
       try {
-        await sendDerivativeFile(response, originalPath, { noStore: true });
+        await sendDerivativeFile(response, originalPath, { original: true });
       } catch {
         if (!response.headersSent) {
           applyDerivativeErrorHeaders(response);
@@ -416,7 +423,7 @@ previewOriginalResolutionRouter.get('/*path', async (request, response, next) =>
   }
 
   try {
-    await sendDerivativeFile(response, originalPath, { noStore: true });
+    await sendDerivativeFile(response, originalPath, { original: true });
   } catch {
     if (response.headersSent) {
       return;

@@ -181,7 +181,7 @@ describe.sequential('shared and legacy preview delivery for eligible videos', ()
 
     expect(response.status).toBe(200);
     expect(response.body).toBe('original:shared-videos/clip.mp4');
-    expect(response.headers.get('cache-control')).toBe('private, no-store');
+    expect(response.headers.get('cache-control')).toBe('public, no-cache');
     expect(generatePreviewDerivativeMock).not.toHaveBeenCalled();
   });
 

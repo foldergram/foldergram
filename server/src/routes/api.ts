@@ -13,6 +13,7 @@ import { createRateLimiter } from '../middleware/rate-limit.js';
 import { LIBRARY_REBUILD_REQUIRED_MESSAGE, scannerService } from '../services/scanner-service.js';
 import { storageService } from '../services/storage-service.js';
 import { watcherService } from '../services/watcher-service.js';
+import { applyOriginalMediaHeaders } from '../utils/media-response.js';
 import { serveDerivativeForImage } from './lazy-derivatives.js';
 
 const router = express.Router();
@@ -1258,6 +1259,8 @@ router.get('/originals/:id', (request, response) => {
     response.status(404).json({ message: 'Original media not found' });
     return;
   }
+
+  applyOriginalMediaHeaders(response);
 
   if (query.download) {
     response.download(originalMedia.path, originalMedia.filename);

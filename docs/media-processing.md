@@ -257,7 +257,10 @@ all-library FFprobe pass is required.
 Previously issued normal `/previews/...mp4` URLs keep working in both eager and
 lazy modes. For a currently eligible asset, the preview URL resolves to the same
 original-media serving path. The response does not use the immutable derivative
-cache policy because it is serving a mutable original.
+cache policy because it is serving a mutable original. It uses
+revalidation-friendly caching (`private, no-cache` with `Vary: Cookie` when
+password protection is enabled, or `public, no-cache` otherwise) while preserving
+`ETag`, `Last-Modified`, and byte-range behavior.
 
 **Scan and repair derivatives** reclaims obsolete video previews for
 already-indexed qualifying videos. It validates the current source, checks live

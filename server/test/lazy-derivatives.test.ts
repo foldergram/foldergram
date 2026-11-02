@@ -619,7 +619,7 @@ describe.sequential('DERIVATIVE_MODE lazy behavior', () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.body).toBe(`source:${video.relative_path}`);
-    expect(response.headers.get('cache-control')).toBe('private, no-store');
+    expect(response.headers.get('cache-control')).toBe('public, no-cache');
     expect(generatePreviewDerivativeMock).not.toHaveBeenCalled();
   });
 
@@ -636,7 +636,7 @@ describe.sequential('DERIVATIVE_MODE lazy behavior', () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.body).toBe(`source:${video.relative_path}`);
-    expect(response.headers.get('cache-control')).toBe('private, no-store');
+    expect(response.headers.get('cache-control')).toBe('public, no-cache');
     expect(generatePreviewDerivativeMock).not.toHaveBeenCalled();
   });
 
