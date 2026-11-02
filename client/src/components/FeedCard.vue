@@ -1,6 +1,6 @@
 <template>
   <article class="bg-transparent">
-    <div class="flex items-center justify-between gap-4 px-4 py-[0.55rem]">
+    <div class="feed-card__header flex items-center justify-between gap-4 px-4 py-[0.8rem]">
       <div class="feed-card__folder flex items-center gap-[0.72rem] min-w-0">
         <button
           v-if="showHomeStoryAvatar"

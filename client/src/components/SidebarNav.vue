@@ -1,6 +1,6 @@
 <template>
   <aside
-    class="sidebar group flex h-full w-[4.85rem] flex-col overflow-visible bg-bg px-[0.95rem] py-5 text-text transition-[width] duration-220 ease hover:w-60"
+    class="sidebar group flex h-full w-[4.85rem] flex-col overflow-visible bg-bg px-[0.95rem] pt-7 pb-5 text-text transition-[width] duration-220 ease hover:w-60"
   >
     <RouterLink
       class="sidebar__brand relative inline-flex items-center justify-center w-12 h-12 p-[0.3rem] rounded-[1rem] color-inherit transition-[background-color,transform,opacity] duration-180 hover:bg-surface-hover hover:-translate-y-px"
@@ -259,7 +259,7 @@
         >{{ t('nav.foldersSpotlight') }}</span
       >
       <div
-        class="flex min-h-0 flex-col gap-[0.2rem] max-h-[22.5rem] overflow-y-auto [scrollbar-width:none]"
+        class="flex min-h-0 shrink-0 flex-col gap-[0.2rem] max-h-[22.5rem] overflow-y-auto [scrollbar-width:none]"
       >
         <RouterLink
           v-for="folder in featuredFolders"
@@ -470,7 +470,7 @@
     authStore.accessMode === "public" ? t("nav.returnToPublicView") : t("nav.signOut"),
   )
   const sidebarActiveClass =
-    "router-link-active bg-[color-mix(in_srgb,var(--surface)_92%,transparent_8%)] font-bold"
+    "router-link-active bg-[var(--sidebar-active-background)] font-bold"
 
   function closeMoreMenu() {
     moreMenuOpen.value = false

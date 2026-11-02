@@ -10,6 +10,8 @@ data/gallery.sqlite
 data/gallery.sqlite-shm
 data/gallery.sqlite-wal
 coverage
+client/test-results/
+client/playwright-report/
 client/dist
 server/dist
 docs/.vitepress/dist

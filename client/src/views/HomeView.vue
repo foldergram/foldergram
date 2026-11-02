@@ -2,7 +2,8 @@
   <section
     ref="homeLayoutElement"
     :class="[
-      'grid gap-[4rem] items-start justify-center mx-auto',
+      'home-layout grid gap-[4rem] items-start justify-center mx-auto',
+      { 'home-layout--compact': isCompactHomeLayout },
       isCompactHomeLayout
         ? 'grid-cols-1 w-full'
         : 'grid-cols-[minmax(0,39.375rem)_19.9375rem] w-[min(100%,63.3125rem)] md:relative',
@@ -38,7 +39,7 @@
         </div>
       </section>
 
-      <section v-if="!appStore.isLibraryUnavailable" class="grid min-w-0 gap-[1rem] mb-5 w-full max-w-[39.375rem]">
+      <section v-if="!appStore.isLibraryUnavailable" class="home-layout__header grid min-w-0 gap-[0.6875rem] mb-5 mx-auto w-full max-w-[39.375rem]">
         <section v-if="displayMomentItems.length" class="mb-2 min-w-0">
           <div class="story-rail-shell">
             <div class="stories-bar story-rail pb-5 pt-[0.12rem]" :aria-label="momentsStore.displayRailTitle">
@@ -223,7 +224,7 @@
         homeSummaryFolder &&
         !isCompactHomeLayout
       "
-      class="sticky top-8 grid gap-[1.15rem] w-[19.9375rem] text-muted"
+      class="grid gap-[1.15rem] w-[19rem] text-muted mt-5"
       :aria-label="t('home.sidebar.ariaLabel')"
     >
       <div class="flex items-center gap-[0.8rem]">
@@ -522,7 +523,7 @@ async function retryFeedFolderStory() {
 
 function updateHomeLayout() {
   const layoutWidth = homeLayoutElement.value?.clientWidth ?? window.innerWidth;
-  isCompactHomeLayout.value = layoutWidth <= HOME_RIGHT_RAIL_BREAKPOINT;
+  isCompactHomeLayout.value = layoutWidth <= HOME_RIGHT_RAIL_BREAKPOINT || window.innerHeight > window.innerWidth;
 }
 
 async function runHomeScan() {
@@ -554,9 +555,8 @@ onMounted(async () => {
       updateHomeLayout();
     });
     homeLayoutResizeObserver.observe(homeLayoutElement.value);
-  } else {
-    window.addEventListener('resize', updateHomeLayout);
   }
+  window.addEventListener('resize', updateHomeLayout);
 
   if (!appStore.stats) {
     await appStore.fetchStats().catch(() => {});

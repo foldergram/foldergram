@@ -25,6 +25,11 @@ It includes:
 - desktop recommendations for folders based on recency, likes, and recent navigation
 - infinite loading for feed pagination
 
+The desktop recommendations sidebar scrolls with the feed.
+The Moments or Highlights rail shares the feed's center line. Desktop navigation
+and folder shortcuts are vertically centered between the logo and the More menu.
+Portrait windows use the centered feed layout without the recommendations sidebar.
+
 ### Feed mode behavior
 
 | Mode | What it does |
@@ -185,6 +190,18 @@ Behavior depends on how the route is opened:
 
 - from another page, it can render as a modal over the background route
 - directly, it renders as a full page
+
+The modal uses a centered, borderless media area with a consistent target width.
+Its height follows the photo or video's proportions, so wide posts leave more of
+the dimmed background visible. Very tall media scales down to fit the screen.
+
+Portrait desktop windows and narrow screens start with details hidden. Use the
+sidebar button below the right navigation arrow to show or hide details.
+Details open over the media on these screens; on wider landscape windows, they
+appear alongside it and can also be hidden. Previous and next controls stay at
+equal distances from the screen edges, and Close stays in the top-right corner.
+For panoramic posts, docked details keep enough height for captions and metadata
+and scroll independently of the media.
 
 The detail view includes:
 

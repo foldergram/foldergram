@@ -8,7 +8,8 @@
     "dev": "vite",
     "build": "vue-tsc --noEmit -p tsconfig.build.json && vite build",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:browser": "playwright test"
   },
   "dependencies": {
     "pinia": "^3.0.1",
@@ -19,10 +20,11 @@
   },
   "devDependencies": {
     "@iconify-json/fluent": "^1.2.40",
+    "@playwright/test": "^1.64.1",
     "@types/node": "^22.13.10",
-    "@vue/test-utils": "^2.4.6",
     "@unocss/transformer-directives": "^66.6.6",
     "@vitejs/plugin-vue": "^5.2.1",
+    "@vue/test-utils": "^2.4.6",
     "jsdom": "^26.1.0",
     "typescript": "^5.8.2",
     "unocss": "^66.6.6",

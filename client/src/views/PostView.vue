@@ -162,8 +162,8 @@ async function handleDelete() {
 .image-view--modal {
   display: flex;
   justify-content: center;
+  width: auto;
   min-height: 0;
-  height: 100%;
   max-height: 100%;
 }
 
