@@ -166,7 +166,7 @@ The shipped `.env.example` keeps the development ports aligned like this:
 | --- | --- |
 | Node.js 22 | Use 22.23.4 or a newer patched Node.js 22 release. The Docker image bundles Node.js 22.23.4. |
 | `pnpm` | Matches the workspace scripts and lockfile. |
-| Writable local storage | Foldergram creates and maintains the gallery, database, thumbnails, and previews directories. |
+| Writable local storage | Foldergram creates and maintains the gallery, database, thumbnails, and previews directories. Keep `DB_DIR` on a local filesystem inside the host; WAL mode requires reliable local file locking. |
 | FFmpeg and FFprobe | Needed only when you run the app outside Docker and want supported video processing or animated AVIF image-sequence processing. The backend calls `ffprobe` for metadata and `ffmpeg` for video thumbnails, video previews, and animated AVIF derivatives. |
 
 ## Supported media
@@ -290,6 +290,16 @@ Keep your existing configuration, data directories, and volume mounts when
 upgrading. Stop Foldergram before backing up its data so the SQLite backup is
 consistent. Include the database, original gallery, and any other configured
 data directories in the backup.
+
+The database uses WAL mode, so a running instance may also have
+`gallery.sqlite-wal` and `gallery.sqlite-shm` beside `gallery.sqlite`. A clean
+shutdown checkpoints those files. Copy only `gallery.sqlite` after shutdown if
+every other process and SQLite connection using the database is also closed. If
+any connection remains open, or you snapshot a running system, include the
+database and any live WAL sidecars together; do not copy only the main database
+file. When shutdown reports `SQLite WAL checkpoint incomplete`, keep the WAL
+sidecars with the backup. Keep `DB_DIR` on local storage rather than a network
+share.
 
 ### Docker Compose
 

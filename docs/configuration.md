@@ -62,6 +62,61 @@ new data that cannot be rolled back safely, startup stops instead of guessing.
 For source installs, use `pnpm migrate` if you want to apply pending
 migrations without starting the rest of the app.
 
+## SQLite concurrency and durability policy
+
+Foldergram stores its gallery index in SQLite. Every persistent connection to
+`gallery.sqlite` applies the same explicit policy:
+
+- `PRAGMA foreign_keys = ON`
+- `PRAGMA busy_timeout = 5000`
+- `PRAGMA journal_mode = WAL` for file-backed databases
+- `PRAGMA synchronous = NORMAL` when WAL is active
+
+If the database directory is unavailable and Foldergram falls back to an
+in-memory database, it does not force WAL mode.
+
+At startup, the resolved journal mode is logged once. WAL is enabled on a
+best-effort basis: if the database filesystem cannot provide WAL, Foldergram
+logs the resolved journal mode and continues instead of assuming that WAL is
+active.
+
+`busy_timeout` gives short overlapping writes up to five seconds to finish
+instead of failing immediately with `SQLITE_BUSY`. It does not make unlimited
+parallel writers safe. Run one Foldergram process against a database file at a
+time; do not treat WAL as a replacement for a networked database or as support
+for many application replicas.
+
+### Filesystem and backup requirements
+
+WAL depends on reliable shared-memory and file-locking behavior. Keep `DB_DIR`
+on a local filesystem inside the host, even when `GALLERY_ROOT` is mounted from
+a network share. Do not place the SQLite database on NFS or SMB-style storage
+unless that storage's locking behavior has been validated for SQLite.
+
+While the app is running, SQLite may create `gallery.sqlite-wal` and
+`gallery.sqlite-shm` beside the database. Foldergram runs a truncating WAL
+checkpoint on shutdown and logs `SQLite WAL checkpoint incomplete` when another
+connection, such as a database viewer with an open read transaction, prevents
+the checkpoint from completing.
+
+A main-file-only backup is safe only after every process and SQLite connection
+using the database has closed and the shutdown checkpoint has completed. When
+backing up the database:
+
+- for a main-file-only copy, stop Foldergram, close every other tool or process
+  using `gallery.sqlite`, and wait for shutdown to finish
+- otherwise include `gallery.sqlite`, `gallery.sqlite-wal`, and
+  `gallery.sqlite-shm` together from a stopped or consistently snapshotted
+  filesystem
+- never delete the WAL sidecars to force a main-file-only backup
+
+If the shutdown log reports an incomplete checkpoint, keep the WAL sidecars with
+the database backup or close the remaining connections and let Foldergram
+checkpoint cleanly on a later shutdown. Do not copy only the main database file
+from an actively running process. `GALLERY_ROOT`, `DB_DIR`, `THUMBNAILS_DIR`,
+and `PREVIEWS_DIR` remain independent; moving media to network storage does not
+require moving the database with it.
+
 ## Access protection configuration
 
 Shared-password protection is **not** configured in `.env`.

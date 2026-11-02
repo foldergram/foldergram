@@ -219,22 +219,29 @@ function repairInterruptedPostsMigrationMarker(database: DatabaseSync): void {
     throw new Error('Cannot safely resume migration 000005 because scan warning details already exist.');
   }
 
-  database.exec('BEGIN IMMEDIATE');
+  const foreignKeyState = database.prepare('PRAGMA foreign_keys').get() as { foreign_keys: number };
+  database.exec('PRAGMA foreign_keys = OFF');
+
   try {
-    if (hasCarouselOwner) {
-      database.exec('ALTER TABLE folders DROP COLUMN carousel_owner_folder_id');
+    database.exec('BEGIN IMMEDIATE');
+    try {
+      if (hasCarouselOwner) {
+        database.exec('ALTER TABLE folders DROP COLUMN carousel_owner_folder_id');
+      }
+      if (hasWarningCount) {
+        database.exec('ALTER TABLE scan_runs DROP COLUMN warning_count');
+      }
+      if (hasWarningText) {
+        database.exec('ALTER TABLE scan_runs DROP COLUMN warning_text');
+      }
+      removeMigrationVersion(database, POSTS_MIGRATION_VERSION);
+      database.exec('COMMIT');
+    } catch (error) {
+      database.exec('ROLLBACK');
+      throw error;
     }
-    if (hasWarningCount) {
-      database.exec('ALTER TABLE scan_runs DROP COLUMN warning_count');
-    }
-    if (hasWarningText) {
-      database.exec('ALTER TABLE scan_runs DROP COLUMN warning_text');
-    }
-    removeMigrationVersion(database, POSTS_MIGRATION_VERSION);
-    database.exec('COMMIT');
-  } catch (error) {
-    database.exec('ROLLBACK');
-    throw error;
+  } finally {
+    database.exec(`PRAGMA foreign_keys = ${foreignKeyState.foreign_keys === 1 ? 'ON' : 'OFF'}`);
   }
 
   log.info('Reset an interrupted migration 000005 marker so the posts migration can resume');
