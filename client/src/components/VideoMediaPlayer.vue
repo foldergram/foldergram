@@ -15,12 +15,16 @@
       :fullscreenOrientation.prop="'none'"
       :playsInline.prop="playsinline"
       :muted.prop="muted"
+      :storage.prop="videoMuteStorage"
       :autoPlay.prop="autoplay"
       :loop.prop="loop"
       :load="load"
       :preload="preload"
       @fullscreen-change="handleFullscreenChange"
       @auto-play-fail="handleAutoplayFail"
+      @media-mute-request="emit('mute-change', true)"
+      @media-unmute-request="emit('mute-change', false)"
+      @media-volume-change-request="emit('mute-change', $event.detail === 0)"
     >
       <media-provider />
       <media-poster
@@ -59,7 +63,6 @@
               class="video-media-player__control"
               :aria-label="t('post.viewer.toggleSound')"
               data-swipe-ignore="true"
-              @click.stop="handleMuteClick"
             >
               <span
                 class="video-media-player__control-icon video-media-player__mute-icon video-media-player__mute-icon--on i-fluent-speaker-2-16-regular"
@@ -120,12 +123,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import type { MediaPlayerElement } from 'vidstack/elements';
 import type { MediaFullscreenChangeEvent, MediaLoadingStrategy, PlayerSrc } from 'vidstack';
 
+import { useNativeVideoMuteSync } from '../composables/useNativeVideoMuteSync';
 import { videoPreviewWouldDownscale } from '../utils/media';
+import { applyVideoMutePreference, createVideoMuteStorage } from '../utils/video-mute';
 import VideoProgressFooter from './VideoProgressFooter.vue';
 
 const props = withDefaults(
@@ -171,8 +176,7 @@ const props = withDefaults(
 );
 
 const emit = defineEmits<{
-  'toggle-mute': [];
-  'autoplay-muted': [];
+  'mute-change': [muted: boolean];
   'toggle-hd': [isHd: boolean];
   'toggle-playback': [];
   'fullscreen-change': [isFullscreen: boolean];
@@ -181,7 +185,9 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useI18n();
+const videoMuteStorage = createVideoMuteStorage(() => props.muted);
 const playerElement = ref<MediaPlayerElement | null>(null);
+useNativeVideoMuteSync(playerElement, () => props.muted, (muted) => emit('mute-change', muted));
 const durationSec = ref(0);
 const currentTimeSec = ref(0);
 const isPaused = ref(false);
@@ -246,20 +252,10 @@ function handleFullscreenChange(event: MediaFullscreenChangeEvent) {
   emit('fullscreen-change', Boolean(event.detail));
 }
 
-function handleMuteClick() {
-  emit('toggle-mute');
-}
-
-async function handleAutoplayFail() {
-  const player = playerElement.value;
-  if (!player || !props.autoplay || props.muted) return;
-
-  // Browsers commonly reject audible autoplay. Keep carousel playback automatic
-  // by retrying muted and persist that state through the owning app store.
-  player.muted = true;
-  emit('autoplay-muted');
-  await nextTick();
-  await player.play().catch(() => {});
+function handleAutoplayFail() {
+  // A blocked autoplay attempt must not change the user's sound preference.
+  isPaused.value = true;
+  showPausedIndicator.value = true;
 }
 
 async function toggleHd() {
@@ -398,6 +394,10 @@ watch(basePreviewUrl, () => {
 watch(playerElement, () => {
   if (removeEventListeners) removeEventListeners();
   setupListeners();
+});
+
+watch([playerElement, () => props.muted], ([player, muted]) => {
+  if (player) applyVideoMutePreference(player, muted);
 });
 
 defineExpose({

@@ -1,6 +1,7 @@
 import { mount } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
+import type { MediaStorage } from 'vidstack';
 
 import { i18n } from '../locales';
 import VideoMediaPlayer from './VideoMediaPlayer.vue';
@@ -44,7 +45,34 @@ describe('VideoMediaPlayer', () => {
     expect((wrapper.find('media-player').element as any).autoPlay).toBe(true);
   });
 
-  it('retries blocked audible autoplay while muted', async () => {
+  it('restores the current mute preference when a video or HD source initializes', async () => {
+    const wrapper = mount(VideoMediaPlayer, {
+      props: { src: '/preview.mp4', muted: true }
+    });
+    const player = wrapper.get('media-player').element as HTMLElement & { storage: MediaStorage };
+    expect(await player.storage.getMuted()).toBe(true);
+
+    await wrapper.setProps({ muted: false, src: '/original.mp4' });
+    expect(await player.storage.getMuted()).toBe(false);
+    await wrapper.setProps({ muted: true });
+    expect(await player.storage.getMuted()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it('emits explicit mute requests once and ignores provider volume events', async () => {
+    const wrapper = mount(VideoMediaPlayer, { props: { src: '/preview.mp4' } });
+    const button = wrapper.get('media-mute-button');
+    button.element.dispatchEvent(new Event('media-unmute-request', { bubbles: true }));
+    button.element.dispatchEvent(new Event('media-mute-request', { bubbles: true }));
+    button.element.dispatchEvent(new CustomEvent('media-volume-change-request', { bubbles: true, detail: 0.5 }));
+    button.element.dispatchEvent(new CustomEvent('media-volume-change-request', { bubbles: true, detail: 0 }));
+    await wrapper.get('media-player').trigger('volume-change');
+
+    expect(wrapper.emitted('mute-change')).toEqual([[false], [true], [false], [true]]);
+    wrapper.unmount();
+  });
+
+  it('preserves sound enabled when audible autoplay is blocked', async () => {
     const wrapper = mount(VideoMediaPlayer, {
       props: {
         src: '/test-video.mp4',
@@ -58,11 +86,13 @@ describe('VideoMediaPlayer', () => {
 
     const playerEl = wrapper.find('media-player').element as any;
     playerEl.play = vi.fn().mockResolvedValue(undefined);
-    playerEl.dispatchEvent(new CustomEvent('auto-play-fail'));
-    await vi.waitFor(() => expect(playerEl.play).toHaveBeenCalled());
+    await wrapper.get('media-player').trigger('auto-play-fail');
 
-    expect(playerEl.muted).toBe(true);
-    expect(wrapper.emitted('autoplay-muted')).toHaveLength(1);
+    expect(playerEl.muted).toBe(false);
+    expect(playerEl.play).not.toHaveBeenCalled();
+    expect(wrapper.emitted('mute-change')).toBeUndefined();
+    expect(wrapper.find('.video-media-player__pause-indicator').exists()).toBe(true);
+    wrapper.unmount();
   });
 
   it('evaluates HD eligibility based on playbackStrategy, dimensions, and originalUrl', async () => {

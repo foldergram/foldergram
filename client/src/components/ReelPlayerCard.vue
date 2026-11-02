@@ -17,9 +17,13 @@
           :fullscreenOrientation.prop="'none'"
           :playsInline.prop="true"
           :muted.prop="appStore.videoMuted"
+          :storage.prop="videoMuteStorage"
           :loop.prop="true"
           :load="playerLoadMode"
           preload="metadata"
+          @media-mute-request="appStore.setVideoMuted(true)"
+          @media-unmute-request="appStore.setVideoMuted(false)"
+          @media-volume-change-request="appStore.setVideoMuted($event.detail === 0)"
         >
           <media-provider />
           <media-poster
@@ -120,10 +124,12 @@ import { RouterLink } from 'vue-router';
 import type { PlayerSrc } from 'vidstack';
 import type { MediaPlayerElement } from 'vidstack/elements';
 
+import { useNativeVideoMuteSync } from '../composables/useNativeVideoMuteSync';
 import { useAppStore } from '../stores/app';
 import type { FeedItem, FolderSummary } from '../types/api';
 import { formatFolderTitle } from '../utils/folder-titles';
 import { getOriginalMediaUrl } from '../utils/original-media';
+import { applyVideoMutePreference, createVideoMuteStorage } from '../utils/video-mute';
 import Avatar from './Avatar.vue';
 
 const props = defineProps<{
@@ -134,7 +140,9 @@ const props = defineProps<{
 
 const { t } = useI18n();
 const appStore = useAppStore();
+const videoMuteStorage = createVideoMuteStorage(() => appStore.videoMuted);
 const playerElement = ref<MediaPlayerElement | null>(null);
+useNativeVideoMuteSync(playerElement, () => appStore.videoMuted, (muted) => appStore.setVideoMuted(muted));
 const isPaused = ref(false);
 const isUsingOriginalFallback = ref(false);
 const playerLoadMode = computed(() => (props.active ? 'eager' : 'visible'));
@@ -154,7 +162,6 @@ const folderDescription = computed(() => {
   return currentFolderName ? `${currentFolderName}/${props.item.filename}` : props.item.filename;
 });
 
-let muteSyncToken = 0;
 let removePlayerEventListeners: (() => void) | null = null;
 let autoplayRetryAttempts = 0;
 let autoplayRetryTimer = 0;
@@ -196,14 +203,7 @@ function switchToOriginalFallback() {
 }
 
 function syncMuted(player: MediaPlayerElement, muted: boolean) {
-  const token = ++muteSyncToken;
-  player.muted = muted;
-
-  requestAnimationFrame(() => {
-    if (muteSyncToken === token) {
-      muteSyncToken = 0;
-    }
-  });
+  applyVideoMutePreference(player, muted);
 }
 
 async function syncPlayback() {

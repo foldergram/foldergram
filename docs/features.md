@@ -337,6 +337,14 @@ The client also persists a few local browser preferences:
 
 These are stored in `localStorage`.
 
+The sound control shares one mute preference across the home feed, reels, post
+viewer, carousels, stories, and shared-post videos. Muting a video keeps subsequent
+videos muted, including after navigation or a page reload in the same browser. Enabling sound
+updates that shared preference. If the browser blocks autoplay with sound, use
+the play control to start the video. Foldergram keeps the chosen sound setting
+instead of silently muting that video. Sound changes made through native video
+controls, including mobile fullscreen controls, update the same saved preference.
+
 The selected language also has one extra layer:
 
 - changing the language updates the current browser immediately

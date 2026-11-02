@@ -168,9 +168,13 @@
               :fullscreenOrientation.prop="'none'"
               :playsInline.prop="true"
               :muted.prop="appStore.videoMuted"
+              :storage.prop="videoMuteStorage"
               :loop.prop="true"
               load="eager"
               preload="metadata"
+              @media-mute-request="appStore.setVideoMuted(true)"
+              @media-unmute-request="appStore.setVideoMuted(false)"
+              @media-volume-change-request="appStore.setVideoMuted($event.detail === 0)"
               >
                 <media-provider />
               <media-poster
@@ -605,6 +609,7 @@
 
   import { useHorizontalSwipe } from "../composables/useHorizontalSwipe"
   import { useImageCaptionEditor } from "../composables/useImageCaptionEditor"
+  import { useNativeVideoMuteSync } from "../composables/useNativeVideoMuteSync"
   import type { ImageDetail, FolderSummary } from "../types/api"
   import { useAppStore } from "../stores/app"
   import { useAuthStore } from "../stores/auth"
@@ -613,6 +618,7 @@
   import { resolveDisplayCaption } from "../utils/caption"
   import { formatFolderTitle } from "../utils/folder-titles"
   import { getOriginalMediaDownloadUrl, getOriginalMediaUrl } from "../utils/original-media"
+  import { applyVideoMutePreference, createVideoMuteStorage } from "../utils/video-mute"
   import Avatar from "./Avatar.vue"
   import CarouselMediaStage from "./CarouselMediaStage.vue"
   import CollectionBookmark from "./CollectionBookmark.vue"
@@ -635,12 +641,14 @@
 
   const likesStore = useLikesStore()
   const appStore = useAppStore()
+  const videoMuteStorage = createVideoMuteStorage(() => appStore.videoMuted)
   const authStore = useAuthStore()
   const foldersStore = useFoldersStore()
   const route = useRoute()
   const router = useRouter()
   const { locale, t } = useI18n()
   const playerElement = ref<MediaPlayerElement | null>(null)
+  useNativeVideoMuteSync(playerElement, () => appStore.videoMuted, muted => appStore.setVideoMuted(muted))
   const cardWrapperElement = ref<HTMLElement | null>(null)
   const sidebarElement = ref<HTMLElement | null>(null)
   const sidebarToggleElement = ref<HTMLButtonElement | null>(null)
@@ -694,8 +702,6 @@
     value: string
   }
 
-  let videoMuteSyncToken = 0
-  let playerReady = false
   let pendingVideoRestore: { currentTime: number; wasPaused: boolean } | null = null
   let removePlayerEventListeners: (() => void) | null = null
   let sidebarSheetPointerId: number | null = null
@@ -978,14 +984,7 @@
   })
 
   function syncVideoMuted(player: MediaPlayerElement, muted: boolean) {
-    const token = ++videoMuteSyncToken
-    player.muted = muted
-
-    requestAnimationFrame(() => {
-      if (videoMuteSyncToken === token) {
-        videoMuteSyncToken = 0
-      }
-    })
+    applyVideoMutePreference(player, muted)
   }
 
   function isPrimaryPlainClick(event: MouseEvent) {
@@ -1460,20 +1459,7 @@
       isVideoPaused.value = false
       return
     } catch {
-      if (appStore.videoMuted) {
-        // Ignore autoplay rejections and leave manual controls available.
-        isVideoPaused.value = true
-        return
-      }
-    }
-
-    syncVideoMuted(player, true)
-
-    try {
-      await player.play()
-      isVideoPaused.value = false
-    } catch {
-      // Ignore autoplay rejections and leave manual controls available.
+      // Preserve the shared sound preference when the browser blocks autoplay.
       isVideoPaused.value = true
     }
   }
@@ -1491,20 +1477,6 @@
       isVideoPaused.value = false
     } catch {
       // Ignore playback rejections and leave manual controls available.
-    }
-  }
-
-  function handlePlayerVolumeChange() {
-    const player = playerElement.value
-    // Ignore volume-change events that fire before the player has fully initialized.
-    // Vidstack can emit these during its own setup with muted=false, which would
-    // overwrite the persisted muted preference read from localStorage.
-    if (!player || !playerReady || videoMuteSyncToken !== 0) {
-      return
-    }
-
-    if (player.muted !== appStore.videoMuted) {
-      appStore.setVideoMuted(player.muted)
     }
   }
 
@@ -1552,7 +1524,6 @@
     }
 
     const handleReady = () => {
-      playerReady = true
       void handlePlayerReadyForPlayback()
     }
     const handlePlay = () => {
@@ -1562,9 +1533,6 @@
     const handlePause = () => {
       isVideoPaused.value = props.image?.mediaType === "video"
       syncVideoTimelineState(player)
-    }
-    const handleVolume = () => {
-      handlePlayerVolumeChange()
     }
     const handleDuration = (event: Event) => {
       if (event instanceof CustomEvent && typeof event.detail === "number" && event.detail > 0) {
@@ -1595,7 +1563,6 @@
     player.addEventListener("can-play", handleReady)
     player.addEventListener("play", handlePlay)
     player.addEventListener("pause", handlePause)
-    player.addEventListener("volume-change", handleVolume)
     player.addEventListener("duration-change", handleDuration)
     player.addEventListener("time-update", handleTimeUpdate)
     player.addEventListener("ended", handleEnded)
@@ -1605,7 +1572,6 @@
       player.removeEventListener("can-play", handleReady)
       player.removeEventListener("play", handlePlay)
       player.removeEventListener("pause", handlePause)
-      player.removeEventListener("volume-change", handleVolume)
       player.removeEventListener("duration-change", handleDuration)
       player.removeEventListener("time-update", handleTimeUpdate)
       player.removeEventListener("ended", handleEnded)
@@ -1647,7 +1613,6 @@
   watch(playerElement, player => {
     videoDurationMs.value = props.image?.durationMs ?? 0
     videoCurrentTimeMs.value = 0
-    playerReady = false
     bindPlayerEventListeners(player)
   })
 

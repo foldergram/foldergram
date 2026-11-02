@@ -88,7 +88,7 @@ If multiple slides in a carousel match the search query, the carousel appears ex
 
 ## Reels and mixed videos
 
-Videos play inside the carousel using the integrated video player with interactive timeline scrubbing, play/pause controls, mute toggling, and optional HD source switching. In the post viewer, the active video starts automatically. When a browser blocks audible autoplay, Foldergram retries muted and updates the shared video mute preference so playback can begin without another click. The HD button appears only when the original video is larger than the generated preview and uses a browser-supported direct playback format (`playbackStrategy: 'original'`). Toggling HD switches resolution without resetting current playback time or playing state.
+Videos play inside the carousel using the integrated video player with interactive timeline scrubbing, play/pause controls, mute toggling, and optional HD source switching. In the post viewer, the active video starts automatically when the browser permits it. Carousel videos use the same sound preference as other players, including after a reload. If the browser blocks autoplay with sound, use the play control; the video keeps your chosen sound setting. The HD button appears only when the original video is larger than the generated preview and uses a browser-supported direct playback format (`playbackStrategy: 'original'`). Toggling HD switches resolution without resetting current playback time or playing state.
 
 Swiping or navigating through slides isolates video controls so that dragging the time slider or tapping player buttons does not trigger slide changes, and unmounting or switching slides pauses background playback cleanly.
 

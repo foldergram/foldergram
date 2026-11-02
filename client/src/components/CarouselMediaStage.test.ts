@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 
 import { i18n } from '../locales';
+import { useAppStore } from '../stores/app';
 import type { PostMediaItem } from '../types/api';
 import CarouselMediaStage from './CarouselMediaStage.vue';
 
@@ -89,6 +90,19 @@ describe('CarouselMediaStage', () => {
 
     // Should NOT have navigated because pointerdown was on an ignored element
     expect(wrapper.emitted('update:modelValue')).toBeUndefined();
+  });
+
+  it('shares explicit sound requests with other videos and persists them', async () => {
+    const wrapper = mount(CarouselMediaStage, { props: { items: mockItems } });
+    const player = wrapper.get('media-player');
+    await player.trigger('media-unmute-request');
+    expect(useAppStore().videoMuted).toBe(false);
+    expect(window.localStorage.getItem('foldergram-video-muted')).toBe('false');
+
+    await player.trigger('media-mute-request');
+    expect(useAppStore().videoMuted).toBe(true);
+    expect(window.localStorage.getItem('foldergram-video-muted')).toBe('true');
+    wrapper.unmount();
   });
 
   it('keeps the first slide aspect ratio in feeds and lets the viewer contain mixed slide sizes', async () => {

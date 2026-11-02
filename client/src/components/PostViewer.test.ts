@@ -1,5 +1,6 @@
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
+import type { MediaStorage } from 'vidstack';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { FeedItem, ImageDetail } from '../types/api';
@@ -196,6 +197,51 @@ describe('PostViewer', () => {
 
   afterEach(() => {
     document.body.innerHTML = '';
+  });
+
+  it('restores shared mute on source initialization and persists explicit sound requests', async () => {
+    const appStore = useAppStore();
+    appStore.setVideoMuted(true);
+    const wrapper = mount(PostViewer, {
+      props: { image: createVideoDetail(26) },
+      global: { stubs: globalStubs }
+    });
+    await flushPromises();
+    const player = wrapper.get('media-player').element as FakeMediaPlayerElement & { storage: MediaStorage };
+    player.dispatchEvent(new Event('can-play'));
+    await flushPromises();
+    player.muted = (await player.storage.getMuted()) ?? false;
+    expect(player.muted).toBe(true);
+
+    await wrapper.get('media-player').trigger('media-unmute-request');
+    expect(appStore.videoMuted).toBe(false);
+    expect(await player.storage.getMuted()).toBe(false);
+    expect(window.localStorage.getItem('foldergram-video-muted')).toBe('false');
+
+    await wrapper.get('media-player').trigger('media-mute-request');
+    expect(appStore.videoMuted).toBe(true);
+    expect(window.localStorage.getItem('foldergram-video-muted')).toBe('true');
+  });
+
+  it('keeps sound enabled when the browser blocks audible autoplay', async () => {
+    useAppStore().setVideoMuted(false);
+    const play = vi.spyOn(FakeMediaPlayerElement.prototype, 'play').mockRejectedValue(new Error('Autoplay blocked'));
+    try {
+      const wrapper = mount(PostViewer, {
+        props: { image: createVideoDetail(27) },
+        global: { stubs: globalStubs }
+      });
+      await flushPromises();
+      const player = wrapper.get('media-player').element as FakeMediaPlayerElement;
+      player.dispatchEvent(new Event('can-play'));
+      await flushPromises();
+      expect(player.muted).toBe(false);
+      expect(useAppStore().videoMuted).toBe(false);
+      expect(window.localStorage.getItem('foldergram-video-muted')).toBe('false');
+      expect(wrapper.find('.viewer__pause-indicator').exists()).toBe(true);
+    } finally {
+      play.mockRestore();
+    }
   });
 
   it('uses the normal media shell for wide carousel photos without resizing when slides change', async () => {

@@ -181,6 +181,16 @@ describe('StoriesModal', () => {
     expect(video.attributes('src')).toBe(videoItem.previewUrl);
     expect(video.attributes('poster')).toBe(videoItem.thumbnailUrl);
     expect(wrapper.find('img[data-test="resilient-image"]').exists()).toBe(false);
+    expect((video.element as HTMLVideoElement).muted).toBe(true);
+
+    useAppStore().setVideoMuted(false);
+    await flushPromises();
+    expect((video.element as HTMLVideoElement).muted).toBe(false);
+
+    useAppStore().setVideoMuted(true);
+    await flushPromises();
+    expect((video.element as HTMLVideoElement).muted).toBe(true);
+    wrapper.unmount();
   });
 
   it('renders a download-original control and updates it when the active capsule changes', async () => {
