@@ -1,16 +1,60 @@
-import { DatabaseSync } from 'node:sqlite';
+import type { DatabaseSync } from 'node:sqlite';
 
 import { runStartupMigrations } from './migration.js';
 import { assertNoLegacySchema } from './schema-compat.js';
 import { schemaSql } from './schema.js';
+import {
+  checkpointSqliteWal,
+  openSqliteDatabase,
+  type SqliteConnectionPolicy,
+  type SqliteWalCheckpointResult
+} from './sqlite-connection.js';
+import { appConfig } from '../config/env.js';
+import { log } from '../services/log-service.js';
 import { storageService } from '../services/storage-service.js';
 
-function initializeTransientDatabase(database: DatabaseSync): DatabaseSync {
-  database.exec(schemaSql);
-  return database;
+const GLOBAL_DB_KEY = Symbol.for('foldergram.database.connection');
+
+function synchronousLabel(synchronous: number): string {
+  if (synchronous === 0) {
+    return 'OFF';
+  }
+  if (synchronous === 1) {
+    return 'NORMAL';
+  }
+  if (synchronous === 2) {
+    return 'FULL';
+  }
+  if (synchronous === 3) {
+    return 'EXTRA';
+  }
+  return String(synchronous);
 }
 
-const GLOBAL_DB_KEY = Symbol.for('foldergram.database.connection');
+function logConnectionPolicy(policy: SqliteConnectionPolicy): void {
+  const meta = {
+    busyTimeoutMs: policy.busyTimeoutMs,
+    foreignKeys: policy.foreignKeys ? 'ON' : 'OFF',
+    synchronous: synchronousLabel(policy.synchronous)
+  };
+
+  if (policy.fileBacked && policy.journalMode !== 'wal') {
+    log.info(
+      `SQLite WAL mode is unavailable; continuing with ${policy.journalMode.toUpperCase()} journal mode`,
+      meta
+    );
+    return;
+  }
+
+  log.info(`SQLite journal mode: ${policy.journalMode.toUpperCase()}`, meta);
+
+  if (appConfig.logVerbose) {
+    log.info('SQLite connection configured', {
+      ...meta,
+      fileBacked: policy.fileBacked
+    });
+  }
+}
 
 class DatabaseManager {
   get connection(): DatabaseSync {
@@ -21,31 +65,57 @@ class DatabaseManager {
 
     const databasePath = storageService.getDatabasePath();
 
-    let db: DatabaseSync;
-    if (databasePath === ':memory:') {
-      db = initializeTransientDatabase(new DatabaseSync(databasePath));
-    } else {
+    if (databasePath !== ':memory:') {
       runStartupMigrations({ databasePath });
-      db = new DatabaseSync(databasePath);
-      assertNoLegacySchema(db);
+    }
+
+    const db = openSqliteDatabase(databasePath, { onConfigured: logConnectionPolicy });
+    try {
+      if (databasePath === ':memory:') {
+        db.exec(schemaSql);
+      } else {
+        assertNoLegacySchema(db);
+      }
+    } catch (error) {
+      db.close();
+      throw error;
     }
 
     globalObj[GLOBAL_DB_KEY] = db;
     return db;
   }
 
-  close(): void {
+  close(): SqliteWalCheckpointResult | null {
     const globalObj = globalThis as unknown as Record<symbol, DatabaseSync | null>;
     const db = globalObj[GLOBAL_DB_KEY];
-    if (db) {
-      try {
-        db.close();
-      } catch {
-        // Ignore errors if already closed
-      } finally {
-        globalObj[GLOBAL_DB_KEY] = null;
-      }
+    if (!db) {
+      return null;
     }
+
+    let checkpoint: SqliteWalCheckpointResult | null = null;
+
+    try {
+      checkpoint = checkpointSqliteWal(db);
+      if (checkpoint && !checkpoint.complete) {
+        log.info('SQLite WAL checkpoint incomplete; preserve WAL sidecar files with database backups', {
+          busy: checkpoint.busy,
+          logFrames: checkpoint.logFrames,
+          checkpointedFrames: checkpoint.checkpointedFrames
+        });
+      }
+    } catch {
+      // Checkpointing is best-effort; closing still releases the connection.
+    }
+
+    try {
+      db.close();
+    } catch {
+      // Ignore errors if already closed
+    } finally {
+      globalObj[GLOBAL_DB_KEY] = null;
+    }
+
+    return checkpoint;
   }
 }
 

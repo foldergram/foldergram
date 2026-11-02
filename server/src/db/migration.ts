@@ -1,12 +1,13 @@
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
-import { DatabaseSync } from 'node:sqlite';
+import type { DatabaseSync } from 'node:sqlite';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { resolveBinary } from 'dbmate';
 
 import { repositoryRoot } from '../config/env.js';
+import { openSqliteDatabase, SQLITE_BUSY_TIMEOUT_MS } from './sqlite-connection.js';
 import {
   applyBaselineCompatMigrations,
   assertNoLegacySchema,
@@ -96,7 +97,7 @@ function applyBaselineSchema(database: DatabaseSync, migrationsDirectory: string
 }
 
 function buildSqliteDatabaseUrl(databasePath: string): string {
-  return `sqlite:${pathToFileURL(databasePath).pathname}`;
+  return `sqlite:${pathToFileURL(databasePath).pathname}?_busy_timeout=${SQLITE_BUSY_TIMEOUT_MS}`;
 }
 
 function hasExistingAppSchema(database: DatabaseSync): boolean {
@@ -218,29 +219,36 @@ function repairInterruptedPostsMigrationMarker(database: DatabaseSync): void {
     throw new Error('Cannot safely resume migration 000005 because scan warning details already exist.');
   }
 
-  database.exec('BEGIN IMMEDIATE');
+  const foreignKeyState = database.prepare('PRAGMA foreign_keys').get() as { foreign_keys: number };
+  database.exec('PRAGMA foreign_keys = OFF');
+
   try {
-    if (hasCarouselOwner) {
-      database.exec('ALTER TABLE folders DROP COLUMN carousel_owner_folder_id');
+    database.exec('BEGIN IMMEDIATE');
+    try {
+      if (hasCarouselOwner) {
+        database.exec('ALTER TABLE folders DROP COLUMN carousel_owner_folder_id');
+      }
+      if (hasWarningCount) {
+        database.exec('ALTER TABLE scan_runs DROP COLUMN warning_count');
+      }
+      if (hasWarningText) {
+        database.exec('ALTER TABLE scan_runs DROP COLUMN warning_text');
+      }
+      removeMigrationVersion(database, POSTS_MIGRATION_VERSION);
+      database.exec('COMMIT');
+    } catch (error) {
+      database.exec('ROLLBACK');
+      throw error;
     }
-    if (hasWarningCount) {
-      database.exec('ALTER TABLE scan_runs DROP COLUMN warning_count');
-    }
-    if (hasWarningText) {
-      database.exec('ALTER TABLE scan_runs DROP COLUMN warning_text');
-    }
-    removeMigrationVersion(database, POSTS_MIGRATION_VERSION);
-    database.exec('COMMIT');
-  } catch (error) {
-    database.exec('ROLLBACK');
-    throw error;
+  } finally {
+    database.exec(`PRAGMA foreign_keys = ${foreignKeyState.foreign_keys === 1 ? 'ON' : 'OFF'}`);
   }
 
   log.info('Reset an interrupted migration 000005 marker so the posts migration can resume');
 }
 
 function repairKnownIncompleteMigrationMarkers(databasePath: string): void {
-  const database = new DatabaseSync(databasePath);
+  const database = openSqliteDatabase(databasePath);
 
   try {
     if (!tableExists(database, 'schema_migrations')) {
@@ -255,7 +263,7 @@ function repairKnownIncompleteMigrationMarkers(databasePath: string): void {
 }
 
 export function baselineExistingDatabaseIfNeeded(databasePath: string, options: StartupMigrationOptions = {}): BaselineResult {
-  const database = new DatabaseSync(databasePath);
+  const database = openSqliteDatabase(databasePath);
   const migrationsDirectory = options.migrationsDirectory ?? defaultMigrationsDirectory();
 
   try {
@@ -642,7 +650,7 @@ export function runStartupMigrations(options: StartupMigrationOptions = {}): Sta
   repairKnownIncompleteMigrationMarkers(databasePath);
   runDbmateUp(databasePath, options);
 
-  const database = new DatabaseSync(databasePath);
+  const database = openSqliteDatabase(databasePath);
   try {
     validatePostsMigrationCompleteness(database);
   } finally {

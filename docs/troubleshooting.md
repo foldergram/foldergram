@@ -33,6 +33,24 @@ database. That means indexed state disappears when the process stops.
 
 Fix the configured database directory first.
 
+## Folders load but images or videos report permission denied
+
+Files can be indexed even when the server cannot read their cached thumbnails
+or previews. Check the API response or server log for `EACCES` and the affected
+path. The server account needs read access to media files and read, write, and
+directory traversal access to `THUMBNAILS_DIR` and `PREVIEWS_DIR`.
+
+On Linux or WSL, if the server account owns the generated cache directories,
+restore owner access with your configured paths:
+
+```bash
+chmod -R u+rwX /path/to/data/thumbnails /path/to/data/previews
+```
+
+This changes permissions on generated caches. It does not require rescanning
+the library or rebuilding the database. If access is still denied on a
+Windows-mounted drive, check the Windows permissions for those paths as well.
+
 ## Startup stops after an upgrade
 
 Foldergram now runs pending SQLite migrations before it serves requests. If the
@@ -54,6 +72,47 @@ Foldergram can automatically resume known migrations that were recorded before
 their schema work began. If the log instead reports a partially present schema,
 do not delete the database; restore a known-good `gallery.sqlite` backup and
 retry the upgrade.
+
+## Startup reports `database is locked` and the app keeps loading
+
+This is a SQLite lock error. If it stops the API process, the development
+client may also report `ECONNRESET` or `ECONNREFUSED` for `/api/` requests.
+
+Close other Foldergram instances and database tools that have the same
+`<DB_DIR>/gallery.sqlite` open, then restart Foldergram. A database viewer with
+an unfinished read transaction can also block a write. Do not delete the
+database or its journal files to clear a lock.
+
+Foldergram allows up to five seconds for temporary SQLite locks during startup
+migrations, startup schema checks, and normal database access. A persistent lock
+can still prevent startup; close the process holding it before restarting.
+
+File-backed databases use WAL mode with `synchronous=NORMAL`. While the app is
+running, you may see `gallery.sqlite-wal` and `gallery.sqlite-shm` beside the
+database. That is normal; a clean shutdown checkpoints and releases them. If
+shutdown logs `SQLite WAL checkpoint incomplete`, another connection prevented
+the checkpoint. Close that connection and restart and stop Foldergram, or keep
+the WAL sidecars with any database backup. Do not delete those files to clear a
+lock.
+
+Keep `DB_DIR` on a local filesystem inside the host. WAL requires reliable
+shared-memory and file-locking behavior, so avoid NFS, SMB, or other network
+mounts for the database unless you have validated SQLite locking on that
+storage. The gallery and generated derivative directories can still live on a
+separate or network mount.
+
+Changing between Windows and WSL paths can trigger gallery relocation
+validation even when both paths refer to the same library. Foldergram updates
+the cached source paths in one transaction. A failed path update rolls back
+the entire batch.
+
+For WSL installations with recurring lock problems on a Windows-mounted drive,
+you can keep the database on the Linux filesystem while leaving media on the
+Windows drive. Stop all processes using the database, back it up, copy the
+existing database to the new directory, and set `DB_DIR` in `.env` to that
+directory before restarting. Preserve any `gallery.sqlite-wal`,
+`gallery.sqlite-shm`, or `gallery.sqlite-journal` files with the database if
+they remain after shutdown; do not copy an actively used database.
 
 ## Settings reports a permanent deletion recovery warning
 

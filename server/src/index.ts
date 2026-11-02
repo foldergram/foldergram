@@ -20,6 +20,7 @@ import { createServer } from "node:http";
 
 import { appConfig } from "./config/env.js";
 import { createApp } from "./app.js";
+import { databaseManager } from "./db/database.js";
 import { collectionRepository } from "./db/repositories.js";
 import { log } from "./services/log-service.js";
 import { permanentDeletionService } from "./services/permanent-deletion-service.js";
@@ -97,7 +98,10 @@ async function bootstrap(): Promise<void> {
   async function shutdown(signal: string): Promise<void> {
     log.info(`Received ${signal}, shutting down`);
     await watcherService.stop();
-    server.close(() => process.exit(0));
+    server.close(() => {
+      databaseManager.close();
+      process.exit(0);
+    });
   }
 
   process.on("SIGINT", () => void shutdown("SIGINT"));

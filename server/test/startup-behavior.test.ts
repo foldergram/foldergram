@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { Worker } from 'node:worker_threads';
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -14,7 +15,7 @@ import {
   LIBRARY_REBUILD_REQUIRED_SETTING_KEY,
   PREVIOUS_GALLERY_ROOT_SETTING_KEY
 } from '../src/constants/app-setting-keys.js';
-import { getPreviewPathForAssetKey, getThumbnailPathForAssetKey } from '../src/utils/derivative-paths.js';
+import { generateAssetKey, getPreviewPathForAssetKey, getThumbnailPathForAssetKey } from '../src/utils/derivative-paths.js';
 import { normalizePath } from '../src/utils/path-utils.js';
 
 type AppConfigModule = typeof import('../src/config/env.js');
@@ -214,6 +215,78 @@ describe.sequential('startup behavior', () => {
     expect(refreshed?.absolute_path).toBe(path.join(appConfig.galleryRoot, indexed.relative_path));
   });
 
+  it('waits for a temporary reader lock while committing relocated paths', async () => {
+    const oldGalleryRoot = path.join(tempRoot, 'old-gallery-root');
+    const indexed = await createIndexedRelocationMedia({
+      relativePath: 'relocated/photo-1.jpg',
+      storedGalleryRoot: oldGalleryRoot
+    });
+    appSettingsRepository.set(LAST_SUCCESSFUL_GALLERY_ROOT_SETTING_KEY, oldGalleryRoot);
+
+    // Release the other connection from a worker: the main thread is blocked
+    // inside SQLite while COMMIT waits for this read transaction to finish.
+    const reader = new Worker(`
+      const { parentPort, workerData } = require('node:worker_threads');
+      const { DatabaseSync } = require('node:sqlite');
+      const database = new DatabaseSync(workerData.databasePath);
+      database.exec('BEGIN');
+      database.prepare('SELECT COUNT(*) FROM images').get();
+      parentPort.postMessage('locked');
+      setTimeout(() => {
+        database.exec('ROLLBACK');
+        database.close();
+      }, 500);
+    `, { eval: true, workerData: { databasePath: appConfig.databasePath } });
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        reader.once('message', () => resolve());
+        reader.once('error', reject);
+      });
+
+      expect(scannerService.handleStartup('startup')).toBe('idle');
+      expect(imageRepository.getByRelativePath(indexed.relative_path)?.absolute_path)
+        .toBe(path.join(appConfig.galleryRoot, indexed.relative_path));
+      expect(appSettingsRepository.get(LAST_SUCCESSFUL_GALLERY_ROOT_SETTING_KEY))
+        .toBe(normalizePath(appConfig.galleryRoot));
+    } finally {
+      await reader.terminate();
+    }
+  });
+
+  it('rolls back all relocated paths if an update fails partway through', async () => {
+    const oldGalleryRoot = path.join(tempRoot, 'old-gallery-root');
+    const first = await createIndexedRelocationMedia({
+      relativePath: 'relocated/photo-1.jpg',
+      storedGalleryRoot: oldGalleryRoot
+    });
+    const second = await createIndexedRelocationMedia({
+      relativePath: 'relocated/photo-2.jpg',
+      storedGalleryRoot: oldGalleryRoot
+    });
+    const { databaseManager } = await import('../src/db/database.js');
+    const database = databaseManager.connection;
+    database.exec(`
+      CREATE TEMP TRIGGER fail_relocation BEFORE UPDATE OF absolute_path ON images
+      WHEN OLD.id = ${second.id}
+      BEGIN
+        SELECT RAISE(ABORT, 'relocation update failed');
+      END;
+    `);
+
+    try {
+      expect(() => imageRepository.refreshAbsolutePathsForGalleryRoot(appConfig.galleryRoot))
+        .toThrow('relocation update failed');
+      expect(imageRepository.getByRelativePath(first.relative_path)?.absolute_path).toBe(first.absolute_path);
+      expect(imageRepository.getByRelativePath(second.relative_path)?.absolute_path).toBe(second.absolute_path);
+    } finally {
+      database.exec('DROP TRIGGER fail_relocation');
+    }
+
+    expect(imageRepository.refreshAbsolutePathsForGalleryRoot(appConfig.galleryRoot)).toBe(2);
+    expect(imageRepository.refreshAbsolutePathsForGalleryRoot(appConfig.galleryRoot)).toBe(0);
+  });
+
   it('requires a rebuild when a moved gallery root is missing an indexed active file', async () => {
     const oldGalleryRoot = path.join(tempRoot, 'old-gallery-root');
     await createIndexedRelocationMedia({
@@ -278,7 +351,7 @@ describe.sequential('startup behavior', () => {
     const filename = path.posix.basename(options.relativePath);
     const extension = path.extname(filename).toLowerCase();
     const mediaType = getMediaTypeFromExtension(extension);
-    const assetKey = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    const assetKey = generateAssetKey();
     const contents = `source:${options.relativePath}`;
     const actualMtimeMs = Date.parse('2026-03-07T12:00:00.000Z');
     const sourcePath = path.join(appConfig.galleryRoot, options.relativePath);

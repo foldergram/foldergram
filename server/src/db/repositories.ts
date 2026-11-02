@@ -2731,19 +2731,33 @@ export const imageRepository = {
     const rows = database
       .prepare('SELECT id, relative_path, absolute_path FROM images WHERE is_deleted = 0 ORDER BY id ASC')
       .all() as Array<Pick<ImageRecord, 'id' | 'relative_path' | 'absolute_path'>>;
+    const updates = rows.flatMap((row) => {
+      const nextAbsolutePath = safeJoin(galleryRoot, row.relative_path);
+      return normalizePath(row.absolute_path) === normalizePath(nextAbsolutePath)
+        ? []
+        : [{ id: row.id, absolutePath: nextAbsolutePath }];
+    });
+
+    if (updates.length === 0) {
+      return 0;
+    }
+
     const update = database.prepare('UPDATE images SET absolute_path = ?, updated_at = ? WHERE id = ?');
     const updatedAt = nowIso();
     let refreshed = 0;
 
-    for (const row of rows) {
-      const nextAbsolutePath = safeJoin(galleryRoot, row.relative_path);
-
-      if (normalizePath(row.absolute_path) === normalizePath(nextAbsolutePath)) {
-        continue;
+    // Relocation may update thousands of rows. Commit once, and leave all paths
+    // unchanged if any update or the final commit fails.
+    database.exec('BEGIN IMMEDIATE');
+    try {
+      for (const row of updates) {
+        const result = update.run(row.absolutePath, updatedAt, row.id);
+        refreshed += Number(result.changes ?? 0);
       }
-
-      const result = update.run(nextAbsolutePath, updatedAt, row.id);
-      refreshed += Number(result.changes ?? 0);
+      database.exec('COMMIT');
+    } catch (error) {
+      database.exec('ROLLBACK');
+      throw error;
     }
 
     return refreshed;
