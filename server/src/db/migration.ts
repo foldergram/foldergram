@@ -1,12 +1,13 @@
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
-import { DatabaseSync } from 'node:sqlite';
+import type { DatabaseSync } from 'node:sqlite';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { resolveBinary } from 'dbmate';
 
 import { repositoryRoot } from '../config/env.js';
+import { openSqliteDatabase, SQLITE_BUSY_TIMEOUT_MS } from './sqlite-connection.js';
 import {
   applyBaselineCompatMigrations,
   assertNoLegacySchema,
@@ -96,7 +97,7 @@ function applyBaselineSchema(database: DatabaseSync, migrationsDirectory: string
 }
 
 function buildSqliteDatabaseUrl(databasePath: string): string {
-  return `sqlite:${pathToFileURL(databasePath).pathname}`;
+  return `sqlite:${pathToFileURL(databasePath).pathname}?_busy_timeout=${SQLITE_BUSY_TIMEOUT_MS}`;
 }
 
 function hasExistingAppSchema(database: DatabaseSync): boolean {
@@ -240,7 +241,7 @@ function repairInterruptedPostsMigrationMarker(database: DatabaseSync): void {
 }
 
 function repairKnownIncompleteMigrationMarkers(databasePath: string): void {
-  const database = new DatabaseSync(databasePath);
+  const database = openSqliteDatabase(databasePath);
 
   try {
     if (!tableExists(database, 'schema_migrations')) {
@@ -255,7 +256,7 @@ function repairKnownIncompleteMigrationMarkers(databasePath: string): void {
 }
 
 export function baselineExistingDatabaseIfNeeded(databasePath: string, options: StartupMigrationOptions = {}): BaselineResult {
-  const database = new DatabaseSync(databasePath);
+  const database = openSqliteDatabase(databasePath);
   const migrationsDirectory = options.migrationsDirectory ?? defaultMigrationsDirectory();
 
   try {
@@ -642,7 +643,7 @@ export function runStartupMigrations(options: StartupMigrationOptions = {}): Sta
   repairKnownIncompleteMigrationMarkers(databasePath);
   runDbmateUp(databasePath, options);
 
-  const database = new DatabaseSync(databasePath);
+  const database = openSqliteDatabase(databasePath);
   try {
     validatePostsMigrationCompleteness(database);
   } finally {

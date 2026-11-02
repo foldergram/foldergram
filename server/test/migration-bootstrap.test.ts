@@ -3,6 +3,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
+import { spawnSync } from 'node:child_process';
+import { Worker } from 'node:worker_threads';
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -154,6 +156,97 @@ describe.sequential('dbmate startup migrations', () => {
       database.close();
     }
   });
+
+  it('waits for an exclusive lock on the first runtime connection before bootstrap schema access', async () => {
+    const databasePath = path.join(tempRoot, 'db', 'gallery.sqlite');
+    await fs.mkdir(path.dirname(databasePath), { recursive: true });
+    const seed = new DatabaseSync(databasePath);
+    seed.exec("CREATE TABLE cold_start_probe (value TEXT); INSERT INTO cold_start_probe VALUES ('preserved')");
+    seed.close();
+
+    const { databaseManager } = await importDatabaseModule();
+    const blocker = new Worker(`
+      const { parentPort, workerData } = require('node:worker_threads');
+      const { DatabaseSync } = require('node:sqlite');
+      const database = new DatabaseSync(workerData.databasePath);
+      database.exec('BEGIN EXCLUSIVE');
+      parentPort.postMessage('locked');
+      setTimeout(() => {
+        database.exec('ROLLBACK');
+        database.close();
+      }, 500);
+    `, { eval: true, workerData: { databasePath } });
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        blocker.once('message', () => resolve());
+        blocker.once('error', reject);
+      });
+
+      // No runtime connection has been opened yet. This must wait in the
+      // migration bootstrap, before the runtime connection is configured.
+      const database = databaseManager.connection;
+      expect(listAppliedVersions(database)).toEqual(['000001', '000002', '000004', '000005']);
+      expect(database.prepare('SELECT value FROM cold_start_probe').get()).toEqual({ value: 'preserved' });
+    } finally {
+      databaseManager.close();
+      await blocker.terminate();
+    }
+  });
+
+  it.each(['SQL migrations', 'post-migration schema validation'])(
+    'waits for an exclusive lock during %s',
+    async (phase) => {
+      const databasePath = path.join(tempRoot, 'db', 'gallery.sqlite');
+      await fs.mkdir(path.dirname(databasePath), { recursive: true });
+      const { runStartupMigrations } = await importMigrationModule();
+      const signal = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
+      const blocker = new Worker(`
+        const { parentPort, workerData } = require('node:worker_threads');
+        const { DatabaseSync } = require('node:sqlite');
+        parentPort.once('message', () => {
+          const database = new DatabaseSync(workerData.databasePath);
+          database.exec('BEGIN EXCLUSIVE');
+          const signal = new Int32Array(workerData.signal);
+          Atomics.store(signal, 0, 1);
+          Atomics.notify(signal, 0);
+          setTimeout(() => {
+            database.exec('ROLLBACK');
+            database.close();
+          }, 500);
+        });
+      `, { eval: true, workerData: { databasePath, signal: signal.buffer } });
+
+      function acquireLock(): void {
+        blocker.postMessage('lock');
+        // The migration runner is synchronous, so use a worker handshake to
+        // hold the lock at the selected boundary before continuing startup.
+        expect(Atomics.wait(signal, 0, 0, 3000)).not.toBe('timed-out');
+        expect(Atomics.load(signal, 0)).toBe(1);
+      }
+
+      try {
+        runStartupMigrations({
+          databasePath,
+          spawnSyncImpl: ((command, args, options) => {
+            if (phase === 'SQL migrations') acquireLock();
+            const result = spawnSync(command, args, options);
+            if (phase === 'post-migration schema validation') acquireLock();
+            return result;
+          }) as typeof spawnSync
+        });
+
+        const database = new DatabaseSync(databasePath);
+        try {
+          expect(listAppliedVersions(database)).toEqual(['000001', '000002', '000004', '000005']);
+        } finally {
+          database.close();
+        }
+      } finally {
+        await blocker.terminate();
+      }
+    }
+  );
 
   it('marks an existing pre-dbmate database as baseline without dropping indexed data', async () => {
     const databasePath = path.join(tempRoot, 'db', 'gallery.sqlite');

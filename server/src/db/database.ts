@@ -1,14 +1,10 @@
-import { DatabaseSync } from 'node:sqlite';
+import type { DatabaseSync } from 'node:sqlite';
 
 import { runStartupMigrations } from './migration.js';
 import { assertNoLegacySchema } from './schema-compat.js';
 import { schemaSql } from './schema.js';
+import { openSqliteDatabase } from './sqlite-connection.js';
 import { storageService } from '../services/storage-service.js';
-
-function initializeTransientDatabase(database: DatabaseSync): DatabaseSync {
-  database.exec(schemaSql);
-  return database;
-}
 
 const GLOBAL_DB_KEY = Symbol.for('foldergram.database.connection');
 
@@ -21,13 +17,20 @@ class DatabaseManager {
 
     const databasePath = storageService.getDatabasePath();
 
-    let db: DatabaseSync;
-    if (databasePath === ':memory:') {
-      db = initializeTransientDatabase(new DatabaseSync(databasePath));
-    } else {
+    if (databasePath !== ':memory:') {
       runStartupMigrations({ databasePath });
-      db = new DatabaseSync(databasePath);
-      assertNoLegacySchema(db);
+    }
+
+    const db = openSqliteDatabase(databasePath);
+    try {
+      if (databasePath === ':memory:') {
+        db.exec(schemaSql);
+      } else {
+        assertNoLegacySchema(db);
+      }
+    } catch (error) {
+      db.close();
+      throw error;
     }
 
     globalObj[GLOBAL_DB_KEY] = db;
