@@ -349,17 +349,17 @@
     "library": {
       "legacyMigration": {
         "title": "Migration alter abgeleiteter Dateien ausstehend",
-        "messageOne": "{count} indizierter Medieneintrag verwendet noch die alten gespiegelten Pfade für Miniaturansicht und Vorschau. Führe „Bibliothek scannen“ aus, um ihn in den Asset-Key-Speicher zu verschieben.",
-        "messageOther": "{count} indizierte Medieneinträge verwenden noch die alten gespiegelten Pfade für Miniaturansichten und Vorschauen. Führe „Bibliothek scannen“ aus, um sie in den Asset-Key-Speicher zu verschieben."
+        "messageOne": "{count} indizierter Medieneintrag verwendet noch die alten gespiegelten Pfade für Miniaturansicht und Vorschau. Führe einen Scan aus, um ihn in den Asset-Key-Speicher zu verschieben.",
+        "messageOther": "{count} indizierte Medieneinträge verwenden noch die alten gespiegelten Pfade für Miniaturansichten und Vorschauen. Führe einen Scan aus, um sie in den Asset-Key-Speicher zu verschieben."
       },
       "carouselReconciliation": {
         "title": "Aktualisierung der Karussell-Ordner ausstehend",
-        "scanDescription": "Der gespeicherte Karussell-Ordnermodus wurde noch nicht auf den Index angewendet. Führe „Bibliothek scannen“ aus, um Ordner und Beiträge zu aktualisieren.",
+        "scanDescription": "Der gespeicherte Karussell-Ordnermodus wurde noch nicht auf den Index angewendet. Führe einen Scan aus, um Ordner und Beiträge zu aktualisieren.",
         "rebuildDescription": "Der gespeicherte Karussell-Ordnermodus wurde noch nicht auf den Index angewendet. Verwende unten „Bibliotheksindex neu aufbauen“, um ihn auf den aktuellen Galerie-Speicherort anzuwenden."
       },
       "scanCard": {
         "title": "Bibliothek scannen",
-        "description": "Führe einen Scan aus, nachdem du Ordner hinzugefügt hast oder wenn du indizierte Medien aktualisieren möchtest."
+        "description": "Erkennt Ergänzungen, Änderungen und Entfernungen. Wähle die Derivatreparatur, um zusätzlich generierte Medien unveränderter Dateien zu prüfen."
       },
       "statusLabel": {
         "storageUnavailable": "Speicher nicht verfügbar",
@@ -369,16 +369,19 @@
       },
       "scanButton": {
         "active": "Bibliothek wird gescannt...",
-        "idle": "Bibliothek scannen"
+        "changes": "Nach Änderungen suchen",
+        "repair": "Scannen und Derivate reparieren"
       },
       "scanActionNote": {
         "loading": "Aktueller Bibliotheksstatus wird geladen...",
         "rebuildRequired": "Baue zuerst den Bibliotheksindex neu auf, da sich der Galerie-Speicherort geändert hat.",
         "otherTaskActive": "Eine andere Bibliotheksaufgabe läuft. Der Fortschritt wird live in der fixierten Statusleiste angezeigt.",
         "progress": "Der Fortschritt wird live in der fixierten Statusleiste angezeigt.",
-        "legacyMigration": "Führe „Bibliothek scannen“ aus, um alte gespiegelte Miniaturansichten und Vorschauen in die Asset-Key-Speicherstruktur zu verschieben.",
-        "carouselReconciliation": "Führe „Bibliothek scannen“ aus, um den gespeicherten Karussell-Ordnermodus auf indizierte Ordner und Beiträge anzuwenden.",
-        "idle": "Scans erkennen hinzugefügte, geänderte oder fehlende Medien."
+        "progressChanges": "Die Galerie wird nach Änderungen durchsucht. Der Fortschritt wird live in der fixierten Statusleiste angezeigt.",
+        "progressRepair": "Änderungen werden gesucht und Derivate repariert. Der Fortschritt wird live in der fixierten Statusleiste angezeigt.",
+        "legacyMigration": "Führe einen Scan aus, um alte gespiegelte Miniaturansichten und Vorschauen in die Asset-Key-Speicherstruktur zu verschieben.",
+        "carouselReconciliation": "Führe einen Scan aus, um den gespeicherten Karussell-Ordnermodus auf indizierte Ordner und Beiträge anzuwenden.",
+        "idle": "Beide Aktionen erkennen Änderungen in der Galerie. Die Reparatur prüft zusätzlich generierte Medien unveränderter Dateien."
       },
       "thumbnailCard": {
         "title": "Miniaturansichten neu erzeugen",
@@ -415,7 +418,8 @@
         "thumbnailActive": "Warte zuerst, bis die Neuerzeugung der Miniaturansichten abgeschlossen ist.",
         "scanActive": "Warte zuerst, bis der aktuelle Scan abgeschlossen ist.",
         "rebuildRequired": "Empfohlen, da sich der Galerie-Speicherort geändert hat.",
-        "idle": "Verwende dies, um den Index zurückzusetzen und passende abgeleitete Dateien aus dem vorherigen Bibliotheksindex wiederzuverwenden."
+        "idle": "Verwende dies, um den Index zurückzusetzen und passende abgeleitete Dateien aus dem vorherigen Bibliotheksindex wiederzuverwenden.",
+        "legacyMigration": "Hierbei bleiben die aktuellen Pfade der Miniaturansichten erhalten, alte gespiegelte abgeleitete Dateien werden nicht migriert. Führe stattdessen einen Scan aus, um sie in den Asset-Key-Speicher zu verschieben."
       },
       "dialogs": {
         "rebuildTitle": "Aktuellen Bibliotheksindex neu aufbauen?",

@@ -89,6 +89,152 @@ describe.sequential('video derivative strategy', () => {
     expect(ffmpegCalls[1]?.[1]).toContain(expectedVideoScaleFilter());
   });
 
+  it('skips the playable preview for a compatible MP4 within the size and width budgets', async () => {
+    execFileAsyncMock.mockImplementation(createExecFileAsyncMock({
+      format: {
+        duration: '4.0',
+        format_name: 'mov,mp4,m4a,3gp,3g2,mj2'
+      },
+      streams: [
+        { codec_type: 'video', codec_name: 'h264', width: 1080, height: 1920, pix_fmt: 'yuv420p' },
+        { index: 1, codec_type: 'audio', codec_name: 'aac' }
+      ]
+    }));
+
+    const sourcePath = path.join(appConfig.galleryRoot, 'clips', 'direct.mp4');
+    await fs.mkdir(path.dirname(sourcePath), { recursive: true });
+    await fs.writeFile(sourcePath, Buffer.alloc(10 * 1024 * 1024));
+
+    const result = await generateDerivatives(sourcePath, 'clips/direct.mp4');
+
+    expect(result.playbackStrategy).toBe('original');
+    expect(result.generatedThumbnail).toBe(true);
+    expect(result.generatedPreview).toBe(false);
+    const ffmpegCalls = execFileAsyncMock.mock.calls.filter(([command, args]) => command === 'ffmpeg' && args.includes('-i'));
+    expect(ffmpegCalls).toHaveLength(1);
+    expect(ffmpegCalls[0]?.[1]).toContain('libwebp');
+    expect(ffmpegCalls[0]?.[1]).not.toContain('libx264');
+  });
+
+  it('skips previews for compatible silent MP4 videos within the budgets', async () => {
+    execFileAsyncMock.mockImplementation(createExecFileAsyncMock({
+      format: {
+        duration: '4.0',
+        format_name: 'mov,mp4,m4a,3gp,3g2,mj2'
+      },
+      streams: [
+        { codec_type: 'video', codec_name: 'h264', width: 1080, height: 1920, pix_fmt: 'yuv420p' }
+      ]
+    }));
+
+    const sourcePath = path.join(appConfig.galleryRoot, 'clips', 'silent-direct.mp4');
+    await fs.mkdir(path.dirname(sourcePath), { recursive: true });
+    await fs.writeFile(sourcePath, Buffer.alloc(2 * 1024 * 1024));
+
+    const result = await generateDerivatives(sourcePath, 'clips/silent-direct.mp4');
+
+    expect(result.playbackStrategy).toBe('original');
+    expect(result.generatedPreview).toBe(false);
+  });
+
+  it('invalidates a previous preview when forced processing now skips preview encoding', async () => {
+    execFileAsyncMock.mockImplementation(createExecFileAsyncMock({
+      format: { duration: '4.0', format_name: 'mov,mp4,m4a,3gp,3g2,mj2' },
+      streams: [{ codec_type: 'video', codec_name: 'h264', width: 1080, height: 1920, pix_fmt: 'yuv420p' }]
+    }));
+    const relativePath = 'clips/changed-direct.mp4';
+    const sourcePath = path.join(appConfig.galleryRoot, relativePath);
+    const previewPath = path.join(appConfig.previewsDir, relativePath);
+    await fs.mkdir(path.dirname(sourcePath), { recursive: true });
+    await fs.mkdir(path.dirname(previewPath), { recursive: true });
+    await fs.writeFile(sourcePath, Buffer.alloc(1024));
+    await fs.writeFile(previewPath, 'previous-source-preview');
+
+    const result = await generateDerivatives(sourcePath, relativePath, true);
+
+    expect(result.generatedThumbnail).toBe(true);
+    expect(result.generatedPreview).toBe(false);
+    await expect(fs.stat(previewPath)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(execFileAsyncMock.mock.calls.filter(([command, args]) => command === 'ffmpeg' && args.includes('libx264'))).toHaveLength(0);
+  });
+
+  it('treats exactly 24 MiB and exactly 1500 display pixels as eligible', async () => {
+    execFileAsyncMock.mockImplementation(createExecFileAsyncMock({
+      format: {
+        duration: '4.0',
+        format_name: 'mov,mp4,m4a,3gp,3g2,mj2'
+      },
+      streams: [
+        { codec_type: 'video', codec_name: 'h264', width: 1500, height: 1000, pix_fmt: 'yuv420p' },
+        { index: 1, codec_type: 'audio', codec_name: 'aac' }
+      ]
+    }));
+
+    const sourcePath = path.join(appConfig.galleryRoot, 'clips', 'boundary.mp4');
+    await fs.mkdir(path.dirname(sourcePath), { recursive: true });
+    await fs.writeFile(sourcePath, Buffer.alloc(1));
+    await fs.truncate(sourcePath, 24 * 1024 * 1024);
+
+    const result = await generateDerivatives(sourcePath, 'clips/boundary.mp4');
+
+    expect(result.generatedPreview).toBe(false);
+    expect(execFileAsyncMock.mock.calls.filter(([command, args]) => command === 'ffmpeg' && args.includes('libx264'))).toHaveLength(0);
+  });
+
+  it('keeps transcoding one byte above the size cap and one pixel above the width cap', async () => {
+    const sourcePath = path.join(appConfig.galleryRoot, 'clips', 'over-budget.mp4');
+    await fs.mkdir(path.dirname(sourcePath), { recursive: true });
+    await fs.writeFile(sourcePath, Buffer.alloc(1));
+    await fs.truncate(sourcePath, 24 * 1024 * 1024 + 1);
+    execFileAsyncMock.mockImplementation(createExecFileAsyncMock({
+      format: {
+        duration: '4.0',
+        format_name: 'mov,mp4,m4a,3gp,3g2,mj2'
+      },
+      streams: [
+        { codec_type: 'video', codec_name: 'h264', width: 1080, height: 1920, pix_fmt: 'yuv420p' },
+        { index: 1, codec_type: 'audio', codec_name: 'aac' }
+      ]
+    }));
+    expect((await generateDerivatives(sourcePath, 'clips/over-budget.mp4', true)).generatedPreview).toBe(true);
+
+    const wideSourcePath = path.join(appConfig.galleryRoot, 'clips', 'too-wide.mp4');
+    await fs.writeFile(wideSourcePath, Buffer.alloc(1024));
+    execFileAsyncMock.mockImplementation(createExecFileAsyncMock({
+      format: {
+        duration: '4.0',
+        format_name: 'mov,mp4,m4a,3gp,3g2,mj2'
+      },
+      streams: [
+        { codec_type: 'video', codec_name: 'h264', width: 1501, height: 1000, pix_fmt: 'yuv420p' },
+        { index: 1, codec_type: 'audio', codec_name: 'aac' }
+      ]
+    }));
+    expect((await generateDerivatives(wideSourcePath, 'clips/too-wide.mp4', true)).generatedPreview).toBe(true);
+  });
+
+  it('conservatively uses previews when compatible videos have unknown dimensions', async () => {
+    execFileAsyncMock.mockImplementation(createExecFileAsyncMock({
+      format: {
+        duration: '4.0',
+        format_name: 'mov,mp4,m4a,3gp,3g2,mj2'
+      },
+      streams: [
+        { codec_type: 'video', codec_name: 'h264', pix_fmt: 'yuv420p' },
+        { index: 1, codec_type: 'audio', codec_name: 'aac' }
+      ]
+    }));
+
+    const sourcePath = path.join(appConfig.galleryRoot, 'clips', 'unknown-dimensions.mp4');
+    await fs.mkdir(path.dirname(sourcePath), { recursive: true });
+    await fs.writeFile(sourcePath, Buffer.alloc(1024 * 1024));
+
+    const result = await generateDerivatives(sourcePath, 'clips/unknown-dimensions.mp4');
+
+    expect(result.playbackStrategy).toBe('preview');
+    expect(result.generatedPreview).toBe(true);
+  });
+
   it('keeps preview transcoding for incompatible MP4 files', async () => {
     execFileAsyncMock.mockImplementation(createExecFileAsyncMock({
       format: {

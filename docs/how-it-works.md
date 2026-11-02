@@ -193,8 +193,9 @@ To avoid unnecessary work, Foldergram records per-folder scan signatures in
 `folder_scan_state`. If a folder signature still matches and metadata coverage is
 complete, the scanner can skip reprocessing every file in that folder.
 
-That shortcut is bypassed when Foldergram needs to repair unchanged derivatives
-or when gallery-root assumptions no longer match.
+That shortcut is bypassed when Foldergram needs to repair unchanged derivatives,
+when a folder has pending one-time AVIF metadata repair, or when gallery-root
+assumptions no longer match.
 
 ## Full scan lifecycle
 
@@ -207,10 +208,27 @@ During a full scan, Foldergram:
 5. Reads or refreshes media metadata.
 6. Reconciles eligible file moves so the same row, likes, and derivative paths can survive path changes.
 7. Marks missing indexed rows as deleted.
-8. Queues derivative work for changed or missing outputs.
-9. Depending on `SCAN_MEDIA_ERROR_MODE`, either records and skips supported-media failures or fails fast on the first one.
-10. Performs deferred stale-derivative cleanup after successful scans.
-11. Writes scan status to `scan_runs` and, when needed, a per-run full scan error report.
+8. Queues derivative work for changed or missing outputs. Qualifying direct-playback videos generate posters but skip the playable preview.
+9. During an explicit repair scan, reclaims generated video previews that are no longer needed after validating the source, live references, and active share requirements.
+10. Depending on `SCAN_MEDIA_ERROR_MODE`, either records and skips supported-media failures or fails fast on the first one.
+11. Performs deferred stale-derivative cleanup after successful scans.
+12. Writes scan status to `scan_runs` and, when needed, a per-run full scan error report.
+
+## Quick scans and derivative repair
+
+`POST /api/admin/rescan` accepts an optional `repairDerivatives` boolean.
+
+- **Scan for changes** (`false`) walks included source folders, reads source
+  stats, computes fingerprints and folder signatures, reconciles removals, and
+  applies changed or new media. It does not queue ordinary unchanged derivative
+  verification.
+- **Scan and repair derivatives** (`true`) performs the same discovery and also
+  verifies generated media for unchanged assets. It is also the action that
+  reclaims obsolete video previews for already-indexed qualifying videos.
+
+Both modes still perform pending one-time metadata repairs and derivative-storage
+migration work. Neither mode turns directory traversal into a changed-path-only scan;
+discovery still reads the included gallery tree.
 
 ## Scan progress phases
 
@@ -353,6 +371,7 @@ Once data is indexed:
 - likes read from SQLite
 - moments, highlights, and folder stories read from SQLite
 - thumbnails and previews are served as static files
+- qualifying direct-playback videos use the original-media route as their normal playback source
 - originals are served by image ID only
 
 ## Posts and carousel discovery

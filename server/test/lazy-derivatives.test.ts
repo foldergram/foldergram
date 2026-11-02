@@ -607,12 +607,58 @@ describe.sequential('DERIVATIVE_MODE lazy behavior', () => {
     );
   });
 
+  it('serves the original for an eligible normal video preview URL without generating a derivative', async () => {
+    await reset('lazy');
+
+    maintenanceRepository.resetLibraryIndex();
+    const folder = folderRepository.upsert({ slug: 'originals', name: 'Originals', folderPath: 'originals' });
+    const video = createIndexedMedia(folder, 'clip.mp4', 4100, 'original', 5000);
+    await createSourceFile(video.relative_path);
+
+    const response = await dispatchRoute(lazyPreviewsRouter, `/${encodeRelativePath(video.preview_path)}`);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toBe(`source:${video.relative_path}`);
+    expect(response.headers.get('cache-control')).toBe('private, no-store');
+    expect(generatePreviewDerivativeMock).not.toHaveBeenCalled();
+  });
+
+  it('serves the original for existing eligible preview URLs in eager mode', async () => {
+    await reset('eager');
+
+    maintenanceRepository.resetLibraryIndex();
+    const { previewOriginalResolutionRouter } = await import('../src/routes/lazy-derivatives.js');
+    const folder = folderRepository.upsert({ slug: 'eager-originals', name: 'Eager Originals', folderPath: 'eager-originals' });
+    const video = createIndexedMedia(folder, 'clip.mp4', 4200, 'original', 5000);
+    await createSourceFile(video.relative_path);
+
+    const response = await dispatchRoute(previewOriginalResolutionRouter, `/${encodeRelativePath(video.preview_path)}`);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toBe(`source:${video.relative_path}`);
+    expect(response.headers.get('cache-control')).toBe('private, no-store');
+    expect(generatePreviewDerivativeMock).not.toHaveBeenCalled();
+  });
+
+  it('does not recreate an intentionally skipped preview when the original is unavailable', async () => {
+    await reset('lazy');
+
+    maintenanceRepository.resetLibraryIndex();
+    const folder = folderRepository.upsert({ slug: 'missing-original', name: 'Missing Original', folderPath: 'missing-original' });
+    const video = createIndexedMedia(folder, 'clip.mp4', 4300, 'original', 5000);
+
+    const response = await dispatchRoute(lazyPreviewsRouter, `/${encodeRelativePath(video.preview_path)}`);
+
+    expect(response.statusCode).toBe(404);
+    expect(generatePreviewDerivativeMock).not.toHaveBeenCalled();
+  });
+
   it('deduplicates concurrent requests for the same missing video preview', async () => {
     await reset('lazy');
 
     maintenanceRepository.resetLibraryIndex();
     const folder = folderRepository.upsert({ slug: 'videos', name: 'Videos', folderPath: 'videos' });
-    const video = createIndexedMedia(folder, 'clip.mp4', 4000, 'original', 5000);
+    const video = createIndexedMedia(folder, 'clip.webm', 4000, 'preview', 5000);
     let releaseGeneration: (() => void) | null = null;
     const generationStarted = new Promise<void>((resolve) => {
       generatePreviewDerivativeMock.mockImplementationOnce(async (_src: string, relativePath: string, _force = false, overrides?: { previewPath?: string }) => {

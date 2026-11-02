@@ -138,7 +138,8 @@ const playerElement = ref<MediaPlayerElement | null>(null);
 const isPaused = ref(false);
 const isUsingOriginalFallback = ref(false);
 const playerLoadMode = computed(() => (props.active ? 'eager' : 'visible'));
-const currentVideoSrc = computed(() => (isUsingOriginalFallback.value ? getOriginalMediaUrl(props.item.id) : props.item.previewUrl));
+const originalMediaId = computed(() => props.item.mediaItems?.[0]?.imageId ?? props.item.id);
+const currentVideoSrc = computed(() => (isUsingOriginalFallback.value ? getOriginalMediaUrl(originalMediaId.value) : props.item.previewUrl));
 const videoSource = computed<PlayerSrc>(() => ({
   src: currentVideoSrc.value,
   type: 'video/mp4'

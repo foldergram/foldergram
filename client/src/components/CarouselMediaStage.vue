@@ -19,6 +19,7 @@
         :src="item.previewUrl"
         :original-url="item.originalUrl"
         :playback-strategy="item.playbackStrategy"
+        :video-playback-source="item.videoPlaybackSource"
         :width="item.width"
         :height="item.height"
         :poster="item.thumbnailUrl"

@@ -5,6 +5,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as galleryApi from '../api/gallery';
 import type { AppStats, AppStatus, PlacesStatus } from '../types/api';
 import { useAppStore } from '../stores/app';
+import { useFeedStore } from '../stores/feed';
+import { useFoldersStore } from '../stores/folders';
 import SettingsView from './SettingsView.vue';
 
 vi.mock('vue-router', () => ({
@@ -190,6 +192,22 @@ describe('SettingsView', () => {
     expect(warning.text()).toContain('The server and library remain available.');
   });
 
+  it('fetches the full admin stats payload exactly once when settings opens', async () => {
+    const appStore = useAppStore();
+    appStore.$patch({ stats: createAppStatus() });
+
+    const wrapper = mountSettingsView();
+    await flushPromises();
+    await flushPromises();
+
+    expect(vi.mocked(galleryApi.fetchAdminStats)).toHaveBeenCalledTimes(1);
+
+    await openGeneralSettingsSidebarTab(wrapper);
+    await flushPromises();
+
+    expect(vi.mocked(galleryApi.fetchAdminStats)).toHaveBeenCalledTimes(1);
+  });
+
   it('renders the combined feed defaults card with separate home and reels groups', async () => {
     const appStore = useAppStore();
     appStore.$patch({
@@ -370,7 +388,7 @@ describe('SettingsView', () => {
 
     expect(wrapper.text()).toContain('Legacy derivative migration pending');
     expect(wrapper.text()).toContain('24 indexed media records still use the old mirrored thumbnail and preview paths.');
-    expect(wrapper.text()).toContain('Run Scan Library to move legacy mirrored thumbnails and previews into the asset-key storage layout.');
+    expect(wrapper.text()).toContain('Run a scan to move legacy mirrored thumbnails and previews into the asset-key storage layout.');
     expect(wrapper.text()).toContain('This keeps the current thumbnail paths and does not migrate legacy mirrored derivatives.');
   });
 
@@ -389,10 +407,10 @@ describe('SettingsView', () => {
 
     expect(wrapper.text()).toContain('Carousel folder update pending');
     expect(wrapper.text()).toContain(
-      'The saved Carousel folder mode has not been applied to the index. Run Scan Library to update folders and posts.'
+      'The saved Carousel folder mode has not been applied to the index. Run a scan to update folders and posts.'
     );
     expect(wrapper.text()).toContain(
-      'Run Scan Library to apply the saved Carousel folder mode to indexed folders and posts.'
+      'Run a scan to apply the saved Carousel folder mode to indexed folders and posts.'
     );
     expect(wrapper.text()).not.toContain('settings.library.carouselReconciliation');
     expect(wrapper.text()).not.toContain('settings.library.scanActionNote.carouselReconciliation');
@@ -819,8 +837,8 @@ describe('SettingsView', () => {
     await flushPromises();
 
     expect(wrapper.text()).toContain('Carousel folder update pending');
-    expect(wrapper.text()).toContain('Run Scan Library to update folders and posts.');
-    const scanButton = wrapper.findAll('button').find((button) => button.text() === 'Run Scan Library');
+    expect(wrapper.text()).toContain('Run a scan to update folders and posts.');
+    const scanButton = wrapper.findAll('button').find((button) => button.text() === 'Scan for changes');
     expect(scanButton?.attributes('disabled')).toBeUndefined();
 
     await openGeneralSettingsSidebarTab(wrapper);
@@ -848,7 +866,7 @@ describe('SettingsView', () => {
     await flushPromises();
 
     expect(wrapper.text()).toContain('Rebuild Library Index below to apply it to the current gallery location.');
-    const scanButton = wrapper.findAll('button').find((button) => button.text() === 'Run Scan Library');
+    const scanButton = wrapper.findAll('button').find((button) => button.text() === 'Scan for changes');
     const rebuildButton = wrapper.findAll('button').find((button) => button.text() === 'Rebuild Library Index');
     expect(scanButton?.attributes('disabled')).toBeDefined();
     expect(rebuildButton?.attributes('disabled')).toBeUndefined();
@@ -924,5 +942,38 @@ describe('SettingsView', () => {
     expect(updateCarouselsSpy).toHaveBeenCalledWith(true);
     expect(wrapper.text()).toContain('Carousel folder behavior was saved. Run a library scan to apply it.');
     expect(wrapper.text()).not.toContain('Stories folder behavior was saved');
+  });
+
+  it('runs quick scans and derivative repairs from their explicit library actions', async () => {
+    const appStore = useAppStore();
+    appStore.$patch({ stats: createAppStatus() });
+    vi.spyOn(appStore, 'fetchStats').mockResolvedValue();
+    const foldersStore = useFoldersStore();
+    const feedStore = useFeedStore();
+    vi.spyOn(foldersStore, 'fetchFolders').mockResolvedValue(undefined);
+    vi.spyOn(feedStore, 'loadInitial').mockResolvedValue(undefined);
+    const triggerScanSpy = vi
+      .spyOn(galleryApi, 'triggerManualScan')
+      .mockResolvedValue({ ok: true, lastScan: null });
+
+    const wrapper = mountSettingsView();
+    await flushPromises();
+
+    const quickScanButton = wrapper
+      .findAll('button')
+      .find((button) => button.text() === 'Scan for changes');
+    const repairScanButton = wrapper
+      .findAll('button')
+      .find((button) => button.text() === 'Scan and repair derivatives');
+    expect(quickScanButton).toBeDefined();
+    expect(repairScanButton).toBeDefined();
+
+    await quickScanButton!.trigger('click');
+    await flushPromises();
+    expect(triggerScanSpy).toHaveBeenNthCalledWith(1, { repairDerivatives: false });
+
+    await repairScanButton!.trigger('click');
+    await flushPromises();
+    expect(triggerScanSpy).toHaveBeenNthCalledWith(2, { repairDerivatives: true });
   });
 });

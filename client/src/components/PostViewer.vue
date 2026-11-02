@@ -668,7 +668,7 @@
   const NAVIGATION_COOLDOWN_MS = 320
   const isCarousel = computed(() => props.image?.postType === 'carousel' && (props.image.mediaItems?.length ?? 0) > 1)
   const activeMediaItem = computed(() => isCarousel.value ? props.image?.mediaItems?.[carouselIndex.value] ?? null : null)
-  const activeMediaImageId = computed(() => activeMediaItem.value?.imageId ?? props.image?.id ?? null)
+  const activeMediaImageId = computed(() => activeMediaItem.value?.imageId ?? props.image?.mediaItems?.[0]?.imageId ?? props.image?.id ?? null)
   const activeMediaWidth = computed(() => activeMediaItem.value?.width ?? props.image?.width ?? 0)
   const activeMediaHeight = computed(() => activeMediaItem.value?.height ?? props.image?.height ?? 0)
   const activeMediaDurationMs = computed(() => activeMediaItem.value?.durationMs ?? props.image?.durationMs ?? null)
@@ -681,7 +681,7 @@
     }
     return props.image?.filename ?? ''
   })
-  const originalMediaUrl = computed(() => activeMediaItem.value?.originalUrl ?? (activeMediaImageId.value ? getOriginalMediaUrl(activeMediaImageId.value) : ""))
+  const originalMediaUrl = computed(() => activeMediaItem.value?.originalUrl ?? props.image?.originalUrl ?? (activeMediaImageId.value ? getOriginalMediaUrl(activeMediaImageId.value) : ""))
   const downloadOriginalMediaUrl = computed(() => activeMediaImageId.value ? getOriginalMediaDownloadUrl(activeMediaImageId.value) : "")
   const MODAL_SIDEBAR_COLLAPSE_BREAKPOINT = 960
   const SHEET_SWIPE_MIN_DISTANCE = 56
@@ -721,6 +721,7 @@
     () =>
       props.image?.mediaType === 'video' &&
       props.image?.playbackStrategy === 'original' &&
+      props.image?.videoPlaybackSource !== 'original' &&
       videoPreviewWouldDownscale(props.image.width, props.image.height),
   )
   const showVideoPausedIndicator = computed(

@@ -64,8 +64,10 @@ import { parseNestedFolderTitleFormatSetting, serializeNestedFolderTitleFormatSe
 import { countSupportedRootMediaFiles } from '../utils/gallery-root-utils.js';
 import { resolveOriginalPath } from '../utils/media-paths.js';
 import { getLeafPathName, getParentRelativePath, getPathBreadcrumb } from '../utils/path-utils.js';
+import { measureOperation } from '../utils/perf-timing.js';
 import { buildReelQueue, shuffleReelCandidates, type ReelAffinitySignals } from '../utils/reels-utils.js';
 import { parseTreatStoriesAsFoldersSetting, serializeTreatStoriesAsFoldersSetting } from '../utils/stories-utils.js';
+import { resolveVideoPlaybackSource, type VideoDeliveryContext, type VideoPlaybackSource } from '../utils/video-playback-policy.js';
 import { geodataService, placeResolutionService } from './place-service.js';
 import { permanentDeletionService } from './permanent-deletion-service.js';
 import { scannerService } from './scanner-service.js';
@@ -166,7 +168,7 @@ interface PlaceRowFields {
   placeIsApproximate?: number | null;
 }
 
-type IndexedFeedImage = FeedImage & PlaceRowFields & { playbackStrategy?: PlaybackStrategy | null };
+type IndexedFeedImage = FeedImage & PlaceRowFields & { playbackStrategy?: PlaybackStrategy | null; fileSize?: number | null };
 type IndexedImageDetail = ImageDetail & PlaceRowFields & { playbackStrategy?: PlaybackStrategy | null; exifJson?: string | null };
 type IndexedTrashImage = TrashImage & PlaceRowFields & { playbackStrategy?: PlaybackStrategy | null };
 type ScanSummaryRecord = ReturnType<typeof scanRunRepository.latestCompleted>;
@@ -311,15 +313,44 @@ function buildPreviewUrl(
     id: number;
     mediaType: MediaType;
     previewUrl: string;
+    videoPlaybackSource?: VideoPlaybackSource | null;
   },
   useOriginalForImages = false,
   version?: string | null
 ): string {
-  if (useOriginalForImages && image.mediaType === 'image') {
+  if (image.mediaType === 'image') {
+    return useOriginalForImages
+      ? buildOriginalUrl(image.id)
+      : toPublicMediaUrl('/previews', image.previewUrl, version);
+  }
+
+  if (image.videoPlaybackSource === 'original') {
     return buildOriginalUrl(image.id);
   }
 
   return toPublicMediaUrl('/previews', image.previewUrl, version);
+}
+
+function getVideoPlaybackSource(image: {
+  mediaType: MediaType;
+  filename?: string | null;
+  fileSize?: number | null;
+  width?: number | null;
+  height?: number | null;
+  playbackStrategy?: PlaybackStrategy | null;
+}, context: VideoDeliveryContext = 'normal'): VideoPlaybackSource | null {
+  if (image.mediaType !== 'video') {
+    return null;
+  }
+
+  return resolveVideoPlaybackSource({
+    mediaType: image.mediaType,
+    extension: path.extname(image.filename ?? ''),
+    fileSize: image.fileSize,
+    width: image.width,
+    height: image.height,
+    playbackStrategy: image.playbackStrategy
+  }, context);
 }
 
 function mapPlaceSummaryFromRow(image: PlaceRowFields) {
@@ -462,35 +493,6 @@ async function removeDirectoryTree(targetPath: string | null): Promise<void> {
   }
 }
 
-function countDerivativeFilesOnDisk(rootPath: string): number {
-  try {
-    const entries = fs.readdirSync(rootPath, { withFileTypes: true });
-    let count = 0;
-
-    for (const entry of entries) {
-      const entryPath = path.join(rootPath, entry.name);
-
-      if (entry.isDirectory()) {
-        count += countDerivativeFilesOnDisk(entryPath);
-        continue;
-      }
-
-      if (entry.isFile() && entry.name !== '.gitkeep') {
-        count += 1;
-      }
-    }
-
-    return count;
-  } catch (error) {
-    const filesystemError = error as NodeJS.ErrnoException;
-    if (filesystemError.code === 'ENOENT') {
-      return 0;
-    }
-
-    throw error;
-  }
-}
-
 function isSameOrDescendantFolderPath(rootFolderPath: string, candidateFolderPath: string): boolean {
   return candidateFolderPath === rootFolderPath || candidateFolderPath.startsWith(`${rootFolderPath}/`);
 }
@@ -510,7 +512,17 @@ function getParentFolderDisplayName(folderPath: string): string | null {
 }
 
 function mapFeedImage(image: IndexedFeedImage, derivativeVersion = getDerivativeAssetVersion()): FeedImage {
-  const { playbackStrategy, placeId, placeSlug, placeName, placeKind, placeIsApproximate, isSaved, mediaItems, itemCount, ...rest } = image as any;
+  const { playbackStrategy, fileSize, placeId, placeSlug, placeName, placeKind, placeIsApproximate, isSaved, mediaItems, itemCount, ...rest } = image as any;
+  const representativeMediaItem = mediaItems?.[0];
+  const representativeImageId = representativeMediaItem?.imageId ?? rest.id;
+  const videoPlaybackSource = getVideoPlaybackSource({
+    mediaType: rest.mediaType,
+    filename: rest.filename,
+    fileSize,
+    width: rest.width,
+    height: rest.height,
+    playbackStrategy
+  });
   return {
     ...rest,
     postType: rest.postType ?? 'single',
@@ -521,33 +533,47 @@ function mapFeedImage(image: IndexedFeedImage, derivativeVersion = getDerivative
     folderBreadcrumb: getPathBreadcrumb(rest.folderPath),
     thumbnailUrl: toPublicMediaUrl('/thumbnails', rest.thumbnailUrl, derivativeVersion),
     previewUrl: buildPreviewUrl({
-      id: rest.id,
+      id: representativeImageId,
       mediaType: rest.mediaType,
-      previewUrl: rest.previewUrl
+      previewUrl: rest.previewUrl,
+      videoPlaybackSource
     }, false, derivativeVersion),
+    videoPlaybackSource: videoPlaybackSource ?? undefined,
     place: mapPlaceSummaryFromRow({ placeId, placeSlug, placeName, placeKind, placeIsApproximate }),
-    mediaItems: (mediaItems ?? []).map((item: any) => ({
-      imageId: item.imageId,
-      position: item.position,
-      filename: item.filename,
-      mediaType: item.mediaType,
-      width: item.width,
-      height: item.height,
-      durationMs: item.durationMs,
-      isAnimated: Boolean(item.isAnimated),
-      thumbnailUrl: toPublicMediaUrl('/thumbnails', item.thumbnailUrl, derivativeVersion),
-      previewUrl: buildPreviewUrl({
-        id: item.imageId,
+    mediaItems: (mediaItems ?? []).map((item: any) => {
+      const itemPlaybackSource = getVideoPlaybackSource({
         mediaType: item.mediaType,
-        previewUrl: item.previewUrl
-      }, false, derivativeVersion),
-      originalUrl: buildOriginalUrl(item.imageId),
-      playbackStrategy: item.playbackStrategy ?? 'preview',
-      mimeType: item.mimeType,
-      fileSize: item.fileSize,
-      relativePath: item.relativePath,
-      exif: item.exif ?? null
-    })),
+        filename: item.filename,
+        fileSize: item.fileSize,
+        width: item.width,
+        height: item.height,
+        playbackStrategy: item.playbackStrategy
+      });
+      return {
+        imageId: item.imageId,
+        position: item.position,
+        filename: item.filename,
+        mediaType: item.mediaType,
+        width: item.width,
+        height: item.height,
+        durationMs: item.durationMs,
+        isAnimated: Boolean(item.isAnimated),
+        thumbnailUrl: toPublicMediaUrl('/thumbnails', item.thumbnailUrl, derivativeVersion),
+        previewUrl: buildPreviewUrl({
+          id: item.imageId,
+          mediaType: item.mediaType,
+          previewUrl: item.previewUrl,
+          videoPlaybackSource: itemPlaybackSource
+        }, false, derivativeVersion),
+        originalUrl: buildOriginalUrl(item.imageId),
+        playbackStrategy: item.playbackStrategy ?? 'preview',
+        videoPlaybackSource: itemPlaybackSource ?? undefined,
+        mimeType: item.mimeType,
+        fileSize: item.fileSize,
+        relativePath: item.relativePath,
+        exif: item.exif ?? null
+      };
+    }),
     itemCount: itemCount ?? (mediaItems ? mediaItems.length : 1)
   };
 }
@@ -576,6 +602,14 @@ function mapSharedMediaItem(item: PostMediaItem, derivativeVersion: string | nul
     thumbnailUrl: buildShareThumbnailUrl(item.imageId, derivativeVersion),
     previewUrl: buildSharePreviewUrl(item.imageId, derivativeVersion),
     playbackStrategy: item.playbackStrategy ?? 'preview',
+    videoPlaybackSource: getVideoPlaybackSource({
+      mediaType: item.mediaType,
+      filename: item.filename,
+      fileSize: item.fileSize,
+      width: item.width,
+      height: item.height,
+      playbackStrategy: item.playbackStrategy
+    }, 'share') ?? undefined,
     mimeType: item.mimeType,
     fileSize: item.fileSize
   };
@@ -599,6 +633,14 @@ function mapSharedFeedImage(image: IndexedFeedImage, derivativeVersion = getDeri
     isAnimated: Boolean(image.isAnimated),
     thumbnailUrl: buildShareThumbnailUrl(representativeImageId, derivativeVersion),
     previewUrl: buildSharePreviewUrl(representativeImageId, derivativeVersion),
+    videoPlaybackSource: getVideoPlaybackSource({
+      mediaType: image.mediaType,
+      filename: image.filename,
+      fileSize: image.fileSize,
+      width: image.width,
+      height: image.height,
+      playbackStrategy: image.playbackStrategy
+    }, 'share') ?? undefined,
     sortTimestamp: image.sortTimestamp,
     postType: image.postType ?? 'single',
     itemCount: image.itemCount ?? (mediaItems.length || 1),
@@ -610,6 +652,14 @@ function mapImageDetail(image: IndexedImageDetail, derivativeVersion = getDeriva
   const { playbackStrategy, exifJson, placeId, placeSlug, placeName, placeKind, placeIsApproximate, isSaved, mediaItems, itemCount, ...rest } = image as any;
   const useOriginalForImages = appConfig.imageDetailSource === 'original';
   const representativeImageId = mediaItems?.[0]?.imageId ?? rest.id;
+  const videoPlaybackSource = getVideoPlaybackSource({
+    mediaType: rest.mediaType,
+    filename: rest.filename,
+    fileSize: rest.fileSize,
+    width: rest.width,
+    height: rest.height,
+    playbackStrategy
+  });
   return {
     ...rest,
     postType: rest.postType ?? 'single',
@@ -623,33 +673,47 @@ function mapImageDetail(image: IndexedImageDetail, derivativeVersion = getDeriva
     previewUrl: buildPreviewUrl({
       id: representativeImageId,
       mediaType: rest.mediaType,
-      previewUrl: rest.previewUrl
+      previewUrl: rest.previewUrl,
+      videoPlaybackSource
     }, useOriginalForImages, derivativeVersion),
     originalUrl: buildOriginalUrl(representativeImageId),
     playbackStrategy,
+    videoPlaybackSource: videoPlaybackSource ?? undefined,
     place: mapPlaceSummaryFromRow({ placeId, placeSlug, placeName, placeKind, placeIsApproximate }),
-    mediaItems: (mediaItems ?? []).map((item: any) => ({
-      imageId: item.imageId,
-      position: item.position,
-      filename: item.filename,
-      mediaType: item.mediaType,
-      width: item.width,
-      height: item.height,
-      durationMs: item.durationMs,
-      isAnimated: Boolean(item.isAnimated),
-      thumbnailUrl: toPublicMediaUrl('/thumbnails', item.thumbnailUrl, derivativeVersion),
-      previewUrl: buildPreviewUrl({
-        id: item.imageId,
+    mediaItems: (mediaItems ?? []).map((item: any) => {
+      const itemPlaybackSource = getVideoPlaybackSource({
         mediaType: item.mediaType,
-        previewUrl: item.previewUrl
-      }, false, derivativeVersion),
-      originalUrl: buildOriginalUrl(item.imageId),
-      playbackStrategy: item.playbackStrategy ?? 'preview',
-      mimeType: item.mimeType,
-      fileSize: item.fileSize,
-      relativePath: item.relativePath,
-      exif: item.exif ?? null
-    })),
+        filename: item.filename,
+        fileSize: item.fileSize,
+        width: item.width,
+        height: item.height,
+        playbackStrategy: item.playbackStrategy
+      });
+      return {
+        imageId: item.imageId,
+        position: item.position,
+        filename: item.filename,
+        mediaType: item.mediaType,
+        width: item.width,
+        height: item.height,
+        durationMs: item.durationMs,
+        isAnimated: Boolean(item.isAnimated),
+        thumbnailUrl: toPublicMediaUrl('/thumbnails', item.thumbnailUrl, derivativeVersion),
+        previewUrl: buildPreviewUrl({
+          id: item.imageId,
+          mediaType: item.mediaType,
+          previewUrl: item.previewUrl,
+          videoPlaybackSource: itemPlaybackSource
+        }, false, derivativeVersion),
+        originalUrl: buildOriginalUrl(item.imageId),
+        playbackStrategy: item.playbackStrategy ?? 'preview',
+        videoPlaybackSource: itemPlaybackSource ?? undefined,
+        mimeType: item.mimeType,
+        fileSize: item.fileSize,
+        relativePath: item.relativePath,
+        exif: item.exif ?? null
+      };
+    }),
     itemCount: itemCount ?? (mediaItems ? mediaItems.length : 1)
   };
 }
@@ -673,6 +737,14 @@ function mapSharedImageDetail(image: IndexedImageDetail, derivativeVersion = get
     isAnimated: Boolean(image.isAnimated),
     thumbnailUrl: buildShareThumbnailUrl(representativeImageId, derivativeVersion),
     previewUrl: buildSharePreviewUrl(representativeImageId, derivativeVersion),
+    videoPlaybackSource: getVideoPlaybackSource({
+      mediaType: image.mediaType,
+      filename: image.filename,
+      fileSize: image.fileSize,
+      width: image.width,
+      height: image.height,
+      playbackStrategy: image.playbackStrategy
+    }, 'share') ?? undefined,
     sortTimestamp: image.sortTimestamp,
     nextImageId: image.nextImageId,
     previousImageId: image.previousImageId,
@@ -1352,7 +1424,7 @@ export const galleryService = {
       };
     }
 
-    const candidates = imageRepository.listVisibleVideoCandidates();
+    const candidates = measureOperation('reels.candidate_selection', () => imageRepository.listVisibleVideoCandidates());
     const total = candidates.length;
     if (total === 0) {
       return {
@@ -1474,7 +1546,7 @@ export const galleryService = {
       return [];
     }
 
-    return folderRepository.getAllSummaries().map(buildFolderSummary);
+    return measureOperation('folders.summary_selection', () => folderRepository.getAllSummaries().map(buildFolderSummary));
   },
 
   listPlaces() {
@@ -2139,15 +2211,24 @@ export const galleryService = {
     const storiesMigration = getStoriesMigrationStatus();
     const treatCarouselsAsFolders = getTreatCarouselsAsFolders();
     const carouselsMigration = getCarouselsMigrationStatus();
-    const indexedPosts = storageState.libraryAvailable ? imageRepository.countFeed() : 0;
+    const indexedPosts = measureOperation('status.feed_count', () => (storageState.libraryAvailable ? imageRepository.countFeed() : 0));
+    const indexedMediaAssets = measureOperation('status.media_assets_count', () =>
+      storageState.libraryAvailable ? imageRepository.countVisibleMediaAssets() : 0
+    );
+    const indexedCarousels = measureOperation('status.carousel_count', () =>
+      storageState.libraryAvailable ? imageRepository.countVisibleCarousels() : 0
+    );
+    const indexedVideos = measureOperation('status.video_count', () =>
+      storageState.libraryAvailable ? imageRepository.countVisibleSingleVideos() : 0
+    );
 
     return {
-      folders: storageState.libraryAvailable ? folderRepository.count() : 0,
+      folders: measureOperation('status.folder_count', () => (storageState.libraryAvailable ? folderRepository.count() : 0)),
       indexedImages: indexedPosts,
       indexedPosts,
-      indexedMediaAssets: storageState.libraryAvailable ? imageRepository.countVisibleMediaAssets() : 0,
-      indexedCarousels: storageState.libraryAvailable ? imageRepository.countVisibleCarousels() : 0,
-      indexedVideos: storageState.libraryAvailable ? imageRepository.countVisibleSingleVideos() : 0,
+      indexedMediaAssets,
+      indexedCarousels,
+      indexedVideos,
       scan: this.getScanProgress(),
       storage: {
         available: storageState.libraryAvailable,
@@ -2201,7 +2282,6 @@ export const galleryService = {
     const previousGalleryRoot = appSettingsRepository.get(PREVIOUS_GALLERY_ROOT_SETTING_KEY);
     const rebuildRequired = appSettingsRepository.get(LIBRARY_REBUILD_REQUIRED_SETTING_KEY) === '1';
     const lastSuccessfulGalleryRoot = appSettingsRepository.get(LAST_SUCCESSFUL_GALLERY_ROOT_SETTING_KEY);
-    const pendingDerivativeMigrationRows = storageState.libraryAvailable ? imageRepository.countPendingDerivativeMigrationRows() : 0;
     const defaultHomeFeedMode = getDefaultHomeFeedMode();
     const defaultLocale = getDefaultLocale();
     const defaultReelsFeedMode = getDefaultReelsFeedMode();
@@ -2213,47 +2293,52 @@ export const galleryService = {
     const carouselsMigration = getCarouselsMigrationStatus();
     const excludedFolders = getExcludedFolderSettings();
 
-    return {
-      folders: storageState.libraryAvailable ? folderRepository.count() : 0,
-      indexedImages: storageState.libraryAvailable ? imageRepository.countFeed() : 0,
-      indexedPosts: storageState.libraryAvailable ? imageRepository.countFeed() : 0,
-      indexedMediaAssets: storageState.libraryAvailable ? imageRepository.countVisibleMediaAssets() : 0,
-      indexedCarousels: storageState.libraryAvailable ? imageRepository.countVisibleCarousels() : 0,
-      indexedVideos: storageState.libraryAvailable ? imageRepository.countVisibleSingleVideos() : 0,
-      deletedImages: storageState.libraryAvailable ? imageRepository.countDeleted() : 0,
-      thumbnailCount: storageState.libraryAvailable ? countDerivativeFilesOnDisk(appConfig.thumbnailsDir) : 0,
-      previewCount: storageState.libraryAvailable ? countDerivativeFilesOnDisk(appConfig.previewsDir) : 0,
-      lastScan: lastCompletedScan,
-      scan: this.getAdminScanProgress(),
-      storage: {
-        available: storageState.libraryAvailable,
-        reason: storageState.reason,
-        usingInMemoryDatabase: storageState.usingInMemoryDatabase
-      },
-      libraryIndex: {
-        rebuildRequired,
-        reason: rebuildRequired ? 'gallery_root_changed' : null,
-        currentGalleryRoot,
-        previousGalleryRoot,
-        lastSuccessfulGalleryRoot,
-        legacyDerivativeMigrationPending: pendingDerivativeMigrationRows > 0,
-        pendingDerivativeMigrationRows,
-        ignoredRootMediaCount: storageState.libraryAvailable ? countSupportedRootMediaFiles(currentGalleryRoot) : 0
-      },
-      preferences: {
-        defaultLocale,
-        defaultHomeFeedMode,
-        defaultReelsFeedMode,
-        defaultFolderImageOrder,
-        nestedFolderTitleFormat,
-        treatStoriesAsFolders,
-        treatCarouselsAsFolders
-      },
-      storiesMigration,
-      carouselsMigration,
-      excludedFolders,
-      deletionRecovery: permanentDeletionService.getRecoveryStatus()
-    };
+    return measureOperation('admin_stats.construction', () => {
+      const indexedPosts = storageState.libraryAvailable ? imageRepository.countFeed() : 0;
+      const pendingDerivativeMigrationRows = storageState.libraryAvailable ? imageRepository.countPendingDerivativeMigrationRows() : 0;
+
+      return {
+        folders: storageState.libraryAvailable ? folderRepository.count() : 0,
+        indexedImages: indexedPosts,
+        indexedPosts,
+        indexedMediaAssets: storageState.libraryAvailable ? imageRepository.countVisibleMediaAssets() : 0,
+        indexedCarousels: storageState.libraryAvailable ? imageRepository.countVisibleCarousels() : 0,
+        indexedVideos: storageState.libraryAvailable ? imageRepository.countVisibleSingleVideos() : 0,
+        deletedImages: storageState.libraryAvailable ? imageRepository.countDeleted() : 0,
+        thumbnailCount: storageState.libraryAvailable ? imageRepository.countWithThumbnail() : 0,
+        previewCount: storageState.libraryAvailable ? imageRepository.countWithPreview() : 0,
+        lastScan: lastCompletedScan,
+        scan: this.getAdminScanProgress(),
+        storage: {
+          available: storageState.libraryAvailable,
+          reason: storageState.reason,
+          usingInMemoryDatabase: storageState.usingInMemoryDatabase
+        },
+        libraryIndex: {
+          rebuildRequired,
+          reason: rebuildRequired ? 'gallery_root_changed' : null,
+          currentGalleryRoot,
+          previousGalleryRoot,
+          lastSuccessfulGalleryRoot,
+          legacyDerivativeMigrationPending: pendingDerivativeMigrationRows > 0,
+          pendingDerivativeMigrationRows,
+          ignoredRootMediaCount: storageState.libraryAvailable ? countSupportedRootMediaFiles(currentGalleryRoot) : 0
+        },
+        preferences: {
+          defaultLocale,
+          defaultHomeFeedMode,
+          defaultReelsFeedMode,
+          defaultFolderImageOrder,
+          nestedFolderTitleFormat,
+          treatStoriesAsFolders,
+          treatCarouselsAsFolders
+        },
+        storiesMigration,
+        carouselsMigration,
+        excludedFolders,
+        deletionRecovery: permanentDeletionService.getRecoveryStatus()
+      };
+    });
   },
 
   setDefaultHomeFeedMode(mode: FeedMode) {

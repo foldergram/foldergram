@@ -349,17 +349,17 @@
     "library": {
       "legacyMigration": {
         "title": "Legacy derivative migration pending",
-        "messageOne": "{count} indexed media record still uses the old mirrored thumbnail and preview paths. Run Scan Library to move it into asset-key storage.",
-        "messageOther": "{count} indexed media records still use the old mirrored thumbnail and preview paths. Run Scan Library to move them into asset-key storage."
+        "messageOne": "{count} indexed media record still uses the old mirrored thumbnail and preview paths. Run a scan to move it into asset-key storage.",
+        "messageOther": "{count} indexed media records still use the old mirrored thumbnail and preview paths. Run a scan to move them into asset-key storage."
       },
       "carouselReconciliation": {
         "title": "Carousel folder update pending",
-        "scanDescription": "The saved Carousel folder mode has not been applied to the index. Run Scan Library to update folders and posts.",
+        "scanDescription": "The saved Carousel folder mode has not been applied to the index. Run a scan to update folders and posts.",
         "rebuildDescription": "The saved Carousel folder mode has not been applied to the index. Rebuild Library Index below to apply it to the current gallery location."
       },
       "scanCard": {
         "title": "Scan Library",
-        "description": "Run a scan after adding folders or when you want to refresh indexed media."
+        "description": "Scan for additions, updates, and removals. Choose derivative repair to also check generated media for unchanged files."
       },
       "statusLabel": {
         "storageUnavailable": "Storage unavailable",
@@ -369,16 +369,19 @@
       },
       "scanButton": {
         "active": "Scanning library...",
-        "idle": "Run Scan Library"
+        "changes": "Scan for changes",
+        "repair": "Scan and repair derivatives"
       },
       "scanActionNote": {
         "loading": "Loading current library status...",
         "rebuildRequired": "Rebuild the library index first because the gallery location changed.",
         "otherTaskActive": "Another library task is running. Live progress appears in the sticky status bar.",
         "progress": "Live progress appears in the sticky status bar.",
-        "legacyMigration": "Run Scan Library to move legacy mirrored thumbnails and previews into the asset-key storage layout.",
-        "carouselReconciliation": "Run Scan Library to apply the saved Carousel folder mode to indexed folders and posts.",
-        "idle": "Scans check for added, updated, or missing media."
+        "progressChanges": "Scanning for gallery changes. Live progress appears in the sticky status bar.",
+        "progressRepair": "Scanning for changes and repairing derivatives. Live progress appears in the sticky status bar.",
+        "legacyMigration": "Run a scan to move legacy mirrored thumbnails and previews into the asset-key storage layout.",
+        "carouselReconciliation": "Run a scan to apply the saved Carousel folder mode to indexed folders and posts.",
+        "idle": "Both actions discover gallery changes. Repair also checks generated media for unchanged files."
       },
       "thumbnailCard": {
         "title": "Regenerate Thumbnails",
@@ -415,7 +418,8 @@
         "thumbnailActive": "Wait for thumbnail regeneration to finish first.",
         "scanActive": "Wait for the current scan to finish first.",
         "rebuildRequired": "Recommended because the gallery location changed.",
-        "idle": "Use this to reset the index and reuse matching derivatives from the previous library index."
+        "idle": "Use this to reset the index and reuse matching derivatives from the previous library index.",
+        "legacyMigration": "This keeps the current thumbnail paths and does not migrate legacy mirrored derivatives. Run a scan instead to move them into asset-key storage."
       },
       "dialogs": {
         "rebuildTitle": "Rebuild the current library index?",

@@ -349,17 +349,17 @@
     "library": {
       "legacyMigration": {
         "title": "旧版派生资源迁移待处理",
-        "messageOne": "{count} 条已索引媒体记录仍在使用旧的镜像缩略图和预览路径。运行“扫描图库”即可将其迁移到资源键存储。",
-        "messageOther": "{count} 条已索引媒体记录仍在使用旧的镜像缩略图和预览路径。运行“扫描图库”即可将它们迁移到资源键存储。"
+        "messageOne": "{count} 条已索引媒体记录仍在使用旧的镜像缩略图和预览路径。运行扫描即可将其迁移到资源键存储。",
+        "messageOther": "{count} 条已索引媒体记录仍在使用旧的镜像缩略图和预览路径。运行扫描即可将它们迁移到资源键存储。"
       },
       "carouselReconciliation": {
         "title": "轮播文件夹更新待处理",
-        "scanDescription": "已保存的轮播文件夹模式尚未应用到索引。请运行“扫描图库”以更新文件夹和帖子。",
+        "scanDescription": "已保存的轮播文件夹模式尚未应用到索引。请运行扫描以更新文件夹和帖子。",
         "rebuildDescription": "已保存的轮播文件夹模式尚未应用到索引。请使用下方的“重建图库索引”，将其应用到当前图库位置。"
       },
       "scanCard": {
         "title": "扫描图库",
-        "description": "在添加文件夹后，或你想刷新已索引媒体时运行一次扫描。"
+        "description": "扫描新增、更新和删除的媒体。选择修复派生文件还会检查未更改媒体对应的已生成文件。"
       },
       "statusLabel": {
         "storageUnavailable": "存储不可用",
@@ -369,16 +369,19 @@
       },
       "scanButton": {
         "active": "正在扫描图库...",
-        "idle": "运行图库扫描"
+        "changes": "扫描更改",
+        "repair": "扫描并修复派生文件"
       },
       "scanActionNote": {
         "loading": "正在加载当前图库状态...",
         "rebuildRequired": "由于图库位置已更改，请先重建图库索引。",
         "otherTaskActive": "当前还有其他图库任务正在运行。实时进度会显示在置顶状态栏中。",
         "progress": "实时进度会显示在置顶状态栏中。",
-        "legacyMigration": "运行“扫描图库”可将旧的镜像缩略图和预览图迁移到资源键存储布局。",
-        "carouselReconciliation": "运行“扫描图库”，将已保存的轮播文件夹模式应用到已索引的文件夹和帖子。",
-        "idle": "扫描会检查新增、更新或缺失的媒体。"
+        "progressChanges": "正在扫描图库更改。实时进度会显示在置顶状态栏中。",
+        "progressRepair": "正在扫描更改并修复派生文件。实时进度会显示在置顶状态栏中。",
+        "legacyMigration": "运行扫描可将旧的镜像缩略图和预览图迁移到资源键存储布局。",
+        "carouselReconciliation": "运行扫描，将已保存的轮播文件夹模式应用到已索引的文件夹和帖子。",
+        "idle": "两种操作都会发现图库更改。修复还会检查未更改媒体对应的已生成文件。"
       },
       "thumbnailCard": {
         "title": "重新生成缩略图",
@@ -415,7 +418,8 @@
         "thumbnailActive": "请先等待缩略图重新生成完成。",
         "scanActive": "请先等待当前扫描完成。",
         "rebuildRequired": "由于图库位置已更改，建议执行此操作。",
-        "idle": "使用此操作可以重置索引，并复用上一个图库索引中仍可匹配的衍生资源。"
+        "idle": "使用此操作可以重置索引，并复用上一个图库索引中仍可匹配的衍生资源。",
+        "legacyMigration": "此操作会保留当前缩略图路径，不会迁移旧的镜像衍生资源。请改为运行扫描以将其迁移到资源键存储。"
       },
       "dialogs": {
         "rebuildTitle": "要重建当前图库索引吗？",

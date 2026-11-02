@@ -7,9 +7,10 @@ import { appConfig, repositoryRoot } from './config/env.js';
 import { requireApiAuthentication, requireMediaAuthentication } from './middleware/auth-protection.js';
 import { requireTrustedMutationRequest } from './middleware/csrf-protection.js';
 import { blockPublicDemoMutations } from './middleware/public-demo-mode.js';
+import { routeTimingMiddleware } from './middleware/route-timing.js';
 import { apiRouter } from './routes/api.js';
 import { authService } from './services/auth-service.js';
-import { lazyThumbnailsRouter, lazyPreviewsRouter } from './routes/lazy-derivatives.js';
+import { lazyThumbnailsRouter, lazyPreviewsRouter, previewOriginalResolutionRouter } from './routes/lazy-derivatives.js';
 import { createProtectedStaticOptions } from './utils/media-response.js';
 
 export function applyApiNoStoreHeaders(response: Pick<express.Response, 'setHeader'>) {
@@ -29,10 +30,10 @@ export function createApp() {
     app.use('/previews', requireMediaAuthentication, lazyPreviewsRouter);
   } else {
     app.use('/thumbnails', requireMediaAuthentication, express.static(appConfig.thumbnailsDir, createProtectedStaticOptions()));
-    app.use('/previews', requireMediaAuthentication, express.static(appConfig.previewsDir, createProtectedStaticOptions()));
+    app.use('/previews', requireMediaAuthentication, previewOriginalResolutionRouter, express.static(appConfig.previewsDir, createProtectedStaticOptions()));
   }
 
-  app.use('/api', (_request, response, next) => {
+  app.use('/api', routeTimingMiddleware, (_request, response, next) => {
     applyApiNoStoreHeaders(response);
     next();
   });
@@ -51,6 +52,11 @@ export function createApp() {
   app.use((error: unknown, _request: express.Request, response: express.Response, next: express.NextFunction) => {
     if (response.headersSent) {
       next(error);
+      return;
+    }
+
+    if (error instanceof Error && 'status' in error && error.status === 416) {
+      response.status(416).end();
       return;
     }
 

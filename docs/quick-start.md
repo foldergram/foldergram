@@ -121,7 +121,7 @@ docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
 
 On first run, the server performs a startup scan because there is no existing
 index. Existing libraries keep using the current index on startup; run
-`Scan Library` from Settings whenever you want to refresh the library after
+**Scan for changes** from Settings whenever you want to refresh the library after
 changes.
 
 On later upgrades, startup automatically applies pending SQLite migrations

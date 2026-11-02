@@ -69,6 +69,7 @@ export interface PostMediaItem {
   thumbnailUrl: string;
   previewUrl: string;
   playbackStrategy?: 'preview' | 'original' | null;
+  videoPlaybackSource?: 'original' | 'preview';
   originalUrl?: string;
   mimeType?: string;
   fileSize?: number;
@@ -96,6 +97,7 @@ export interface FeedItem {
   isAnimated?: boolean | null;
   thumbnailUrl: string;
   previewUrl: string;
+  videoPlaybackSource?: 'original' | 'preview';
   sortTimestamp: number;
   takenAt: number | null;
   isSaved?: boolean;
@@ -327,6 +329,7 @@ export interface SharedFeedItem {
   isAnimated?: boolean | null;
   thumbnailUrl: string;
   previewUrl: string;
+  videoPlaybackSource?: 'original' | 'preview';
   sortTimestamp: number;
   postType?: PostType;
   itemCount?: number;
@@ -349,6 +352,7 @@ export interface SharedImageDetail {
   isAnimated?: boolean | null;
   thumbnailUrl: string;
   previewUrl: string;
+  videoPlaybackSource?: 'original' | 'preview';
   sortTimestamp: number;
   nextImageId: number | null;
   previousImageId: number | null;

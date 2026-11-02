@@ -134,9 +134,14 @@ several payload fields still use `image` terminology while carrying mixed media.
 
 ## Can Foldergram play videos directly from the original file?
 
-Yes, sometimes. Compatible MP4 originals can be exposed as an optional `HD`
-source in the detail player while the generated preview remains the default
-playback source.
+Yes, sometimes. A compatible `.mp4` with H.264 video, `yuv420p` pixels, AAC or
+no audio, a known size of at most `24 MiB`, and a known display width of at most
+`1500` pixels uses the original as its ordinary playback source. Posters are
+still generated, and larger compatible videos use a generated preview with an
+optional `HD` original source in the detail player.
+
+Folder-share playback keeps using scoped preview media instead of granting
+ordinary original access.
 
 ## Why are thumbnails or previews being created while I browse?
 

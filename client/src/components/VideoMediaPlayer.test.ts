@@ -115,6 +115,24 @@ describe('VideoMediaPlayer', () => {
     expect(wrapperIneligibleSize.find('button[data-swipe-ignore="true"]').exists()).toBe(false);
   });
 
+  it('hides the HD switch when normal playback already uses the original', () => {
+    const wrapper = mount(VideoMediaPlayer, {
+      props: {
+        src: '/test-video-original.mp4',
+        originalUrl: '/test-video-original.mp4',
+        playbackStrategy: 'original',
+        videoPlaybackSource: 'original',
+        width: 1920,
+        height: 1080
+      },
+      global: {
+        plugins: [i18n]
+      }
+    });
+
+    expect(wrapper.find('button[aria-label="Switch to HD original"]').exists()).toBe(false);
+  });
+
   it('toggles HD state and resets when src changes', async () => {
     const wrapper = mount(VideoMediaPlayer, {
       props: {

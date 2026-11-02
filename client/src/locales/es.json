@@ -349,17 +349,17 @@
     "library": {
       "legacyMigration": {
         "title": "Migración heredada de derivados pendiente",
-        "messageOne": "{count} registro de medio indexado aún usa las antiguas rutas reflejadas de miniaturas y vistas previas. Ejecuta Escanear biblioteca para moverlo al almacenamiento por clave de recurso.",
-        "messageOther": "{count} registros de medios indexados aún usan las antiguas rutas reflejadas de miniaturas y vistas previas. Ejecuta Escanear biblioteca para moverlos al almacenamiento por clave de recurso."
+        "messageOne": "{count} registro de medio indexado aún usa las antiguas rutas reflejadas de miniaturas y vistas previas. Ejecuta un escaneo para moverlo al almacenamiento por clave de recurso.",
+        "messageOther": "{count} registros de medios indexados aún usan las antiguas rutas reflejadas de miniaturas y vistas previas. Ejecuta un escaneo para moverlos al almacenamiento por clave de recurso."
       },
       "carouselReconciliation": {
         "title": "Actualización de carpetas de carrusel pendiente",
-        "scanDescription": "El modo guardado de las carpetas de carrusel aún no se ha aplicado al índice. Ejecuta Escanear biblioteca para actualizar las carpetas y publicaciones.",
+        "scanDescription": "El modo guardado de las carpetas de carrusel aún no se ha aplicado al índice. Ejecuta un escaneo para actualizar las carpetas y publicaciones.",
         "rebuildDescription": "El modo guardado de las carpetas de carrusel aún no se ha aplicado al índice. Usa Reconstruir índice de la biblioteca abajo para aplicarlo a la ubicación actual de la galería."
       },
       "scanCard": {
         "title": "Escanear biblioteca",
-        "description": "Ejecuta un escaneo después de añadir carpetas o cuando quieras refrescar los medios indexados."
+        "description": "Busca adiciones, actualizaciones y eliminaciones. Elige reparar derivados para comprobar también los medios generados de los archivos sin cambios."
       },
       "statusLabel": {
         "storageUnavailable": "Almacenamiento no disponible",
@@ -369,16 +369,19 @@
       },
       "scanButton": {
         "active": "Escaneando biblioteca...",
-        "idle": "Ejecutar escaneo de la biblioteca"
+        "changes": "Buscar cambios",
+        "repair": "Escanear y reparar derivados"
       },
       "scanActionNote": {
         "loading": "Cargando el estado actual de la biblioteca...",
         "rebuildRequired": "Reconstruye primero el índice de la biblioteca porque cambió la ubicación de la galería.",
         "otherTaskActive": "Hay otra tarea de biblioteca en ejecución. El progreso en vivo aparece en la barra de estado fija.",
         "progress": "El progreso en vivo aparece en la barra de estado fija.",
-        "legacyMigration": "Ejecuta Escanear biblioteca para mover miniaturas y vistas previas reflejadas heredadas al diseño de almacenamiento con claves de recursos.",
-        "carouselReconciliation": "Ejecuta Escanear biblioteca para aplicar el modo guardado de las carpetas de carrusel a las carpetas y publicaciones indexadas.",
-        "idle": "Los escaneos comprueban medios añadidos, actualizados o faltantes."
+        "progressChanges": "Buscando cambios en la galería. El progreso en vivo aparece en la barra de estado fija.",
+        "progressRepair": "Buscando cambios y reparando derivados. El progreso en vivo aparece en la barra de estado fija.",
+        "legacyMigration": "Ejecuta un escaneo para mover miniaturas y vistas previas reflejadas heredadas al diseño de almacenamiento con claves de recursos.",
+        "carouselReconciliation": "Ejecuta un escaneo para aplicar el modo guardado de las carpetas de carrusel a las carpetas y publicaciones indexadas.",
+        "idle": "Ambas acciones detectan cambios en la galería. Reparar también comprueba los medios generados de los archivos sin cambios."
       },
       "thumbnailCard": {
         "title": "Regenerar miniaturas",
@@ -415,7 +418,8 @@
         "thumbnailActive": "Espera a que termine primero la regeneración de miniaturas.",
         "scanActive": "Espera a que termine el escaneo actual primero.",
         "rebuildRequired": "Recomendado porque cambió la ubicación de la galería.",
-        "idle": "Usa esto para restablecer el índice y reutilizar derivados coincidentes del índice anterior de la biblioteca."
+        "idle": "Usa esto para restablecer el índice y reutilizar derivados coincidentes del índice anterior de la biblioteca.",
+        "legacyMigration": "Esto conserva las rutas actuales de las miniaturas y no migra los derivados reflejados heredados. Ejecuta un escaneo para moverlos al almacenamiento con claves de recursos."
       },
       "dialogs": {
         "rebuildTitle": "¿Reconstruir el índice actual de la biblioteca?",

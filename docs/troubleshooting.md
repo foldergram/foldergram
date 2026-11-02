@@ -143,6 +143,11 @@ after the retention window on a later successful full scan.
 That is intentional so temporary share outages or accidental moves do not
 immediately delete cached derivatives.
 
+Obsolete playable video previews for qualifying direct-playback videos are a
+separate cleanup. **Scan and repair derivatives** removes them after validating
+the current source, live derivative references, and active share requirements.
+Quick scans do not remove them.
+
 ## A scan failed or completed with errors on a corrupt or unreadable media file
 
 Foldergram can now handle this in two different ways, depending on
@@ -175,15 +180,35 @@ no audio remains silent. If audio exists but no track has an available decoder,
 preview generation reports an error. Check the scan error report for details;
 an available decoder does not guarantee that a damaged track can be decoded.
 
-Empty cached thumbnails and previews are treated as missing. Run **Scan Library**
-to repair them in eager mode, or request the media again in lazy mode.
-Nonempty corrupt or truncated previews still require forced regeneration;
-Foldergram does not probe every cached video on each request.
+Empty cached thumbnails and previews are treated as missing. Run **Scan and
+repair derivatives** to repair them in eager mode, or request the media again in
+lazy mode. Nonempty corrupt or truncated previews still require forced
+regeneration; Foldergram does not probe every cached video on each request.
 **Regenerate Thumbnails** only rebuilds thumbnails and video posters, so it
 does not repair a nonempty corrupt video preview.
 
+A missing video preview is expected for a qualifying direct-playback video.
+Normal playback uses the original, and the old preview URL resolves to it.
+
 See [Video preview generation](/media-processing#video-preview-generation)
 for audio selection, output validation, and cache behavior.
+
+## A video preview disappears after a repair scan
+
+If the video qualifies for direct playback, its generated preview is no longer
+needed for normal playback. **Scan and repair derivatives** removes only that
+generated preview file after validating the source and share requirements.
+Thumbnails, originals, and indexed identities are preserved.
+
+If a folder share still needs scoped preview media, the preview is retained or
+recreated. Enabling sharing later also works without a library rebuild because
+the scoped share route can generate the required preview on authorized first
+access.
+
+If you later run an older Foldergram version that expects generated video
+previews by default, use **Scan and repair derivatives** to regenerate them.
+Lazy mode can also recover them on demand. Originals and indexed identities are
+not affected.
 
 ## Moments are missing and highlights appear instead
 
@@ -251,6 +276,15 @@ That is a normal optimization. Foldergram streams the original file directly
 when the video is already suitable for browser playback under the current size
 and codec rules.
 
+The current policy requires a compatible `.mp4` with H.264 video, `yuv420p`
+pixels, AAC or no audio, a known size of at most `24 MiB`, and a known
+orientation-correct display width of at most `1500` pixels. Larger compatible
+videos use a generated preview and can still offer the HD original switch.
+
+Folder-share visitors never receive ordinary original access. Shared playback
+continues to use scoped preview media, which may be generated even for a video
+that normally plays from its original.
+
 See [Media Processing](/media-processing) for the exact conditions.
 
 ## The development watcher is not reacting
@@ -292,6 +326,6 @@ build from the same origin and the browser still has stale cached assets.
 
 ## Carousel scan warnings and reconciliation recovery
 
-Structural carousel warnings appear in **Settings → Scan & Library** without turning a successful scan into a processing failure. Move media placed directly in `carousels/` into a child folder; move nested media directly into that post child; split posts above 20 items; and expect a one-item child to become a normal post with a warning. If carousel children appear as ordinary folders, disable **Treat carousels folders as normal app folders**, save, then run **Scan Library**.
+Structural carousel warnings appear in **Settings → Scan & Library** without turning a successful scan into a processing failure. Move media placed directly in `carousels/` into a child folder; move nested media directly into that post child; split posts above 20 items; and expect a one-item child to become a normal post with a warning. If carousel children appear as ordinary folders, disable **Treat carousels folders as normal app folders**, save, then run **Scan for changes**.
 
-After changing the carousel folder setting, follow the pending update message in **Settings → Scan & Library**. Run **Scan Library** to apply the saved mode, or use **Rebuild Library Index** when Settings reports that a rebuild is required. The reminder remains visible until the index reflects the selected mode.
+After changing the carousel folder setting, follow the pending update message in **Settings → Scan & Library**. Run **Scan for changes** to apply the saved mode, or use **Rebuild Library Index** when Settings reports that a rebuild is required. The reminder remains visible until the index reflects the selected mode.

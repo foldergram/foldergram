@@ -85,6 +85,15 @@ payloads. Shared folder payloads point to `/api/share/images/:id/thumbnail` and
 `/api/share/images/:id/preview`, and those routes check that the request has a
 grant for the image's folder before serving or lazily generating the derivative.
 
+Some videos that are suitable for direct playback use the ordinary
+`/api/originals/:id` route during normal browsing. This does not expand shared
+access: scoped share preview routes continue to serve or generate their own
+preview media and never redirect to an original path. Previously issued normal
+`/previews/...mp4` URLs are resolved only through the indexed media record and
+the same original-media authorization rules. Original delivery through either
+URL is unavailable while library storage is unavailable or an index rebuild is
+required after a gallery-root change.
+
 ## Mutation protection
 
 All mutating API routes pass through `requireTrustedMutationRequest`.

@@ -52,7 +52,7 @@ Renaming files can reorder a post after the next scan without replacing its capt
 
 You can rename a carousel child folder and add, remove, or replace slides before running a full scan. Foldergram preserves the post ID, caption, likes, saved state, collection membership, and sort date when surviving indexed slides identify one existing post, remain together in one destination, and its old directory is gone. Safe slide matching requires unchanged file size and modification time. If every slide is replaced or no slide can be matched safely, post identity may not be preserved.
 
-If surviving slides from one indexed post are split between carousel directories, the scan stops with an ambiguity error and preserves the existing post memberships. Keep those slides together in one carousel directory and run **Scan Library** again. Permission and I/O failures also stop the scan rather than treating an inaccessible carousel directory as missing; restore access and retry.
+If surviving slides from one indexed post are split between carousel directories, the scan stops with an ambiguity error and preserves the existing post memberships. Keep those slides together in one carousel directory and run **Scan for changes** again. Permission and I/O failures also stop the scan rather than treating an inaccessible carousel directory as missing; restore access and retry.
 
 Use a directory name that has not been indexed when renaming a carousel. Foldergram does not merge two indexed post histories. When a destination's media or slide membership changes and file size and modification time match slides from another indexed post whose old files are missing, the scan reports a conflict before replacing destination image records, including when filenames overlap. If a conflict is reported, move the renamed carousel to a directory name that has not been indexed, then scan again; post identity can be preserved only when surviving slides can be matched safely to one existing post.
 
@@ -124,7 +124,7 @@ When an existing index contains a `carousels` path segment, Settings presents a 
 - **Use Carousel Posts** enables the reserved structure.
 - **Keep Normal Folders** preserves legacy folder discovery.
 
-Saving either choice stores the selected folder mode and resolves the migration decision. Settings keeps an update reminder visible until a successful full scan applies that mode to the index. Run **Scan Library** from **Settings → Scan & Library** to update folders and posts. If the gallery location requires a new index, use **Rebuild Library Index** instead. The same follow-up applies whenever you change **Treat carousels folders as normal app folders**.
+Saving either choice stores the selected folder mode and resolves the migration decision. Settings keeps an update reminder visible until a successful full scan applies that mode to the index. Run **Scan for changes** from **Settings → Scan & Library** to update folders and posts. If the gallery location requires a new index, use **Rebuild Library Index** instead. The same follow-up applies whenever you change **Treat carousels folders as normal app folders**.
 
 ## Scanning and media processing
 
@@ -135,7 +135,7 @@ Structural problems complete the scan with warnings instead of reporting a proce
 ## Troubleshooting
 
 - **App Folder is missing:** ensure `carousels` has an immediate child containing at least one supported direct media file, then scan.
-- **Carousels appear as ordinary folders:** turn off **Treat carousels folders as normal app folders**, save, then run **Scan Library**.
+- **Carousels appear as ordinary folders:** turn off **Treat carousels folders as normal app folders**, save, then run **Scan for changes**.
 - **Direct media is ignored:** move it from `AppFolder/carousels` into `AppFolder/carousels/Post name`.
 - **Order is unexpected:** use filename prefixes and rescan; dates and discovery order do not control item order.
 - **Only 20 items appear:** this is the per-post limit; split the remaining files into another child folder.
@@ -143,6 +143,6 @@ Structural problems complete the scan with warnings instead of reporting a proce
 - **An emptied carousel disappears:** removing every supported item soft-deletes that post on the next scan; restoring items reactivates the same indexed post when its media identities can be reconciled.
 - **A video is absent from Reels:** videos in a multi-item carousel are intentionally excluded.
 - **Caption fallback is unexpected:** edit the shared caption or rename the carousel child and rescan.
-- **A scan failed with `UNIQUE constraint failed: post_items.image_id` after a rename:** update Foldergram and run **Scan Library** again. Recovery without rebuilding requires surviving slides from one indexed post to remain together in one destination, with no competing indexed post at that path. If the scan reports split destinations or an existing-post conflict, follow [Renaming and moving carousel posts](#renaming-and-moving-carousel-posts) before retrying.
+- **A scan failed with `UNIQUE constraint failed: post_items.image_id` after a rename:** update Foldergram and run **Scan for changes** again. Recovery without rebuilding requires surviving slides from one indexed post to remain together in one destination, with no competing indexed post at that path. If the scan reports split destinations or an existing-post conflict, follow [Renaming and moving carousel posts](#renaming-and-moving-carousel-posts) before retrying.
 - **Cover is unexpected:** position 1 controls the post cover; manual or direct `cover.*` rules control the App Folder avatar.
-- **Folder mode has not taken effect:** follow the pending update message in **Settings → Scan & Library**. Run **Scan Library**, or use **Rebuild Library Index** when Settings reports that a rebuild is required.
+- **Folder mode has not taken effect:** follow the pending update message in **Settings → Scan & Library**. Run **Scan for changes**, or use **Rebuild Library Index** when Settings reports that a rebuild is required.

@@ -309,17 +309,18 @@ derivatives follow the usual retention and cleanup rules.
 
 - `IMAGE_DETAIL_SOURCE=preview` keeps image detail pages on generated previews.
 - `IMAGE_DETAIL_SOURCE=original` makes image detail pages stream `/api/originals/:id`.
-- `DERIVATIVE_MODE=eager` generates thumbnails and previews during scans.
-- `DERIVATIVE_MODE=lazy` indexes metadata during scans, then generates missing files the first time `/thumbnails/...` or `/previews/...` is requested and caches them on disk.
+- `DERIVATIVE_MODE=eager` generates required thumbnails and previews during scans. Qualifying direct-playback videos receive posters but skip the playable preview.
+- `DERIVATIVE_MODE=lazy` indexes metadata during scans, then generates missing required files the first time `/thumbnails/...` or `/previews/...` is requested and caches them on disk.
 - `SCAN_MEDIA_ERROR_MODE=skip` reports supported image and video processing failures, skips those files, and lets the scan finish as `completed_with_errors`.
 - `SCAN_MEDIA_ERROR_MODE=fail` preserves fail-fast behavior for those same scan-time media errors.
 - When a scan records skipped media failures, Foldergram stores a short sample in SQLite, writes the full per-run report under `<DATA_ROOT>/scan-errors/`, and shows that report path in the admin Settings view.
 
 These flags are independent:
 
-- feed cards, folder grids, avatars, and other list surfaces still use generated derivatives
-- `IMAGE_DETAIL_SOURCE` affects images only; videos still default to preview playback
+- feed cards, folder grids, avatars, and other list surfaces use the selected playback source; qualifying videos use the indexed original
+- `IMAGE_DETAIL_SOURCE` affects images only; video playback follows the direct-playback policy (`.mp4`, H.264, `yuv420p`, AAC or silent, at most 24 MiB, at most 1500 display pixels wide)
 - `Rebuild Library Index` refreshes the SQLite-backed index; in lazy mode it does not pre-generate missing derivatives
+- **Scan for changes** skips unchanged derivative verification; **Scan and repair derivatives** also checks generated media and reclaims obsolete qualifying-video previews
 - `Regenerate Thumbnails` remains a manual thumbnail and video-poster rebuild only; it does not rebuild previews
 
 ### Access Protection

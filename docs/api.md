@@ -146,7 +146,10 @@ Notes:
 
 - `items` contain both images and videos.
 - `thumbnailUrl` points to `/thumbnails/...`.
-- `previewUrl` points to `/previews/...`.
+- `previewUrl` points to `/previews/...` for generated media. For a qualifying
+  direct-playback video it points to `/api/originals/:id`.
+- video items can include `videoPlaybackSource` with `original` or `preview` to
+  distinguish the selected ordinary source from compatibility metadata.
 - feed items can include a nullable `caption`.
 - feed items representing carousel posts include `carouselTitle`, a display-safe child-folder label that remains available when anonymous-public responses omit `sourcePath`.
 
@@ -395,7 +398,7 @@ Returns one shared post detail using the canonical `posts.id` namespace after
 checking access to that post's folder. Shared folder grids and carousel links
 use this route.
 
-Shared detail payloads do not expose original-file URLs (`originalUrl`) or local system paths. Only `thumbnailUrl` and `previewUrl` are provided, both pointing to guarded shared media endpoints.
+Shared detail payloads do not expose original-file URLs (`originalUrl`) or local system paths. Only `thumbnailUrl` and `previewUrl` are provided, both pointing to guarded shared media endpoints. Video items in shared payloads report `videoPlaybackSource: "preview"`.
 
 ### `GET /api/share/images/:imageId`
 
@@ -413,6 +416,10 @@ checking its folder grant. The ID is an `images.id`, including for Carousel slid
 
 Serves or lazily generates the preview for one physical media asset after
 checking its folder grant. The ID is an `images.id`, including for Carousel slides.
+
+Folder-share visitors do not receive ordinary original URLs. A qualifying video
+may still need a generated preview for shared delivery, so this route can create
+one on authorized first access even when normal playback uses the original.
 
 ### `GET /api/places`
 
@@ -735,8 +742,13 @@ Errors:
 Detail media rules:
 
 - if `IMAGE_DETAIL_SOURCE=original` and the item is an image, `previewUrl` points to `/api/originals/:id`
-- videos keep `previewUrl` on `/previews/...`
-- compatible original MP4 videos can set `playbackStrategy: "original"` so the client can expose an optional original-quality switch
+- an eligible direct-playback video also uses `/api/originals/:id` for `previewUrl`
+- other videos keep `previewUrl` on `/previews/...`
+- `playbackStrategy: "original"` reports original-playback compatibility
+- `videoPlaybackSource` reports the selected ordinary video source. When it is
+  `original`, the client does not show an HD switch that would toggle between
+  the same source. Larger compatible videos with `videoPlaybackSource: "preview"`
+  keep preview/HD switching.
 
 Errors:
 
@@ -757,12 +769,19 @@ Rules:
 - the indexed path must still exist
 - the resolved path must stay within `GALLERY_ROOT`
 - deleted posts do not resolve
+- original delivery is unavailable while library storage is unavailable or a library rebuild is required
 - without `download=1`, the route streams the original inline/open behavior
 - with `download=1`, the route serves the same file as a download attachment
+- inline delivery supports `HEAD` and byte ranges; valid single ranges return `206`
+
+Previously issued `/previews/...mp4` URLs for qualifying direct-playback videos
+use the same original-file availability checks and range behavior in both eager
+and lazy modes.
 
 Errors:
 
 - `404` with `{"message":"Original media not found"}`
+- `416` with `Content-Range: bytes */<file-size>` when no requested byte range is satisfiable
 
 ### `GET /api/status`
 
@@ -850,8 +869,8 @@ additional fields below and uses the same admin-detailed `scan` payload as
 | Field | Notes |
 | --- | --- |
 | `deletedImages` | Soft-deleted post count. |
-| `thumbnailCount` | Actual generated thumbnail files currently present on disk. |
-| `previewCount` | Actual generated preview files currently present on disk. |
+| `thumbnailCount` | Count of indexed media-asset rows that store a non-empty thumbnail target. Independent of physical file existence. |
+| `previewCount` | Count of indexed media-asset rows that store a non-empty preview target. Independent of physical file existence. |
 | `storage.usingInMemoryDatabase` | Whether SQLite had to fall back to in-memory mode. |
 | `libraryIndex.currentGalleryRoot` | Current configured gallery root. |
 | `libraryIndex.previousGalleryRoot` | Prior configured gallery root when the root changed. |
@@ -861,6 +880,16 @@ additional fields below and uses the same admin-detailed `scan` payload as
 | `excludedFolders` | Env-backed, custom, and effective exclusion rules. |
 | `deletionRecovery` | Failed permanent-deletion recovery count and admin-safe journal details. A failed journal remains quarantined and does not stop the server or scans. |
 | `lastScan` | Last completed scan run. |
+
+`thumbnailCount` and `previewCount` are computed directly from the library
+index rather than by walking derivative directories, so requests stay fast on
+large libraries. The values count indexed media-asset rows with stored
+derivative targets, not posts: a single carousel post with three media members
+can contribute three rows to each count. Soft-deleted rows remain counted while
+their indexed targets stay stored; a rescan or physical derivative cleanup does
+not necessarily lower these values. The counts do not verify file existence, so
+missing or orphaned derivative files are not reflected. Use
+`POST /api/admin/rescan` to reconcile derivative state.
 
 The same `preferences.treatStoriesAsFolders` and `storiesMigration` fields from
 `GET /api/status` are also present here.
@@ -1709,6 +1738,23 @@ Errors:
 Runs a manual scan against the current library and then starts the development
 watcher.
 
+Optional JSON body:
+
+```json
+{
+  "repairDerivatives": false
+}
+```
+
+| Request | Behavior |
+| --- | --- |
+| No body, `{}`, or `{"repairDerivatives": true}` | Preserve the scan-and-repair behavior, including unchanged derivative verification. |
+| `{"repairDerivatives": false}` | Scan for gallery changes and skip ordinary unchanged derivative verification. |
+
+Invalid JSON or a non-boolean `repairDerivatives` value returns `400` without
+starting a scan. The field defaults to `true` for backward compatibility with
+existing scripts that call this route without a body.
+
 Success:
 
 ```json
@@ -1725,6 +1771,8 @@ Success:
 Notes:
 
 - in `SCAN_MEDIA_ERROR_MODE=skip`, a successful rescan can also return `"status": "completed_with_errors"` when supported media was skipped and reported
+- quick scans still discover files, read source stats, reconcile removals, and perform any one-time derivative migration work. They skip verification and repair of unchanged generated derivatives.
+- `{"repairDerivatives": true}` also reclaims generated video previews that are no longer needed under the current direct-playback policy after validating the source, derivative references, and share requirements.
 
 Errors:
 
@@ -1739,7 +1787,7 @@ gallery root, and then restarts the watcher.
 
 Matching cached derivatives already on disk are left in place and can be reused.
 In `DERIVATIVE_MODE=lazy`, this rebuild does not pre-generate missing thumbnails
-or previews.
+or required previews.
 
 This resets:
 
