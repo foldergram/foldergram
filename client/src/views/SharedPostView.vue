@@ -41,11 +41,14 @@
             />
             <video
               v-else-if="shareStore.image.mediaType === 'video'"
+              ref="videoElement"
               class="max-h-[78vh] w-full bg-black"
               :src="shareStore.image.previewUrl"
               :poster="shareStore.image.thumbnailUrl"
+              :muted="appStore.videoMuted"
               controls
               playsinline
+              @volumechange="handleVideoVolumeChange"
             />
             <ResilientImage
               v-else
@@ -92,9 +95,11 @@ import { RouterLink, useRoute } from 'vue-router';
 import ErrorState from '../components/ErrorState.vue';
 import CarouselMediaStage from '../components/CarouselMediaStage.vue';
 import ResilientImage from '../components/ResilientImage.vue';
+import { useAppStore } from '../stores/app';
 import { useShareStore } from '../stores/share';
 import { resolveDisplayCaption } from '../utils/caption';
 import { formatMediaDuration } from '../utils/media';
+import { applyVideoMutePreference } from '../utils/video-mute';
 
 const props = defineProps<{
   slug: string;
@@ -104,10 +109,20 @@ const props = defineProps<{
 const { t } = useI18n();
 const route = useRoute();
 const shareStore = useShareStore();
+const appStore = useAppStore();
+const videoElement = ref<HTMLVideoElement | null>(null);
 const imageId = computed(() => Number(props.id));
 const carouselIndex = ref(0);
 const isCarousel = computed(() => shareStore.image?.postType === 'carousel' && (shareStore.image.mediaItems?.length ?? 0) > 1);
 const activeMedia = computed(() => isCarousel.value ? shareStore.image?.mediaItems?.[carouselIndex.value] ?? null : null);
+
+function handleVideoVolumeChange(event: Event) {
+  const player = event.currentTarget as HTMLVideoElement;
+  const muted = player.muted || player.volume === 0;
+  if (muted !== appStore.videoMuted) {
+    appStore.setVideoMuted(muted);
+  }
+}
 
 async function loadImage() {
   carouselIndex.value = 0;
@@ -117,6 +132,9 @@ async function loadImage() {
 }
 
 watch(() => [props.slug, imageId.value] as const, loadImage, { immediate: true });
+watch([videoElement, () => appStore.videoMuted], ([player, muted]) => {
+  if (player) applyVideoMutePreference(player, muted);
+});
 </script>
 
 <style scoped>

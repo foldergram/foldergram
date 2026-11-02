@@ -25,6 +25,11 @@ It includes:
 - desktop recommendations for folders based on recency, likes, and recent navigation
 - infinite loading for feed pagination
 
+The desktop recommendations sidebar scrolls with the feed.
+The Moments or Highlights rail shares the feed's center line. Desktop navigation
+and folder shortcuts are vertically centered between the logo and the More menu.
+Portrait windows use the centered feed layout without the recommendations sidebar.
+
 ### Feed mode behavior
 
 | Mode | What it does |
@@ -186,6 +191,18 @@ Behavior depends on how the route is opened:
 - from another page, it can render as a modal over the background route
 - directly, it renders as a full page
 
+The modal uses a centered, borderless media area with a consistent target width.
+Its height follows the photo or video's proportions, so wide posts leave more of
+the dimmed background visible. Very tall media scales down to fit the screen.
+
+Portrait desktop windows and narrow screens start with details hidden. Use the
+sidebar button below the right navigation arrow to show or hide details.
+Details open over the media on these screens; on wider landscape windows, they
+appear alongside it and can also be hidden. Previous and next controls stay at
+equal distances from the screen edges, and Close stays in the top-right corner.
+For panoramic posts, docked details keep enough height for captions and metadata
+and scroll independently of the media.
+
 The detail view includes:
 
 - image detail media sourced from either generated previews or originals, depending on `IMAGE_DETAIL_SOURCE`
@@ -336,6 +353,14 @@ The client also persists a few local browser preferences:
 - recent explore searches
 
 These are stored in `localStorage`.
+
+The sound control shares one mute preference across the home feed, reels, post
+viewer, carousels, stories, and shared-post videos. Muting a video keeps subsequent
+videos muted, including after navigation or a page reload in the same browser. Enabling sound
+updates that shared preference. If the browser blocks autoplay with sound, use
+the play control to start the video. Foldergram keeps the chosen sound setting
+instead of silently muting that video. Sound changes made through native video
+controls, including mobile fullscreen controls, update the same saved preference.
 
 The selected language also has one extra layer:
 

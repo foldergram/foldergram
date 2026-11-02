@@ -1,5 +1,6 @@
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
+import type { MediaStorage } from 'vidstack';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { FeedItem, ImageDetail } from '../types/api';
@@ -198,6 +199,93 @@ describe('PostViewer', () => {
     document.body.innerHTML = '';
   });
 
+  it('collapses details in portrait desktop windows and docks them again in landscape', async () => {
+    const originalWidth = window.innerWidth;
+    const originalHeight = window.innerHeight;
+
+    try {
+      Object.assign(window, { innerWidth: 1080, innerHeight: 1920 });
+      const wrapper = mount(PostViewer, {
+        props: { image: createVideoDetail(26), isModal: true },
+        global: { stubs: globalStubs }
+      });
+      expect(wrapper.get('.viewer__sidebar').attributes('aria-hidden')).toBe('true');
+      await flushPromises();
+
+      const toggle = wrapper.get('.viewer__right-controls button[aria-label="Show post details"]');
+      expect(toggle.attributes('aria-expanded')).toBe('false');
+      expect(wrapper.get('.viewer__sidebar').attributes('aria-hidden')).toBe('true');
+      await toggle.trigger('click');
+      expect(toggle.attributes('aria-expanded')).toBe('true');
+      expect(wrapper.get('.viewer__sidebar').attributes('aria-hidden')).toBe('false');
+
+      Object.assign(window, { innerWidth: 1920, innerHeight: 1080 });
+      window.dispatchEvent(new Event('resize'));
+      await flushPromises();
+      expect(toggle.attributes('aria-expanded')).toBe('true');
+      expect(wrapper.classes()).toContain('viewer--details-docked');
+      expect(wrapper.get('.viewer__sidebar').classes()).not.toContain('viewer__sidebar--drawer');
+      expect(wrapper.get('.viewer__sidebar').attributes('aria-hidden')).toBe('false');
+
+      await toggle.trigger('click');
+      expect(wrapper.classes()).not.toContain('viewer--details-docked');
+      expect(wrapper.get('.viewer__sidebar').classes()).toContain('viewer__sidebar--hidden');
+      window.dispatchEvent(new Event('resize'));
+      await flushPromises();
+      expect(toggle.attributes('aria-expanded')).toBe('false');
+
+      await wrapper.get('.viewer__modal-close').trigger('click');
+      expect(wrapper.emitted('close')).toHaveLength(1);
+    } finally {
+      Object.assign(window, { innerWidth: originalWidth, innerHeight: originalHeight });
+    }
+  });
+
+  it('restores shared mute on source initialization and persists explicit sound requests', async () => {
+    const appStore = useAppStore();
+    appStore.setVideoMuted(true);
+    const wrapper = mount(PostViewer, {
+      props: { image: createVideoDetail(26) },
+      global: { stubs: globalStubs }
+    });
+    await flushPromises();
+    const player = wrapper.get('media-player').element as FakeMediaPlayerElement & { storage: MediaStorage };
+    player.dispatchEvent(new Event('can-play'));
+    await flushPromises();
+    player.muted = (await player.storage.getMuted()) ?? false;
+    expect(player.muted).toBe(true);
+
+    await wrapper.get('media-player').trigger('media-unmute-request');
+    expect(appStore.videoMuted).toBe(false);
+    expect(await player.storage.getMuted()).toBe(false);
+    expect(window.localStorage.getItem('foldergram-video-muted')).toBe('false');
+
+    await wrapper.get('media-player').trigger('media-mute-request');
+    expect(appStore.videoMuted).toBe(true);
+    expect(window.localStorage.getItem('foldergram-video-muted')).toBe('true');
+  });
+
+  it('keeps sound enabled when the browser blocks audible autoplay', async () => {
+    useAppStore().setVideoMuted(false);
+    const play = vi.spyOn(FakeMediaPlayerElement.prototype, 'play').mockRejectedValue(new Error('Autoplay blocked'));
+    try {
+      const wrapper = mount(PostViewer, {
+        props: { image: createVideoDetail(27) },
+        global: { stubs: globalStubs }
+      });
+      await flushPromises();
+      const player = wrapper.get('media-player').element as FakeMediaPlayerElement;
+      player.dispatchEvent(new Event('can-play'));
+      await flushPromises();
+      expect(player.muted).toBe(false);
+      expect(useAppStore().videoMuted).toBe(false);
+      expect(window.localStorage.getItem('foldergram-video-muted')).toBe('false');
+      expect(wrapper.find('.viewer__pause-indicator').exists()).toBe(true);
+    } finally {
+      play.mockRestore();
+    }
+  });
+
   it('uses the normal media shell for wide carousel photos without resizing when slides change', async () => {
     const image = {
       ...createImageDetail(12, { previousImageId: null, nextImageId: null }),
@@ -208,7 +296,7 @@ describe('PostViewer', () => {
       props: { image, isModal: true },
       global: { stubs: globalStubs }
     });
-    const singleStyle = wrapper.get('.viewer__media-shell').attributes('style');
+    const singleStyle = wrapper.attributes('style');
     await wrapper.setProps({
       image: {
         ...image,
@@ -220,19 +308,19 @@ describe('PostViewer', () => {
         ]
       }
     });
-    const shell = wrapper.get('.viewer__media-shell--carousel');
-    expect(shell.attributes('style')).toBe(singleStyle);
-    expect((shell.element as HTMLElement).style.getPropertyValue('--viewer-media-aspect-ratio')).toBe('2880 / 1800');
+    expect(wrapper.find('.viewer__media-shell--carousel').exists()).toBe(true);
+    expect(wrapper.attributes('style')).toBe(singleStyle);
+    expect((wrapper.element as HTMLElement).style.getPropertyValue('--viewer-media-aspect-ratio')).toBe('2880 / 1800');
     const stage = wrapper.getComponent({ name: 'CarouselMediaStage' });
     expect(stage.props('fitContainer')).toBe(true);
     expect((stage.element as HTMLElement).style.aspectRatio).toBe('auto');
     await stage.get('button[aria-label="Next carousel item"]').trigger('click');
     expect(wrapper.text()).toContain('1200 × 1800');
-    expect(shell.attributes('style')).toBe(singleStyle);
+    expect(wrapper.attributes('style')).toBe(singleStyle);
     await stage.get('button[aria-label="Next carousel item"]').trigger('click');
     expect(stage.findComponent({ name: 'VideoMediaPlayer' }).exists()).toBe(true);
     expect(wrapper.get('.viewer__card-wrapper').classes()).toContain('viewer__card-wrapper--carousel');
-    expect(shell.attributes('style')).toBe(singleStyle);
+    expect(wrapper.attributes('style')).toBe(singleStyle);
   });
 
   it('uses likes-page neighbors instead of folder neighbors when opened from likes', () => {

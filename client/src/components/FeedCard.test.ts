@@ -1,10 +1,14 @@
 import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { MediaStorage } from 'vidstack';
 
+import { useAppStore } from '../stores/app';
 import { useAuthStore } from '../stores/auth';
 import type { FeedItem } from '../types/api';
 import FeedCard from './FeedCard.vue';
+import CarouselMediaStage from './CarouselMediaStage.vue';
+import ReelPlayerCard from './ReelPlayerCard.vue';
 
 vi.mock('vidstack/bundle', () => ({}));
 vi.mock('vue-router', async () => {
@@ -20,12 +24,22 @@ vi.mock('vue-router', async () => {
 });
 
 class FakeMediaPlayerElement extends HTMLElement {
+  storage: MediaStorage | null = null;
   muted = true;
+  volume = 1;
   paused = true;
   playCallCount = 0;
   pauseCallCount = 0;
   currentTime = 0;
   duration = 0;
+
+  async restoreProviderSettings() {
+    // Vidstack restores settings after notifying can-play listeners.
+    this.dispatchEvent(new Event('can-play'));
+    await flushPromises();
+    this.muted = (await this.storage?.getMuted()) ?? false;
+    this.dispatchEvent(new CustomEvent('volume-change', { detail: { muted: this.muted, volume: 1 } }));
+  }
 
   async play() {
     this.playCallCount += 1;
@@ -157,6 +171,139 @@ describe('FeedCard', () => {
         unobserve() {}
       }
     );
+  });
+
+  it('keeps the saved mute preference through provider initialization and a page reload', async () => {
+    window.localStorage.setItem('foldergram-video-muted', 'true');
+    useAppStore().initializeVideoMuted();
+
+    for (const id of [901, 902]) {
+      const wrapper = mount(FeedCard, {
+        props: { item: createVideoItem(id), avatarUrl: null, context: 'home', isActiveVideo: true },
+        global: { stubs: globalStubs }
+      });
+      await flushPromises();
+      const player = wrapper.get('media-player').element as FakeMediaPlayerElement;
+      await player.restoreProviderSettings();
+
+      expect(player.muted).toBe(true);
+      expect(useAppStore().videoMuted).toBe(true);
+      expect(window.localStorage.getItem('foldergram-video-muted')).toBe('true');
+      wrapper.unmount();
+
+      setActivePinia(createPinia());
+      useAppStore().initializeVideoMuted();
+    }
+  });
+
+  it('applies sound requests to already mounted videos when they finish loading', async () => {
+    const appStore = useAppStore();
+    appStore.setVideoMuted(false);
+    const mountVideo = (id: number, active: boolean) => mount(FeedCard, {
+      props: { item: createVideoItem(id), avatarUrl: null, context: 'home', isActiveVideo: active },
+      global: { stubs: globalStubs }
+    });
+    const first = mountVideo(903, true);
+    const next = mountVideo(904, false);
+    await flushPromises();
+
+    first.get('media-mute-button').element.dispatchEvent(new Event('media-mute-request', { bubbles: true }));
+    await flushPromises();
+    expect(appStore.videoMuted).toBe(true);
+    expect(window.localStorage.getItem('foldergram-video-muted')).toBe('true');
+
+    const nextPlayer = next.get('media-player').element as FakeMediaPlayerElement;
+    await next.setProps({ isActiveVideo: true });
+    await nextPlayer.restoreProviderSettings();
+    expect(nextPlayer.muted).toBe(true);
+
+    nextPlayer.volume = 0;
+    next.get('media-mute-button').element.dispatchEvent(new Event('media-unmute-request', { bubbles: true }));
+    await flushPromises();
+    await nextPlayer.restoreProviderSettings();
+    expect(nextPlayer.muted).toBe(false);
+    expect(nextPlayer.volume).toBeGreaterThan(0);
+    expect(appStore.videoMuted).toBe(false);
+    expect(window.localStorage.getItem('foldergram-video-muted')).toBe('false');
+    first.unmount();
+    next.unmount();
+  });
+
+  it('does not save delayed provider volume events as the user preference', async () => {
+    const appStore = useAppStore();
+    appStore.setVideoMuted(true);
+    const wrapper = mount(FeedCard, {
+      props: { item: createVideoItem(905), avatarUrl: null, context: 'home', isActiveVideo: true },
+      global: { stubs: globalStubs }
+    });
+    await flushPromises();
+    const player = wrapper.get('media-player').element as FakeMediaPlayerElement;
+    await player.restoreProviderSettings();
+    await new Promise(requestAnimationFrame);
+    player.muted = false;
+    player.dispatchEvent(new CustomEvent('volume-change', { detail: { muted: false, volume: 1 } }));
+    await flushPromises();
+
+    expect(appStore.videoMuted).toBe(true);
+    expect(window.localStorage.getItem('foldergram-video-muted')).toBe('true');
+    wrapper.unmount();
+  });
+
+  it('keeps sound enabled when the browser blocks audible autoplay', async () => {
+    const appStore = useAppStore();
+    appStore.setVideoMuted(false);
+    const wrapper = mount(FeedCard, {
+      props: { item: createVideoItem(906), avatarUrl: null, context: 'home', isActiveVideo: false },
+      global: { stubs: globalStubs }
+    });
+    await flushPromises();
+    const player = wrapper.get('media-player').element as FakeMediaPlayerElement;
+    const play = vi.spyOn(player, 'play').mockRejectedValue(new Error('Autoplay blocked'));
+    await wrapper.setProps({ isActiveVideo: true });
+    await flushPromises();
+
+    expect(player.muted).toBe(false);
+    expect(appStore.videoMuted).toBe(false);
+    expect(window.localStorage.getItem('foldergram-video-muted')).toBe('false');
+    expect(play).toHaveBeenCalledTimes(1);
+    expect(wrapper.find('.feed-card__pause-indicator').exists()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it('shares a single sound preference between feed, reel, and carousel players', async () => {
+    const appStore = useAppStore();
+    appStore.setVideoMuted(false);
+    const item = createVideoItem(907);
+    const wrapper = mount({
+      components: { FeedCard, ReelPlayerCard, CarouselMediaStage },
+      setup: () => ({
+        item,
+        mediaItems: [{ ...item, imageId: item.id, position: 1, originalUrl: `/api/originals/${item.id}` }]
+      }),
+      template: `
+        <FeedCard :item="item" :avatar-url="null" context="home" :is-active-video="true" />
+        <ReelPlayerCard :item="item" :folder="null" :active="false" />
+        <CarouselMediaStage :items="mediaItems" />
+      `
+    }, {
+      global: { stubs: globalStubs }
+    });
+    await flushPromises();
+    const feed = wrapper.getComponent(FeedCard);
+    const reel = wrapper.getComponent(ReelPlayerCard);
+    const carousel = wrapper.getComponent(CarouselMediaStage);
+    const players = [feed, reel, carousel].map(wrapper => wrapper.get('media-player').element as FakeMediaPlayerElement);
+
+    await feed.get('media-player').trigger('media-mute-request');
+    expect(players.map(player => player.muted)).toEqual([true, true, true]);
+
+    await reel.get('.reel-player-card__sound-button').trigger('click');
+    expect(players.map(player => player.muted)).toEqual([false, false, false]);
+
+    await carousel.get('media-player').trigger('media-mute-request');
+    expect(players.map(player => player.muted)).toEqual([true, true, true]);
+    expect(window.localStorage.getItem('foldergram-video-muted')).toBe('true');
+    wrapper.unmount();
   });
 
   it('updates the home video aspect ratio from the loaded video element when metadata disagrees with indexed dimensions', async () => {

@@ -1,28 +1,30 @@
 <template>
   <section
     v-if="image"
-    :class="['viewer relative', { 'viewer--modal': isModal }]"
+    :class="[
+      'viewer relative',
+      {
+        'viewer--modal': isModal,
+        'viewer--details-docked': isModal && !isModalSidebarCollapsible && isSidebarExpanded,
+      },
+    ]"
+    :style="mediaShellStyle"
     @wheel="handleWheel"
   >
-    <!-- Close button (modal only) -->
     <button
       v-if="isModal"
-      class="viewer__modal-close"
+      class="viewer__overlay-button viewer__modal-close"
       type="button"
       :aria-label="t('post.viewer.close')"
+      :title="t('post.viewer.close')"
       @click="$emit('close')"
     >
-      <svg
-        class="viewer__modal-close-icon"
-        viewBox="0 0 24 24"
-        role="presentation"
-      >
+      <svg class="viewer__modal-close-icon" viewBox="0 0 24 24" aria-hidden="true">
         <path
-          d="m7 7 10 10M17 7 7 17"
+          d="m4.5 4.5 15 15M19.5 4.5l-15 15"
           fill="none"
           stroke="currentColor"
           stroke-linecap="round"
-          stroke-linejoin="round"
           stroke-width="1.8"
         />
       </svg>
@@ -31,12 +33,8 @@
     <!-- Previous nav -->
     <RouterLink
       v-if="previousNavigationImageId"
-      :class="[
-        'inline-flex items-center justify-center w-[2.2rem] h-[2.2rem] rounded-full text-[#111] bg-white/88 shadow-[0_8px_20px_rgba(0,0,0,0.18)]',
-        isModal
-          ? 'fixed top-1/2 z-45 -translate-y-1/2 left-[5px]'
-          : 'absolute top-1/2 z-2 -mt-[1.1rem] left-[-3.25rem] max-md:left-[-2.75rem]',
-      ]"
+      class="viewer__navigation viewer__navigation--previous"
+      :class="isModal ? 'viewer__navigation--modal' : 'viewer__navigation--page'"
       :to="{
         name: 'image',
         params: { id: String(previousNavigationImageId) },
@@ -44,76 +42,71 @@
       }"
       :aria-label="t('post.viewer.previous')"
     >
-      <svg class="w-4 h-4" viewBox="0 0 24 24" role="presentation">
+      <svg class="viewer__navigation-icon" viewBox="0 0 24 24" aria-hidden="true">
         <path
-          d="m14.5 6.5-5 5 5 5"
+          d="m14.5 5.5-6.5 6.5 6.5 6.5"
           fill="none"
           stroke="currentColor"
           stroke-linecap="round"
           stroke-linejoin="round"
-          stroke-width="1.8"
+          stroke-width="1.5"
         />
       </svg>
     </RouterLink>
 
-    <!-- Next nav -->
-    <RouterLink
-      v-if="nextNavigationImageId"
-      :class="[
-        'inline-flex items-center justify-center w-[2.2rem] h-[2.2rem] rounded-full text-[#111] bg-white/88 shadow-[0_8px_20px_rgba(0,0,0,0.18)]',
-        isModal
-          ? 'fixed top-1/2 z-45 -translate-y-1/2 right-[5px]'
-          : 'absolute top-1/2 z-2 -mt-[1.1rem] right-[-3.25rem] max-md:right-[-2.75rem]',
-      ]"
-      :to="{
-        name: 'image',
-        params: { id: String(nextNavigationImageId) },
-        query: route.query,
-      }"
-      :aria-label="t('post.viewer.next')"
-    >
-      <svg class="w-4 h-4" viewBox="0 0 24 24" role="presentation">
-        <path
-          d="m9.5 6.5 5 5-5 5"
-          fill="none"
-          stroke="currentColor"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          stroke-width="1.8"
-        />
-      </svg>
-    </RouterLink>
-
-    <button
-      v-if="isModalSidebarCollapsible"
-      ref="sidebarToggleElement"
-      class="viewer__sidebar-toggle"
-      type="button"
-      :aria-expanded="isSidebarExpanded"
-      :aria-label="
-        isSidebarExpanded ? t('post.viewer.hideDetails') : t('post.viewer.showDetails')
-      "
-      @click="toggleSidebar"
-    >
-      <span
-        :class="
-          isSidebarExpanded
-            ? 'i-fluent-panel-left-contract-16-filled'
-            : 'i-fluent-panel-left-expand-16-filled'
+    <div :class="isModal ? 'viewer__right-controls' : 'contents'">
+      <!-- Next nav -->
+      <RouterLink
+        v-if="nextNavigationImageId"
+        class="viewer__navigation viewer__navigation--next"
+        :class="isModal ? 'viewer__navigation--modal' : 'viewer__navigation--page'"
+        :to="{
+          name: 'image',
+          params: { id: String(nextNavigationImageId) },
+          query: route.query,
+        }"
+        :aria-label="t('post.viewer.next')"
+      >
+        <svg class="viewer__navigation-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path
+            d="m9.5 5.5 6.5 6.5-6.5 6.5"
+            fill="none"
+            stroke="currentColor"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="1.5"
+          />
+        </svg>
+      </RouterLink>
+      <button
+        v-if="isModal"
+        ref="sidebarToggleElement"
+        class="viewer__overlay-button viewer__sidebar-toggle"
+        type="button"
+        :aria-expanded="isSidebarExpanded"
+        :aria-label="
+          isSidebarExpanded ? t('post.viewer.hideDetails') : t('post.viewer.showDetails')
         "
-        class="viewer__sidebar-toggle-icon"
-        aria-hidden="true"
-      />
-    </button>
+        :title="
+          isSidebarExpanded ? t('post.viewer.hideDetails') : t('post.viewer.showDetails')
+        "
+        @click="toggleSidebar"
+      >
+        <svg class="viewer__sidebar-toggle-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="3" y="4" width="18" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.7" />
+          <path d="M15 4v16" fill="none" stroke="currentColor" stroke-width="1.7" />
+        </svg>
+      </button>
+    </div>
 
     <!-- Card -->
-      <div
-        ref="cardWrapperElement"
-        :class="[
-          'card viewer__card-wrapper',
+    <div
+      ref="cardWrapperElement"
+      :class="[
+        'viewer__card-wrapper',
         {
+          card: !isModal,
           'viewer__card-wrapper--modal': isModal,
-          'viewer__card-wrapper--compact': isModalSidebarCollapsible,
           'viewer__card-wrapper--carousel': isCarousel,
         },
       ]"
@@ -137,7 +130,6 @@
         <div
           v-if="isCarousel"
           class="viewer__media-shell viewer__media-shell--carousel"
-          :style="mediaShellStyle"
         >
           <CarouselMediaStage
             v-model="carouselIndex"
@@ -153,7 +145,6 @@
         <template v-else-if="image.mediaType === 'video'">
           <div
             class="viewer__media-shell viewer__media-shell--video viewer__media-shell--video-interactive"
-            :style="mediaShellStyle"
             :aria-label="t('post.viewer.togglePlayback')"
             role="button"
             tabindex="0"
@@ -168,9 +159,13 @@
               :fullscreenOrientation.prop="'none'"
               :playsInline.prop="true"
               :muted.prop="appStore.videoMuted"
+              :storage.prop="videoMuteStorage"
               :loop.prop="true"
               load="eager"
               preload="metadata"
+              @media-mute-request="appStore.setVideoMuted(true)"
+              @media-unmute-request="appStore.setVideoMuted(false)"
+              @media-volume-change-request="appStore.setVideoMuted($event.detail === 0)"
               >
                 <media-provider />
               <media-poster
@@ -269,7 +264,6 @@
         <div
           v-else
           class="viewer__media-shell viewer__media-shell--image"
-          :style="mediaShellStyle"
         >
           <ResilientImage
             class="viewer__media-image"
@@ -302,12 +296,13 @@
             'viewer__sidebar--drawer': isModalSidebarCollapsible,
             'viewer__sidebar--drawer-open':
               isModalSidebarCollapsible && isSidebarExpanded,
+            'viewer__sidebar--hidden': isModal && !isModalSidebarCollapsible && !isSidebarExpanded,
             'viewer__sidebar--dragging': isSidebarSheetDragging,
           },
         ]"
         :style="sidebarSheetStyle"
-        :aria-hidden="isModalSidebarCollapsible && !isSidebarExpanded"
-        :inert="isModalSidebarCollapsible && !isSidebarExpanded"
+        :aria-hidden="isModal && !isSidebarExpanded"
+        :inert="isModal && !isSidebarExpanded"
         @pointercancel="handleSidebarSheetPointercancel"
         @pointerdown="handleSidebarSheetPointerdown"
         @pointermove="handleSidebarSheetPointermove"
@@ -605,6 +600,7 @@
 
   import { useHorizontalSwipe } from "../composables/useHorizontalSwipe"
   import { useImageCaptionEditor } from "../composables/useImageCaptionEditor"
+  import { useNativeVideoMuteSync } from "../composables/useNativeVideoMuteSync"
   import type { ImageDetail, FolderSummary } from "../types/api"
   import { useAppStore } from "../stores/app"
   import { useAuthStore } from "../stores/auth"
@@ -613,6 +609,7 @@
   import { resolveDisplayCaption } from "../utils/caption"
   import { formatFolderTitle } from "../utils/folder-titles"
   import { getOriginalMediaDownloadUrl, getOriginalMediaUrl } from "../utils/original-media"
+  import { applyVideoMutePreference, createVideoMuteStorage } from "../utils/video-mute"
   import Avatar from "./Avatar.vue"
   import CarouselMediaStage from "./CarouselMediaStage.vue"
   import CollectionBookmark from "./CollectionBookmark.vue"
@@ -635,19 +632,22 @@
 
   const likesStore = useLikesStore()
   const appStore = useAppStore()
+  const videoMuteStorage = createVideoMuteStorage(() => appStore.videoMuted)
   const authStore = useAuthStore()
   const foldersStore = useFoldersStore()
   const route = useRoute()
   const router = useRouter()
   const { locale, t } = useI18n()
   const playerElement = ref<MediaPlayerElement | null>(null)
+  useNativeVideoMuteSync(playerElement, () => appStore.videoMuted, muted => appStore.setVideoMuted(muted))
   const cardWrapperElement = ref<HTMLElement | null>(null)
   const sidebarElement = ref<HTMLElement | null>(null)
   const sidebarToggleElement = ref<HTMLButtonElement | null>(null)
   const wheelDeltaAccumulator = ref(0)
   const navigationLockedUntil = ref(0)
-  const isSidebarCollapsible = ref(false)
-  const isSidebarExpanded = ref(true)
+  const MODAL_SIDEBAR_COLLAPSE_BREAKPOINT = 960
+  const isSidebarCollapsible = ref(props.isModal === true && shouldUseSidebarDrawer())
+  const isSidebarExpanded = ref(!isSidebarCollapsible.value)
   const isSidebarSheetDragging = ref(false)
   const isPlayingHd = ref(false)
   const isVideoPaused = ref(false)
@@ -683,7 +683,6 @@
   })
   const originalMediaUrl = computed(() => activeMediaItem.value?.originalUrl ?? props.image?.originalUrl ?? (activeMediaImageId.value ? getOriginalMediaUrl(activeMediaImageId.value) : ""))
   const downloadOriginalMediaUrl = computed(() => activeMediaImageId.value ? getOriginalMediaDownloadUrl(activeMediaImageId.value) : "")
-  const MODAL_SIDEBAR_COLLAPSE_BREAKPOINT = 960
   const SHEET_SWIPE_MIN_DISTANCE = 56
   const SHEET_SWIPE_MAX_HORIZONTAL_DISTANCE = 96
   const SHEET_SWIPE_MIN_VERTICAL_RATIO = 1.15
@@ -694,8 +693,6 @@
     value: string
   }
 
-  let videoMuteSyncToken = 0
-  let playerReady = false
   let pendingVideoRestore: { currentTime: number; wasPaused: boolean } | null = null
   let removePlayerEventListeners: (() => void) | null = null
   let sidebarSheetPointerId: number | null = null
@@ -762,6 +759,7 @@
 
     return {
       "--viewer-media-aspect-ratio": `${props.image.width} / ${props.image.height}`,
+      "--viewer-media-ratio": props.image.width / props.image.height || 1,
       "--viewer-media-intrinsic-width": `${props.image.width}px`,
     }
   })
@@ -978,14 +976,7 @@
   })
 
   function syncVideoMuted(player: MediaPlayerElement, muted: boolean) {
-    const token = ++videoMuteSyncToken
-    player.muted = muted
-
-    requestAnimationFrame(() => {
-      if (videoMuteSyncToken === token) {
-        videoMuteSyncToken = 0
-      }
-    })
+    applyVideoMutePreference(player, muted)
   }
 
   function isPrimaryPlainClick(event: MouseEvent) {
@@ -1200,6 +1191,10 @@
     mediaSheetRevealStartY = 0
   }
 
+  function shouldUseSidebarDrawer() {
+    return window.innerWidth <= MODAL_SIDEBAR_COLLAPSE_BREAKPOINT || window.innerHeight > window.innerWidth
+  }
+
   function updateSidebarLayout() {
     resetSidebarSheetGesture()
     resetMediaSheetRevealGesture()
@@ -1210,24 +1205,19 @@
       return
     }
 
-    const nextCollapsible = window.innerWidth <= MODAL_SIDEBAR_COLLAPSE_BREAKPOINT
+    const nextCollapsible = shouldUseSidebarDrawer()
     const wasCollapsible = isSidebarCollapsible.value
 
     isSidebarCollapsible.value = nextCollapsible
 
-    if (!nextCollapsible) {
-      isSidebarExpanded.value = true
-      return
-    }
-
-    if (!wasCollapsible) {
+    if (nextCollapsible !== wasCollapsible) {
       focusSidebarToggle()
-      isSidebarExpanded.value = false
+      isSidebarExpanded.value = !nextCollapsible
     }
   }
 
   function openSidebar() {
-    if (!isModalSidebarCollapsible.value) {
+    if (!props.isModal) {
       return
     }
 
@@ -1236,7 +1226,7 @@
   }
 
   function toggleSidebar() {
-    if (!isModalSidebarCollapsible.value) {
+    if (!props.isModal) {
       return
     }
 
@@ -1249,7 +1239,7 @@
   }
 
   function closeSidebar(options: { restoreFocus?: boolean } = {}) {
-    if (!isModalSidebarCollapsible.value) {
+    if (!props.isModal) {
       return
     }
 
@@ -1460,20 +1450,7 @@
       isVideoPaused.value = false
       return
     } catch {
-      if (appStore.videoMuted) {
-        // Ignore autoplay rejections and leave manual controls available.
-        isVideoPaused.value = true
-        return
-      }
-    }
-
-    syncVideoMuted(player, true)
-
-    try {
-      await player.play()
-      isVideoPaused.value = false
-    } catch {
-      // Ignore autoplay rejections and leave manual controls available.
+      // Preserve the shared sound preference when the browser blocks autoplay.
       isVideoPaused.value = true
     }
   }
@@ -1491,20 +1468,6 @@
       isVideoPaused.value = false
     } catch {
       // Ignore playback rejections and leave manual controls available.
-    }
-  }
-
-  function handlePlayerVolumeChange() {
-    const player = playerElement.value
-    // Ignore volume-change events that fire before the player has fully initialized.
-    // Vidstack can emit these during its own setup with muted=false, which would
-    // overwrite the persisted muted preference read from localStorage.
-    if (!player || !playerReady || videoMuteSyncToken !== 0) {
-      return
-    }
-
-    if (player.muted !== appStore.videoMuted) {
-      appStore.setVideoMuted(player.muted)
     }
   }
 
@@ -1552,7 +1515,6 @@
     }
 
     const handleReady = () => {
-      playerReady = true
       void handlePlayerReadyForPlayback()
     }
     const handlePlay = () => {
@@ -1562,9 +1524,6 @@
     const handlePause = () => {
       isVideoPaused.value = props.image?.mediaType === "video"
       syncVideoTimelineState(player)
-    }
-    const handleVolume = () => {
-      handlePlayerVolumeChange()
     }
     const handleDuration = (event: Event) => {
       if (event instanceof CustomEvent && typeof event.detail === "number" && event.detail > 0) {
@@ -1595,7 +1554,6 @@
     player.addEventListener("can-play", handleReady)
     player.addEventListener("play", handlePlay)
     player.addEventListener("pause", handlePause)
-    player.addEventListener("volume-change", handleVolume)
     player.addEventListener("duration-change", handleDuration)
     player.addEventListener("time-update", handleTimeUpdate)
     player.addEventListener("ended", handleEnded)
@@ -1605,7 +1563,6 @@
       player.removeEventListener("can-play", handleReady)
       player.removeEventListener("play", handlePlay)
       player.removeEventListener("pause", handlePause)
-      player.removeEventListener("volume-change", handleVolume)
       player.removeEventListener("duration-change", handleDuration)
       player.removeEventListener("time-update", handleTimeUpdate)
       player.removeEventListener("ended", handleEnded)
@@ -1647,7 +1604,6 @@
   watch(playerElement, player => {
     videoDurationMs.value = props.image?.durationMs ?? 0
     videoCurrentTimeMs.value = 0
-    playerReady = false
     bindPlayerEventListeners(player)
   })
 

@@ -1,6 +1,6 @@
 <template>
   <article class="bg-transparent">
-    <div class="flex items-center justify-between gap-4 px-4 py-[0.55rem]">
+    <div class="feed-card__header flex items-center justify-between gap-4 px-4 py-[0.8rem]">
       <div class="feed-card__folder flex items-center gap-[0.72rem] min-w-0">
         <button
           v-if="showHomeStoryAvatar"
@@ -131,10 +131,14 @@
         :fullscreenOrientation.prop="'none'"
         :playsInline.prop="true"
         :muted.prop="appStore.videoMuted"
+        :storage.prop="videoMuteStorage"
         :loop.prop="true"
         load="visible"
         preload="metadata"
         @fullscreen-change="handleHomeVideoFullscreenChange"
+        @media-mute-request="appStore.setVideoMuted(true)"
+        @media-unmute-request="appStore.setVideoMuted(false)"
+        @media-volume-change-request="appStore.setVideoMuted($event.detail === 0)"
       >
         <media-provider />
         <media-poster
@@ -437,6 +441,7 @@ import type { MediaPlayerElement } from 'vidstack/elements';
 
 import { deleteImage, trashImage } from '../api/gallery';
 import { useImageCaptionEditor } from '../composables/useImageCaptionEditor';
+import { useNativeVideoMuteSync } from '../composables/useNativeVideoMuteSync';
 import { useAppStore } from '../stores/app';
 import { useAuthStore } from '../stores/auth';
 import { useFeedStore } from '../stores/feed';
@@ -449,6 +454,7 @@ import { formatFolderTitle } from '../utils/folder-titles';
 import { formatMediaDuration, formatVideoTimestamp } from '../utils/media';
 import { resolveFeedAspectRatio } from '../utils/media-layout';
 import { getOriginalMediaDownloadUrl, getOriginalMediaUrl } from '../utils/original-media';
+import { applyVideoMutePreference, createVideoMuteStorage } from '../utils/video-mute';
 import Avatar from './Avatar.vue';
 import CarouselMediaStage from './CarouselMediaStage.vue';
 import CollectionBookmark from './CollectionBookmark.vue';
@@ -487,6 +493,7 @@ const emit = defineEmits<{
 }>();
 
 const appStore = useAppStore();
+const videoMuteStorage = createVideoMuteStorage(() => appStore.videoMuted);
 const authStore = useAuthStore();
 const feedStore = useFeedStore();
 const likesStore = useLikesStore();
@@ -502,6 +509,7 @@ const deleteError = ref<string | null>(null);
 const isEditingCaption = ref(false);
 const homeVideoTarget = ref<HTMLElement | null>(null);
 const homePlayerElement = ref<MediaPlayerElement | null>(null);
+useNativeVideoMuteSync(homePlayerElement, () => appStore.videoMuted, (muted) => appStore.setVideoMuted(muted));
 const loadedHomeVideoAspectRatio = ref<string | null>(null);
 const isHomeVideoPaused = ref(false);
 const isHomeVideoFullscreen = ref(false);
@@ -513,8 +521,6 @@ const carouselIndex = ref(0);
 
 let homeImageTapResetTimer: ReturnType<typeof setTimeout> | null = null;
 let homeVideoObserver: IntersectionObserver | null = null;
-let homeVideoMuteSyncToken = 0;
-let homePlayerReady = false;
 let removeHomePlayerEventListeners: (() => void) | null = null;
 const {
   saving: captionSaving,
@@ -741,14 +747,7 @@ function startHomeVideoObserver() {
 }
 
 function syncHomeVideoMuted(player: MediaPlayerElement, muted: boolean) {
-  const token = ++homeVideoMuteSyncToken;
-  player.muted = muted;
-
-  requestAnimationFrame(() => {
-    if (homeVideoMuteSyncToken === token) {
-      homeVideoMuteSyncToken = 0;
-    }
-  });
+  applyVideoMutePreference(player, muted);
 }
 
 async function syncHomeVideoPlayback() {
@@ -777,18 +776,8 @@ async function syncHomeVideoPlayback() {
     isHomeVideoPaused.value = false;
     return;
   } catch {
-    if (appStore.videoMuted) {
-      // Ignore autoplay rejections and leave manual controls available when focused.
-      return;
-    }
-  }
-
-  syncHomeVideoMuted(player, true);
-
-  try {
-    await player.play();
-  } catch {
-    // Ignore autoplay rejections and leave manual controls available when focused.
+    // Preserve the shared sound preference when the browser blocks autoplay.
+    isHomeVideoPaused.value = showHomeVideoSurfaceControls.value;
   }
 }
 
@@ -888,20 +877,6 @@ function handleHomeVideoFullscreenChange(event: Event) {
   void syncHomeVideoPlayback();
 }
 
-function handleHomeVideoVolumeChange() {
-  const player = homePlayerElement.value;
-  // Ignore volume-change events that fire before the player has fully initialized.
-  // Vidstack can emit these during its own setup with muted=false, which would
-  // overwrite the persisted muted preference read from localStorage.
-  if (!player || !homePlayerReady || homeVideoMuteSyncToken !== 0) {
-    return;
-  }
-
-  if (player.muted !== appStore.videoMuted) {
-    appStore.setVideoMuted(player.muted);
-  }
-}
-
 function bindHomePlayerEventListeners(player: MediaPlayerElement | null) {
   removeHomePlayerEventListeners?.();
   removeHomePlayerEventListeners = null;
@@ -911,13 +886,9 @@ function bindHomePlayerEventListeners(player: MediaPlayerElement | null) {
   }
 
   const handleReady = () => {
-    homePlayerReady = true;
     syncHomeVideoAspectRatio(player);
     syncHomeVideoTimelineState(player);
     void syncHomeVideoPlayback();
-  };
-  const handleVolume = () => {
-    handleHomeVideoVolumeChange();
   };
   const handlePlay = () => {
     handleHomeVideoPlay();
@@ -937,7 +908,6 @@ function bindHomePlayerEventListeners(player: MediaPlayerElement | null) {
 
   player.addEventListener('loaded-metadata', handleReady);
   player.addEventListener('can-play', handleReady);
-  player.addEventListener('volume-change', handleVolume);
   player.addEventListener('play', handlePlay);
   player.addEventListener('pause', handlePause);
   player.addEventListener('duration-change', handleDuration);
@@ -947,7 +917,6 @@ function bindHomePlayerEventListeners(player: MediaPlayerElement | null) {
   removeHomePlayerEventListeners = () => {
     player.removeEventListener('loaded-metadata', handleReady);
     player.removeEventListener('can-play', handleReady);
-    player.removeEventListener('volume-change', handleVolume);
     player.removeEventListener('play', handlePlay);
     player.removeEventListener('pause', handlePause);
     player.removeEventListener('duration-change', handleDuration);
@@ -1075,7 +1044,6 @@ watch(homePlayerElement, (player) => {
   loadedHomeVideoAspectRatio.value = null;
   isHomeVideoPaused.value = false;
   homeVideoDurationMs.value = props.item.durationMs ?? 0;
-  homePlayerReady = false;
   homeVideoCurrentTimeMs.value = 0;
   bindHomePlayerEventListeners(player);
 });

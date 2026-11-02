@@ -1,6 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
+import type { MediaStorage } from 'vidstack';
 
 import { useAppStore } from '../stores/app';
 import type { FeedItem, FolderSummary } from '../types/api';
@@ -11,11 +12,19 @@ vi.mock('vidstack/bundle', () => ({}));
 let nextPlayFailures = 0;
 
 class FakeMediaPlayerElement extends HTMLElement {
+  storage: MediaStorage | null = null;
   muted = true;
   paused = true;
   playCallCount = 0;
   pauseCallCount = 0;
   src: unknown = null;
+
+  async restoreProviderSettings() {
+    this.dispatchEvent(new Event('can-play'));
+    await flushPromises();
+    this.muted = (await this.storage?.getMuted()) ?? false;
+    this.dispatchEvent(new CustomEvent('volume-change', { detail: { muted: this.muted, volume: 1 } }));
+  }
 
   async play() {
     this.playCallCount += 1;
@@ -259,6 +268,7 @@ describe('ReelPlayerCard', () => {
     await flushPromises();
 
     const firstPlayer = getPlayerElement(wrapper);
+    await firstPlayer.restoreProviderSettings();
     expect(appStore.videoMuted).toBe(false);
     expect(firstPlayer.muted).toBe(false);
     expect(wrapper.get('.reel-player-card__sound-button').attributes('aria-label')).toBe('Mute sound');
@@ -279,9 +289,43 @@ describe('ReelPlayerCard', () => {
     await flushPromises();
 
     const secondPlayer = getPlayerElement(nextWrapper);
+    await secondPlayer.restoreProviderSettings();
     expect(appStore.videoMuted).toBe(false);
     expect(secondPlayer.muted).toBe(false);
     expect(nextWrapper.get('.reel-player-card__sound-button').attributes('aria-label')).toBe('Mute sound');
+    nextWrapper.unmount();
+  });
+
+  it('keeps preloaded reels muted on activation and after a reload', async () => {
+    useAppStore().setVideoMuted(false);
+    const first = mount(ReelPlayerCard, {
+      props: { item: createFeedItem(31), folder: createFolder(), active: true },
+      global: { stubs: globalStubs }
+    });
+    const next = mount(ReelPlayerCard, {
+      props: { item: createFeedItem(32), folder: createFolder(), active: false },
+      global: { stubs: globalStubs }
+    });
+    await flushPromises();
+    await first.get('.reel-player-card__sound-button').trigger('click');
+    await next.setProps({ active: true });
+    await getPlayerElement(next).restoreProviderSettings();
+
+    expect(getPlayerElement(next).muted).toBe(true);
+    expect(window.localStorage.getItem('foldergram-video-muted')).toBe('true');
+    first.unmount();
+    next.unmount();
+
+    setActivePinia(createPinia());
+    useAppStore().initializeVideoMuted();
+    const reloaded = mount(ReelPlayerCard, {
+      props: { item: createFeedItem(33), folder: createFolder(), active: true },
+      global: { stubs: globalStubs }
+    });
+    await flushPromises();
+    await getPlayerElement(reloaded).restoreProviderSettings();
+    expect(getPlayerElement(reloaded).muted).toBe(true);
+    reloaded.unmount();
   });
 
   it('falls back to the original video when preview autoplay keeps failing', async () => {

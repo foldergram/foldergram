@@ -32,6 +32,7 @@ description: Workspace scripts, local ports, watcher behavior, tests, and docs d
 | `pnpm build:docs` | VitePress docs build |
 | `pnpm rescan` | Manual server rescan script |
 | `pnpm test` | Server and client Vitest suites |
+| `pnpm test:browser` | Client Chromium layout and contrast regressions |
 
 ## Default ports
 
@@ -100,6 +101,20 @@ Run them with:
 ```bash
 pnpm test
 ```
+
+Browser regressions cover panoramic-post details and active navigation in light
+and dark themes. Install Chromium once, then run the browser suite:
+
+```bash
+pnpm --filter @foldergram/client exec playwright install chromium
+pnpm test:browser
+```
+
+The suite builds the client and starts a temporary preview on `127.0.0.1:4173`.
+It uses mock API responses and sample images, so it does not start the backend or
+read your gallery. Failure screenshots and traces are saved in
+`client/test-results/`. To use an existing Chrome or Chromium installation, set
+`PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` to its executable path.
 
 ## Schema migrations
 

@@ -317,13 +317,8 @@ async function closeImageModal() {
   inset: 0;
   z-index: 40;
   display: flex;
-  align-items: stretch;
+  align-items: center;
   justify-content: center;
-  padding:
-    max(0.85rem, env(safe-area-inset-top))
-    max(0.85rem, env(safe-area-inset-right))
-    max(0.85rem, env(safe-area-inset-bottom))
-    max(0.85rem, env(safe-area-inset-left));
   min-height: 100vh;
   min-height: 100dvh;
   overflow: hidden;
@@ -331,10 +326,4 @@ async function closeImageModal() {
   overscroll-behavior: contain;
 }
 
-@media (min-width: 769px) {
-  .app__image-modal-layer {
-    align-items: center;
-    padding: 2rem;
-  }
-}
 </style>
