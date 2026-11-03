@@ -309,14 +309,13 @@ Stop the app, then take the backup of the host directories mounted by Compose:
 docker compose stop foldergram
 ```
 
-To pin this release, set the service image in `docker-compose.yml` to:
+Use the `latest` image tag in `docker-compose.yml` to follow stable releases:
 
 ```yaml
-image: ghcr.io/foldergram/foldergram:1.3.0
+image: ghcr.io/foldergram/foldergram:latest
 ```
 
-The default `latest` tag follows stable releases. Pull the selected image and
-start the service again:
+Pull the updated image and start the service again:
 
 ```bash
 docker compose pull foldergram
