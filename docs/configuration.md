@@ -130,6 +130,25 @@ Instead:
 The built-in auth model is a small role-based password gate for one app
 instance, not a multi-user account system.
 
+## Reverse proxy deployments
+
+Foldergram does not require Nginx, Caddy, or another proxy. Direct HTTP access to
+the Node process remains the supported default, including byte-range video
+playback.
+
+If you deploy behind a reverse proxy:
+
+- proxy `/api`, `/thumbnails`, `/previews`, and media requests to Foldergram instead of serving generated directories directly
+- forward `Range`, `If-Range`, `If-None-Match`, `If-Modified-Since`, `Cookie`, and `Host`
+- allow `206` range responses and avoid buffering long video responses unnecessarily
+- do not ignore or rewrite `Cache-Control` on protected endpoints
+- do not cache API responses by URL alone when authentication or folder-share grants affect access
+- do not alias protected derivative directories unless the proxy enforces equivalent authorization
+- set `CSRF_TRUSTED_ORIGINS` when the browser-visible origin differs from the upstream host seen by Express
+
+See [Security](/security#reverse-proxy-deployments) for the access-control
+requirements and [API](/api#media-cache-behavior) for the response policies.
+
 ## Stories folders mode
 
 Reserved stories behavior is **not** configured in `.env`.

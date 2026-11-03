@@ -57,9 +57,13 @@ It includes:
 
 | Mode | What it does |
 | --- | --- |
-| Recommended | "Affinity-ranked mix." It scores videos using freshness, likes, recent folder affinity, portrait fit, duration fit, and a deterministic seed, then reduces immediate repeats from the same folder when alternatives exist. |
-| Recent | "Newest videos first." |
-| Random | "Stable session shuffle." |
+| Recommended | "Affinity-ranked mix." It scores videos from a bounded candidate window using freshness, likes, recent folder affinity, portrait fit, duration fit, and a deterministic seed, then reduces immediate repeats from the same folder when alternatives exist. |
+| Recent | "Newest videos first." Pages continue from an opaque cursor so tied timestamps cannot duplicate or skip videos. |
+| Random | "Stable session shuffle." The same seed keeps the same order across pages, and changing the seed starts a new queue. |
+
+For large libraries, Recommended describes its bounded session queue in
+`total`/`hasMore` rather than promising every video in one session. Starting a
+new Reels session with a new seed rotates the discovery sample.
 
 ## Explore
 

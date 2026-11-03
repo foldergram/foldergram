@@ -15,6 +15,18 @@ All documented routes come from `server/src/routes/api.ts`.
 | `/thumbnails` | Protected thumbnail derivatives, served from cache or generated on demand in lazy mode |
 | `/previews` | Protected preview derivatives, served from cache or generated on demand in lazy mode |
 
+## Media cache behavior
+
+- JSON API responses use `Cache-Control: no-store`.
+- `/thumbnails/...` and `/previews/...` derivatives use the immutable protected-derivative policy: `private, max-age=604800, immutable` with `Vary: Cookie` when password protection is enabled, or `public, max-age=604800, immutable` when it is disabled.
+- Folder-share media under `/api/share/images/:id/...` always uses `private, no-store`.
+- Original media uses a revalidation-friendly policy instead of an immutable lifetime because a file can change without its image ID changing:
+  - password protection enabled: `Cache-Control: private, no-cache` with `Vary: Cookie`
+  - password protection disabled: `Cache-Control: public, no-cache`
+- Original responses still include `ETag`, `Last-Modified`, and `Accept-Ranges`, so browsers can revalidate and seek with bounded range requests.
+
+This applies to `/api/originals/:id` and to legacy `/previews/...` URLs that resolve to an original.
+
 ## Authentication and protected routes
 
 Foldergram can optionally require a role-bearing password session.
@@ -174,9 +186,10 @@ Query parameters:
 | `page` | integer | `1` | Minimum `1`. |
 | `limit` | integer | `24` | Minimum `1`, maximum `60`. The current client helper requests `6` per page. |
 | `mode` | `recommended | recent | random` | `recommended` | Reels queue mode. |
-| `seed` | integer | unset | Optional seed used to keep `recommended` and `random` queues stable while paging. |
+| `seed` | integer | unset | Optional seed used to keep `recommended` and `random` queues stable while paging. If omitted, the server uses a UTC-day default seed. When continuing a cursor without a seed, the cursor's seed is reused. Changing the seed starts a new session queue. |
 | `lastFolder` | string | unset | Optional recent-navigation hint used by `recommended`. |
 | `recentFolders` | comma-separated string | unset | Optional recent-navigation hints used by `recommended`. |
+| `cursor` | string | unset | Opaque cursor returned by the previous page as `nextCursor`. When supplied, continue from that cursor and keep `mode`, `seed`, and recommendation hints unchanged. |
 
 Response shape:
 
@@ -187,16 +200,20 @@ Response shape:
   "page": 1,
   "limit": 6,
   "total": 0,
-  "hasMore": false
+  "hasMore": false,
+  "nextCursor": null
 }
 ```
 
 Notes:
 
 - `items` contain videos only.
+- `nextCursor` is an opaque string when another page is available, otherwise `null`.
 - `recommended` uses `lastFolder` and `recentFolders` to bias the queue toward folders you recently opened.
-- `recent` ignores recommendation hints and returns newest indexed videos first.
-- `random` and `recommended` stay stable across pages when the same `seed` is reused.
+- `recent` ignores recommendation hints and returns newest indexed videos first. Its cursor uses the last `(sortTimestamp, id)` pair, so tied timestamps cannot duplicate or skip rows.
+- `random` and `recommended` stay stable across pages when the same `seed` is reused. If no seed is supplied, the UTC-day default changes at midnight, but cursor requests continue with the seed stored in the cursor.
+- `total` means the number of visible videos for `recent` and `random`. For `recommended`, `total` describes the bounded session queue, not the entire video library. A new seed rotates the queue so the rest of the library remains discoverable.
+- Mode, seed, or recommendation-hint changes invalidate the previous cursor; a stale or malformed cursor returns `400`. `page` remains accepted for compatibility, but cursor-based paging is preferred.
 
 ### `GET /api/feed/moments`
 
@@ -772,11 +789,14 @@ Rules:
 - original delivery is unavailable while library storage is unavailable or a library rebuild is required
 - without `download=1`, the route streams the original inline/open behavior
 - with `download=1`, the route serves the same file as a download attachment
+- responses use the original-media cache policy described above; downloads keep the same policy and never become shared-cacheable when password protection is enabled
 - inline delivery supports `HEAD` and byte ranges; valid single ranges return `206`
+- conditional requests with `If-None-Match` or `If-Modified-Since` return `304` when the file has not changed
+- `ETag`, `Last-Modified`, and `Accept-Ranges` are preserved by the underlying file response
 
 Previously issued `/previews/...mp4` URLs for qualifying direct-playback videos
-use the same original-file availability checks and range behavior in both eager
-and lazy modes.
+use the same original-file availability checks, cache policy, conditional
+request handling, and range behavior in both eager and lazy modes.
 
 Errors:
 

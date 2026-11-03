@@ -93,7 +93,7 @@ describe('reels store', () => {
     await reelsStore.loadInitial();
 
     expect(reelsStore.mode).toBe('random');
-    expect(fetchReelsSpy).toHaveBeenCalledWith(1, 6, 'random', expect.any(Number), {});
+    expect(fetchReelsSpy).toHaveBeenCalledWith(1, 6, 'random', expect.any(Number), { cursor: null });
     expect(reelsStore.seed).toEqual(expect.any(Number));
     expect(reelsStore.items.map((item) => item.id)).toEqual([11]);
   });
@@ -117,7 +117,7 @@ describe('reels store', () => {
     await reelsStore.loadInitial();
 
     expect(reelsStore.mode).toBe('recent');
-    expect(fetchReelsSpy).toHaveBeenCalledWith(1, 6, 'recent', undefined, {});
+    expect(fetchReelsSpy).toHaveBeenCalledWith(1, 6, 'recent', undefined, { cursor: null });
     expect(reelsStore.items.map((item) => item.id)).toEqual([7]);
   });
 
@@ -149,8 +149,95 @@ describe('reels store', () => {
 
     await reelsStore.loadInitial();
 
-    expect(fetchReelsSpy).toHaveBeenCalledWith(1, 6, 'random', expect.any(Number), {});
+    expect(fetchReelsSpy).toHaveBeenCalledWith(1, 6, 'random', expect.any(Number), { cursor: null });
     expect(reelsStore.items.map((item) => item.id)).toEqual([21]);
     expect(reelsStore.loadedMode).toBe('random');
+  });
+
+  it('sends the opaque cursor for subsequent pages and clears it when the queue ends', async () => {
+    const appStore = useAppStore();
+    appStore.$patch({
+      stats: createAppStatus('recent')
+    });
+
+    const fetchReelsSpy = vi
+      .spyOn(galleryApi, 'fetchReels')
+      .mockResolvedValueOnce({
+        mode: 'recent',
+        items: [createFeedItem(31)],
+        page: 1,
+        limit: 6,
+        total: 2,
+        hasMore: true,
+        nextCursor: 'cursor-page-2'
+      })
+      .mockResolvedValueOnce({
+        mode: 'recent',
+        items: [createFeedItem(32)],
+        page: 2,
+        limit: 6,
+        total: 2,
+        hasMore: false,
+        nextCursor: null
+      });
+
+    const reelsStore = useReelsStore();
+    await reelsStore.loadInitial();
+    await reelsStore.loadMore();
+
+    expect(fetchReelsSpy).toHaveBeenNthCalledWith(1, 1, 6, 'recent', undefined, { cursor: null });
+    expect(fetchReelsSpy).toHaveBeenNthCalledWith(2, 2, 6, 'recent', undefined, { cursor: 'cursor-page-2' });
+    expect(reelsStore.items.map((item) => item.id)).toEqual([31, 32]);
+    expect(reelsStore.cursor).toBeNull();
+    expect(reelsStore.hasMore).toBe(false);
+  });
+
+  it('resets pagination and ignores a stale response after the mode changes', async () => {
+    const appStore = useAppStore();
+    appStore.$patch({
+      stats: createAppStatus('random')
+    });
+
+    let resolveStaleRequest: ((payload: Awaited<ReturnType<typeof galleryApi.fetchReels>>) => void) | null = null;
+    const staleRequest = new Promise<Awaited<ReturnType<typeof galleryApi.fetchReels>>>((resolve) => {
+      resolveStaleRequest = resolve;
+    });
+
+    const fetchReelsSpy = vi
+      .spyOn(galleryApi, 'fetchReels')
+      .mockImplementationOnce(() => staleRequest)
+      .mockResolvedValueOnce({
+        mode: 'recent',
+        items: [createFeedItem(41)],
+        page: 1,
+        limit: 6,
+        total: 1,
+        hasMore: false,
+        nextCursor: null
+      });
+
+    const reelsStore = useReelsStore();
+    const staleLoad = reelsStore.loadInitial();
+
+    appStore.stats!.preferences.defaultReelsFeedMode = 'recent';
+    const freshLoad = reelsStore.loadInitial();
+
+    resolveStaleRequest?.({
+      mode: 'random',
+      items: [createFeedItem(40)],
+      page: 1,
+      limit: 6,
+      total: 1,
+      hasMore: false,
+      nextCursor: null
+    });
+
+    await Promise.all([staleLoad, freshLoad]);
+
+    expect(fetchReelsSpy).toHaveBeenCalledTimes(2);
+    expect(reelsStore.mode).toBe('recent');
+    expect(reelsStore.items.map((item) => item.id)).toEqual([41]);
+    expect(reelsStore.cursor).toBeNull();
+    expect(reelsStore.hasMore).toBe(false);
   });
 });

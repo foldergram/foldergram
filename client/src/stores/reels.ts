@@ -13,6 +13,7 @@ interface ReelsState {
   items: FeedItem[];
   page: number;
   limit: number;
+  cursor: string | null;
   hasMore: boolean;
   loading: boolean;
   error: string | null;
@@ -20,6 +21,7 @@ interface ReelsState {
   seed: number | null;
   affinitySnapshot: ReelsAffinitySnapshot | null;
   activeReelId: number | null;
+  requestId: number;
 }
 
 function createReelsSeed(): number {
@@ -38,13 +40,15 @@ export const useReelsStore = defineStore('reels', {
     items: [],
     page: 1,
     limit: 6,
+    cursor: null,
     hasMore: true,
     loading: false,
     error: null,
     initialized: false,
     seed: null,
     affinitySnapshot: null,
-    activeReelId: null
+    activeReelId: null,
+    requestId: 0
   }),
   getters: {
     activeItem: (state) => state.items.find((item) => item.id === state.activeReelId) ?? state.items[0] ?? null
@@ -59,6 +63,7 @@ export const useReelsStore = defineStore('reels', {
 
       if (modeChanged) {
         this.seed = null;
+        this.cursor = null;
       }
 
       this.affinitySnapshot = this.mode === 'recommended' && !force && !modeChanged ? this.affinitySnapshot : null;
@@ -83,6 +88,7 @@ export const useReelsStore = defineStore('reels', {
       this.loadedMode = null;
       this.items = [];
       this.page = 1;
+      this.cursor = null;
       this.hasMore = true;
       this.loading = false;
       this.error = null;
@@ -90,13 +96,10 @@ export const useReelsStore = defineStore('reels', {
       this.seed = null;
       this.affinitySnapshot = null;
       this.activeReelId = null;
+      this.requestId += 1;
     },
 
     async loadInitial(force = false) {
-      if (this.loading) {
-        return;
-      }
-
       const modeChanged = this.syncModeWithDefault(force);
       const queueRequiresSeed = this.mode !== 'recent';
       const queueMatchesMode = this.loadedMode === this.mode && (!queueRequiresSeed || this.seed !== null);
@@ -105,10 +108,13 @@ export const useReelsStore = defineStore('reels', {
         return;
       }
 
+      this.requestId += 1;
       this.items = [];
       this.loadedMode = null;
       this.page = 1;
+      this.cursor = null;
       this.hasMore = true;
+      this.loading = false;
       this.error = null;
       this.initialized = false;
       this.activeReelId = null;
@@ -131,6 +137,7 @@ export const useReelsStore = defineStore('reels', {
         this.affinitySnapshot = null;
       }
 
+      const requestId = ++this.requestId;
       this.loading = true;
       this.error = null;
 
@@ -140,17 +147,25 @@ export const useReelsStore = defineStore('reels', {
           this.limit,
           this.mode,
           this.mode === 'recent' ? undefined : this.ensureSeed(),
-          this.mode === 'recommended'
-            ? {
-                lastFolder: this.affinitySnapshot?.lastFolder ?? null,
-                recentFolders: this.affinitySnapshot?.recentFolders ?? []
-              }
-            : {}
+          {
+            ...(this.mode === 'recommended'
+              ? {
+                  lastFolder: this.affinitySnapshot?.lastFolder ?? null,
+                  recentFolders: this.affinitySnapshot?.recentFolders ?? []
+                }
+              : {}),
+            cursor: this.cursor
+          }
         );
+
+        if (requestId !== this.requestId) {
+          return;
+        }
 
         this.items.push(...payload.items);
         this.loadedMode = payload.mode ?? this.mode;
-        this.page += 1;
+        this.cursor = payload.nextCursor ?? null;
+        this.page = payload.page + 1;
         this.hasMore = payload.hasMore;
         this.initialized = true;
 
@@ -158,9 +173,15 @@ export const useReelsStore = defineStore('reels', {
           this.activeReelId = this.items[0]?.id ?? null;
         }
       } catch (error) {
+        if (requestId !== this.requestId) {
+          return;
+        }
+
         this.error = error instanceof Error ? error.message : i18n.global.t('reels.view.loadErrorTitle');
       } finally {
-        this.loading = false;
+        if (requestId === this.requestId) {
+          this.loading = false;
+        }
       }
     },
 

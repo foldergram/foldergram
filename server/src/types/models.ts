@@ -273,6 +273,8 @@ export interface FeedPost extends FeedImage {
   mediaItems: PostMediaItem[];
 }
 
+export type ReelsFeedMode = 'recommended' | 'recent' | 'random';
+
 export interface ReelCandidate extends FeedPost {
   likedAt: string | null;
 }

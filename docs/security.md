@@ -36,7 +36,10 @@ When enabled:
 - in `viewer_access_mode=public`, safe read routes and generated media can be browsed anonymously
 - anonymous public JSON payloads omit local media paths, post source paths, and EXIF metadata, including nested carousel items
 - anonymous public favorites stay in the browser and never write into SQLite likes
-- authenticated API and media responses are marked `Cache-Control: no-store` and `Vary: Cookie`
+- authenticated JSON API responses are marked `Cache-Control: no-store` and `Vary: Cookie`
+- protected thumbnails and previews use private browser caching with `Vary: Cookie`; folder-share media always uses `private, no-store`
+- original media uses `Cache-Control: private, no-cache` with `Vary: Cookie` so browsers can revalidate and seek without making a mutable original shared-cacheable
+- when password protection is disabled, original media uses `public, no-cache` and generated derivatives may use public caching
 - the production service worker skips caching protected thumbnail and preview responses
 - admin-only routes reject `viewer` and `anonymous` sessions with `403` or `401` depending on auth state
 
@@ -90,9 +93,9 @@ Some videos that are suitable for direct playback use the ordinary
 access: scoped share preview routes continue to serve or generate their own
 preview media and never redirect to an original path. Previously issued normal
 `/previews/...mp4` URLs are resolved only through the indexed media record and
-the same original-media authorization rules. Original delivery through either
-URL is unavailable while library storage is unavailable or an index rebuild is
-required after a gallery-root change.
+the same original-media authorization and cache rules. Original delivery through
+either URL is unavailable while library storage is unavailable or an index
+rebuild is required after a gallery-root change.
 
 ## Mutation protection
 
@@ -222,6 +225,24 @@ Use Foldergram like a local app:
 - remember that on plain HTTP, both the password and session cookie are visible to anyone who can sniff that local network traffic
 - do not assume the password layer and mutation checks are a full internet-facing security boundary
 - treat delete actions as destructive and permanent
+
+## Reverse proxy deployments
+
+Serving Foldergram directly is the fully supported default. A reverse proxy is
+optional, and it must not weaken the app's access checks.
+
+When proxying, keep these rules:
+
+- forward `Range`, `If-Range`, `If-None-Match`, `If-Modified-Since`, `Cookie`, and `Host` to Foldergram
+- allow `206` range responses and avoid buffering long video responses when the proxy supports streaming controls
+- do not ignore or rewrite `Cache-Control` on protected API or media endpoints
+- do not cache API responses by URL alone when cookies, roles, or folder-share grants affect access
+- do not alias `/thumbnails` or `/previews` to the generated directories unless the proxy enforces equivalent authorization, such as a correctly configured `auth_request`
+- keep `/api/originals/:id` behind the same proxy authorization as the rest of the app
+- set `CSRF_TRUSTED_ORIGINS` when the browser-visible origin differs from the upstream host seen by Express
+
+A cache or alias that skips Foldergram's authentication is not a supported
+performance optimization no matter how much it reduces load.
 
 ## A precise caveat about headers
 

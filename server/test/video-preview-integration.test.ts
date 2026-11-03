@@ -114,7 +114,7 @@ describe.skipIf(binariesAvailable.includes(false)).sequential('real video previe
     const outputBytes = await fs.readFile(preview);
     expect(outputBytes.indexOf(Buffer.from('moov'))).toBeLessThan(outputBytes.indexOf(Buffer.from('mdat')));
     expect(imageRepository.listFeed(1, 20).some((entry) => entry.id === image.id)).toBe(true);
-    expect(imageRepository.listVisibleVideoCandidates().some((entry) => entry.id === image.id)).toBe(true);
+    expect(imageRepository.listRecentVideos(0, 20).some((entry) => entry.id === image.id)).toBe(true);
     const publishedMtime = (await fs.stat(preview)).mtimeMs;
     const reuseScan = await scannerService.scanAll('manual');
     expect(reuseScan?.status).toBe('completed');

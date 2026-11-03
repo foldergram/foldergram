@@ -1,6 +1,7 @@
 import { databaseManager } from './database.js';
 import { SHARE_SESSION_SECRET_SETTING_KEY } from '../constants/app-setting-keys.js';
 import { normalizePath, safeJoin } from '../utils/path-utils.js';
+import { REEL_RECOMMENDED_WINDOW_SIZE, REEL_RECOMMENDED_WINDOW_SLICES } from '../utils/reels-utils.js';
 import { resolveUniqueSlug, slugifyFolderName } from '../utils/slug.js';
 import type {
   AppSettingRecord,
@@ -241,6 +242,65 @@ const BASE_POST_SELECT_SQL = `
   JOIN images ON images.id = post_items.image_id
   LEFT JOIN places ON places.id = posts.place_id
 `;
+
+const REEL_CANDIDATE_SELECT_SQL = `
+  SELECT
+    posts.id,
+    posts.folder_id AS folderId,
+    folders.slug AS folderSlug,
+    folders.name AS folderName,
+    folders.folder_path AS folderPath,
+    images.filename,
+    posts.caption AS caption,
+    posts.post_type AS postType,
+    posts.source_path AS sourcePath,
+    images.width,
+    images.height,
+    images.media_type AS mediaType,
+    images.duration_ms AS durationMs,
+    images.is_animated AS isAnimated,
+    images.thumbnail_path AS thumbnailUrl,
+    images.preview_path AS previewUrl,
+    images.playback_strategy AS playbackStrategy,
+    posts.sort_timestamp AS sortTimestamp,
+    posts.taken_at AS takenAt,
+    ${POST_SAVED_SELECT_SQL},
+    places.id AS placeId,
+    places.slug AS placeSlug,
+    places.display_name AS placeName,
+    places.kind AS placeKind,
+    places.is_approximate AS placeIsApproximate,
+    likes.created_at AS likedAt
+`;
+
+const REEL_CANDIDATE_JOINS_SQL = `
+  INNER JOIN folders ON folders.id = posts.folder_id
+  JOIN post_items ON post_items.post_id = posts.id AND post_items.position = 1
+  JOIN images ON images.id = post_items.image_id
+  LEFT JOIN places ON places.id = posts.place_id
+  LEFT JOIN likes ON likes.post_id = posts.id
+`;
+
+const REEL_CANDIDATE_ID_FROM_SQL = `
+  FROM posts
+  INNER JOIN folders ON folders.id = posts.folder_id
+  JOIN post_items ON post_items.post_id = posts.id AND post_items.position = 1
+  JOIN images ON images.id = post_items.image_id
+`;
+
+const REEL_CANDIDATE_ID_LIKED_FROM_SQL = `
+  ${REEL_CANDIDATE_ID_FROM_SQL}
+  INNER JOIN likes ON likes.post_id = posts.id
+`;
+
+const REEL_CANDIDATE_WHERE_SQL = `
+  ${VISIBLE_POST_WHERE_SQL}
+  AND posts.post_type = 'single'
+  AND images.media_type = 'video'
+  AND LOWER(images.filename) NOT IN (${COVER_FILENAME_SQL})
+`;
+
+const REEL_RANDOM_ORDER_SQL = 'reel_random_rank(posts.id, ?), posts.id DESC';
 
 const FOLDER_SUMMARY_SELECT_SQL = `
   SELECT
@@ -1598,49 +1658,132 @@ export const postRepository = {
     return this.hydratePostItems(posts);
   },
 
-  listVisibleVideoCandidates(): ReelCandidate[] {
+  countVisibleVideos(): number {
+    return Number(
+      (
+        database
+          .prepare(`SELECT COUNT(*) AS count ${REEL_CANDIDATE_ID_FROM_SQL} WHERE ${REEL_CANDIDATE_WHERE_SQL}`)
+          .get() as { count: number }
+      ).count
+    );
+  },
+
+  listRecentVideos(offset: number, limit: number): ReelCandidate[] {
     const posts = database.prepare(
       `
-      SELECT
-        posts.id,
-        posts.folder_id AS folderId,
-        folders.slug AS folderSlug,
-        folders.name AS folderName,
-        folders.folder_path AS folderPath,
-        images.filename,
-        posts.caption AS caption,
-        posts.post_type AS postType,
-        posts.source_path AS sourcePath,
-        images.width,
-        images.height,
-        images.media_type AS mediaType,
-        images.duration_ms AS durationMs,
-        images.is_animated AS isAnimated,
-        images.thumbnail_path AS thumbnailUrl,
-        images.preview_path AS previewUrl,
-        images.playback_strategy AS playbackStrategy,
-        posts.sort_timestamp AS sortTimestamp,
-        posts.taken_at AS takenAt,
-        ${POST_SAVED_SELECT_SQL},
-        places.id AS placeId,
-        places.slug AS placeSlug,
-        places.display_name AS placeName,
-        places.kind AS placeKind,
-        places.is_approximate AS placeIsApproximate,
-        likes.created_at AS likedAt
+      ${REEL_CANDIDATE_SELECT_SQL}
       FROM posts
-      INNER JOIN folders ON folders.id = posts.folder_id
-      JOIN post_items ON post_items.post_id = posts.id AND post_items.position = 1
-      JOIN images ON images.id = post_items.image_id
-      LEFT JOIN places ON places.id = posts.place_id
-      LEFT JOIN likes ON likes.post_id = posts.id
-      WHERE ${VISIBLE_POST_WHERE_SQL}
-        AND posts.post_type = 'single'
-        AND images.media_type = 'video'
-        AND LOWER(images.filename) NOT IN (${COVER_FILENAME_SQL})
+      ${REEL_CANDIDATE_JOINS_SQL}
+      WHERE ${REEL_CANDIDATE_WHERE_SQL}
       ORDER BY posts.sort_timestamp DESC, posts.id DESC
+      LIMIT ? OFFSET ?
       `
-    ).all() as unknown as ReelCandidate[];
+    ).all(limit, offset) as unknown as ReelCandidate[];
+
+    return this.hydratePostItems(posts) as ReelCandidate[];
+  },
+
+  listRecentVideosAfter(sortTimestamp: number, id: number, limit: number): ReelCandidate[] {
+    const posts = database.prepare(
+      `
+      ${REEL_CANDIDATE_SELECT_SQL}
+      FROM posts
+      ${REEL_CANDIDATE_JOINS_SQL}
+      WHERE ${REEL_CANDIDATE_WHERE_SQL}
+        AND (
+          posts.sort_timestamp < ?
+          OR (posts.sort_timestamp = ? AND posts.id < ?)
+        )
+      ORDER BY posts.sort_timestamp DESC, posts.id DESC
+      LIMIT ?
+      `
+    ).all(sortTimestamp, sortTimestamp, id, limit) as unknown as ReelCandidate[];
+
+    return this.hydratePostItems(posts) as ReelCandidate[];
+  },
+
+  listRandomVideos(offset: number, limit: number, seed: number): ReelCandidate[] {
+    const posts = database.prepare(
+      `
+      ${REEL_CANDIDATE_SELECT_SQL}
+      FROM posts
+      ${REEL_CANDIDATE_JOINS_SQL}
+      WHERE ${REEL_CANDIDATE_WHERE_SQL}
+      ORDER BY ${REEL_RANDOM_ORDER_SQL}
+      LIMIT ? OFFSET ?
+      `
+    ).all(seed, limit, offset) as unknown as ReelCandidate[];
+
+    return this.hydratePostItems(posts) as ReelCandidate[];
+  },
+
+  listRecommendedVideoCandidates(seed: number, folderSlugs: string[] = []): ReelCandidate[] {
+    const candidateBranches: string[] = [];
+    const parameters: Array<number | string> = [];
+
+    candidateBranches.push(`
+      SELECT id FROM (
+        SELECT posts.id
+        ${REEL_CANDIDATE_ID_FROM_SQL}
+        WHERE ${REEL_CANDIDATE_WHERE_SQL}
+        ORDER BY posts.sort_timestamp DESC, posts.id DESC
+        LIMIT ?
+      )
+    `);
+    parameters.push(REEL_RECOMMENDED_WINDOW_SLICES.recent);
+
+    if (folderSlugs.length > 0) {
+      const placeholders = folderSlugs.map(() => '?').join(', ');
+      candidateBranches.push(`
+        SELECT id FROM (
+          SELECT posts.id
+          ${REEL_CANDIDATE_ID_FROM_SQL}
+          WHERE ${REEL_CANDIDATE_WHERE_SQL}
+            AND folders.slug IN (${placeholders})
+          ORDER BY posts.sort_timestamp DESC, posts.id DESC
+          LIMIT ?
+        )
+      `);
+      parameters.push(...folderSlugs, REEL_RECOMMENDED_WINDOW_SLICES.affinity);
+    }
+
+    candidateBranches.push(`
+      SELECT id FROM (
+        SELECT posts.id
+        ${REEL_CANDIDATE_ID_LIKED_FROM_SQL}
+        WHERE ${REEL_CANDIDATE_WHERE_SQL}
+        ORDER BY likes.created_at DESC, posts.id DESC
+        LIMIT ?
+      )
+    `);
+    parameters.push(REEL_RECOMMENDED_WINDOW_SLICES.liked);
+
+    candidateBranches.push(`
+      SELECT id FROM (
+        SELECT posts.id
+        ${REEL_CANDIDATE_ID_FROM_SQL}
+        WHERE ${REEL_CANDIDATE_WHERE_SQL}
+        ORDER BY ${REEL_RANDOM_ORDER_SQL}
+        LIMIT ?
+      )
+    `);
+    parameters.push(seed, REEL_RECOMMENDED_WINDOW_SLICES.discovery);
+    parameters.push(REEL_RECOMMENDED_WINDOW_SIZE);
+
+    const posts = database.prepare(
+      `
+      WITH candidate_ids(id) AS (
+        ${candidateBranches.join('\n        UNION\n')}
+      )
+      ${REEL_CANDIDATE_SELECT_SQL}
+      FROM posts
+      JOIN candidate_ids ON candidate_ids.id = posts.id
+      ${REEL_CANDIDATE_JOINS_SQL}
+      WHERE ${REEL_CANDIDATE_WHERE_SQL}
+      ORDER BY posts.sort_timestamp DESC, posts.id DESC
+      LIMIT ?
+      `
+    ).all(...parameters) as unknown as ReelCandidate[];
 
     return this.hydratePostItems(posts) as ReelCandidate[];
   },
@@ -2531,8 +2674,24 @@ export const imageRepository = {
     return postRepository.listRandom(page, limit, seed);
   },
 
-  listVisibleVideoCandidates(): ReelCandidate[] {
-    return postRepository.listVisibleVideoCandidates();
+  countVisibleVideos(): number {
+    return postRepository.countVisibleVideos();
+  },
+
+  listRecentVideos(offset: number, limit: number): ReelCandidate[] {
+    return postRepository.listRecentVideos(offset, limit);
+  },
+
+  listRecentVideosAfter(sortTimestamp: number, id: number, limit: number): ReelCandidate[] {
+    return postRepository.listRecentVideosAfter(sortTimestamp, id, limit);
+  },
+
+  listRandomVideos(offset: number, limit: number, seed: number): ReelCandidate[] {
+    return postRepository.listRandomVideos(offset, limit, seed);
+  },
+
+  listRecommendedVideoCandidates(seed: number, folderSlugs: string[] = []): ReelCandidate[] {
+    return postRepository.listRecommendedVideoCandidates(seed, folderSlugs);
   },
 
   listVisibleSearch(query: string, page: number, limit: number): FeedImage[] {

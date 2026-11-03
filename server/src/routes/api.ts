@@ -13,6 +13,8 @@ import { createRateLimiter } from '../middleware/rate-limit.js';
 import { LIBRARY_REBUILD_REQUIRED_MESSAGE, scannerService } from '../services/scanner-service.js';
 import { storageService } from '../services/storage-service.js';
 import { watcherService } from '../services/watcher-service.js';
+import { applyOriginalMediaHeaders } from '../utils/media-response.js';
+import { REEL_CURSOR_MAX_LENGTH } from '../utils/reels-utils.js';
 import { serveDerivativeForImage } from './lazy-derivatives.js';
 
 const router = express.Router();
@@ -64,9 +66,10 @@ const feedQuerySchema = paginationQuerySchema.extend({
 });
 const reelsQuerySchema = paginationQuerySchema.extend({
   mode: z.enum(['recommended', 'recent', 'random']).default('recommended'),
-  seed: z.coerce.number().int().nonnegative().optional(),
+  seed: z.coerce.number().int().nonnegative().max(0xffffffff).optional(),
   lastFolder: z.string().trim().min(1).max(240).optional(),
-  recentFolders: z.string().trim().max(2400).optional()
+  recentFolders: z.string().trim().max(2400).optional(),
+  cursor: z.string().trim().min(1).max(REEL_CURSOR_MAX_LENGTH).optional()
 });
 const mediaSearchQuerySchema = paginationQuerySchema.extend({
   q: z.string().trim().min(1).max(160)
@@ -502,10 +505,17 @@ router.get('/reels', (request, response) => {
     : [];
 
   response.json(
-    galleryService.getReels(query.page, query.limit, query.mode, query.seed, {
-      lastOpenedFolderSlug: query.lastFolder ?? null,
-      recentOpenedFolderSlugs
-    })
+    galleryService.getReels(
+      query.page,
+      query.limit,
+      query.mode,
+      query.seed,
+      {
+        lastOpenedFolderSlug: query.lastFolder ?? null,
+        recentOpenedFolderSlugs
+      },
+      query.cursor
+    )
   );
 });
 
@@ -1258,6 +1268,8 @@ router.get('/originals/:id', (request, response) => {
     response.status(404).json({ message: 'Original media not found' });
     return;
   }
+
+  applyOriginalMediaHeaders(response);
 
   if (query.download) {
     response.download(originalMedia.path, originalMedia.filename);

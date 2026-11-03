@@ -14,6 +14,16 @@ export function applyProtectedMediaHeaders(response: HeaderResponse): void {
   response.setHeader('Cache-Control', 'public, max-age=604800, immutable');
 }
 
+export function applyOriginalMediaHeaders(response: HeaderResponse): void {
+  if (authService.isEnabled()) {
+    response.setHeader('Cache-Control', 'private, no-cache');
+    response.setHeader('Vary', 'Cookie');
+    return;
+  }
+
+  response.setHeader('Cache-Control', 'public, no-cache');
+}
+
 export function applyDerivativeErrorHeaders(response: HeaderResponse): void {
   response.setHeader('Cache-Control', 'no-store');
 

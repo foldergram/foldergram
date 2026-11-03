@@ -82,6 +82,7 @@ export function fetchReels(
   options: {
     lastFolder?: string | null;
     recentFolders?: string[];
+    cursor?: string | null;
   } = {}
 ) {
   const params = new URLSearchParams({
@@ -100,6 +101,10 @@ export function fetchReels(
 
   if (options.recentFolders && options.recentFolders.length > 0) {
     params.set('recentFolders', options.recentFolders.join(','));
+  }
+
+  if (options.cursor) {
+    params.set('cursor', options.cursor);
   }
 
   return requestJson<PaginatedReels>(`/api/reels?${params.toString()}`);

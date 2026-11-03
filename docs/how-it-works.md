@@ -275,9 +275,14 @@ provide an inline mode switch of its own.
 
 | Mode | Behavior |
 | --- | --- |
-| `recommended` | Builds a seeded queue from indexed videos using freshness, likes, folder-affinity signals from recent navigation, portrait fit, duration fit, and a small deterministic jitter. It also penalizes immediate repeats from the same folder when alternatives exist. |
-| `recent` | Uses newest indexed videos first. |
-| `random` | Uses a deterministic seeded shuffle so the queue stays stable while paging. |
+| `recommended` | Builds a seeded queue from a bounded candidate window using freshness, likes, folder-affinity signals from recent navigation, portrait fit, duration fit, and a small deterministic jitter. It also penalizes immediate repeats from the same folder when alternatives exist. The window combines recent videos, affinity-folder videos, liked videos, and a seeded discovery sample, so a Reels request never materializes the entire video library. |
+| `recent` | Uses newest indexed videos first and pages with a keyset cursor based on `(sort_timestamp, id)`. |
+| `random` | Uses a deterministic seeded SQL ordering so the queue stays stable while paging without loading every visible video into JavaScript. |
+
+Recommended pages describe the bounded session queue in `total` and `hasMore`.
+Changing the seed rotates the discovery sample and starts a new queue, which
+keeps large libraries explorable across sessions without loading every video at
+once.
 
 ## Moments and highlights
 

@@ -27,6 +27,7 @@ interface MockResponse {
   json: ReturnType<typeof vi.fn>;
   sendFile: ReturnType<typeof vi.fn>;
   download: ReturnType<typeof vi.fn>;
+  setHeader: ReturnType<typeof vi.fn>;
 }
 
 interface RouteLayer {
@@ -97,6 +98,7 @@ describe.sequential('original media route download behavior', () => {
       vi.fn()
     );
 
+    expect(response.setHeader).toHaveBeenCalledWith('Cache-Control', 'public, no-cache');
     expect(response.sendFile).toHaveBeenCalledWith(image.absolute_path);
     expect(response.download).not.toHaveBeenCalled();
     expect(response.status).not.toHaveBeenCalled();
@@ -117,6 +119,7 @@ describe.sequential('original media route download behavior', () => {
       vi.fn()
     );
 
+    expect(response.setHeader).toHaveBeenCalledWith('Cache-Control', 'public, no-cache');
     expect(response.download).toHaveBeenCalledWith(image.absolute_path, 'snow day.jpg');
     expect(response.sendFile).not.toHaveBeenCalled();
     expect(response.status).not.toHaveBeenCalled();
@@ -239,7 +242,8 @@ describe.sequential('original media route download behavior', () => {
       status: vi.fn().mockReturnThis(),
       json: vi.fn().mockReturnThis(),
       sendFile: vi.fn().mockReturnThis(),
-      download: vi.fn().mockReturnThis()
+      download: vi.fn().mockReturnThis(),
+      setHeader: vi.fn().mockReturnThis()
     };
   }
 
