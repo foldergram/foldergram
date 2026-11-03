@@ -1,7 +1,7 @@
 <div align="center">
 
 <a href="https://foldergram.intentdeep.com/">
-  <img src="client/public/github_banner.png" alt="Foldergram" />
+  <img src="client/public/github_banner.png?v=f1b7d10" alt="Foldergram" />
 </a>
 <br /><br />
 <a href="https://foldergram.intentdeep.com/">
