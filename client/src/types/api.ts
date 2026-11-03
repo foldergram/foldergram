@@ -173,6 +173,7 @@ export interface PaginatedReels {
   limit: number;
   total: number;
   hasMore: boolean;
+  nextCursor?: string | null;
 }
 
 export interface RailCapsule {

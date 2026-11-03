@@ -1,4 +1,4 @@
-import type { FeedImage } from '../types/models.js';
+import type { FeedImage, ReelsFeedMode } from '../types/models.js';
 
 export interface ReelRecommendationCandidate extends FeedImage {
   likedAt: string | null;
@@ -14,6 +14,21 @@ export interface RankedReelCandidate {
   score: number;
 }
 
+export interface ReelCursorAnchor {
+  sortTimestamp: number;
+  id: number;
+}
+
+export interface ReelCursorPayload {
+  version: typeof REEL_CURSOR_VERSION;
+  mode: ReelsFeedMode;
+  seed: number | null;
+  signalsHash: string;
+  page: number;
+  offset: number;
+  after: ReelCursorAnchor | null;
+}
+
 export const REEL_RECOMMENDATION_WEIGHTS = {
   freshness: 0.35,
   liked: 0.2,
@@ -23,6 +38,21 @@ export const REEL_RECOMMENDATION_WEIGHTS = {
   seededJitter: 0.05
 } as const;
 
+export const REEL_RECOMMENDED_WINDOW_SIZE = 512;
+export const REEL_RECOMMENDED_WINDOW_SLICES = {
+  recent: 192,
+  affinity: 128,
+  liked: 64,
+  discovery: 128
+} as const;
+export const REEL_MAX_AFFINITY_FOLDERS = 8;
+export const REEL_MAX_FOLDER_SLUG_LENGTH = 240;
+export const REEL_CURSOR_VERSION = 1;
+export const REEL_CURSOR_MAX_LENGTH = 1024;
+
+const REEL_CURSOR_MAX_OFFSET = 10_000_000;
+const REEL_CURSOR_MAX_SEED = 0xffffffff;
+const REEL_CURSOR_MAX_ABSOLUTE_TIMESTAMP = 8_640_000_000_000_000;
 const PRIMARY_REPEAT_FOLDER_PENALTY = 0.5;
 const SECONDARY_REPEAT_FOLDER_PENALTY = 0.15;
 const FOLDER_REPEAT_COUNT_PENALTY = 0.03;
@@ -67,23 +97,44 @@ function getFreshnessScore(candidate: ReelRecommendationCandidate, minimumTimest
   return (getEffectiveTimestamp(candidate) - minimumTimestamp) / (maximumTimestamp - minimumTimestamp);
 }
 
-function getFolderAffinityLookup(signals: ReelAffinitySignals): Map<string, number> {
+export function normalizeReelAffinitySignals(signals: ReelAffinitySignals = {}): ReelAffinitySignals {
   const orderedSlugs: string[] = [];
   const seenSlugs = new Set<string>();
 
   for (const slug of [signals.lastOpenedFolderSlug ?? null, ...(signals.recentOpenedFolderSlugs ?? [])]) {
-    if (!slug) {
+    if (typeof slug !== 'string') {
       continue;
     }
 
     const normalizedSlug = slug.trim();
-    if (normalizedSlug.length === 0 || seenSlugs.has(normalizedSlug)) {
+    if (
+      normalizedSlug.length === 0 ||
+      normalizedSlug.length > REEL_MAX_FOLDER_SLUG_LENGTH ||
+      seenSlugs.has(normalizedSlug)
+    ) {
       continue;
     }
 
     seenSlugs.add(normalizedSlug);
     orderedSlugs.push(normalizedSlug);
+
+    if (orderedSlugs.length >= REEL_MAX_AFFINITY_FOLDERS) {
+      break;
+    }
   }
+
+  return {
+    lastOpenedFolderSlug: orderedSlugs[0] ?? null,
+    recentOpenedFolderSlugs: orderedSlugs.slice(1)
+  };
+}
+
+function getFolderAffinityLookup(signals: ReelAffinitySignals): Map<string, number> {
+  const normalized = normalizeReelAffinitySignals(signals);
+  const orderedSlugs = [
+    normalized.lastOpenedFolderSlug ?? null,
+    ...(normalized.recentOpenedFolderSlugs ?? [])
+  ].filter((slug): slug is string => typeof slug === 'string' && slug.length > 0);
 
   return new Map(
     orderedSlugs.map((slug, index) => [slug, clamp(1 - index * 0.16, 0.24, 1)])
@@ -204,6 +255,132 @@ export function shuffleReelCandidates(
 
     return right.id - left.id;
   });
+}
+
+export function getReelRandomRank(id: number, seed: number): number {
+  let hash = (normalizeSeed(seed) ^ (Math.abs(Math.trunc(id)) >>> 0)) >>> 0;
+  hash = Math.imul(hash ^ (hash >>> 16), 0x85ebca6b);
+  hash = Math.imul(hash ^ (hash >>> 13), 0xc2b2ae35);
+  return (hash ^ (hash >>> 16)) >>> 0;
+}
+
+export function getReelSignalsFingerprint(signals: ReelAffinitySignals = {}): string {
+  const normalized = normalizeReelAffinitySignals(signals);
+  const serialized = [
+    normalized.lastOpenedFolderSlug ?? '',
+    ...(normalized.recentOpenedFolderSlugs ?? [])
+  ].join('\u0000');
+  let hash = 0x811c9dc5;
+
+  for (let index = 0; index < serialized.length; index += 1) {
+    hash ^= serialized.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+export function encodeReelCursor(payload: Omit<ReelCursorPayload, 'version'>): string {
+  return Buffer.from(
+    JSON.stringify({
+      version: REEL_CURSOR_VERSION,
+      ...payload
+    }),
+    'utf8'
+  ).toString('base64url');
+}
+
+export function decodeReelCursor(value: string): ReelCursorPayload | null {
+  if (typeof value !== 'string' || value.length === 0 || value.length > REEL_CURSOR_MAX_LENGTH) {
+    return null;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(Buffer.from(value, 'base64url').toString('utf8'));
+  } catch {
+    return null;
+  }
+
+  if (!isRecord(parsed) || parsed.version !== REEL_CURSOR_VERSION) {
+    return null;
+  }
+
+  if (parsed.mode !== 'recommended' && parsed.mode !== 'recent' && parsed.mode !== 'random') {
+    return null;
+  }
+
+  const seed = parsed.seed;
+  if (
+    seed !== null &&
+    (typeof seed !== 'number' || !Number.isInteger(seed) || seed < 0 || seed > REEL_CURSOR_MAX_SEED)
+  ) {
+    return null;
+  }
+
+  if (parsed.mode !== 'recent' && seed === null) {
+    return null;
+  }
+
+  if (typeof parsed.signalsHash !== 'string' || parsed.signalsHash.length > 64) {
+    return null;
+  }
+
+  const page = parsed.page;
+  if (typeof page !== 'number' || !Number.isInteger(page) || page < 1) {
+    return null;
+  }
+
+  const offset = parsed.offset;
+  if (
+    typeof offset !== 'number' ||
+    !Number.isInteger(offset) ||
+    offset < 0 ||
+    offset > REEL_CURSOR_MAX_OFFSET
+  ) {
+    return null;
+  }
+
+  let after: ReelCursorAnchor | null = null;
+  if (parsed.mode === 'recent') {
+    if (!isRecord(parsed.after)) {
+      return null;
+    }
+
+    const sortTimestamp = parsed.after.sortTimestamp;
+    const id = parsed.after.id;
+    if (
+      typeof sortTimestamp !== 'number' ||
+      !Number.isSafeInteger(sortTimestamp) ||
+      Math.abs(sortTimestamp) > REEL_CURSOR_MAX_ABSOLUTE_TIMESTAMP ||
+      typeof id !== 'number' ||
+      !Number.isSafeInteger(id) ||
+      id < 1
+    ) {
+      return null;
+    }
+
+    after = {
+      sortTimestamp,
+      id
+    };
+  } else if (parsed.after !== null) {
+    return null;
+  }
+
+  return {
+    version: REEL_CURSOR_VERSION,
+    mode: parsed.mode,
+    seed,
+    signalsHash: parsed.signalsHash,
+    page,
+    offset,
+    after
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 export function buildReelQueue(

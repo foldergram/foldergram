@@ -186,9 +186,10 @@ Query parameters:
 | `page` | integer | `1` | Minimum `1`. |
 | `limit` | integer | `24` | Minimum `1`, maximum `60`. The current client helper requests `6` per page. |
 | `mode` | `recommended | recent | random` | `recommended` | Reels queue mode. |
-| `seed` | integer | unset | Optional seed used to keep `recommended` and `random` queues stable while paging. |
+| `seed` | integer | unset | Optional seed used to keep `recommended` and `random` queues stable while paging. If omitted, the server uses a UTC-day default seed. When continuing a cursor without a seed, the cursor's seed is reused. Changing the seed starts a new session queue. |
 | `lastFolder` | string | unset | Optional recent-navigation hint used by `recommended`. |
 | `recentFolders` | comma-separated string | unset | Optional recent-navigation hints used by `recommended`. |
+| `cursor` | string | unset | Opaque cursor returned by the previous page as `nextCursor`. When supplied, continue from that cursor and keep `mode`, `seed`, and recommendation hints unchanged. |
 
 Response shape:
 
@@ -199,16 +200,20 @@ Response shape:
   "page": 1,
   "limit": 6,
   "total": 0,
-  "hasMore": false
+  "hasMore": false,
+  "nextCursor": null
 }
 ```
 
 Notes:
 
 - `items` contain videos only.
+- `nextCursor` is an opaque string when another page is available, otherwise `null`.
 - `recommended` uses `lastFolder` and `recentFolders` to bias the queue toward folders you recently opened.
-- `recent` ignores recommendation hints and returns newest indexed videos first.
-- `random` and `recommended` stay stable across pages when the same `seed` is reused.
+- `recent` ignores recommendation hints and returns newest indexed videos first. Its cursor uses the last `(sortTimestamp, id)` pair, so tied timestamps cannot duplicate or skip rows.
+- `random` and `recommended` stay stable across pages when the same `seed` is reused. If no seed is supplied, the UTC-day default changes at midnight, but cursor requests continue with the seed stored in the cursor.
+- `total` means the number of visible videos for `recent` and `random`. For `recommended`, `total` describes the bounded session queue, not the entire video library. A new seed rotates the queue so the rest of the library remains discoverable.
+- Mode, seed, or recommendation-hint changes invalidate the previous cursor; a stale or malformed cursor returns `400`. `page` remains accepted for compatibility, but cursor-based paging is preferred.
 
 ### `GET /api/feed/moments`
 

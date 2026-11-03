@@ -12,8 +12,22 @@ import {
 import { appConfig } from '../config/env.js';
 import { log } from '../services/log-service.js';
 import { storageService } from '../services/storage-service.js';
+import { getReelRandomRank } from '../utils/reels-utils.js';
 
 const GLOBAL_DB_KEY = Symbol.for('foldergram.database.connection');
+
+function registerSqlFunctions(db: DatabaseSync): void {
+  db.function('reel_random_rank', { deterministic: true }, (idValue, seedValue) => {
+    const id = Number(idValue);
+    const seed = Number(seedValue);
+
+    if (!Number.isFinite(id) || !Number.isFinite(seed)) {
+      return 0;
+    }
+
+    return getReelRandomRank(id, seed);
+  });
+}
 
 function synchronousLabel(synchronous: number): string {
   if (synchronous === 0) {
@@ -71,6 +85,8 @@ class DatabaseManager {
 
     const db = openSqliteDatabase(databasePath, { onConfigured: logConnectionPolicy });
     try {
+      registerSqlFunctions(db);
+
       if (databasePath === ':memory:') {
         db.exec(schemaSql);
       } else {

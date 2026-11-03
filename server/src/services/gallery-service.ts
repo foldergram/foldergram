@@ -47,6 +47,7 @@ import type {
   PlaybackStrategy,
   PostMediaItem,
   PostRecord,
+  ReelsFeedMode,
   SharedFeedItem,
   SharedFolderSummary,
   SharedImageDetail,
@@ -65,7 +66,14 @@ import { countSupportedRootMediaFiles } from '../utils/gallery-root-utils.js';
 import { resolveOriginalPath } from '../utils/media-paths.js';
 import { getLeafPathName, getParentRelativePath, getPathBreadcrumb } from '../utils/path-utils.js';
 import { measureOperation } from '../utils/perf-timing.js';
-import { buildReelQueue, shuffleReelCandidates, type ReelAffinitySignals } from '../utils/reels-utils.js';
+import {
+  buildReelQueue,
+  decodeReelCursor,
+  encodeReelCursor,
+  getReelSignalsFingerprint,
+  normalizeReelAffinitySignals,
+  type ReelAffinitySignals
+} from '../utils/reels-utils.js';
 import { parseTreatStoriesAsFoldersSetting, serializeTreatStoriesAsFoldersSetting } from '../utils/stories-utils.js';
 import { resolveVideoPlaybackSource, type VideoDeliveryContext, type VideoPlaybackSource } from '../utils/video-playback-policy.js';
 import { geodataService, placeResolutionService } from './place-service.js';
@@ -74,7 +82,6 @@ import { scannerService } from './scanner-service.js';
 import { storageService } from './storage-service.js';
 
 type FeedMode = 'recent' | 'rediscover' | 'random';
-type ReelsFeedMode = 'recommended' | 'recent' | 'random';
 type SupportedLocale = 'en' | 'es' | 'zh' | 'de';
 
 interface FeedCapsuleDefinition {
@@ -215,6 +222,12 @@ function parseReelsFeedMode(value: string | null): ReelsFeedMode {
 
 function getDefaultReelsFeedMode(): ReelsFeedMode {
   return parseReelsFeedMode(appSettingsRepository.get(REELS_FEED_DEFAULT_MODE_SETTING_KEY));
+}
+
+function resolveReelsSessionSeed(seed?: number): number {
+  return Number.isFinite(seed)
+    ? Number(seed)
+    : Number(new Date().toISOString().slice(0, 10).replaceAll('-', ''));
 }
 
 function parseFolderImageOrder(value: string | null): FolderImageOrder {
@@ -1412,51 +1425,160 @@ export const galleryService = {
     };
   },
 
-  getReels(page: number, limit: number, mode: ReelsFeedMode = 'recommended', seed?: number, signals: ReelAffinitySignals = {}) {
+  getReels(
+    page: number,
+    limit: number,
+    mode: ReelsFeedMode = 'recommended',
+    seed?: number,
+    signals: ReelAffinitySignals = {},
+    cursorValue?: string | null
+  ) {
+    const buildEmptyPayload = () => ({
+      mode,
+      items: [],
+      page,
+      limit,
+      total: 0,
+      hasMore: false,
+      nextCursor: null
+    });
+
     if (!storageService.getState().libraryAvailable) {
-      return {
-        mode,
-        items: [],
-        page,
-        limit,
-        total: 0,
-        hasMore: false
-      };
+      return buildEmptyPayload();
     }
 
-    const candidates = measureOperation('reels.candidate_selection', () => imageRepository.listVisibleVideoCandidates());
-    const total = candidates.length;
-    if (total === 0) {
-      return {
-        mode,
-        items: [],
-        page,
-        limit,
-        total: 0,
-        hasMore: false
-      };
+    const normalizedSignals = normalizeReelAffinitySignals(signals);
+    const signalsHash = mode === 'recommended' ? getReelSignalsFingerprint(normalizedSignals) : '';
+    const cursor = cursorValue ? decodeReelCursor(cursorValue) : null;
+
+    if (cursorValue && !cursor) {
+      throw new Error('Invalid Reels cursor.');
     }
 
-    const orderedCandidates =
+    const usesImplicitSeed = seed === undefined || seed === null;
+    const sessionSeed =
       mode === 'recent'
-        ? candidates
-        : (() => {
-            const sessionSeed = Number.isFinite(seed)
-              ? Number(seed)
-              : Number(new Date().toISOString().slice(0, 10).replaceAll('-', ''));
+        ? null
+        : usesImplicitSeed && cursor?.seed !== null && cursor?.seed !== undefined
+          ? cursor.seed
+          : resolveReelsSessionSeed(seed);
 
-            return mode === 'random' ? shuffleReelCandidates(candidates, sessionSeed) : buildReelQueue(candidates, sessionSeed, signals);
-          })();
-    const offset = (page - 1) * limit;
+    if (
+      cursor &&
+      (cursor.mode !== mode || cursor.seed !== sessionSeed || cursor.signalsHash !== signalsHash)
+    ) {
+      throw new Error('Reels cursor does not match the current session.');
+    }
+
+    const requestedPage = cursor?.page ?? page;
+    const offset = cursor?.offset ?? (page - 1) * limit;
+
+    if (mode === 'recent') {
+      const total = measureOperation('reels.count', () => imageRepository.countVisibleVideos());
+      if (total === 0) {
+        return buildEmptyPayload();
+      }
+
+      const rows = measureOperation('reels.candidate_selection', () =>
+        cursor?.after
+          ? imageRepository.listRecentVideosAfter(cursor.after.sortTimestamp, cursor.after.id, limit + 1)
+          : imageRepository.listRecentVideos(offset, limit + 1)
+      );
+      const hasMore = rows.length > limit;
+      const pageItems = rows.slice(0, limit);
+      const lastItem = pageItems.at(-1);
+
+      return {
+        mode,
+        items: mapFeedItems(pageItems),
+        page: requestedPage,
+        limit,
+        total,
+        hasMore,
+        nextCursor:
+          hasMore && lastItem
+            ? encodeReelCursor({
+                mode,
+                seed: null,
+                signalsHash: '',
+                page: requestedPage + 1,
+                offset: requestedPage * limit,
+                after: {
+                  sortTimestamp: lastItem.sortTimestamp,
+                  id: lastItem.id
+                }
+              })
+            : null
+      };
+    }
+
+    if (mode === 'random') {
+      const total = measureOperation('reels.count', () => imageRepository.countVisibleVideos());
+      if (total === 0) {
+        return buildEmptyPayload();
+      }
+
+      const items = measureOperation('reels.candidate_selection', () =>
+        imageRepository.listRandomVideos(offset, limit, sessionSeed ?? 0)
+      );
+      const hasMore = offset + items.length < total;
+
+      return {
+        mode,
+        items: mapFeedItems(items),
+        page: requestedPage,
+        limit,
+        total,
+        hasMore,
+        nextCursor: hasMore
+          ? encodeReelCursor({
+              mode,
+              seed: sessionSeed,
+              signalsHash: '',
+              page: requestedPage + 1,
+              offset: offset + limit,
+              after: null
+            })
+          : null
+      };
+    }
+
+    const folderSlugs = [
+      normalizedSignals.lastOpenedFolderSlug ?? null,
+      ...(normalizedSignals.recentOpenedFolderSlugs ?? [])
+    ].filter((slug): slug is string => typeof slug === 'string' && slug.length > 0);
+    const candidates = measureOperation('reels.candidate_selection', () =>
+      imageRepository.listRecommendedVideoCandidates(sessionSeed ?? 0, folderSlugs)
+    );
+    const queue = measureOperation('reels.ranking', () =>
+      buildReelQueue(candidates, sessionSeed ?? 0, normalizedSignals)
+    );
+    const total = queue.length;
+
+    if (total === 0) {
+      return buildEmptyPayload();
+    }
+
+    const items = queue.slice(offset, offset + limit);
+    const hasMore = offset + items.length < total;
 
     return {
       mode,
-      ...buildPaginatedPayload(
-        mapFeedItems(orderedCandidates.slice(offset, offset + limit)),
-        page,
-        limit,
-        total
-      )
+      items: mapFeedItems(items),
+      page: requestedPage,
+      limit,
+      total,
+      hasMore,
+      nextCursor: hasMore
+        ? encodeReelCursor({
+            mode,
+            seed: sessionSeed,
+            signalsHash,
+            page: requestedPage + 1,
+            offset: offset + limit,
+            after: null
+          })
+        : null
     };
   },
 
