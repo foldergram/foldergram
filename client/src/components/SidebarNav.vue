@@ -3,7 +3,7 @@
     class="sidebar group flex h-full w-[4.85rem] flex-col overflow-visible bg-bg px-[0.95rem] pt-7 pb-5 text-text transition-[width] duration-220 ease hover:w-60"
   >
     <RouterLink
-      class="sidebar__brand relative inline-flex items-center justify-center w-12 h-12 p-[0.3rem] rounded-[1rem] color-inherit transition-[background-color,transform,opacity] duration-180 hover:bg-surface-hover hover:-translate-y-px"
+      class="sidebar__brand relative inline-flex items-center justify-center w-12 h-12 p-[0.3rem] rounded-[1rem] color-inherit transition-[background-color,transform,opacity] duration-180 hover:bg-sidebar-hover hover:-translate-y-px"
       to="/"
       :aria-label="t('nav.foldergramHome')"
     >
@@ -205,7 +205,7 @@
             >{{ likesStore.collectionLabel }}</span
           >
           <small
-            class="sidebar__badge sidebar__meta ml-auto max-w-0 min-w-[1.5rem] overflow-hidden whitespace-nowrap rounded-full bg-white/12 px-[0.45rem] py-[0.1rem] text-center text-[0.72rem] font-bold text-white/86 opacity-0 group-hover:max-w-[12rem] group-hover:opacity-100"
+            class="sidebar__badge sidebar__meta ml-auto inline-flex h-6 min-w-6 max-w-0 shrink-0 items-center justify-center overflow-hidden whitespace-nowrap rounded-full bg-[var(--sidebar-badge-background)] px-1.5 text-[0.72rem] leading-none font-bold text-text opacity-0 group-hover:max-w-[12rem] group-hover:opacity-100"
             style="
               transition:
                 opacity 0.18s ease,
@@ -389,7 +389,7 @@
 
         <button
           class="sidebar-item w-full"
-          :class="moreMenuOpen ? 'bg-surface-hover font-semibold' : ''"
+          :class="moreMenuOpen ? 'bg-[var(--sidebar-active-background)] hover:bg-[var(--sidebar-active-background)] font-semibold' : ''"
           type="button"
           aria-haspopup="menu"
           :aria-expanded="moreMenuOpen"
@@ -477,7 +477,7 @@
     authStore.accessMode === "public" ? t("nav.returnToPublicView") : t("nav.signOut"),
   )
   const sidebarActiveClass =
-    "router-link-active bg-[var(--sidebar-active-background)] font-bold"
+    "router-link-active bg-[var(--sidebar-active-background)] hover:bg-[var(--sidebar-active-background)] font-bold"
 
   function closeMoreMenu() {
     moreMenuOpen.value = false

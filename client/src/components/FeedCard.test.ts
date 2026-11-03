@@ -7,6 +7,7 @@ import { useAppStore } from '../stores/app';
 import { useAuthStore } from '../stores/auth';
 import type { FeedItem } from '../types/api';
 import FeedCard from './FeedCard.vue';
+import FeedList from './FeedList.vue';
 import CarouselMediaStage from './CarouselMediaStage.vue';
 import ReelPlayerCard from './ReelPlayerCard.vue';
 
@@ -376,6 +377,78 @@ describe('FeedCard', () => {
     expect(player.playCallCount).toBeGreaterThanOrEqual(2);
     expect(player.paused).toBe(false);
     expect(wrapper.find('.feed-card__pause-indicator').exists()).toBe(false);
+  });
+
+  it.each([-1000, 1000])('pauses an audible video scrolled out of view at %ipx after leaving fullscreen', async (offscreenTop) => {
+    const observers: FeedVideoObserver[] = [];
+    class FeedVideoObserver {
+      target: Element | null = null;
+      constructor(private callback: IntersectionObserverCallback) {
+        observers.push(this);
+      }
+      observe(target: Element) { this.target = target; }
+      disconnect() { this.target = null; }
+      unobserve() { this.target = null; }
+      report(ratio: number, top = 0) {
+        if (!this.target) throw new Error('Video visibility observer is disconnected');
+        this.callback([{
+          target: this.target,
+          isIntersecting: ratio > 0,
+          intersectionRatio: ratio,
+          boundingClientRect: { top, height: 400 }
+        } as IntersectionObserverEntry], this as unknown as IntersectionObserver);
+      }
+    }
+    vi.stubGlobal('IntersectionObserver', FeedVideoObserver);
+    const appStore = useAppStore();
+    appStore.setVideoMuted(false);
+    const wrapper = mount(FeedList, {
+      props: { items: [createVideoItem(8052), createVideoItem(8053)], context: 'home' },
+      global: { stubs: globalStubs }
+    });
+    await flushPromises();
+
+    const [player, nextPlayer] = wrapper.findAll('media-player').map(node => node.element as FakeMediaPlayerElement);
+    const nextObserver = observers.find(entry => entry.target === nextPlayer.parentElement)!;
+    let observer = observers.find(entry => entry.target === player.parentElement)!;
+    observer.report(0.9);
+    await flushPromises();
+    expect(player.paused).toBe(false);
+
+    for (let cycle = 0; cycle < 2; cycle += 1) {
+      const changeFullscreen = async (fullscreen: boolean) => {
+        // Vidstack's DOMEvent extends Event, not CustomEvent, and its attribute can lag behind detail.
+        const event = new Event('fullscreen-change');
+        Object.defineProperty(event, 'detail', { value: fullscreen });
+        player.dispatchEvent(event);
+        player.toggleAttribute('data-fullscreen', fullscreen);
+        await flushPromises();
+      };
+      await changeFullscreen(true);
+      expect(observer.target).toBeNull();
+      expect(player.paused).toBe(false);
+
+      await changeFullscreen(false);
+      observer = observers.at(-1)!;
+      expect(observer.target).toBe(player.parentElement);
+      observer.report(0.9);
+      await flushPromises();
+
+      observer.report(0, offscreenTop);
+      nextObserver.report(0.9);
+      await flushPromises();
+      expect(player.paused).toBe(true);
+      expect(nextPlayer.paused).toBe(false);
+      expect(player.muted).toBe(false);
+      expect(appStore.videoMuted).toBe(false);
+
+      nextObserver.report(0, -offscreenTop);
+      observer.report(0.9);
+      await flushPromises();
+      expect(player.paused).toBe(false);
+      expect(nextPlayer.paused).toBe(true);
+    }
+    wrapper.unmount();
   });
 
   it('renders the bottom progress UI and keeps slider clicks from pausing the home video', async () => {

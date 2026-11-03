@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
 const folder = {
@@ -119,6 +120,53 @@ async function expectReadableActiveNavigation(link: Locator) {
   });
   expect(contrast, 'Active navigation text and icons need at least 4.5:1 contrast').toBeGreaterThanOrEqual(4.5);
 }
+
+test('home videos stop playing off screen after leaving fullscreen', async ({ page }) => {
+  await mockGallery(page, 'light');
+  await page.setViewportSize({ width: 1280, height: 720 });
+  const clip = await readFile(new URL('./fixtures/feed-video.mp4', import.meta.url));
+  await page.route('**/previews/feed-video.mp4', route => route.fulfill({ contentType: 'video/mp4', body: clip }));
+  const image = (id: number) => ({ ...panorama, id, width: 1200, height: 1200 });
+  const video = (id: number) => ({
+    ...panorama, id, filename: `clip-${id}.mp4`, mediaType: 'video',
+    width: 160, height: 90, durationMs: 1000, previewUrl: '/previews/feed-video.mp4'
+  });
+  const items = [image(1), image(2), video(3), image(4), image(5), video(6), image(7), image(8)];
+  await page.route('**/api/feed?*', route => route.fulfill({
+    json: { items, page: 1, limit: 24, total: items.length, hasMore: false }
+  }));
+  await page.goto('/');
+
+  const shell = page.locator('.feed-card__video-shell').first();
+  const player = shell.locator('media-player');
+  const media = shell.locator('video');
+  await shell.scrollIntoViewIfNeeded();
+  await expect(media).toHaveJSProperty('paused', false);
+  await shell.locator('media-mute-button').click();
+  await expect(media).toHaveJSProperty('muted', false);
+
+  for (const direction of ['down', 'up']) {
+    await shell.locator('media-fullscreen-button').click();
+    await expect(player).toHaveAttribute('data-fullscreen', '');
+    await expect(media).toHaveJSProperty('paused', false);
+    await page.evaluate(() => document.exitFullscreen());
+    await expect(player).not.toHaveAttribute('data-fullscreen');
+
+    const target = direction === 'down'
+      ? page.locator('.feed-card__video-shell').nth(1)
+      : page.locator('main article').first();
+    await target.scrollIntoViewIfNeeded();
+    await expect(shell).not.toBeInViewport();
+    await expect(media).toHaveJSProperty('paused', true);
+    await expect(media).toHaveJSProperty('muted', false);
+    if (direction === 'down') {
+      await expect(target.locator('video')).toHaveJSProperty('paused', false);
+    }
+
+    await shell.scrollIntoViewIfNeeded();
+    await expect(media).toHaveJSProperty('paused', false);
+  }
+});
 
 for (const theme of ['light', 'dark'] as const) {
   test.describe(`${theme} theme`, () => {

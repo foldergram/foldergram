@@ -22,6 +22,8 @@
   --surface-alt: #eef1f4;
   --surface-hover: #eceff3;
   --sidebar-active-background: var(--surface-hover);
+  --sidebar-hover-background: color-mix(in srgb, var(--sidebar-active-background) 65%, var(--bg) 35%);
+  --sidebar-badge-background: color-mix(in srgb, var(--text) 12%, var(--sidebar-active-background) 88%);
   --border: #d8dde3;
   --text: #111827;
   --muted: #6b7280;

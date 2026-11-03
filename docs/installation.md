@@ -338,6 +338,23 @@ pnpm build
 pnpm start
 ```
 
+### Thumbnail and preview storage migration
+
+Older releases mirrored source folders under the thumbnail and preview
+directories. Current releases store these files in small directories grouped by
+stable asset keys, so later source-folder moves can reuse existing generated
+media and preserve indexed media identity.
+
+The next full scan after upgrading migrates existing thumbnails and previews in
+place. Your library remains readable while the migration runs: stored paths
+continue to reference existing files, and surviving legacy files are reused or
+repaired where possible. Original media files remain untouched.
+
+Open **Settings → Scan & Library** and run **Scan for changes** to apply the
+migration. Scan progress reports discovery, derivative migration, and derivative
+generation separately. See [Derivative mapping](/media-processing#derivative-mapping)
+for the storage layout and repair behavior.
+
 ### Carousel folders when upgrading from v1.2.2
 
 If the existing index contains folders named `carousels`, open

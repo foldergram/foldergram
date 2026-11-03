@@ -25,6 +25,10 @@ It includes:
 - desktop recommendations for folders based on recency, likes, and recent navigation
 - infinite loading for feed pagination
 
+Feed videos pause when they scroll out of view, stopping their audio as well.
+Fullscreen playback continues until you exit fullscreen; scrolling then follows
+the same visibility rules without changing your saved sound preference.
+
 The desktop recommendations sidebar scrolls with the feed.
 The Moments or Highlights rail shares the feed's center line. Desktop navigation
 and folder shortcuts are vertically centered between the logo and the More menu.
@@ -350,6 +354,10 @@ Current non-admin behavior:
 | Rebuild Library Index | Clears indexed folders, posts, likes, folder scan state, and scan history, then rescans the active gallery root and reuses matching cached derivatives when possible. In lazy derivative mode it does not pre-generate missing thumbnails or previews. |
 
 ## Theme, language, and local UI preferences
+
+The startup screen follows your saved light or dark theme and displays a static
+Foldergram icon while the app loads. If no theme is saved, it follows your system
+preference.
 
 The interface supports English, Spanish, Chinese, and German. See
 [App language](/configuration#app-language) for language selection and how

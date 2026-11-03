@@ -32,6 +32,7 @@ export default defineConfig({
       surface: "var(--surface)",
       "surface-alt": "var(--surface-alt)",
       "surface-hover": "var(--surface-hover)",
+      "sidebar-hover": "var(--sidebar-hover-background)",
       border: "var(--border)",
       text: "var(--text)",
       muted: "var(--muted)",
@@ -66,7 +67,7 @@ export default defineConfig({
     // Nav link/button in sidebar
     [
       "sidebar-item",
-      "flex items-center gap-4 min-h-[3rem] px-[0.75rem] py-[0.7rem] border-0 rounded-[1rem] color-inherit bg-transparent cursor-pointer transition-colors duration-150 hover:bg-white/8",
+      "flex items-center gap-4 min-h-[3rem] px-[0.75rem] py-[0.7rem] border-0 rounded-[1rem] color-inherit bg-transparent cursor-pointer transition-colors duration-150 hover:bg-sidebar-hover",
     ],
     // Avatar circle base
     [

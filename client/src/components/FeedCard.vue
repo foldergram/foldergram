@@ -436,7 +436,7 @@ import 'vidstack/bundle';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { RouterLink, useRoute } from 'vue-router';
-import type { PlayerSrc } from 'vidstack';
+import type { MediaFullscreenChangeEvent, PlayerSrc } from 'vidstack';
 import type { MediaPlayerElement } from 'vidstack/elements';
 
 import { deleteImage, trashImage } from '../api/gallery';
@@ -858,11 +858,9 @@ function handleHomeVideoSurfaceKeydown(event: KeyboardEvent) {
   void handleHomeVideoSurfaceClick(new MouseEvent('click', { button: 0 }));
 }
 
-function handleHomeVideoFullscreenChange(event: Event) {
-  const nextFullscreen =
-    event instanceof CustomEvent && typeof event.detail === 'boolean'
-      ? event.detail
-      : homePlayerElement.value?.hasAttribute('data-fullscreen') === true;
+function handleHomeVideoFullscreenChange(event: MediaFullscreenChangeEvent) {
+  // Vidstack events extend Event, and data-fullscreen can still reflect the previous state.
+  const nextFullscreen = event.detail;
 
   isHomeVideoFullscreen.value = nextFullscreen;
 

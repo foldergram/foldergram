@@ -106,9 +106,14 @@ validation even when both paths refer to the same library. Foldergram updates
 the cached source paths in one transaction. A failed path update rolls back
 the entire batch.
 
-For WSL installations with recurring lock problems on a Windows-mounted drive,
-you can keep the database on the Linux filesystem while leaving media on the
-Windows drive. Stop all processes using the database, back it up, copy the
+For WSL installations with recurring lock problems or slow database reads on a
+Windows-mounted drive, you can keep the database on the Linux filesystem while leaving media on the
+Windows drive. Setting only `DATA_ROOT` to a path under `/mnt/c` or `/mnt/d`
+also places the database there unless `DB_DIR` is set separately. Windows-mounted
+storage adds overhead to SQLite reads from Linux; [Microsoft recommends the WSL
+filesystem for Linux workloads](https://learn.microsoft.com/en-us/windows/wsl/filesystems#file-storage-and-performance-across-file-systems).
+
+Stop all processes using the database, back it up, copy the
 existing database to the new directory, and set `DB_DIR` in `.env` to that
 directory before restarting. Preserve any `gallery.sqlite-wal`,
 `gallery.sqlite-shm`, or `gallery.sqlite-journal` files with the database if

@@ -26,11 +26,7 @@
 
 ---
 
-Foldergram is a self-hosted web application that turns your local folders into a beautiful, instagram-style feed and profile. It turns your local folder to app folders (profiles), and serves a lightning-fast Progressive Web App (PWA).
-
-Foldergram indexes supported media from a configured `GALLERY_ROOT`, stores metadata in SQLite, generates thumbnails and previews, and serves a fast feed-style web app for local browsing. Derivatives can be generated during scans or lazily on first request, and image detail pages can be configured to use generated previews or originals. The current app includes Home, Reels, Explore, Library, Likes, Moments or Highlights, App Folder pages, post detail views, original-media download controls, delete actions, scan controls, and rebuild tools.
-
-Generated derivatives are now stored under stable asset-key shards instead of mirroring source folders. Existing libraries stay readable during upgrade, then migrate in place on the next full scan. During that upgrade, Foldergram keeps stored paths pointed at files that already exist, repairs surviving legacy derivatives where possible, and lets later folder moves preserve the same indexed media identity and reuse existing thumbnails/previews. Scan status distinguishes discovery, derivative migration, and derivative generation so long-running maintenance work can report the right kind of progress for each phase.
+Foldergram turns your local photo and video folders into a self-hosted gallery with a familiar feed, folder profiles, and a media viewer. It indexes your library in SQLite and uses thumbnails and previews for fast browsing, while keeping your originals untouched.
 
 ## Features
 
@@ -42,6 +38,7 @@ Generated derivatives are now stored under stable asset-key shards instead of mi
 - App Folder pages with a posts grid and a folder-specific `Reels` tab when videos exist.
 - Shared likes in SQLite for signed-in admin/viewer sessions, plus browser-local favorites in public mode.
 - Image and video support with configurable eager or lazy derivative generation for fast browsing.
+- [Carousel posts](docs/carousel-posts.md) with 2–20 images, animated images, and videos in one swipeable post.
 - Original-media download controls on home feed cards, post detail, and stories, alongside open-original actions.
 - Optional role-based local access with admin, viewer, and public browse modes.
 - Settings split into `General Settings` for Home/Reels defaults, language selection, stories and carousel folder modes, and excluded folders, plus `Scan & Library` for scan and rebuild actions.
@@ -186,13 +183,8 @@ pnpm dev
 npm run dev
 ```
 
-`pnpm dev`, `pnpm dev:server`, and `pnpm start` now run versioned SQLite
-migrations automatically before the server boots. Use `pnpm migrate` if you
-want to apply pending migrations without starting the app.
-
-On the first start after upgrading from an older supported Foldergram release,
-the app automatically baselines the existing SQLite database and then applies
-later ordered migrations on future upgrades.
+Server startup applies pending SQLite migrations automatically. Use `pnpm migrate`
+to apply them without starting the app.
 
 For existing installations, follow the [upgrade instructions](docs/installation.md#upgrading-an-existing-installation) to preserve your data and review any Carousel folder migration choice.
 
@@ -387,26 +379,28 @@ Client translations live under `client/src/locales/`.
 
 ## Scripts
 
-- `pnpm dev`
-- `pnpm dev:server`
-- `pnpm dev:client`
-- `pnpm dev:docs`
-- `pnpm build`
-- `pnpm migrate`
-- `pnpm start`
-- `pnpm test`
-- `pnpm rescan`
+| Command | Description |
+| --- | --- |
+| `pnpm dev` | Start the API, client, and docs development servers. |
+| `pnpm dev:server` | Start only the API development server. |
+| `pnpm dev:client` | Start only the Vite client development server. |
+| `pnpm dev:docs` | Start only the VitePress docs development server. |
+| `pnpm build` | Build the server and client for production. |
+| `pnpm build:server` | Build only the server. |
+| `pnpm build:client` | Type-check and build only the client. |
+| `pnpm build:docs` | Build the documentation site. |
+| `pnpm migrate` | Apply pending SQLite migrations without starting the app. |
+| `pnpm start` | Start the production server and serve the built client. |
+| `pnpm test` | Run the server and client unit and integration tests. |
+| `pnpm test:server` | Run only the server tests. |
+| `pnpm test:client` | Run only the client tests. |
+| `pnpm test:browser` | Run the Chromium browser regression tests. |
+| `pnpm rescan` | Scan the configured gallery and update its index. |
 
 ## Contributing
 
-Foldergram welcomes small, clearly aligned pull requests for bug fixes, documentation, tests, and focused polish.
+Contributions are welcome! You can help by reporting bugs, suggesting improvements, improving documentation and translations, or submitting pull requests for fixes, tests, and UI polish.
 
-Before working on major features, architectural changes, or changes to core behavior such as scanning, indexing, routing, auth or access flow, and storage strategy, open an issue or discussion first. Pull requests for large changes that were not discussed in advance will not be accepted.
+For major features or changes to core behavior such as scanning, indexing, access, or storage, please open an issue or discussion first so we can agree on the approach before you invest time in an implementation.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the full contribution policy, local setup notes, branch naming guidance, and pull request expectations.
-
-## Carousel posts
-
-Foldergram supports one post containing 2–20 ordered images, animated images, and videos. Put each post in `AppFolder/carousels/Post name/`; filename order controls its slides and the first item is its cover. A carousel counts as one post, has one caption, and its videos are excluded from Reels. The index stores visible posts separately from physical media through `posts` and `post_items`.
-
-See [Posts with Multiple Photos or Videos](docs/carousel-posts.md) for the complete source tree, edge cases, settings, and troubleshooting guide.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for local setup, project guidelines, and tips for preparing a pull request.

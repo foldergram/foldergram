@@ -102,8 +102,9 @@ Run them with:
 pnpm test
 ```
 
-Browser regressions cover panoramic-post details and active navigation in light
-and dark themes. Install Chromium once, then run the browser suite:
+Browser regressions cover panoramic-post details, active navigation in light
+and dark themes, and feed-video playback after exiting fullscreen. Install
+Chromium once, then run the browser suite:
 
 ```bash
 pnpm --filter @foldergram/client exec playwright install chromium
@@ -111,8 +112,8 @@ pnpm test:browser
 ```
 
 The suite builds the client and starts a temporary preview on `127.0.0.1:4173`.
-It uses mock API responses and sample images, so it does not start the backend or
-read your gallery. Failure screenshots and traces are saved in
+It uses mock API responses, sample images, and a short video fixture with audio,
+so it does not start the backend or read your gallery. Failure screenshots and traces are saved in
 `client/test-results/`. To use an existing Chrome or Chromium installation, set
 `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` to its executable path.
 
