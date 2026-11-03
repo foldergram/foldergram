@@ -11,6 +11,9 @@ import type {
   FeedImage,
   FeedPost,
   FolderAvatarSource,
+  FolderDirectorySort,
+  FolderDirectoryQuery,
+  FolderDirectoryPage,
   FolderImageOrder,
   FolderRole,
   FolderScanStateRecord,
@@ -79,11 +82,13 @@ const VISIBLE_POST_WHERE_UNSCOPED_SQL =
 const STORY_IMAGE_WHERE_SQL = 'images.is_deleted = 0 AND images.is_trashed = 0';
 const STORY_IMAGE_WHERE_UNSCOPED_SQL = 'is_deleted = 0 AND is_trashed = 0';
 
+// Keep the owner-indexed story folders on the outer side even without planner
+// statistics; starting from visible images can scan the whole library per folder.
 const HAS_AVATAR_STORY_SQL = `
   EXISTS (
     SELECT 1
     FROM folders AS story_folders
-    INNER JOIN images AS story_images ON story_images.folder_id = story_folders.id
+    CROSS JOIN images AS story_images ON story_images.folder_id = story_folders.id
     WHERE story_folders.story_owner_folder_id = folders.id
       AND story_folders.role IN ('story_root', 'story_capsule')
       AND story_images.is_deleted = 0
@@ -152,14 +157,56 @@ const FOLDER_SUMMARY_AVATAR_IMAGE_ID_SQL = `
   )
 `;
 
-const FOLDER_SUMMARY_AVATAR_THUMBNAIL_PATH_SQL = `
-  (
-    SELECT thumbnail_path
-    FROM images
-    WHERE id = (${FOLDER_SUMMARY_AVATAR_IMAGE_ID_SQL})
-    LIMIT 1
-  )
+// Scope aggregation to the requested folders. A detail lookup must not aggregate the
+// rest of the library. Materialize the chosen avatar ID so its path uses one join.
+function folderSummaryCtes(whereSql: string): string {
+  return `
+    WITH folder_candidates AS MATERIALIZED (
+      SELECT * FROM folders WHERE ${whereSql}
+    ), folder_media_stats AS (
+      SELECT folders.id AS folder_id,
+        COUNT(DISTINCT posts.id) AS post_count,
+        SUM(CASE WHEN post_items.position = 1 AND NOT (
+          images.folder_id = posts.folder_id AND LOWER(images.filename) IN (${COVER_FILENAME_SQL})
+        ) THEN 1 ELSE 0 END) AS image_count,
+        SUM(CASE WHEN post_items.position = 1 AND posts.post_type = 'carousel' AND NOT (
+          images.folder_id = posts.folder_id AND LOWER(images.filename) IN (${COVER_FILENAME_SQL})
+        ) THEN 1 ELSE 0 END) AS carousel_count,
+        SUM(CASE WHEN post_items.position = 1 AND posts.post_type = 'single'
+          AND images.media_type = 'video' THEN 1 ELSE 0 END) AS video_count,
+        MAX(images.mtime_ms) AS latest_image_mtime_ms
+      FROM folder_candidates AS folders
+      LEFT JOIN posts ON posts.folder_id = folders.id AND posts.is_deleted = 0 AND posts.is_trashed = 0
+      LEFT JOIN post_items ON post_items.post_id = posts.id
+      LEFT JOIN images ON images.id = post_items.image_id
+      GROUP BY folders.id
+    ), folder_summaries AS MATERIALIZED (
+      SELECT folders.*, folder_media_stats.post_count, folder_media_stats.image_count,
+        folder_media_stats.carousel_count, folder_media_stats.video_count,
+        folder_media_stats.latest_image_mtime_ms,
+        ${FOLDER_SUMMARY_AVATAR_IMAGE_ID_SQL} AS summary_avatar_image_id
+      FROM folder_candidates AS folders
+      JOIN folder_media_stats ON folder_media_stats.folder_id = folders.id
+    )
+  `;
+}
+
+const FOLDER_SUMMARY_COLUMNS_SQL = `
+  folders.*,
+  CASE WHEN ${HAS_AVATAR_STORY_SQL} THEN 1 ELSE 0 END AS has_avatar_story,
+  summary_avatar.thumbnail_path AS summary_avatar_thumbnail_path
 `;
+const FOLDER_SUMMARY_AVATAR_JOIN_SQL = `
+  LEFT JOIN images AS summary_avatar ON summary_avatar.id = folders.summary_avatar_image_id
+`;
+const FOLDER_SUMMARY_VISIBILITY_SQL = '(post_count > 0 OR summary_avatar_image_id IS NOT NULL)';
+const FOLDER_DIRECTORY_ORDER_SQL: Record<FolderDirectorySort, string> = {
+  'recent-desc': 'folders.latest_image_mtime_ms DESC, folders.name COLLATE NOCASE ASC, folders.folder_path COLLATE NOCASE ASC, folders.id ASC',
+  'images-desc': 'folders.image_count DESC, folders.name COLLATE NOCASE ASC, folders.folder_path COLLATE NOCASE ASC, folders.id ASC',
+  'name-asc': 'folders.name COLLATE NOCASE ASC, folders.folder_path COLLATE NOCASE ASC, folders.id ASC',
+  'name-desc': 'folders.name COLLATE NOCASE DESC, folders.folder_path COLLATE NOCASE ASC, folders.id ASC',
+  'path-asc': 'folders.folder_path COLLATE NOCASE ASC, folders.id ASC'
+};
 
 function getQualifiedFolderPostOrderSql(order: FolderImageOrder): string {
   return order === 'oldest'
@@ -302,69 +349,6 @@ const REEL_CANDIDATE_WHERE_SQL = `
 
 const REEL_RANDOM_ORDER_SQL = 'reel_random_rank(posts.id, ?), posts.id DESC';
 
-const FOLDER_SUMMARY_SELECT_SQL = `
-  SELECT
-    folders.*,
-    (
-      SELECT COUNT(*)
-      FROM posts
-      WHERE posts.folder_id = folders.id
-        AND posts.is_deleted = 0
-        AND posts.is_trashed = 0
-    ) AS post_count,
-    (
-      SELECT COUNT(*)
-      FROM posts p
-      JOIN post_items pi ON pi.post_id = p.id AND pi.position = 1
-      JOIN images img ON img.id = pi.image_id
-      WHERE p.folder_id = folders.id
-        AND p.is_deleted = 0
-        AND p.is_trashed = 0
-        AND NOT (
-          img.folder_id = p.folder_id
-          AND LOWER(img.filename) IN (${COVER_FILENAME_SQL})
-        )
-    ) AS image_count,
-    (
-      SELECT COUNT(*)
-      FROM posts p
-      JOIN post_items pi ON pi.post_id = p.id AND pi.position = 1
-      JOIN images img ON img.id = pi.image_id
-      WHERE p.folder_id = folders.id
-        AND p.is_deleted = 0
-        AND p.is_trashed = 0
-        AND p.post_type = 'carousel'
-        AND NOT (
-          img.folder_id = p.folder_id
-          AND LOWER(img.filename) IN (${COVER_FILENAME_SQL})
-        )
-    ) AS carousel_count,
-    (
-      SELECT COUNT(*)
-      FROM posts p
-      JOIN post_items pi ON pi.post_id = p.id AND pi.position = 1
-      JOIN images img ON img.id = pi.image_id
-      WHERE p.folder_id = folders.id
-        AND p.is_deleted = 0
-        AND p.is_trashed = 0
-        AND p.post_type = 'single'
-        AND img.media_type = 'video'
-    ) AS video_count,
-    (
-      SELECT MAX(img.mtime_ms)
-      FROM posts p
-      JOIN post_items pi ON pi.post_id = p.id
-      JOIN images img ON img.id = pi.image_id
-      WHERE p.folder_id = folders.id
-        AND p.is_deleted = 0
-        AND p.is_trashed = 0
-    ) AS latest_image_mtime_ms,
-    CASE WHEN ${HAS_AVATAR_STORY_SQL} THEN 1 ELSE 0 END AS has_avatar_story,
-    ${FOLDER_SUMMARY_AVATAR_IMAGE_ID_SQL} AS summary_avatar_image_id,
-    ${FOLDER_SUMMARY_AVATAR_THUMBNAIL_PATH_SQL} AS summary_avatar_thumbnail_path
-  FROM folders
-`;
-
 interface MediaSearchSql {
   whereSql: string;
   whereParams: string[];
@@ -386,6 +370,31 @@ function normalizeSearchQuery(query: string): string {
 
 function escapeLikePattern(value: string): string {
   return value.replace(/[\\%_]/g, '\\$&');
+}
+
+function buildFolderDirectoryFilterSql(search?: string, pathPrefix?: string): { whereSql: string; whereParams: string[] } {
+  const clauses = ["folders.role = 'normal'"];
+  const whereParams: string[] = [];
+  if (pathPrefix) {
+    clauses.push("SUBSTR(folders.folder_path, 1, LENGTH(?)) = ? COLLATE BINARY");
+    whereParams.push(pathPrefix, pathPrefix);
+  }
+  const normalizedSearch = normalizeSearchQuery(search ?? '');
+
+  if (normalizedSearch.length > 0) {
+    for (const token of normalizedSearch.split(' ').filter(Boolean)) {
+      const pattern = `%${escapeLikePattern(token)}%`;
+      clauses.push(
+        `(folder_search_text(folders.name) LIKE ? ESCAPE '\\' OR folder_search_text(folders.slug) LIKE ? ESCAPE '\\' OR folder_search_text(folders.folder_path) LIKE ? ESCAPE '\\' OR folder_search_text(REPLACE(folders.folder_path, '/', ' / ')) LIKE ? ESCAPE '\\' OR EXISTS (SELECT 1 FROM folders AS parent_folder WHERE parent_folder.folder_path = folder_parent_path(folders.folder_path) AND folder_search_text(parent_folder.name) LIKE ? ESCAPE '\\'))`
+      );
+      whereParams.push(pattern, pattern, pattern, pattern, pattern);
+    }
+  }
+
+  return {
+    whereSql: clauses.join(' AND '),
+    whereParams
+  };
 }
 
 function isValidJson(str: string): boolean {
@@ -665,18 +674,62 @@ export const folderRepository = {
   },
 
   getAllSummaries(): FolderSummaryRecord[] {
-    return database
-      .prepare(
-        `
-        SELECT * FROM (
-          ${FOLDER_SUMMARY_SELECT_SQL}
-          WHERE folders.role = 'normal'
-        ) AS summaries
-        WHERE post_count > 0 OR summary_avatar_image_id IS NOT NULL
-        ORDER BY latest_image_mtime_ms DESC, name COLLATE NOCASE ASC, folder_path COLLATE NOCASE ASC
-        `
+    return database.prepare(`
+      ${folderSummaryCtes("folders.role = 'normal'")}
+      SELECT ${FOLDER_SUMMARY_COLUMNS_SQL}
+      FROM folder_summaries AS folders
+      ${FOLDER_SUMMARY_AVATAR_JOIN_SQL}
+      WHERE ${FOLDER_SUMMARY_VISIBILITY_SQL}
+      ORDER BY ${FOLDER_DIRECTORY_ORDER_SQL['recent-desc']}
+    `).all() as unknown as FolderSummaryRecord[];
+  },
+
+  listSummariesPage(input: FolderDirectoryQuery): FolderDirectoryPage {
+    const { whereSql, whereParams } = buildFolderDirectoryFilterSql(input.search, input.pathPrefix);
+    const orderSql = FOLDER_DIRECTORY_ORDER_SQL[input.sort];
+    // Count and page share the same materialized summaries, including when the
+    // requested page is empty. Story and thumbnail enrichment runs only for the page.
+    const rows = database.prepare(`
+      ${folderSummaryCtes(whereSql)},
+      directory_visible AS MATERIALIZED (
+        SELECT * FROM folder_summaries WHERE ${FOLDER_SUMMARY_VISIBILITY_SQL}
+      ), directory_page AS (
+        SELECT * FROM directory_visible AS folders ORDER BY ${orderSql} LIMIT ? OFFSET ?
       )
-      .all() as unknown as FolderSummaryRecord[];
+      SELECT ${FOLDER_SUMMARY_COLUMNS_SQL}, directory_count.total AS directory_total
+      FROM (SELECT COUNT(*) AS total FROM directory_visible) AS directory_count
+      LEFT JOIN directory_page AS folders ON 1 = 1
+      ${FOLDER_SUMMARY_AVATAR_JOIN_SQL}
+      ORDER BY ${orderSql}
+    `).all(...whereParams, input.limit, (input.page - 1) * input.limit) as unknown as
+      Array<FolderSummaryRecord & { directory_total: number }>;
+    return {
+      items: rows.filter((row) => row.id !== null).map(({ directory_total, ...row }) => row),
+      total: rows[0].directory_total
+    };
+  },
+
+  getFeedFolderMetadata(ids: number[]) {
+    if (ids.length === 0) return [];
+    return database.prepare(`
+      WITH selected_avatars AS MATERIALIZED (
+        SELECT folders.id, ${FOLDER_SUMMARY_AVATAR_IMAGE_ID_SQL} AS summary_avatar_image_id
+        FROM folders WHERE folders.id IN (SELECT value FROM json_each(?))
+      )
+      SELECT folders.id, summary_avatar.thumbnail_path,
+        CASE WHEN ${HAS_AVATAR_STORY_SQL} THEN 1 ELSE 0 END AS has_avatar_story
+      FROM selected_avatars
+      JOIN folders ON folders.id = selected_avatars.id
+      LEFT JOIN images AS summary_avatar ON summary_avatar.id = selected_avatars.summary_avatar_image_id
+    `).all(JSON.stringify(ids)) as Array<{ id: number; thumbnail_path: string | null; has_avatar_story: number }>;
+  },
+
+  getNamesByFolderPaths(paths: string[]): Map<string, string> {
+    if (paths.length === 0) return new Map();
+    const rows = database.prepare(`
+      SELECT folder_path, name FROM folders WHERE folder_path IN (SELECT value FROM json_each(?))
+    `).all(JSON.stringify(paths)) as Array<{ folder_path: string; name: string }>;
+    return new Map(rows.map((row) => [row.folder_path, row.name]));
   },
 
   getBySlug(slug: string): FolderRecord | undefined {
@@ -697,8 +750,10 @@ export const folderRepository = {
     return database
       .prepare(
         `
-        ${FOLDER_SUMMARY_SELECT_SQL}
-        WHERE folders.slug = ? AND folders.role = 'normal'
+        ${folderSummaryCtes("folders.slug = ? AND folders.role = 'normal'")}
+        SELECT ${FOLDER_SUMMARY_COLUMNS_SQL}
+        FROM folder_summaries AS folders
+        ${FOLDER_SUMMARY_AVATAR_JOIN_SQL}
         `
       )
       .get(slug) as FolderSummaryRecord | undefined;

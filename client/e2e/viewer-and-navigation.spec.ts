@@ -30,7 +30,8 @@ async function mockGallery(page: Page, theme: 'light' | 'dark') {
   await page.route('https://fonts.googleapis.com/**', route => route.abort());
   await page.route('https://fonts.gstatic.com/**', route => route.abort());
   await page.route('**/api/**', async route => {
-    const pathname = new URL(route.request().url()).pathname;
+    const url = new URL(route.request().url());
+    const pathname = url.pathname;
     const paginated = { items: [panorama], page: 1, limit: 24, total: 1, hasMore: false };
     const scan = { isScanning: false, lastCompletedScan: { id: 1 } };
     const responses: Record<string, unknown> = {
@@ -51,7 +52,10 @@ async function mockGallery(page: Page, theme: 'light' | 'dark') {
         storiesMigration: { hasLegacyStoriesCandidates: false, decisionPending: false }
       },
       '/api/scan-progress': scan,
-      '/api/folders': { items: [folder] },
+      '/api/folders': url.searchParams.has('limit')
+        ? { items: [folder], page: 1, limit: Number(url.searchParams.get('limit')), total: 1, hasMore: false }
+        : { items: [folder] },
+      '/api/folders/panoramas': folder,
       '/api/folders/panoramas/images': { ...paginated, folder },
       '/api/folders/panoramas/stories': {
         railKind: 'stories', railTitle: 'Stories', railDescription: '', railSingularLabel: 'Story',
@@ -157,5 +161,43 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(activeFolder.locator('.sidebar__folder-copy')).toHaveCSS('opacity', '1');
       await expectReadableActiveNavigation(activeFolder);
     });
+  });
+}
+
+
+for (const folderCount of [1500, 5000, 10000]) {
+  test(`folder bootstrap, Library pagination, and Explore search with ${folderCount} folders`, async ({ page }) => {
+    await mockGallery(page, 'light');
+    const folders = Array.from({ length: folderCount }, (_, index) => ({
+      ...folder, id: index + 1, slug: `album-${index}`, name: `Album ${String(index).padStart(3, '0')}`,
+      folderPath: `archive/${index}`, avatarUrl: null
+    }));
+    const requests: URL[] = [];
+    await page.route('**/api/folders?*', async route => {
+      const url = new URL(route.request().url());
+      requests.push(url);
+      const query = url.searchParams.get('q')?.toLowerCase() ?? '';
+      const matches = folders.filter(item => item.name.toLowerCase().includes(query));
+      const pageNumber = Number(url.searchParams.get('page'));
+      const limit = Number(url.searchParams.get('limit'));
+      await route.fulfill({ json: { items: matches.slice((pageNumber - 1) * limit, pageNumber * limit),
+        page: pageNumber, limit, total: matches.length, hasMore: pageNumber * limit < matches.length } });
+    });
+    await page.goto('/');
+    await expect.poll(() => requests.some(url => url.searchParams.get('limit') === '24')).toBe(true);
+    const mountStartedAt = Date.now();
+    await page.goto('/library');
+    await expect(page.locator('main a[href="/f/album-49"]')).toBeAttached();
+    console.info('[folder-directory-browser]', JSON.stringify({ total: folderCount,
+      renderedRows: await page.locator('main a[href^="/f/album-"]').count(),
+      navigationAndMountMs: Date.now() - mountStartedAt }));
+    await page.locator('main a[href="/f/album-49"]').scrollIntoViewIfNeeded();
+    await expect(page.locator('main a[href="/f/album-99"]')).toBeAttached();
+    await page.locator('#library-search').fill('Album 090');
+    await expect(page.locator('main a[href="/f/album-90"]')).toBeVisible();
+    await expect(page.locator('main a[href="/f/album-0"]')).toHaveCount(0);
+    await page.goto('/explore?q=Album%20090&tab=folders');
+    await expect(page.getByRole('button', { name: /Album 090/ })).toBeVisible();
+    expect(requests.every(url => Number(url.searchParams.get('limit')) <= 50)).toBe(true);
   });
 }

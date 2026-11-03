@@ -29,7 +29,7 @@
         <ReelDeck
           ref="deckElement"
           :items="reelsStore.items"
-          :folders="foldersStore.items"
+          :folders="knownFolders"
           :active-reel-id="reelsStore.activeReelId"
           :loading="reelsStore.loading"
           @active-change="handleActiveChange"
@@ -161,8 +161,9 @@ const desktopInfoSidebarAnchor = computed<'left' | 'right'>(() =>
 );
 
 const activeItem = computed(() => reelsStore.activeItem);
+const knownFolders = computed(() => [...foldersStore.items, ...Object.values(foldersStore.summaryBySlug)]);
 const activeFolder = computed(() =>
-  activeItem.value ? foldersStore.items.find((folder) => folder.slug === activeItem.value?.folderSlug) ?? null : null
+  activeItem.value ? knownFolders.value.find((folder) => folder.slug === activeItem.value?.folderSlug) ?? null : null
 );
 const activeIndex = computed(() => reelsStore.items.findIndex((item) => item.id === reelsStore.activeReelId));
 const canGoPrevious = computed(() => activeIndex.value > 0);

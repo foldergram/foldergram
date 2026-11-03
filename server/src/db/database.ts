@@ -12,11 +12,20 @@ import {
 import { appConfig } from '../config/env.js';
 import { log } from '../services/log-service.js';
 import { storageService } from '../services/storage-service.js';
+import { getParentRelativePath } from '../utils/path-utils.js';
 import { getReelRandomRank } from '../utils/reels-utils.js';
 
 const GLOBAL_DB_KEY = Symbol.for('foldergram.database.connection');
 
 function registerSqlFunctions(db: DatabaseSync): void {
+  // SQLite LOWER only folds ASCII; folder search must match the client's Unicode
+  // and whitespace normalization for personal folder names on every platform.
+  db.function('folder_search_text', { deterministic: true }, (value) =>
+    typeof value === 'string' ? value.trim().toLocaleLowerCase().replace(/\s+/g, ' ') : ''
+  );
+  db.function('folder_parent_path', { deterministic: true }, (value) =>
+    typeof value === 'string' ? getParentRelativePath(value) : null
+  );
   db.function('reel_random_rank', { deterministic: true }, (idValue, seedValue) => {
     const id = Number(idValue);
     const seed = Number(seedValue);

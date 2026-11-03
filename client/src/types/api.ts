@@ -3,6 +3,7 @@ import type { SupportedLocale } from '../locales';
 export type FeedMode = 'recent' | 'rediscover' | 'random';
 export type ReelsFeedMode = 'recommended' | 'recent' | 'random';
 export type FolderImageOrder = 'newest' | 'oldest';
+export type FolderDirectorySort = 'recent-desc' | 'images-desc' | 'name-asc' | 'name-desc' | 'path-asc';
 export type NestedFolderTitleFormat = 'folder' | 'parent-plus-folder';
 export type FeedRailKind = 'moments' | 'highlights';
 export type StoryCapsulePresentation = 'avatar' | 'highlight';
@@ -82,6 +83,8 @@ export interface FeedItem {
   folderId: number;
   folderSlug: string;
   folderName: string;
+  folderAvatarUrl?: string | null;
+  folderHasAvatarStory?: boolean;
   folderParentName?: string | null;
   folderPath: string;
   folderBreadcrumb: string | null;
@@ -141,6 +144,22 @@ export interface FolderSummary {
   hasAvatarStory?: boolean;
   avatarImageId: number | null;
   avatarUrl: string | null;
+}
+
+export interface FolderDirectoryQuery {
+  page?: number;
+  limit?: number;
+  q?: string;
+  pathPrefix?: string;
+  sort?: FolderDirectorySort;
+}
+
+export interface FolderDirectoryPayload {
+  items: FolderSummary[];
+  page: number;
+  limit: number;
+  total: number;
+  hasMore: boolean;
 }
 
 export interface ImageExifData {

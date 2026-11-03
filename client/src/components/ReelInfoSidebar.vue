@@ -36,7 +36,7 @@
         <Avatar
           class="reels-info-sidebar__avatar"
           :name="displayFolderTitle"
-          :src="folder?.avatarUrl ?? null"
+          :src="folder ? folder.avatarUrl : item.folderAvatarUrl ?? null"
         />
         <div class="min-w-0">
           <p class="reels-info-sidebar__folder-name">

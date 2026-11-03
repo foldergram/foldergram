@@ -76,16 +76,21 @@ It combines:
 - folder search across name, slug, breadcrumb, and path
 - local recent-search history stored in `localStorage`
 
-Explore is a folder-search and serendipity surface, not a separate backend index.
+Folder search covers the complete indexed library and loads additional matches as you scroll. Searches do not depend on which folders have already appeared in Home or Library.
 
 ## Library
 
-Library lists every indexed folder and supports:
+Library lists indexed folders in pages, loading more as you scroll or select **Load more**. Its folder and post totals describe the complete library. Search and sorting apply across all indexed folders, including those you have not loaded yet.
+
+Library supports:
 
 - free-text search
 - sorting by recent activity, post count, name, or path
 - quick navigation into folders
 - delete actions from a context menu
+
+If a directory request fails, you can retry or change the search and sort controls.
+The whole-library totals update after scans and deletions even while a search is active.
 
 ### Folder deletion behavior
 
@@ -223,6 +228,9 @@ The detail view includes:
 - original-file link
 - an admin-only "Set as Cover" action to customize the folder avatar, which highlights dynamically if the image is already the cover
 - trash and permanent-delete actions with confirmation for admin sessions only
+
+After deleting the last post in a folder, the standalone detail view returns to Library.
+A modal detail view closes back to the page beneath it.
 
 ## Saved posts, likes, and collections
 
