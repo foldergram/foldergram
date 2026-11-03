@@ -6,8 +6,8 @@
       :key="item.id"
       :item="item"
       :context="context"
-      :has-avatar-story="folderLookup.get(item.folderSlug)?.hasAvatarStory ?? false"
-      :avatar-url="folderLookup.get(item.folderSlug)?.avatarUrl ?? null"
+      :has-avatar-story="folderLookup.get(item.folderSlug)?.hasAvatarStory ?? item.folderHasAvatarStory ?? false"
+      :avatar-url="folderAvatar(item)"
       :is-active-video="context === 'home' && item.id === activeVideoId"
       @open-folder-story="emit('openFolderStory', $event)"
       @video-visibility-change="handleVideoVisibilityChange"
@@ -47,7 +47,11 @@ const emit = defineEmits<{
 }>();
 
 const foldersStore = useFoldersStore();
-const folderLookup = computed(() => new Map(foldersStore.items.map((folder) => [folder.slug, folder])));
+const folderLookup = computed(() => new Map([...foldersStore.items, ...Object.values(foldersStore.summaryBySlug)].map((folder) => [folder.slug, folder])));
+function folderAvatar(item: FeedItem) {
+  const folder = folderLookup.value.get(item.folderSlug);
+  return folder ? folder.avatarUrl : item.folderAvatarUrl ?? null;
+}
 const videoVisibilityById = reactive(new Map<number, Omit<HomeVideoVisibilityChange, 'id'>>());
 const activeVideoId = computed<number | null>(() => {
   if (props.context !== 'home') {

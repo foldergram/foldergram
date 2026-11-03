@@ -55,6 +55,8 @@ import type {
   RebuildThumbnailsResult,
   ScanProgress,
   FolderSummary,
+  FolderDirectoryQuery,
+  FolderDirectoryPayload,
   TrashImageResult,
   TrashImagesPayload
 } from '../types/api';
@@ -131,6 +133,17 @@ export function fetchMomentFeed(id: string, page = 1, limit = 24) {
 export async function fetchFolders() {
   const payload = await requestJson<{ items: FolderSummary[] }>('/api/folders');
   return payload.items;
+}
+
+export function fetchFolderDirectory(query: FolderDirectoryQuery = {}) {
+  const params = new URLSearchParams({
+    page: String(query.page ?? 1),
+    limit: String(query.limit ?? 50),
+    sort: query.sort ?? 'recent-desc'
+  });
+  if (query.q) params.set('q', query.q);
+  if (query.pathPrefix) params.set('pathPrefix', query.pathPrefix);
+  return requestJson<FolderDirectoryPayload>(`/api/folders?${params.toString()}`);
 }
 
 export function fetchFolder(slug: string) {

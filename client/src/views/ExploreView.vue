@@ -59,6 +59,7 @@
           </svg>
           <input
             ref="searchInput"
+            maxlength="160"
             v-model="searchQuery"
             class="w-full border-0 bg-transparent p-0 text-[1rem] text-text outline-none placeholder:text-muted"
             type="search"
@@ -241,7 +242,7 @@
 
         <section v-else class="max-w-[35rem]">
           <p
-            v-if="foldersStore.loadingList && foldersStore.items.length === 0"
+            v-if="folderSearch.loading && folderSearch.items.length === 0"
             class="m-0 text-[0.96rem] text-muted"
           >
             {{ t('explore.loadingFolders') }}
@@ -273,12 +274,17 @@
             </button>
 
             <p
-              v-if="folderSearchResults.length === 0"
+              v-if="folderSearchResults.length === 0 && !folderSearch.error"
               class="m-0 pt-2 text-[1rem] text-muted"
             >
               {{ t('explore.noFoldersFound') }}
             </p>
           </div>
+          <div v-if="folderSearch.error" role="status">
+            <p class="text-muted">{{ folderSearch.error }}</p>
+            <button class="btn-primary" type="button" @click="folderSearch.load(true)">{{ t('common.retry') }}</button>
+          </div>
+          <InfiniteLoader v-if="folderSearch.items.length" :loading="folderSearch.loading" :has-more="folderSearch.hasMore && !folderSearch.error" @load-more="folderSearch.load()" />
         </section>
       </section>
 
@@ -342,10 +348,11 @@ import ExploreGrid from '../components/ExploreGrid.vue';
 import InfiniteLoader from '../components/InfiniteLoader.vue';
 import { useAppStore } from '../stores/app';
 import { useExploreStore } from '../stores/explore';
+import { useFolderSearchStore } from '../stores/folder-directory';
 import { useFoldersStore } from '../stores/folders';
 import { useLikesStore } from '../stores/likes';
 import type { FolderSummary } from '../types/api';
-import { searchFolders, rankExploreItems } from '../utils/explore';
+import { rankExploreItems } from '../utils/explore';
 import { formatFolderTitle } from '../utils/folder-titles';
 import { buildLikedCountByFolder } from '../utils/home-recommendations';
 
@@ -356,6 +363,7 @@ const SEARCH_DEBOUNCE_MS = 180;
 const appStore = useAppStore();
 const exploreStore = useExploreStore();
 const foldersStore = useFoldersStore();
+const folderSearch = useFolderSearchStore();
 const likesStore = useLikesStore();
 const route = useRoute();
 const router = useRouter();
@@ -386,7 +394,7 @@ const showSearchChrome = computed(
   () => hasActiveQuery.value || showRecentSearches.value
 );
 const folderSearchResults = computed(() =>
-  searchFolders(foldersStore.items, trimmedSearchQuery.value)
+  folderSearch.items
 );
 const rankedItems = computed(() =>
   rankExploreItems(
@@ -481,6 +489,7 @@ watch(
 
     if (query.length === 0) {
       exploreStore.resetSearch();
+      folderSearch.reset();
       activeSearchTab.value = 'media';
 
       if (previousValue.length > 0) {
@@ -491,8 +500,10 @@ watch(
     }
 
     isSearchActive.value = true;
+    folderSearch.active = true;
     searchDebounceTimer = window.setTimeout(() => {
       void exploreStore.loadSearch(query, true);
+      void folderSearch.search(query, 'name-asc');
     }, SEARCH_DEBOUNCE_MS);
   },
   { immediate: true }
@@ -611,6 +622,8 @@ function handleWindowKeydown(event: KeyboardEvent) {
 
 onMounted(async () => {
   exploreStore.initializeRecentSearches();
+  folderSearch.active = true;
+  if (trimmedSearchQuery.value) void folderSearch.search(trimmedSearchQuery.value, 'name-asc');
 
   const tasks: Array<Promise<unknown>> = [];
   if (foldersStore.items.length === 0) {
@@ -630,6 +643,7 @@ onUnmounted(() => {
     window.clearTimeout(searchDebounceTimer);
   }
 
+  folderSearch.active = false;
   window.removeEventListener('keydown', handleWindowKeydown);
 });
 

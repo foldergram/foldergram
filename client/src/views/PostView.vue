@@ -93,7 +93,7 @@ const imageId = computed(() => Number(props.id));
 const activeMediaType = computed(() => (route.query.tab === 'reels' ? 'video' : undefined));
 const activeImage = computed(() => (viewerStore.image?.id === imageId.value ? viewerStore.image : null));
 const folder = computed(() =>
-  activeImage.value ? foldersStore.items.find((entry) => entry.slug === activeImage.value?.folderSlug) ?? null : null
+  activeImage.value ? foldersStore.getSummary(activeImage.value.folderSlug) : null
 );
 const deleteDialogMessage = computed(() =>
   deleteOriginalFromDisk.value
@@ -109,6 +109,11 @@ async function loadImage() {
 }
 
 watch(() => [imageId.value, activeMediaType.value] as const, loadImage, { immediate: true });
+watch(
+  () => activeImage.value?.folderSlug,
+  (slug) => { if (slug) void foldersStore.ensureSummary(slug).catch(() => {}); },
+  { immediate: true }
+);
 
 function openDeleteDialog() {
   deleteOriginalFromDisk.value = false;
@@ -117,14 +122,16 @@ function openDeleteDialog() {
 }
 
 async function handleDelete() {
-  if (!viewerStore.image) {
+  if (!viewerStore.image || viewerStore.deleting) {
     return;
   }
 
   const currentImage = viewerStore.image;
+  viewerStore.deleting = true;
   deleteError.value = null;
 
   try {
+    await foldersStore.ensureSummary(currentImage.folderSlug);
     const deleted = await viewerStore.deleteImage(currentImage.id, {
       permanent: deleteOriginalFromDisk.value
     });
@@ -150,6 +157,8 @@ async function handleDelete() {
     await router.replace({ name: 'folder', params: { slug: deleted.folderSlug } });
   } catch (error) {
     deleteError.value = error instanceof Error ? error.message : t('post.view.deleteError');
+  } finally {
+    viewerStore.deleting = false;
   }
 }
 </script>

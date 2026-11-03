@@ -71,7 +71,7 @@
               <Avatar
                 class="reel-player-card__avatar"
                 :name="displayFolderTitle"
-                :src="folder?.avatarUrl ?? null"
+                :src="folder ? folder.avatarUrl : item.folderAvatarUrl ?? null"
               />
               <div class="reel-player-card__text">
                 <strong class="reel-player-card__folder-name">

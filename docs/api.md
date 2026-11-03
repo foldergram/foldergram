@@ -281,13 +281,41 @@ date-driven Moments.
 
 ### `GET /api/folders`
 
-Returns:
+Without directory parameters, returns the legacy `{ "items": [...] }` response
+containing every visible normal folder. This compatibility form remains available;
+new clients should request a bounded page.
+
+Supplying any of the following parameters selects the paginated directory response:
+
+| Param | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `page` | integer | `1` | Starts at 1. |
+| `limit` | integer | `50` | Between 1 and 200. |
+| `q` | string | empty | Up to 160 characters. Case-insensitive search across folder names, parent display names, slugs, breadcrumbs, and source paths. All whitespace-separated terms must match; `%`, `_`, and backslashes are literal characters. |
+| `sort` | string | `recent-desc` | `recent-desc`, `images-desc`, `name-asc`, `name-desc`, or `path-asc`. |
+| `pathPrefix` | string | absent | Literal, case-sensitive source-path prefix, up to 4,096 characters. Include a trailing `/` when requesting descendants of a folder. |
+
+For example, `/api/folders?page=1&limit=50&q=summer&sort=name-asc` returns:
 
 ```json
 {
-  "items": []
+  "items": [],
+  "page": 1,
+  "limit": 50,
+  "total": 0,
+  "hasMore": false
 }
 ```
+
+`total` counts all matching folders, including those on later pages. Every sort has
+stable path and ID tie-breakers. Pages reflect the current index; a scan or mutation
+can move results between pages, so refresh the listing after changes. Empty pages
+still return the matching total. Invalid parameters return `400`.
+
+The application loads up to 24 recent folder summaries for Home and sidebar
+recommendations. Library and Explore folder searches use independent pages of 50.
+Feed and Reels items include `folderAvatarUrl` and `folderHasAvatarStory`, allowing
+cards to display folder identity without loading the full directory.
 
 Each item is a folder summary with:
 

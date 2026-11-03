@@ -36,6 +36,7 @@ import type {
   CollectionMembershipRecord,
   CollectionSummaryRecord,
   FeedImage,
+  FolderDirectoryQuery,
   FolderImageOrder,
   NestedFolderTitleFormat,
   FolderRecord,
@@ -510,11 +511,13 @@ function isSameOrDescendantFolderPath(rootFolderPath: string, candidateFolderPat
   return candidateFolderPath === rootFolderPath || candidateFolderPath.startsWith(`${rootFolderPath}/`);
 }
 
-function getParentFolderDisplayName(folderPath: string): string | null {
+function getParentFolderDisplayName(folderPath: string, parentNames?: Map<string, string>): string | null {
   const parentFolderPath = getParentRelativePath(folderPath);
   if (!parentFolderPath) {
     return null;
   }
+
+  if (parentNames) return parentNames.get(parentFolderPath)?.trim() || getLeafPathName(parentFolderPath);
 
   const parentFolder = folderRepository.getByFolderPath(parentFolderPath);
   if (parentFolder?.name.trim()) {
@@ -524,7 +527,7 @@ function getParentFolderDisplayName(folderPath: string): string | null {
   return getLeafPathName(parentFolderPath);
 }
 
-function mapFeedImage(image: IndexedFeedImage, derivativeVersion = getDerivativeAssetVersion()): FeedImage {
+function mapFeedImage(image: IndexedFeedImage, derivativeVersion = getDerivativeAssetVersion(), parentNames?: Map<string, string>): FeedImage {
   const { playbackStrategy, fileSize, placeId, placeSlug, placeName, placeKind, placeIsApproximate, isSaved, mediaItems, itemCount, ...rest } = image as any;
   const representativeMediaItem = mediaItems?.[0];
   const representativeImageId = representativeMediaItem?.imageId ?? rest.id;
@@ -542,7 +545,7 @@ function mapFeedImage(image: IndexedFeedImage, derivativeVersion = getDerivative
     carouselTitle: rest.postType === 'carousel' && rest.sourcePath ? getLeafPathName(rest.sourcePath) : null,
     isAnimated: Boolean(rest.isAnimated),
     isSaved: Boolean(isSaved),
-    folderParentName: getParentFolderDisplayName(rest.folderPath),
+    folderParentName: getParentFolderDisplayName(rest.folderPath, parentNames),
     folderBreadcrumb: getPathBreadcrumb(rest.folderPath),
     thumbnailUrl: toPublicMediaUrl('/thumbnails', rest.thumbnailUrl, derivativeVersion),
     previewUrl: buildPreviewUrl({
@@ -775,8 +778,14 @@ function mapTrashImage(image: IndexedTrashImage, derivativeVersion = getDerivati
   };
 }
 
-function buildFolderSummary(folder: FolderSummaryRecord) {
+function buildFolderSummaries(folders: FolderSummaryRecord[]) {
+  const parentPaths = [...new Set(folders.map((folder) => getParentRelativePath(folder.folder_path)).filter((value): value is string => Boolean(value)))];
+  const parentNames = folderRepository.getNamesByFolderPaths(parentPaths);
   const derivativeVersion = getDerivativeAssetVersion();
+  return folders.map((folder) => buildFolderSummary(folder, parentNames, derivativeVersion));
+}
+
+function buildFolderSummary(folder: FolderSummaryRecord, parentNames?: Map<string, string>, derivativeVersion = getDerivativeAssetVersion()) {
   const hasPreloadedAvatarSummary =
     Object.hasOwn(folder, 'summary_avatar_image_id') || Object.hasOwn(folder, 'summary_avatar_thumbnail_path');
 
@@ -786,7 +795,7 @@ function buildFolderSummary(folder: FolderSummaryRecord) {
       slug: folder.slug,
       name: folder.name,
       description: folder.description,
-      parentFolderName: getParentFolderDisplayName(folder.folder_path),
+      parentFolderName: getParentFolderDisplayName(folder.folder_path, parentNames),
       folderPath: folder.folder_path,
       breadcrumb: getPathBreadcrumb(folder.folder_path),
       imageCount: folder.image_count,
@@ -814,7 +823,7 @@ function buildFolderSummary(folder: FolderSummaryRecord) {
     slug: folder.slug,
     name: folder.name,
     description: folder.description,
-    parentFolderName: getParentFolderDisplayName(folder.folder_path),
+    parentFolderName: getParentFolderDisplayName(folder.folder_path, parentNames),
     folderPath: folder.folder_path,
     breadcrumb: getPathBreadcrumb(folder.folder_path),
     imageCount: folder.image_count,
@@ -900,7 +909,17 @@ function formatMonthYear(date: Date): string {
 }
 
 function mapFeedItems(items: IndexedFeedImage[], derivativeVersion = getDerivativeAssetVersion()): FeedImage[] {
-  return items.map((item) => mapFeedImage(item, derivativeVersion));
+  const parentPaths = [...new Set(items.map((item) => getParentRelativePath(item.folderPath)).filter((value): value is string => Boolean(value)))];
+  const parentNames = folderRepository.getNamesByFolderPaths(parentPaths);
+  const metadata = new Map(folderRepository.getFeedFolderMetadata([...new Set(items.map((item) => item.folderId))]).map((folder) => [folder.id, folder]));
+  return items.map((item) => {
+    const folder = metadata.get(item.folderId);
+    return {
+      ...mapFeedImage(item, derivativeVersion, parentNames),
+      folderAvatarUrl: folder?.thumbnail_path ? toPublicMediaUrl('/thumbnails', folder.thumbnail_path, derivativeVersion) : null,
+      folderHasAvatarStory: Boolean(folder?.has_avatar_story)
+    };
+  });
 }
 
 function mapCollectionSummary(collection: CollectionSummaryRecord, derivativeVersion = getDerivativeAssetVersion()) {
@@ -1668,7 +1687,31 @@ export const galleryService = {
       return [];
     }
 
-    return measureOperation('folders.summary_selection', () => folderRepository.getAllSummaries().map(buildFolderSummary));
+    return measureOperation('folders.summary_selection', () => buildFolderSummaries(folderRepository.getAllSummaries()));
+  },
+
+  listFolderDirectory(query: FolderDirectoryQuery) {
+    if (!storageService.getState().libraryAvailable) {
+      return {
+        items: [],
+        page: query.page,
+        limit: query.limit,
+        total: 0,
+        hasMore: false
+      };
+    }
+
+    const { items, total } = measureOperation('folders.directory_selection', () =>
+      folderRepository.listSummariesPage(query)
+    );
+
+    return {
+      items: buildFolderSummaries(items),
+      page: query.page,
+      limit: query.limit,
+      total,
+      hasMore: query.page * query.limit < total
+    };
   },
 
   listPlaces() {

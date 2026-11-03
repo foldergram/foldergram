@@ -20,7 +20,7 @@
       >
         <div class="text-center">
           <p class="m-0 text-[1.35rem] font-bold tracking-tight">
-            {{ formatCount(foldersStore.items.length) }}
+            {{ formatCount(libraryFolderTotal) }}
           </p>
           <p class="m-0 text-muted text-[0.72rem] uppercase tracking-[0.08em]">
             {{ t('libraryPage.stats.folders') }}
@@ -43,11 +43,6 @@
       :title="t('reels.view.libraryUnavailableTitle')"
       :description="appStore.libraryUnavailableReason"
     />
-    <ErrorState
-      v-else-if="foldersStore.listError && foldersStore.items.length === 0"
-      :title="t('libraryPage.errors.load')"
-      :message="foldersStore.listError"
-    />
     <template v-else>
       <div
         class="flex flex-wrap items-center gap-3 p-[0.85rem] pl-4 bg-surface border border-border rounded-[1.1rem] shadow-[var(--shadow)]"
@@ -67,6 +62,7 @@
           </svg>
           <input
             id="library-search"
+            maxlength="160"
             v-model.trim="searchQuery"
             class="w-full h-10 pl-9 pr-4 border border-border rounded-[0.75rem] text-text text-[0.88rem] bg-surface-alt transition-[border-color,box-shadow] duration-150 focus:outline-none focus:border-accent/40 focus:shadow-[0_0_0_3px_var(--accent-soft)]"
             type="search"
@@ -98,18 +94,22 @@
           </svg>
         </div>
 
-        <span class="ml-auto text-muted text-[0.8rem] shrink-0">{{ formatResultsCount(filteredFolders.length) }}</span>
+        <span class="ml-auto text-muted text-[0.8rem] shrink-0">{{ formatResultsCount(directory.total) }}</span>
       </div>
 
+      <div v-if="directory.error && directory.items.length === 0">
+        <ErrorState :title="t('libraryPage.errors.load')" :message="directory.error" />
+        <button class="btn-primary mt-4" type="button" @click="directory.load(true)">{{ t('common.retry') }}</button>
+      </div>
       <section
-        v-if="foldersStore.loadingList && foldersStore.items.length === 0"
+        v-else-if="directory.loading && directory.total === 0"
         class="card p-12 text-center"
       >
         <p class="text-muted">{{ t('libraryPage.loading') }}</p>
       </section>
 
       <EmptyState
-        v-else-if="foldersStore.items.length === 0"
+        v-else-if="directory.total === 0 && !searchQuery"
         :title="t('libraryPage.emptyTitle')"
         :description="t('libraryPage.emptyDescription')"
       />
@@ -204,6 +204,11 @@
           </button>
         </div>
       </section>
+      <div v-if="directory.error && directory.items.length" role="status">
+        <p class="text-muted">{{ directory.error }}</p>
+        <button class="btn-primary" type="button" @click="directory.load(true)">{{ t('common.retry') }}</button>
+      </div>
+      <InfiniteLoader v-if="directory.items.length" :loading="directory.loading" :has-more="directory.hasMore && !directory.error" @load-more="directory.load()" />
     </template>
 
     <!-- Context menu modal -->
@@ -240,6 +245,7 @@
           v-if="authStore.canDeleteMedia"
           class="flex items-center gap-[0.8rem] w-full px-4 py-[0.95rem] border-0 border-b border-border text-[#d93025] bg-transparent cursor-pointer text-left"
           type="button"
+          :disabled="loadingDeleteDetails"
           @click="handleDelete"
         >
           <svg
@@ -256,7 +262,7 @@
               stroke-width="1.8"
             />
           </svg>
-          <span>{{ t('libraryPage.deleteFolder') }}</span>
+          <span>{{ loadingDeleteDetails ? t('common.loading') : t('libraryPage.deleteFolder') }}</span>
         </button>
         <button
           class="flex items-center gap-[0.8rem] w-full px-4 py-[0.95rem] border-0 text-text bg-transparent cursor-pointer text-left"
@@ -279,6 +285,7 @@
           </svg>
           <span>{{ t('common.cancel') }}</span>
         </button>
+        <p v-if="deleteError" class="px-4 text-muted" role="status">{{ deleteError }}</p>
       </div>
     </div>
 
@@ -326,15 +333,17 @@
 </template>
 
 <script setup lang="ts">
-  import { computed, onMounted, ref } from "vue"
+  import { computed, onMounted, onUnmounted, ref, watch } from "vue"
   import { useI18n } from "vue-i18n"
   import { RouterLink, useRouter } from "vue-router"
 
+  import InfiniteLoader from "../components/InfiniteLoader.vue"
+  import { useLibraryDirectoryStore } from "../stores/folder-directory"
   import Avatar from "../components/Avatar.vue"
   import ConfirmDialog from "../components/ConfirmDialog.vue"
   import EmptyState from "../components/EmptyState.vue"
   import ErrorState from "../components/ErrorState.vue"
-  import { deleteFolder } from "../api/gallery"
+  import { deleteFolder, fetchFolderDirectory } from "../api/gallery"
   import { useAppStore } from "../stores/app"
   import { useAuthStore } from "../stores/auth"
   import { useFeedStore } from "../stores/feed"
@@ -356,14 +365,16 @@
   const feedStore = useFeedStore()
   const likesStore = useLikesStore()
   const foldersStore = useFoldersStore()
+  const directory = useLibraryDirectoryStore()
   const momentsStore = useMomentsStore()
   const router = useRouter()
   const { t, locale } = useI18n()
-  const searchQuery = ref("")
-  const sortMode = ref<LibrarySort>("recent-desc")
+  const searchQuery = ref(directory.query)
+  const sortMode = ref<LibrarySort>(directory.sort)
   const menuFolder = ref<FolderSummary | null>(null)
   const confirmDeleteFolder = ref<FolderSummary | null>(null)
   const deleting = ref(false)
+  const loadingDeleteDetails = ref(false)
   const deleteSourceFolder = ref(false)
   const deleteError = ref<string | null>(null)
 
@@ -401,19 +412,14 @@
       : t("libraryPage.reelsCountOther", { count: formatCount(value) })
   }
 
-  const normalizedQuery = computed(() => searchQuery.value.trim().toLowerCase())
-  const totalIndexedImages = computed(() =>
-    foldersStore.items.reduce((total, folder) => total + folder.imageCount, 0),
-  )
-  const deleteChildFolderCount = computed(() => {
-    if (!confirmDeleteFolder.value) {
-      return 0
-    }
-
-    const rootFolderPath = confirmDeleteFolder.value.folderPath
-    return foldersStore.items.filter(folder =>
-      folder.folderPath.startsWith(`${rootFolderPath}/`),
-    ).length
+  const libraryFolderTotal = computed(() => directory.unfilteredTotal ?? foldersStore.total)
+  const totalIndexedImages = computed(() => appStore.stats?.indexedImages ?? 0)
+  const deleteChildFolderCount = ref(0)
+  let deleteCountGeneration = 0
+  let searchTimer: ReturnType<typeof setTimeout> | undefined
+  watch([searchQuery, sortMode], () => {
+    clearTimeout(searchTimer)
+    searchTimer = setTimeout(() => void directory.search(searchQuery.value, sortMode.value), 180)
   })
   const deleteFolderMessage = computed(() => {
     if (!confirmDeleteFolder.value) {
@@ -454,54 +460,14 @@
     deleteSourceFolder.value ? t("libraryPage.delete.loadingSubtree") : t("libraryPage.delete.loadingFolder"),
   )
 
-  function matchesSearch(folder: FolderSummary, query: string) {
-    if (!query) {
-      return true
-    }
-
-    return [
-      folder.slug,
-      folder.name,
-      formatDisplayFolderTitle(folder),
-      folder.breadcrumb ?? "",
-      folder.folderPath,
-    ].some(value => value.toLowerCase().includes(query))
-  }
-
   function formatDisplayFolderTitle(folder: FolderSummary) {
     return formatFolderTitle(folder, appStore.nestedFolderTitleFormat)
   }
 
-  function sortFolders(left: FolderSummary, right: FolderSummary) {
-    switch (sortMode.value) {
-      case "recent-desc":
-        return (
-          (right.latestImageMtimeMs ?? 0) - (left.latestImageMtimeMs ?? 0) ||
-          left.folderPath.localeCompare(right.folderPath)
-        )
-      case "name-asc":
-        return left.name.localeCompare(right.name)
-      case "name-desc":
-        return right.name.localeCompare(left.name)
-      case "path-asc":
-        return left.folderPath.localeCompare(right.folderPath)
-      case "images-desc":
-      default:
-        return (
-          right.imageCount - left.imageCount ||
-          left.name.localeCompare(right.name)
-        )
-    }
-  }
-
-  const filteredFolders = computed(() =>
-    foldersStore.items
-      .filter(folder => matchesSearch(folder, normalizedQuery.value))
-      .slice()
-      .sort(sortFolders),
-  )
+  const filteredFolders = computed(() => directory.items)
 
   function openMenu(folder: FolderSummary) {
+    deleteError.value = null
     menuFolder.value = folder
   }
 
@@ -515,15 +481,28 @@
     router.push({ name: "folder", params: { slug } })
   }
 
-  function handleDelete() {
+  async function handleDelete() {
     if (!authStore.canDeleteMedia) {
       return
     }
 
-    confirmDeleteFolder.value = menuFolder.value
-    menuFolder.value = null
+    const selected = menuFolder.value
+    if (!selected) return
+    const generation = ++deleteCountGeneration
+    loadingDeleteDetails.value = true
     deleteSourceFolder.value = false
     deleteError.value = null
+    try {
+      const payload = await fetchFolderDirectory({ page: 1, limit: 1, pathPrefix: `${selected.folderPath}/` })
+      if (generation !== deleteCountGeneration || menuFolder.value?.slug !== selected.slug) return
+      deleteChildFolderCount.value = payload.total
+      confirmDeleteFolder.value = selected
+      menuFolder.value = null
+    } catch {
+      if (generation === deleteCountGeneration) deleteError.value = t("libraryPage.errors.load")
+    } finally {
+      if (generation === deleteCountGeneration) loadingDeleteDetails.value = false
+    }
   }
 
   function closeDeleteDialog(force = false) {
@@ -531,6 +510,7 @@
       return
     }
 
+    deleteCountGeneration += 1
     confirmDeleteFolder.value = null
     deleteSourceFolder.value = false
     deleteError.value = null
@@ -566,11 +546,17 @@
     }
   }
 
+  onUnmounted(() => {
+    clearTimeout(searchTimer)
+    deleteCountGeneration += 1
+    directory.active = false
+  })
+
   onMounted(async () => {
     if (appStore.isLibraryUnavailable) {
       return
     }
 
-    await foldersStore.fetchFolders()
+    await directory.activate()
   })
 </script>

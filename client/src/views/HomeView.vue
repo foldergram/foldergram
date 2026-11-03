@@ -305,8 +305,14 @@ const foldersStore = useFoldersStore();
 const momentsStore = useMomentsStore();
 const { t } = useI18n();
 const likedCountByFolder = computed(() => buildLikedCountByFolder(likesStore.items));
+const recommendationCandidates = computed(() => {
+  const lastOpened = appStore.lastOpenedFolderSlug ? foldersStore.summaryBySlug[appStore.lastOpenedFolderSlug] : null;
+  return lastOpened && !foldersStore.items.some((folder) => folder.slug === lastOpened.slug)
+    ? [...foldersStore.items, lastOpened]
+    : foldersStore.items;
+});
 const homeRecommendations = computed(() =>
-  selectHomeRecommendations(foldersStore.items, likedCountByFolder.value, appStore.lastOpenedFolderSlug)
+  selectHomeRecommendations(recommendationCandidates.value, likedCountByFolder.value, appStore.lastOpenedFolderSlug)
 );
 const homeSummaryFolder = computed(() => homeRecommendations.value.homeSummaryFolder);
 const recommendedFolders = computed(() => homeRecommendations.value.recommendedFolders);
@@ -571,14 +577,10 @@ onMounted(async () => {
 });
 
 watch(
-  () => [appStore.stats?.indexedImages ?? 0, appStore.stats?.folders ?? 0] as const,
-  async ([indexedImages, folderCount]) => {
+  () => appStore.stats?.indexedImages ?? 0,
+  async (indexedImages) => {
     if (appStore.isLibraryUnavailable) {
       return;
-    }
-
-    if (folderCount > 0 && folderCount !== foldersStore.items.length) {
-      await foldersStore.fetchFolders(true);
     }
 
     if (indexedImages > 0 && feedStore.items.length === 0 && !feedStore.loading) {
@@ -605,6 +607,12 @@ watch(
 
     await momentsStore.fetchMoments(true);
   }
+);
+
+watch(
+  () => appStore.lastOpenedFolderSlug,
+  (slug) => { if (slug) void foldersStore.ensureSummary(slug).catch(() => {}); },
+  { immediate: true }
 );
 
 watch(

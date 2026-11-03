@@ -3,17 +3,17 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import App from './App.vue';
-import type { AppStatus, FolderSummary } from './types/api';
+import type { AppStatus, FolderDirectoryPayload } from './types/api';
 import { useAppStore } from './stores/app';
 import { useAuthStore } from './stores/auth';
 
-const { fetchFoldersMock, fetchStatusMock } = vi.hoisted(() => ({
-  fetchFoldersMock: vi.fn(),
+const { fetchDirectoryMock, fetchStatusMock } = vi.hoisted(() => ({
+  fetchDirectoryMock: vi.fn(),
   fetchStatusMock: vi.fn()
 }));
 
 vi.mock('./api/gallery', () => ({
-  fetchFolders: fetchFoldersMock,
+  fetchFolderDirectory: fetchDirectoryMock,
   fetchStats: fetchStatusMock
 }));
 
@@ -137,15 +137,15 @@ describe('App protected bootstrap', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     window.localStorage.clear();
-    fetchFoldersMock.mockReset();
+    fetchDirectoryMock.mockReset();
     fetchStatusMock.mockReset();
   });
 
   it('re-runs the protected bootstrap after access is revoked and granted again', async () => {
     const status = createAppStatus();
-    const delayedFolders = createDeferred<FolderSummary[]>();
+    const delayedFolders = createDeferred<FolderDirectoryPayload>();
     fetchStatusMock.mockResolvedValue(status);
-    fetchFoldersMock.mockImplementation(() => delayedFolders.promise);
+    fetchDirectoryMock.mockImplementation(() => delayedFolders.promise);
 
     const authStore = useAuthStore();
     grantAccess(authStore);
@@ -155,6 +155,7 @@ describe('App protected bootstrap', () => {
 
     const appStore = useAppStore();
     expect(fetchStatusMock).toHaveBeenCalledTimes(1);
+    expect(fetchDirectoryMock).toHaveBeenCalledWith({ page: 1, limit: 24, sort: 'recent-desc' });
     expect(appStore.stats).not.toBeNull();
 
     revokeAccess(authStore);
@@ -168,7 +169,7 @@ describe('App protected bootstrap', () => {
     expect(fetchStatusMock).toHaveBeenCalledTimes(2);
     expect(appStore.stats).not.toBeNull();
 
-    delayedFolders.resolve([]);
+    delayedFolders.resolve({ items: [], page: 1, limit: 24, total: 0, hasMore: false });
     await flushPromises();
 
     expect(appStore.stats).not.toBeNull();

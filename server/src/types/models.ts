@@ -5,6 +5,7 @@ export type TakenAtSource = 'exif' | 'mtime' | 'first_seen' | 'sort_timestamp';
 export type PlaybackStrategy = 'preview' | 'original';
 export type FolderAvatarSource = 'auto' | 'manual' | 'cover';
 export type FolderRole = 'normal' | 'story_root' | 'story_capsule' | 'carousel_source';
+export type FolderDirectorySort = 'recent-desc' | 'images-desc' | 'name-asc' | 'name-desc' | 'path-asc';
 export type PlaceKind = 'city' | 'approximate_spot' | 'manual';
 export type PostType = 'single' | 'carousel';
 
@@ -69,6 +70,19 @@ export interface FolderSummaryRecord extends FolderRecord {
   has_avatar_story?: number | null;
   summary_avatar_image_id?: number | null;
   summary_avatar_thumbnail_path?: string | null;
+}
+
+export interface FolderDirectoryQuery {
+  page: number;
+  limit: number;
+  search?: string;
+  pathPrefix?: string;
+  sort: FolderDirectorySort;
+}
+
+export interface FolderDirectoryPage {
+  items: FolderSummaryRecord[];
+  total: number;
 }
 
 export interface ImageRecord {
@@ -240,6 +254,8 @@ export interface FeedImage {
   folderId: number;
   folderSlug: string;
   folderName: string;
+  folderAvatarUrl?: string | null;
+  folderHasAvatarStory?: boolean;
   folderParentName?: string | null;
   folderPath: string;
   folderBreadcrumb?: string | null;

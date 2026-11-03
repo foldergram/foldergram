@@ -984,6 +984,7 @@ async function confirmDelete() {
   deleteError.value = null;
 
   try {
+    await foldersStore.ensureSummary(props.item.folderSlug);
     const deleted = deleteOriginalFromDisk.value ? await deleteImage(props.item.id) : await trashImage(props.item.id);
     feedStore.removeImage(deleted.id);
     likesStore.removeImage(deleted.id);

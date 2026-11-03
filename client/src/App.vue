@@ -221,13 +221,13 @@ watch(
 );
 
 watch(
-  () => appStore.stats?.folders ?? 0,
-  async (folderCount) => {
-    if (appStore.isLibraryUnavailable || folderCount === 0 || folderCount === foldersStore.items.length) {
-      return;
+  () => [appStore.stats?.folders, appStore.stats?.scan.lastCompletedScan?.id] as const,
+  async ([folderCount, scanId], previous) => {
+    if (appStore.isLibraryUnavailable || folderCount === undefined) return;
+    const scanChanged = previous?.[1] !== undefined && scanId !== previous[1];
+    if ((!foldersStore.loadingList && folderCount !== foldersStore.total) || scanChanged) {
+      await foldersStore.fetchFolders(true);
     }
-
-    await foldersStore.fetchFolders(true);
   }
 );
 

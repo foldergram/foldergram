@@ -446,10 +446,17 @@
   )
   const featuredFolders = computed(() =>
     selectSidebarFolders(
-      foldersStore.items,
+      [...foldersStore.items, ...Object.values(foldersStore.summaryBySlug)],
       likedCountByFolder.value,
       appStore.recentOpenedFolderSlugs,
     ),
+  )
+  watch(
+    () => appStore.recentOpenedFolderSlugs.slice(0, 4),
+    (slugs) => {
+      for (const slug of slugs) void foldersStore.ensureSummary(slug).catch(() => {})
+    },
+    { immediate: true },
   )
   const appearanceLabel = computed(() =>
     appStore.theme === "light" ? t("nav.switchToDarkMode") : t("nav.switchToLightMode"),

@@ -26,6 +26,14 @@ const paginationQuerySchema = z.object({
 const mediaTypeQuerySchema = z.object({
   mediaType: z.enum(['image', 'video']).optional()
 });
+const folderDirectoryQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).max(Math.floor(Number.MAX_SAFE_INTEGER / 200)).default(1),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+  q: z.string().trim().max(160).optional(),
+  pathPrefix: z.string().min(1).max(4096).optional(),
+  sort: z.enum(['recent-desc', 'images-desc', 'name-asc', 'name-desc', 'path-asc']).default('recent-desc')
+});
+const FOLDER_DIRECTORY_QUERY_KEYS = ['page', 'limit', 'q', 'sort', 'pathPrefix'] as const;
 const originalMediaQuerySchema = z.object({
   download: z.preprocess((value) => {
     if (value === undefined) {
@@ -616,10 +624,26 @@ router.get('/feed/moments/:id', (request, response) => {
   response.json(payload);
 });
 
-router.get('/folders', (_request, response) => {
-  response.json({
-    items: galleryService.listFolders()
-  });
+router.get('/folders', (request, response) => {
+  const usesDirectoryQuery = FOLDER_DIRECTORY_QUERY_KEYS.some((key) => Object.hasOwn(request.query, key));
+
+  if (!usesDirectoryQuery) {
+    response.json({
+      items: galleryService.listFolders()
+    });
+    return;
+  }
+
+  const query = folderDirectoryQuerySchema.parse(request.query);
+  response.json(
+    galleryService.listFolderDirectory({
+      page: query.page,
+      limit: query.limit,
+      search: query.q,
+      pathPrefix: query.pathPrefix,
+      sort: query.sort
+    })
+  );
 });
 
 router.get('/folders/:slug', (request, response) => {
