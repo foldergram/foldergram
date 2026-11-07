@@ -954,10 +954,14 @@
     }
   })
   const previousNavigationImageId = computed(
-    () => likesNavigationIds.value?.previousImageId ?? props.image?.previousImageId ?? null,
+    () => isLikesNavigationContext.value
+      ? likesNavigationIds.value?.previousImageId ?? null
+      : props.image?.previousImageId ?? null,
   )
   const nextNavigationImageId = computed(
-    () => likesNavigationIds.value?.nextImageId ?? props.image?.nextImageId ?? null,
+    () => isLikesNavigationContext.value
+      ? likesNavigationIds.value?.nextImageId ?? null
+      : props.image?.nextImageId ?? null,
   )
   const isModalSidebarOverlayVisible = computed(
     () => isModalSidebarCollapsible.value && isSidebarExpanded.value,

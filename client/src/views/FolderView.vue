@@ -355,7 +355,7 @@
     await loadFolder()
     await redirectInvalidLikesTab()
   })
-  watch([likesReady, hasLikesTab, activeTab], redirectInvalidLikesTab)
+  watch([() => route.name, likesReady, hasLikesTab, activeTab], redirectInvalidLikesTab)
   watch(
     () => [props.slug, activeTab.value] as const,
     async () => {
