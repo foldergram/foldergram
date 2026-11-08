@@ -349,6 +349,98 @@ describe('PostViewer', () => {
     expect(wrapper.text()).toContain('animal-planet/post-12.jpg');
   });
 
+  it('keeps folder Likes navigation scoped to that folder', () => {
+    useAppStore().setImageModalBackground('/f/animal-planet?tab=likes');
+    mockRouterResolve.mockReturnValue({
+      name: 'folder',
+      params: { slug: 'animal-planet' },
+      query: { tab: 'likes' }
+    });
+    useLikesStore().syncFromItems([
+      createFeedItem(11),
+      { ...createFeedItem(99), folderId: 8, folderSlug: 'other-folder' },
+      createFeedItem(12),
+      createFeedItem(13)
+    ], 'shared');
+
+    const wrapper = mount(PostViewer, {
+      props: {
+        image: createImageDetail(12, { previousImageId: 98, nextImageId: 100 }),
+        isModal: true
+      },
+      global: { stubs: globalStubs }
+    });
+
+    expect(wrapper.get('a[aria-label="Previous post"]').attributes('data-to')).toContain('"id":"11"');
+    expect(wrapper.get('a[aria-label="Next post"]').attributes('data-to')).toContain('"id":"13"');
+  });
+
+  describe.each([
+    { label: 'folder Likes', path: '/f/animal-planet?tab=likes', name: 'folder' },
+    { label: 'the Likes page', path: '/likes/posts', name: 'likes' }
+  ])('navigation from $label', ({ path, name }) => {
+    beforeEach(() => {
+      useAppStore().setImageModalBackground(path);
+      mockRouterResolve.mockReturnValue({
+        name,
+        params: { slug: 'animal-planet' },
+        query: { tab: 'likes' }
+      });
+    });
+
+    it('stops at the first and last liked posts despite available folder neighbors', async () => {
+      useLikesStore().syncFromItems([createFeedItem(11), createFeedItem(13)], 'shared');
+      const wrapper = mount(PostViewer, {
+        props: {
+          image: createImageDetail(11, { previousImageId: 10, nextImageId: 12 }),
+          isModal: true
+        },
+        global: { stubs: globalStubs }
+      });
+
+      expect(wrapper.find('a[aria-label="Previous post"]').exists()).toBe(false);
+      expect(wrapper.get('a[aria-label="Next post"]').attributes('data-to')).toContain('"id":"13"');
+
+      await wrapper.setProps({
+        image: createImageDetail(13, { previousImageId: 12, nextImageId: 99 })
+      });
+
+      expect(wrapper.get('a[aria-label="Previous post"]').attributes('data-to')).toContain('"id":"11"');
+      expect(wrapper.find('a[aria-label="Next post"]').exists()).toBe(false);
+    });
+
+    it('does not navigate to unliked folder posts after the current post is unliked', async () => {
+      const likesStore = useLikesStore();
+      likesStore.syncFromItems([createFeedItem(11), createFeedItem(12), createFeedItem(13)], 'shared');
+      const wrapper = mount(PostViewer, {
+        props: {
+          image: createImageDetail(12, { previousImageId: 98, nextImageId: 99 }),
+          isModal: true
+        },
+        global: { stubs: globalStubs }
+      });
+
+      likesStore.removeImage(12);
+      await flushPromises();
+
+      expect(wrapper.find('a[aria-label="Previous post"]').exists()).toBe(false);
+      expect(wrapper.find('a[aria-label="Next post"]').exists()).toBe(false);
+    });
+  });
+
+  it('keeps ordinary folder navigation when opened outside Likes', () => {
+    const wrapper = mount(PostViewer, {
+      props: {
+        image: createImageDetail(12, { previousImageId: 11, nextImageId: 13 }),
+        isModal: true
+      },
+      global: { stubs: globalStubs }
+    });
+
+    expect(wrapper.get('a[aria-label="Previous post"]').attributes('data-to')).toContain('"id":"11"');
+    expect(wrapper.get('a[aria-label="Next post"]').attributes('data-to')).toContain('"id":"13"');
+  });
+
   it('shows the cover action for videos and uses the current item id when setting cover', async () => {
     const foldersStore = useFoldersStore();
     const setFolderCoverSpy = vi.spyOn(foldersStore, 'setFolderCover').mockResolvedValue();

@@ -99,6 +99,7 @@ export const useLikesStore = defineStore('likes', {
   getters: {
     isLiked: (state) => (id: number) => state.likedIds.includes(id),
     isPending: (state) => (id: number) => state.pendingIds.includes(id),
+    itemsForFolder: (state) => (slug: string) => state.items.filter(item => item.folderSlug === slug),
     collectionLabel: (state) => {
       void i18n.global.locale.value;
       return state.mode === 'local'

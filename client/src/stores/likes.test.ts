@@ -52,4 +52,18 @@ describe('useLikesStore localization', () => {
     expect(store.collectionSectionLabel).toBe('收藏帖子');
     expect(store.toggleAriaLabel(true)).toBe('取消收藏帖子');
   });
+
+  it('filters liked items by folder while preserving order', () => {
+    const store = useLikesStore();
+    const first = createFeedItem(1);
+    const second = { ...createFeedItem(2), folderSlug: 'other-folder', folderId: 2 };
+    const third = createFeedItem(3);
+
+    store.syncFromItems([first, second, third], 'shared');
+
+    expect(store.itemsForFolder('animal-planet').map(item => item.id)).toEqual([1, 3]);
+
+    store.items = store.items.filter(item => item.id !== 1);
+    expect(store.itemsForFolder('animal-planet').map(item => item.id)).toEqual([3]);
+  });
 });

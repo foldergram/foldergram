@@ -927,14 +927,21 @@
       return false
     }
 
-    return router.resolve(appStore.imageModalBackgroundPath).name === "likes"
+    const backgroundRoute = router.resolve(appStore.imageModalBackgroundPath)
+    return backgroundRoute.name === "likes" ||
+      (backgroundRoute.name === "folder" && backgroundRoute.query.tab === "likes")
   })
   const likesNavigationIds = computed(() => {
-    if (!props.image || !isLikesNavigationContext.value) {
+    const backgroundPath = appStore.imageModalBackgroundPath
+    if (!props.image || !isLikesNavigationContext.value || !backgroundPath) {
       return null
     }
 
-    const currentIndex = likesStore.items.findIndex(
+    const backgroundRoute = router.resolve(backgroundPath)
+    const navigationItems = backgroundRoute.name === "folder"
+      ? likesStore.itemsForFolder(String(backgroundRoute.params.slug ?? ""))
+      : likesStore.items
+    const currentIndex = navigationItems.findIndex(
       item => item.id === props.image?.id,
     )
     if (currentIndex === -1) {
@@ -942,15 +949,19 @@
     }
 
     return {
-      previousImageId: likesStore.items[currentIndex - 1]?.id ?? null,
-      nextImageId: likesStore.items[currentIndex + 1]?.id ?? null,
+      previousImageId: navigationItems[currentIndex - 1]?.id ?? null,
+      nextImageId: navigationItems[currentIndex + 1]?.id ?? null,
     }
   })
   const previousNavigationImageId = computed(
-    () => likesNavigationIds.value?.previousImageId ?? props.image?.previousImageId ?? null,
+    () => isLikesNavigationContext.value
+      ? likesNavigationIds.value?.previousImageId ?? null
+      : props.image?.previousImageId ?? null,
   )
   const nextNavigationImageId = computed(
-    () => likesNavigationIds.value?.nextImageId ?? props.image?.nextImageId ?? null,
+    () => isLikesNavigationContext.value
+      ? likesNavigationIds.value?.nextImageId ?? null
+      : props.image?.nextImageId ?? null,
   )
   const isModalSidebarOverlayVisible = computed(
     () => isModalSidebarCollapsible.value && isSidebarExpanded.value,

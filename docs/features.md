@@ -121,6 +121,7 @@ Folder pages include:
 - a posts grid that follows the app-wide default folder order
 - highlight circles above the posts and reels tabs when the folder has story capsules
 - a reels tab when the folder contains videos
+- a likes tab on App Folder pages for folders that contain saved posts
 - infinite loading
 
 The reels tab is a filtered view backed by the same folder endpoint using

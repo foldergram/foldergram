@@ -45,25 +45,7 @@
             </button>
           </div>
         </div>
-        <EmptyState
-          v-if="
-            !foldersStore.loadingFolder &&
-            foldersStore.currentImages.length === 0
-          "
-          class="mx-auto w-[min(100%,66.5625rem)]"
-          :title="
-            activeTab === 'reels'
-              ? t('folder.view.emptyReelsTitle')
-              : t('folder.view.emptyPostsTitle')
-          "
-          :description="
-            activeTab === 'reels'
-              ? t('folder.view.emptyReelsDescription')
-              : t('folder.view.emptyPostsDescription')
-          "
-        />
-        <template v-else>
-          <section class="mx-auto w-[min(100%,66.5625rem)]">
+        <section class="mx-auto w-[min(100%,66.5625rem)]">
             <div
               v-if="folderStoriesStore.highlights.length"
               class="story-rail-shell mb-5"
@@ -145,21 +127,56 @@
                     aria-hidden="true"
                   ></span>
                 </button>
+                <button
+                  v-if="hasLikesTab"
+                  class="relative inline-flex h-[2.2rem] w-[3.15rem] cursor-pointer items-center justify-center border-0 bg-transparent p-0 text-muted transition-colors duration-[180ms] hover:text-text"
+                  :class="activeTab === 'likes' ? 'text-text' : ''"
+                  type="button"
+                  :aria-label="likesStore.collectionLabel"
+                  :title="likesStore.collectionLabel"
+                  :aria-pressed="activeTab === 'likes'"
+                  @click="setTab('likes')"
+                >
+                  <span class="i-fluent-heart-20-filled w-7 h-7 mb-3" aria-hidden="true" />
+                  <span
+                    v-if="activeTab === 'likes'"
+                    class="absolute bottom-[0.02rem] left-[0.15rem] right-[0.15rem] h-[2px] rounded-full bg-current"
+                    aria-hidden="true"
+                  ></span>
+                </button>
               </div>
             </div>
+            <div v-if="activeTab === 'likes' && likesStore.loading" class="card mt-5 p-8 text-center">
+              <p class="text-muted">{{ likesStore.loadingLabel }}</p>
+            </div>
+            <EmptyState
+              v-else-if="displayedItems.length === 0"
+              class="mt-5"
+              :title="activeTab === 'reels'
+                ? t('folder.view.emptyReelsTitle')
+                : activeTab === 'likes'
+                  ? likesStore.emptyTitle
+                  : t('folder.view.emptyPostsTitle')"
+              :description="activeTab === 'reels'
+                ? t('folder.view.emptyReelsDescription')
+                : activeTab === 'likes'
+                  ? likesStore.emptyDescription
+                  : t('folder.view.emptyPostsDescription')"
+            />
             <FolderGrid
-              :items="foldersStore.currentImages"
-              :variant="activeTab"
+              v-else
+              :items="displayedItems"
+              :variant="activeTab === 'reels' ? 'reels' : 'posts'"
             />
             <div class="pt-6">
               <InfiniteLoader
+                v-if="activeTab !== 'likes'"
                 :loading="foldersStore.loadingFolder"
                 :has-more="foldersStore.currentHasMore"
                 @load-more="loadMore"
               />
             </div>
           </section>
-        </template>
       </div>
 
       <StoriesModal
@@ -193,14 +210,18 @@
   import Avatar from "../components/Avatar.vue"
   import StoriesModal from "../components/StoriesModal.vue"
   import { useAppStore } from "../stores/app"
+  import { useAuthStore } from "../stores/auth"
   import { useFolderStoriesStore } from "../stores/folder-stories"
   import { useFoldersStore } from "../stores/folders"
+  import { useLikesStore } from "../stores/likes"
 
   const props = defineProps<{
     slug: string
   }>()
 
   const appStore = useAppStore()
+  const authStore = useAuthStore()
+  const likesStore = useLikesStore()
   const folderStoriesStore = useFolderStoriesStore()
   const foldersStore = useFoldersStore()
   const route = useRoute()
@@ -208,8 +229,19 @@
   const { t } = useI18n()
   const hasLoadedOnce = ref(false)
   const activeStoryViewerId = ref<string | null>(null)
-  const activeTab = computed(() =>
-    route.query.tab === "reels" ? "reels" : "posts",
+  const activeTab = computed<"posts" | "reels" | "likes">(() =>
+    route.query.tab === "reels"
+      ? "reels"
+      : route.query.tab === "likes"
+        ? "likes"
+        : "posts",
+  )
+  const likedItems = computed(() => likesStore.itemsForFolder(props.slug))
+  const displayedItems = computed(() =>
+    activeTab.value === "likes" ? likedItems.value : foldersStore.currentImages,
+  )
+  const hasLikesTab = computed(
+    () => authStore.canUseSavedItems && likedItems.value.length > 0,
   )
   const hasReelsTab = computed(
     () => (foldersStore.currentFolder?.videoCount ?? 0) > 0,
@@ -254,16 +286,18 @@
     }
   }
 
-  async function setTab(tab: "posts" | "reels") {
+  async function setTab(tab: "posts" | "reels" | "likes") {
     if (activeTab.value === tab) {
       return
     }
 
     const nextQuery =
-      tab === "reels"
-        ? { ...route.query, tab: "reels" }
-        : Object.fromEntries(
+      tab === "posts"
+        ? Object.fromEntries(
             Object.entries(route.query).filter(([key]) => key !== "tab"),
+          )
+        : Object.fromEntries(
+            Object.entries({ ...route.query, tab }),
           )
 
     await router.replace({
@@ -293,7 +327,35 @@
     await folderStoriesStore.fetchStories(props.slug, true)
   }
 
-  onMounted(loadFolder)
+  const likesReady = computed(
+    () => !authStore.canUseSavedItems || (likesStore.initialized && !likesStore.loading),
+  )
+
+  async function redirectInvalidLikesTab() {
+    if (
+      route.name !== "folder" ||
+      activeTab.value !== "likes" ||
+      !likesReady.value ||
+      hasLikesTab.value
+    ) {
+      return
+    }
+
+    await router.replace({
+      name: "folder",
+      params: { slug: props.slug },
+      query: Object.fromEntries(
+        Object.entries(route.query).filter(([key]) => key !== "tab"),
+      ),
+    })
+  }
+
+  onMounted(async () => {
+    void likesStore.initialize()
+    await loadFolder()
+    await redirectInvalidLikesTab()
+  })
+  watch([() => route.name, likesReady, hasLikesTab, activeTab], redirectInvalidLikesTab)
   watch(
     () => [props.slug, activeTab.value] as const,
     async () => {

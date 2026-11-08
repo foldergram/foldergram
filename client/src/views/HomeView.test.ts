@@ -1,13 +1,13 @@
-import { defineComponent } from 'vue';
 import { flushPromises, mount } from '@vue/test-utils';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { defineComponent } from 'vue';
 
 import { DEFAULT_LOCALE, i18n } from '../locales';
-import type { AppStatus, ScanProgress } from '../types/api';
 import { useAppStore } from '../stores/app';
 import { useFeedStore } from '../stores/feed';
 import { useMomentsStore } from '../stores/moments';
+import type { AppStatus, ScanProgress } from '../types/api';
 import HomeView from './HomeView.vue';
 
 const routerLinkStub = defineComponent({
