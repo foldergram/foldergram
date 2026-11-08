@@ -159,7 +159,9 @@ pnpm dev:docs
 pnpm build:docs
 ```
 
-The deploy workflow in `.github/workflows/deploy-docs.yml`:
+The release workflow in `.github/workflows/publish-ghcr.yml` runs when a tag
+matching `v*.*.*` is pushed. After the Docker image is published successfully,
+the docs job:
 
 1. installs dependencies with `pnpm`
 2. runs `pnpm build:docs`
