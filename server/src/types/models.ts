@@ -24,6 +24,7 @@ export interface ImageExifData {
 }
 
 export interface FolderRecord {
+  source_id?: number | null;
   id: number;
   slug: string;
   name: string;
@@ -86,6 +87,9 @@ export interface FolderDirectoryPage {
 }
 
 export interface ImageRecord {
+  external_asset_id?: string | null;
+  remote_version?: string | null;
+  source_id?: number | null;
   id: number;
   folder_id: number;
   place_id: number | null;
@@ -122,6 +126,7 @@ export interface ImageRecord {
 }
 
 export interface PostRecord {
+  source_id?: number | null;
   id: number;
   folder_id: number;
   place_id: number | null;
@@ -250,6 +255,8 @@ export interface PostMediaItem {
 }
 
 export interface FeedImage {
+  sourceId?: number | null;
+  originalDownloadsAllowed?: boolean;
   id: number;
   folderId: number;
   folderSlug: string;

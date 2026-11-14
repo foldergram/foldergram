@@ -10,7 +10,7 @@
 
 # Foldergram
 
-**Local-only photo and video gallery for folders, with an Instagram-inspired browsing pattern.**
+**Local-first photo and video gallery for your folders, with Instagram-inspired browsing and optional read-only Immich integration.**
 
 [![Available on GHCR](https://img.shields.io/badge/GHCR-foldergram-blue?style=flat-square&logo=docker)](https://github.com/foldergram/foldergram/pkgs/container/foldergram)
 [![LIVE DEMO](https://img.shields.io/badge/LIVE%20DEMO-FOLDERGRAM-a951ab?style=flat-square&logo=googlechrome&logoColor=white)](https://foldergram.intentdeep.com/)
@@ -27,6 +27,10 @@
 ---
 
 Foldergram turns your local photo and video folders into a self-hosted gallery with a familiar feed, folder profiles, and a media viewer. It indexes your library in SQLite and uses thumbnails and previews for fast browsing, while keeping your originals untouched.
+
+## Optional Immich integration
+
+Connect your Immich v3.3.x server in **Settings → Sources** for read-only browsing of external directories and albums alongside local folders, or use an empty local gallery for Immich-only browsing. Every selected album membership is preserved while each asset appears once in Home. Media uses Immich derivatives through Foldergram's authenticated, bounded cache and streaming proxy. See the [setup, permissions, Docker networking and cache policy](docs/immich.md). Choose one source for an overlapping dataset to avoid duplicate posts.
 
 ## Features
 
@@ -45,11 +49,11 @@ Foldergram turns your local photo and video folders into a self-hosted gallery w
 - Phase-aware scan progress for first indexing, derivative migration, and rebuilds.
 - A web app manifest plus production service worker registration.
 - A debounced filesystem watcher in development mode only.
-- No multi-user accounts, cloud sync, uploads, comments, messaging, notifications, or remote APIs.
+- No multi-user accounts, cloud uploads, comments, messaging, or notifications. Local sources need no remote APIs; the optional [Immich integration](docs/immich.md) synchronizes remote metadata and fetches media through its read-only API.
 
 ## How It Works
 
-Foldergram maps directly to your filesystem:
+For local sources, Foldergram maps directly to your filesystem:
 
 1. **App Folders:** Any non-hidden folder under `GALLERY_ROOT` that directly contains supported media becomes one indexed App Folder. In reserved carousel mode, a folder also qualifies when its `carousels/` directory has an immediate child containing supported media directly.
 2. **Posts:** Each supported image or video directly inside an App Folder becomes one indexed post. Media in `AppFolder/carousels/Post name/` is grouped into a carousel post in reserved mode.

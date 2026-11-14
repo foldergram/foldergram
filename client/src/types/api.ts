@@ -79,6 +79,8 @@ export interface PostMediaItem {
 }
 
 export interface FeedItem {
+  sourceId?: number | null;
+  originalDownloadsAllowed?: boolean;
   id: number;
   folderId: number;
   folderSlug: string;
@@ -131,6 +133,7 @@ export interface PlaceDetail extends PlaceSummary {
 }
 
 export interface FolderSummary {
+  sourceId?: number | null;
   id: number;
   slug: string;
   name: string;

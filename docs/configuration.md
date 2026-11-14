@@ -546,3 +546,7 @@ from `GET /api/admin/scan-progress` and from the `scan` field in
 ## Carousel-folder mode
 
 The SQLite setting `library.treat_carousels_as_folders` controls folders named `carousels`. Its default `false` value reserves `AppFolder/carousels/<post>/` for multi-item posts. Enable **Treat carousels folders as normal app folders** from **Settings → General Settings** to index those paths as ordinary folders instead. When no indexed path conflicts with the reserved name, Settings can show a dismissible Carousel Posts introduction with an expandable folder example. Existing path collisions produce a migration decision card that remains available until a mode is saved. Settings shows a pending update until a successful full scan has applied the saved mode. Use **Scan for changes** under normal conditions, or **Rebuild Library Index** when the gallery location requires a new index. There is no `.env` equivalent.
+
+## Optional Immich integration
+
+Settings → Sources supports encrypted, write-only API keys, explicit roots/albums, manual or scheduled sync, and environment/Docker-secret bootstrap. See [Immich integration](./immich.md) for permissions, supported versions, network configuration, selection semantics and cache/access policy. Local folders remain the default.

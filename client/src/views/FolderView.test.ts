@@ -9,6 +9,7 @@ import { useAuthStore } from '../stores/auth';
 import { useFolderStoriesStore } from '../stores/folder-stories';
 import { useFoldersStore } from '../stores/folders';
 import { useLikesStore } from '../stores/likes';
+import { useSourcesStore } from '../stores/sources';
 import type { FeedItem, FolderSummary, LikesMode } from '../types/api';
 import FolderView from './FolderView.vue';
 
@@ -113,6 +114,19 @@ async function mountFolder(items: FeedItem[], path = '/f/animal-planet?tab=likes
 describe('FolderView Likes tab', () => {
   enableAutoUnmount(afterEach);
   beforeEach(() => vi.restoreAllMocks());
+
+  it('shows connection guidance only for the unavailable folder source and automatically recovers', async () => {
+    const { wrapper } = await mountFolder([], '/f/animal-planet');
+    useFoldersStore().currentFolder = { ...folder, sourceId: 1 };
+    const sources = useSourcesStore();
+    sources.items = [{ id: 1, name: 'Immich', enabled: 1, status: 'ready', generation: 1, updated_at: '', available: false, syncing: false }];
+    await flushPromises();
+    expect(wrapper.text()).toContain('Immich is unavailable');
+    expect(wrapper.find('[data-test="folder-grid"]').exists()).toBe(false);
+    sources.items[0]!.available = true;
+    await flushPromises();
+    expect(wrapper.find('[data-test="folder-grid"]').exists()).toBe(true);
+  });
 
   it('shows only likes for the current folder and keeps Likes selected after closing a post', async () => {
     const { wrapper, router } = await mountFolder([

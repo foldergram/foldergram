@@ -7,6 +7,7 @@ import { DEFAULT_LOCALE, i18n } from '../locales';
 import { useAppStore } from '../stores/app';
 import { useFeedStore } from '../stores/feed';
 import { useMomentsStore } from '../stores/moments';
+import { useSourcesStore } from '../stores/sources';
 import type { AppStatus, ScanProgress } from '../types/api';
 import HomeView from './HomeView.vue';
 
@@ -125,12 +126,145 @@ describe('HomeView', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.restoreAllMocks();
+    useSourcesStore().initialized = true;
     i18n.global.locale.value = DEFAULT_LOCALE;
     Object.defineProperty(window, 'innerWidth', {
       configurable: true,
       writable: true,
       value: 1280
     });
+  });
+
+  it('shows an Immich connection error with Retry without replacing the local feed', async () => {
+    useAppStore().stats = createAppStatus({ isScanning: false });
+    vi.spyOn(useFeedStore(), 'loadInitial').mockResolvedValue();
+    vi.spyOn(useMomentsStore(), 'fetchMoments').mockResolvedValue();
+    const sources = useSourcesStore();
+    const feed = useFeedStore();
+    feed.$patch({ initialized: true, hasMore: false, items: [createMomentCapsule('local-1', 'Local').coverImage] });
+    sources.hasLocalPosts = true;
+    sources.items = [{ id: 1, name: 'Family photos', enabled: 1, status: 'ready', generation: 1, updated_at: '', available: false, syncing: false }];
+    const wrapper = mountHomeView();
+    await flushPromises();
+    expect(wrapper.text()).toContain('Immich is unavailable');
+    expect(wrapper.text()).toContain('Family photos');
+    expect(wrapper.findAll('button').some(button => button.text() === 'Retry')).toBe(true);
+    sources.items[0]!.available = true;
+    await flushPromises();
+    expect(wrapper.text()).not.toContain('Immich is unavailable');
+    wrapper.unmount();
+  });
+
+  it.each([false, true])('shows a known outage immediately while feed loading is %s, without pagination', async loading => {
+    useAppStore().stats = { ...createAppStatus({ isScanning: false }), folders: 15, indexedImages: 237 };
+    const feed = useFeedStore();
+    feed.loading = loading;
+    const initial = vi.spyOn(feed, 'loadInitial').mockResolvedValue();
+    const more = vi.spyOn(feed, 'loadMore').mockResolvedValue();
+    vi.spyOn(useMomentsStore(), 'fetchMoments').mockResolvedValue();
+    const sources = useSourcesStore();
+    sources.$patch({ hasLocalPosts: false, items: [{ id: 1, name: 'Immich', enabled: 1, status: 'ready', generation: 1, updated_at: '', available: false, syncing: false }] });
+    const wrapper = mountHomeView();
+    await flushPromises();
+    expect(wrapper.text()).toContain('Immich is unavailable');
+    expect(wrapper.find('.home-layout__header').exists()).toBe(false);
+    expect(wrapper.find('feed-list-stub').exists()).toBe(false);
+    expect(wrapper.find('infinite-loader-stub').exists()).toBe(false);
+    expect(initial).not.toHaveBeenCalled();
+    expect(more).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it('switches unknown availability from skeletons directly to the centered outage before feed completion', async () => {
+    useAppStore().stats = { ...createAppStatus({ isScanning: false }), folders: 15, indexedImages: 237 };
+    const feed = useFeedStore();
+    feed.loading = true;
+    vi.spyOn(feed, 'loadInitial').mockResolvedValue();
+    vi.spyOn(useMomentsStore(), 'fetchMoments').mockResolvedValue();
+    const sources = useSourcesStore();
+    sources.initialized = false;
+    const wrapper = mountHomeView();
+    await flushPromises();
+    expect(wrapper.text()).not.toContain('Immich is unavailable');
+    expect(wrapper.find('[data-test="home-feed-skeleton"]').exists()).toBe(true);
+    expect(wrapper.find('infinite-loader-stub').exists()).toBe(false);
+
+    sources.$patch({ initialized: true, hasLocalPosts: false, items: [{ id: 1, name: 'Immich', enabled: 1, status: 'ready', generation: 1, updated_at: '', available: false, syncing: false }] });
+    await flushPromises();
+    expect(feed.loading).toBe(true);
+    expect(wrapper.text()).toContain('Immich is unavailable');
+    expect(wrapper.find('feed-list-stub').exists()).toBe(false);
+    expect(wrapper.find('infinite-loader-stub').exists()).toBe(false);
+    feed.$patch({ loading: false, initialized: true, hasMore: true });
+    await flushPromises();
+    expect(wrapper.find('feed-list-stub').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('loads the feed after Retry restores a source whose initial load was skipped', async () => {
+    useAppStore().stats = { ...createAppStatus({ isScanning: false }), folders: 15, indexedImages: 237 };
+    const feed = useFeedStore();
+    const initial = vi.spyOn(feed, 'loadInitial').mockImplementation(async () => {
+      feed.$patch({ initialized: true, hasMore: false, items: [{ ...createMomentCapsule('remote-1', 'Remote').coverImage, sourceId: 1 }] });
+    });
+    vi.spyOn(useMomentsStore(), 'fetchMoments').mockResolvedValue();
+    const sources = useSourcesStore();
+    sources.$patch({ hasLocalPosts: false, items: [{ id: 1, name: 'Immich', enabled: 1, status: 'ready', generation: 1, updated_at: '', available: false, syncing: false }] });
+    vi.spyOn(sources, 'refresh').mockImplementation(async () => { sources.items[0]!.available = true; });
+    const wrapper = mountHomeView();
+    await flushPromises();
+    expect(initial).not.toHaveBeenCalled();
+    await wrapper.get('button').trigger('click');
+    await flushPromises();
+    expect(sources.refresh).toHaveBeenCalledWith(true);
+    expect(initial).toHaveBeenCalledWith(true);
+    expect(wrapper.find('[data-test="source-unavailable"]').exists()).toBe(false);
+    expect(wrapper.find('feed-list-stub').exists()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it('keeps skeletons alone while finding local posts beyond an offline-source page', async () => {
+    useAppStore().stats = { ...createAppStatus({ isScanning: false }), folders: 2, indexedImages: 2 };
+    const feed = useFeedStore();
+    feed.$patch({ initialized: true, hasMore: true, items: [{ ...createMomentCapsule('remote-1', 'Remote').coverImage, sourceId: 1 }] });
+    vi.spyOn(feed, 'loadInitial').mockResolvedValue();
+    const more = vi.spyOn(feed, 'loadMore').mockImplementation(async () => { feed.loading = true; });
+    vi.spyOn(useMomentsStore(), 'fetchMoments').mockResolvedValue();
+    const sources = useSourcesStore();
+    sources.$patch({ hasLocalPosts: true, items: [{ id: 1, name: 'Immich', enabled: 1, status: 'ready', generation: 1, updated_at: '', available: false, syncing: false }] });
+    const wrapper = mountHomeView();
+    await flushPromises();
+    expect(more).toHaveBeenCalledTimes(1);
+    expect(wrapper.text()).not.toContain('Immich is unavailable');
+    expect(wrapper.find('[data-test="home-feed-skeleton"]').exists()).toBe(true);
+    expect(wrapper.find('infinite-loader-stub').exists()).toBe(false);
+    feed.$patch({ loading: false, hasMore: false, items: [...feed.items, createMomentCapsule('local-2', 'Local').coverImage] });
+    await flushPromises();
+    expect(wrapper.text()).toContain('Immich is unavailable');
+    expect(wrapper.find('[data-test="home-feed-skeleton"]').exists()).toBe(false);
+    expect(wrapper.find('.home-layout__header').exists()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it('replaces an unavailable remote-only feed without showing empty-library or caught-up states', async () => {
+    useAppStore().stats = { ...createAppStatus({ isScanning: false }), folders: 1, indexedImages: 1 };
+    const feed = useFeedStore();
+    feed.$patch({ initialized: true, hasMore: false, items: [{ ...createMomentCapsule('remote-1', 'Remote').coverImage, sourceId: 1 }] });
+    vi.spyOn(feed, 'loadInitial').mockResolvedValue();
+    vi.spyOn(useMomentsStore(), 'fetchMoments').mockResolvedValue();
+    const sources = useSourcesStore();
+    sources.items = [{ id: 1, name: 'Immich', enabled: 1, status: 'ready', generation: 1, updated_at: '', available: false, syncing: false }];
+    const wrapper = mountHomeView();
+    await flushPromises();
+    expect(wrapper.text()).toContain('Reconnecting automatically');
+    expect(wrapper.find('.home-layout__header').exists()).toBe(false);
+    expect(wrapper.find('infinite-loader-stub').exists()).toBe(false);
+    expect(wrapper.find('empty-state-stub').exists()).toBe(false);
+    sources.items[0]!.available = true;
+    await flushPromises();
+    expect(wrapper.find('.home-layout__header').exists()).toBe(true);
+    expect(wrapper.find('infinite-loader-stub').exists()).toBe(true);
+    wrapper.unmount();
   });
 
   it('shows an explicit startup scan phase badge and updates it with the current phase', async () => {

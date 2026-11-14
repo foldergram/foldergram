@@ -3,19 +3,27 @@
     ref="homeLayoutElement"
     :class="[
       'home-layout grid gap-[4rem] items-start justify-center mx-auto',
-      { 'home-layout--compact': isCompactHomeLayout },
-      isCompactHomeLayout
+      { 'home-layout--compact': isSingleColumnLayout },
+      isSingleColumnLayout
         ? 'grid-cols-1 w-full'
         : 'grid-cols-[minmax(0,39.375rem)_19.9375rem] w-[min(100%,63.3125rem)] md:relative',
     ]"
     :style="
-      isCompactHomeLayout
+      isSingleColumnLayout
         ? undefined
         : { left: 'calc(var(--desktop-content-compensation) * -1)' }
     "
   >
     <!-- Main feed column -->
     <div class="min-w-0">
+      <SourceUnavailable
+        v-for="source in displayedUnavailableSources"
+        :key="source.id"
+        :name="source.name"
+        :variant="showSourceOutageState ? 'panel' : 'banner'"
+        class="mx-auto mb-5 w-full max-w-[29.375rem]"
+        :class="{ 'mt-[clamp(1rem,6vh,4rem)]': showSourceOutageState }"
+      />
       <section
         v-if="appStore.isLibraryRebuildRequired && appStore.stats && !appStore.isRebuilding"
         class="grid gap-[0.55rem] px-5 py-[1rem] mb-[1.1rem] border rounded-[1rem] shadow-[var(--shadow)]"
@@ -39,7 +47,7 @@
         </div>
       </section>
 
-      <section v-if="!appStore.isLibraryUnavailable" class="home-layout__header grid min-w-0 gap-[0.6875rem] mb-5 mx-auto w-full max-w-[39.375rem]">
+      <section v-if="!appStore.isLibraryUnavailable && !showSourceOutageState" class="home-layout__header grid min-w-0 gap-[0.6875rem] mb-5 mx-auto w-full max-w-[39.375rem]">
         <section v-if="displayMomentItems.length" class="mb-2 min-w-0">
           <div class="story-rail-shell">
             <div class="stories-bar story-rail pb-5 pt-[0.12rem]" :aria-label="momentsStore.displayRailTitle">
@@ -112,7 +120,11 @@
 
       <!-- States -->
       <EmptyState v-if="appStore.isLibraryUnavailable" :title="t('common.libraryUnavailableTitle')" :description="appStore.libraryUnavailableReason" />
-      <ErrorState v-else-if="feedStore.error" :title="t('home.feed.loadErrorTitle')" :message="feedStore.error" />
+      <ErrorState v-else-if="feedStore.error && !showSourceOutageState" :title="t('home.feed.loadErrorTitle')" :message="feedStore.error" />
+      <template v-else-if="showSourceOutageState" />
+      <div v-else-if="showFeedSkeleton && !showInitialScanState" class="mx-auto w-full max-w-[29.375rem]" data-test="home-feed-skeleton">
+        <FeedList :items="[]" context="home" show-skeleton />
+      </div>
 
       <!-- Initial scan state (no feed yet) -->
       <section v-else-if="showInitialScanState" class="grid gap-[0.85rem] px-5 py-5 mb-[1.1rem] border border-border rounded-[1rem] shadow-[var(--shadow)]" style="background: radial-gradient(circle at top right, rgba(0,149,246,0.12), transparent 38%), linear-gradient(180deg, var(--surface) 0%, color-mix(in srgb, var(--surface) 90%, var(--accent) 10%) 100%);">
@@ -165,7 +177,10 @@
           {{ homeScanError }}
         </p>
       </section>
-      <EmptyState v-else-if="feedStore.initialized && feedStore.items.length === 0" :title="t('home.feed.emptyTitle')" :description="t('home.feed.emptyDescription')" />
+      <section v-else-if="feedStore.initialized && feedStore.items.length === 0 && !showSourceOutageState">
+        <EmptyState :title="t('home.feed.emptyTitle')" :description="t('home.feed.emptyDescription')" />
+        <RouterLink v-if="canManageLibrary" class="btn-primary mt-4" :to="{name:'settings',query:{section:'sources'}}">Connect Immich or review media sources</RouterLink>
+      </section>
       <template v-else>
         <div
           v-if="feedStoryError"
@@ -188,14 +203,13 @@
         <!-- Feed cards in home-layout context: transparent card, no shadow -->
         <div class="w-full max-w-[29.375rem] mx-auto flex flex-col gap-[1.2rem]">
           <FeedList
-            :items="feedStore.items"
+            :items="visibleFeedItems"
             context="home"
-            :show-skeleton="!feedStore.initialized && feedStore.loading"
             @open-folder-story="openFeedFolderStory"
           />
         </div>
         <div class="w-full max-w-[29.375rem] mx-auto">
-          <InfiniteLoader :loading="feedStore.loading" :has-more="feedStore.hasMore" @load-more="feedStore.loadMore" />
+          <InfiniteLoader v-if="feedStore.hasMore || feedStore.loading || !sourcesStore.unavailable.length" :loading="feedStore.loading" :has-more="feedStore.hasMore" @load-more="feedStore.loadMore" />
         </div>
       </template>
 
@@ -222,7 +236,7 @@
       v-if="
         !appStore.isLibraryUnavailable &&
         homeSummaryFolder &&
-        !isCompactHomeLayout
+        !isSingleColumnLayout
       "
       class="grid gap-[1.15rem] w-[19rem] text-muted mt-5"
       :aria-label="t('home.sidebar.ariaLabel')"
@@ -274,6 +288,8 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import SourceUnavailable from '../components/SourceUnavailable.vue';
+import { useSourcesStore } from '../stores/sources';
 import { useI18n } from 'vue-i18n';
 import { RouterLink } from 'vue-router';
 
@@ -303,13 +319,34 @@ const folderStoriesStore = useFolderStoriesStore();
 const likesStore = useLikesStore();
 const foldersStore = useFoldersStore();
 const momentsStore = useMomentsStore();
+const sourcesStore = useSourcesStore();
+const visibleFeedItems = computed(() => feedStore.items.filter(item =>
+  !item.sourceId || (sourcesStore.initialized && sourcesStore.canBrowse(item.sourceId))
+));
+const showSourceOutageState = computed(() =>
+  sourcesStore.allContentUnavailable || (
+    sourcesStore.hasLocalPosts === null && sourcesStore.unavailable.length > 0 && feedStore.initialized && !feedStore.loading && !feedStore.hasMore &&
+    !feedStore.error && visibleFeedItems.value.length === 0
+  )
+);
+const displayedUnavailableSources = computed(() =>
+  showSourceOutageState.value || visibleFeedItems.value.length > 0 || (
+    sourcesStore.hasLocalPosts === true && feedStore.initialized && !feedStore.loading && !feedStore.hasMore
+  ) ? sourcesStore.unavailable : []
+);
+const showFeedSkeleton = computed(() =>
+  !showSourceOutageState.value && visibleFeedItems.value.length === 0 && (
+    feedStore.loading || !feedStore.initialized || feedStore.hasMore || !sourcesStore.initialized
+  )
+);
 const { t } = useI18n();
 const likedCountByFolder = computed(() => buildLikedCountByFolder(likesStore.items));
 const recommendationCandidates = computed(() => {
   const lastOpened = appStore.lastOpenedFolderSlug ? foldersStore.summaryBySlug[appStore.lastOpenedFolderSlug] : null;
-  return lastOpened && !foldersStore.items.some((folder) => folder.slug === lastOpened.slug)
+  const candidates = lastOpened && !foldersStore.items.some((folder) => folder.slug === lastOpened.slug)
     ? [...foldersStore.items, lastOpened]
     : foldersStore.items;
+  return candidates.filter(folder => sourcesStore.canBrowse(folder.sourceId));
 });
 const homeRecommendations = computed(() =>
   selectHomeRecommendations(recommendationCandidates.value, likedCountByFolder.value, appStore.lastOpenedFolderSlug)
@@ -321,6 +358,7 @@ const activeFeedStoryId = ref<string | null>(null);
 const feedStoryRetrySlug = ref<string | null>(null);
 const homeLayoutElement = ref<HTMLElement | null>(null);
 const isCompactHomeLayout = ref(false);
+const isSingleColumnLayout = computed(() => isCompactHomeLayout.value || showSourceOutageState.value);
 const requestingHomeScan = ref(false);
 const homeScanError = ref<string | null>(null);
 const feedStoryError = ref<string | null>(null);
@@ -336,7 +374,7 @@ function formatCount(value: number) {
   return new Intl.NumberFormat().format(value);
 }
 
-const displayMomentItems = computed(() => momentsStore.localizedItems);
+const displayMomentItems = computed(() => momentsStore.localizedItems.filter(item => sourcesStore.canBrowse(item.coverImage.sourceId)));
 const homeSidebarLinkLabel = computed(() =>
   authStore.likesMode === 'local' ? t('home.sidebar.viewFavorites') : t('home.sidebar.viewLikes')
 );
@@ -380,6 +418,7 @@ const hasIndexedFolders = computed(() => (appStore.stats?.folders ?? 0) > 0);
 const showHomeSetupNotice = computed(
   () =>
     !appStore.isLibraryUnavailable &&
+    !showSourceOutageState.value &&
     !showInitialScanState.value &&
     Boolean(appStore.stats) &&
     feedStore.initialized &&
@@ -573,13 +612,36 @@ onMounted(async () => {
   }
 
   feedStore.initializeMode(appStore.defaultHomeFeedMode);
+  if (sourcesStore.allContentUnavailable) return;
   await Promise.all([feedStore.loadInitial(), momentsStore.fetchMoments()]);
 });
 
 watch(
+  () => sourcesStore.allContentUnavailable,
+  async (unavailable, wasUnavailable) => {
+    if (!unavailable && wasUnavailable && !appStore.isLibraryUnavailable) {
+      await Promise.all([feedStore.loadInitial(true), momentsStore.fetchMoments(true)]);
+    }
+  }
+);
+
+// A mixed library may have several pages of offline-source metadata before its
+// first usable local post. Keep one initial loading state while finding it.
+watch(
+  () => [sourcesStore.initialized, showSourceOutageState.value, visibleFeedItems.value.length,
+    feedStore.initialized, feedStore.loading, feedStore.hasMore, feedStore.error] as const,
+  async ([sourcesReady, unavailable, visibleCount, feedReady, loading, hasMore, error]) => {
+    if (!appStore.isLibraryUnavailable && sourcesReady && !unavailable && visibleCount === 0 && feedReady && !loading && hasMore && !error) {
+      await feedStore.loadMore();
+    }
+  },
+  { immediate: true }
+);
+
+watch(
   () => appStore.stats?.indexedImages ?? 0,
   async (indexedImages) => {
-    if (appStore.isLibraryUnavailable) {
+    if (appStore.isLibraryUnavailable || sourcesStore.allContentUnavailable) {
       return;
     }
 

@@ -130,7 +130,7 @@
     </section>
 
     <nav
-      class="sticky top-3 z-20 grid w-full grid-cols-5 gap-1.5 rounded-[1.2rem] border border-border bg-[color-mix(in_srgb,var(--bg)_90%,var(--surface)_10%)] p-1.5 shadow-[0_12px_34px_rgba(15,20,25,0.08)] backdrop-blur-[18px] md:hidden"
+      class="sticky top-3 z-20 grid w-full grid-cols-6 gap-1.5 rounded-[1.2rem] border border-border bg-[color-mix(in_srgb,var(--bg)_90%,var(--surface)_10%)] p-1.5 shadow-[0_12px_34px_rgba(15,20,25,0.08)] backdrop-blur-[18px] md:hidden"
       :aria-label="t('settings.sections.navigation')"
     >
       <button
@@ -148,6 +148,14 @@
         :aria-label="t('settings.sections.general.label')"
       >
         <span class="h-[1.55rem] w-[1.55rem]" :class="currentCategory === 'general' ? 'i-fluent-settings-20-filled' : 'i-fluent-settings-20-regular'" aria-hidden="true"></span>
+      </button>
+      <button
+        @click="currentCategory = 'sources'"
+        class="flex min-h-[3.15rem] items-center justify-center rounded-[0.95rem] border-0 bg-transparent p-0 text-muted transition-colors duration-150 cursor-pointer"
+        :class="currentCategory === 'sources' ? 'bg-surface-alt text-text' : 'hover:bg-surface-hover hover:text-text'"
+        :aria-label="t('settings.sections.sources.label')"
+      >
+        <span class="h-[1.55rem] w-[1.55rem]" :class="currentCategory === 'sources' ? 'i-fluent-plug-connected-20-filled' : 'i-fluent-plug-connected-20-regular'" aria-hidden="true"></span>
       </button>
       <button
         @click="currentCategory = 'places'"
@@ -204,6 +212,17 @@
           </span>
         </button>
         <button
+          @click="currentCategory = 'sources'"
+          class="flex items-start gap-3 rounded-[0.85rem] border-0 px-4 py-[0.85rem] text-left text-[1rem] transition-colors duration-150 cursor-pointer"
+          :class="currentCategory === 'sources' ? 'bg-surface-alt font-bold text-text' : 'bg-transparent text-muted hover:bg-surface-hover hover:text-text'"
+        >
+          <span class="mt-[0.1rem] h-[1.25rem] w-[1.25rem] shrink-0" :class="currentCategory === 'sources' ? 'i-fluent-plug-connected-20-filled' : 'i-fluent-plug-connected-20-regular'" aria-hidden="true"></span>
+          <span class="flex min-w-0 flex-col gap-[0.1rem]">
+            <span>{{ t('settings.sections.sources.label') }}</span>
+            <span class="text-[0.75rem] font-normal text-muted">{{ t('settings.sections.sources.description') }}</span>
+          </span>
+        </button>
+        <button
           @click="currentCategory = 'places'"
           class="flex items-start gap-3 rounded-[0.85rem] border-0 px-4 py-[0.85rem] text-left text-[1rem] transition-colors duration-150 cursor-pointer"
           :class="currentCategory === 'places' ? 'bg-surface-alt font-bold text-text' : 'bg-transparent text-muted hover:bg-surface-hover hover:text-text'"
@@ -241,6 +260,7 @@
       <!-- Content Area -->
       <div class="flex-1 w-full min-w-0 flex flex-col gap-[1.15rem]">
         
+        <SourceSettings v-if="currentCategory === 'sources'" @manage-local-exclusions="openExcludedFolders" />
         <!-- CATEGORY: ACCESS -->
         <template v-if="currentCategory === 'access'">
           <section class="card grid gap-[1.15rem] p-8">
@@ -1026,7 +1046,7 @@
                 </button>
               </div>
 
-              <div class="grid gap-4 px-6 py-4">
+              <div ref="excludedFoldersSection" class="grid scroll-mt-24 gap-4 px-6 py-4">
                 <div class="min-w-0">
                   <div class="flex flex-wrap items-center gap-2">
                     <p class="m-0 text-[0.96rem] font-semibold text-text">{{ t('settings.general.excludedFolders.label') }}</p>
@@ -1040,6 +1060,7 @@
                 <label class="grid gap-[0.45rem]">
                   <span class="text-[0.76rem] font-bold uppercase tracking-[0.08em] text-muted">{{ t('settings.general.excludedFolders.customRules') }}</span>
                   <textarea
+                    ref="excludedFoldersInput"
                     v-model="customExcludedFoldersDraft"
                     class="min-h-[10rem] rounded-[0.95rem] border border-border bg-[color-mix(in_srgb,var(--surface-alt)_84%,transparent_16%)] px-4 py-3 text-[0.95rem] leading-[1.55] text-text outline-none transition-[border-color,box-shadow] duration-180 placeholder:text-muted focus:border-[color-mix(in_srgb,var(--accent)_48%,var(--border)_52%)] focus:shadow-[0_0_0_4px_color-mix(in_srgb,var(--accent-soft)_76%,transparent_24%)]"
                     :disabled="savingGeneralSettings || adminStats === null"
@@ -1383,6 +1404,7 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRoute } from 'vue-router';
 
+import SourceSettings from '../components/SourceSettings.vue';
 import ConfirmDialog from '../components/ConfirmDialog.vue';
 import {
   fetchAdminStats,
@@ -1419,7 +1441,15 @@ const momentsStore = useMomentsStore();
 const placesStore = usePlacesStore();
 const viewerStore = useViewerStore();
 const route = useRoute();
-const currentCategory = ref<'library' | 'general' | 'places' | 'access' | 'status'>('library');
+const currentCategory = ref<'library' | 'general' | 'places' | 'access' | 'status' | 'sources'>(route.query.section === 'sources' ? 'sources' : 'library');
+const excludedFoldersSection = ref<HTMLElement | null>(null);
+const excludedFoldersInput = ref<HTMLTextAreaElement | null>(null);
+async function openExcludedFolders() {
+  currentCategory.value = 'general';
+  await nextTick();
+  excludedFoldersSection.value?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  excludedFoldersInput.value?.focus({ preventScroll: true });
+}
 const scanError = ref<string | null>(null);
 const rebuildError = ref<string | null>(null);
 const thumbnailRebuildError = ref<string | null>(null);

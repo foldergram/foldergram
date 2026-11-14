@@ -57,7 +57,7 @@ function findCurrentImageRecord(
   if (!imageRecord || (expectedImageId !== undefined && imageRecord.id !== expectedImageId)) {
     return null;
   }
-  return imageRecord;
+  return imageRecord.source_id ? null : imageRecord;
 }
 
 function sendDerivativeNotFound(response: express.Response): void {

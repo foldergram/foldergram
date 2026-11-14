@@ -17,6 +17,7 @@ interface FeedState {
   initialized: boolean;
   randomSeed: number | null;
   reloadRequested: boolean;
+  generation: number;
 }
 
 function createRandomSeed(): number {
@@ -40,7 +41,8 @@ export const useFeedStore = defineStore('feed', {
     error: null,
     initialized: false,
     randomSeed: null,
-    reloadRequested: false
+    reloadRequested: false,
+    generation: 0
   }),
   actions: {
     initializeMode(mode: FeedMode = 'random') {
@@ -83,6 +85,7 @@ export const useFeedStore = defineStore('feed', {
     },
 
     resetForRebuild() {
+      this.generation++;
       this.loadedMode = null;
       this.items = [];
       this.page = 1;
@@ -127,9 +130,11 @@ export const useFeedStore = defineStore('feed', {
       const requestMode = this.mode;
       const requestPage = this.page;
       const requestSeed = requestMode === 'random' ? this.ensureRandomSeed() : undefined;
+      const generation = this.generation;
 
       try {
         const payload = await fetchFeed(requestPage, this.limit, requestMode, requestSeed);
+        if (generation !== this.generation) return;
 
         const modeChanged = this.mode !== requestMode;
         const seedChanged = requestMode === 'random' && this.randomSeed !== requestSeed;
@@ -145,13 +150,16 @@ export const useFeedStore = defineStore('feed', {
         this.hasMore = payload.hasMore;
         this.initialized = true;
       } catch (error) {
+        if (generation !== this.generation) return;
         this.error = error instanceof Error ? error.message : i18n.global.t('errors.loadFeed');
       } finally {
-        this.loading = false;
+        if (generation === this.generation) {
+          this.loading = false;
 
-        if (this.reloadRequested) {
-          this.reloadRequested = false;
-          await this.loadInitial(true);
+          if (this.reloadRequested) {
+            this.reloadRequested = false;
+            await this.loadInitial(true);
+          }
         }
       }
     }

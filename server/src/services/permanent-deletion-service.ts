@@ -491,6 +491,7 @@ export class PermanentDeletionService {
 
     const post = postRepository.findById(postId);
     if (!post) return null;
+    if (post.source_id) throw new Error('Immich media is read-only.');
     const folderSlug = folderRepository.getById(post.folder_id)?.slug ?? '';
     const operationId = randomUUID();
     const targets = await this.buildValidatedTargets(operationId, postRepository.listImageRecords(post.id));

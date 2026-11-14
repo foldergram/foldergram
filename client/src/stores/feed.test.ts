@@ -42,6 +42,23 @@ describe('feed store', () => {
     vi.restoreAllMocks();
   });
 
+  it('ignores a pre-sync request after invalidation while a refreshed feed is loading', async () => {
+    const pending = createDeferred<Awaited<ReturnType<typeof galleryApi.fetchFeed>>>();
+    const fresh = createDeferred<Awaited<ReturnType<typeof galleryApi.fetchFeed>>>();
+    vi.spyOn(galleryApi, 'fetchFeed').mockReturnValueOnce(pending.promise).mockReturnValueOnce(fresh.promise);
+    const feed = useFeedStore();
+    const oldLoad = feed.loadInitial();
+    feed.resetForRebuild();
+    const newLoad = feed.loadInitial();
+    pending.resolve({ items: [createFeedItem(1)], page: 1, limit: 18, total: 1, hasMore: false });
+    await oldLoad;
+    expect(feed.items).toEqual([]);
+    expect(feed.loading).toBe(true);
+    fresh.resolve({ items: [createFeedItem(2)], page: 1, limit: 18, total: 1, hasMore: false });
+    await newLoad;
+    expect(feed.items.map(item => item.id)).toEqual([2]);
+  });
+
   it('loads the recent feed without a random seed', async () => {
     const fetchFeedSpy = vi.spyOn(galleryApi, 'fetchFeed').mockResolvedValue({
       mode: 'recent',

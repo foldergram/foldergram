@@ -1,4 +1,10 @@
 {
+  "sources": {
+    "unavailableTitle": "Immich ist nicht verfügbar",
+    "unavailableMessage": "Verbindung zu deinem Immich-Server nicht möglich. Prüfe, ob er läuft, und versuche es erneut.",
+    "reconnecting": "Verbindung wird automatisch wiederhergestellt",
+    "checking": "Wird geprüft…"
+  },
   "common": {
     "cancel": "Abbrechen",
     "close": "Schließen",
@@ -96,6 +102,10 @@
       "general": {
         "label": "Allgemeine Einstellungen",
         "description": "Stories-Modus, ausgeschlossene Ordner und Feed-Standards"
+      },
+      "sources": {
+        "label": "Quellen",
+        "description": "Immich-Integration einrichten und verwalten"
       },
       "places": {
         "label": "Orte",

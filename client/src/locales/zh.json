@@ -1,4 +1,10 @@
 {
+  "sources": {
+    "unavailableTitle": "Immich 暂时不可用",
+    "unavailableMessage": "无法连接到你的 Immich 服务器。请确认服务器正在运行，然后重试。",
+    "reconnecting": "正在自动重新连接",
+    "checking": "正在检查…"
+  },
   "common": {
     "cancel": "取消",
     "close": "关闭",
@@ -96,6 +102,10 @@
       "general": {
         "label": "常规设置",
         "description": "Stories 模式、排除文件夹和动态流默认项"
+      },
+      "sources": {
+        "label": "媒体来源",
+        "description": "设置和管理 Immich 集成"
       },
       "places": {
         "label": "地点",

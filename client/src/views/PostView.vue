@@ -1,6 +1,7 @@
 <template>
   <div :class="modal ? 'image-view image-view--modal' : 'image-view image-view--page'" @click.stop>
-    <ErrorState v-if="viewerStore.error" :title="t('post.view.loadErrorTitle')" :message="viewerStore.error" />
+    <SourceUnavailable v-if="sourcesStore.isUnavailable(activeImage?.sourceId)" />
+    <ErrorState v-else-if="viewerStore.error" :title="t('post.view.loadErrorTitle')" :message="viewerStore.error" />
     <PostViewer
       v-else-if="activeImage"
       :image="activeImage"
@@ -54,6 +55,8 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
+import SourceUnavailable from '../components/SourceUnavailable.vue';
+import { useSourcesStore } from '../stores/sources';
 import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
 
@@ -78,6 +81,7 @@ const emit = defineEmits<{
 
 const { t } = useI18n();
 const appStore = useAppStore();
+const sourcesStore = useSourcesStore();
 const feedStore = useFeedStore();
 const likesStore = useLikesStore();
 const viewerStore = useViewerStore();
@@ -90,6 +94,7 @@ const deleteOriginalFromDisk = ref(false);
 const deleteError = ref<string | null>(null);
 
 const imageId = computed(() => Number(props.id));
+const activeFolderSlug = computed(() => typeof route.query.folder === 'string' ? route.query.folder : undefined);
 const activeMediaType = computed(() => (route.query.tab === 'reels' ? 'video' : undefined));
 const activeImage = computed(() => (viewerStore.image?.id === imageId.value ? viewerStore.image : null));
 const folder = computed(() =>
@@ -104,11 +109,12 @@ const deleteDialogConfirmLabel = computed(() => (deleteOriginalFromDisk.value ? 
 
 async function loadImage() {
   if (Number.isFinite(imageId.value)) {
-    await viewerStore.loadImage(imageId.value, activeMediaType.value);
+    if (activeFolderSlug.value) await viewerStore.loadImage(imageId.value,activeMediaType.value,activeFolderSlug.value);
+    else await viewerStore.loadImage(imageId.value, activeMediaType.value);
   }
 }
 
-watch(() => [imageId.value, activeMediaType.value] as const, loadImage, { immediate: true });
+watch(() => [imageId.value, activeMediaType.value, activeFolderSlug.value] as const, loadImage, { immediate: true });
 watch(
   () => activeImage.value?.folderSlug,
   (slug) => { if (slug) void foldersStore.ensureSummary(slug).catch(() => {}); },

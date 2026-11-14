@@ -7,16 +7,15 @@ description: Short answers to common questions about Foldergram's actual scope a
 
 ## Is Foldergram a cloud product?
 
-No. The current repository is designed for local-only, self-hosted use.
+No. Foldergram is self-hosted and local-first. It can optionally connect to your self-hosted Immich server using a restricted read-only API key; see [Immich integration](./immich.md).
 
 ## Does it upload or sync my media anywhere?
 
-No. Originals stay in the configured gallery root.
+Foldergram does not upload your media. For local sources, originals stay in the configured gallery root. With the optional [Immich integration](./immich.md), originals remain on your Immich server. Foldergram synchronizes selected remote metadata into SQLite and fetches thumbnails, previews and video playback files on demand through the Immich API. Original downloads are optional and disabled by default.
 
 ## Does it scan files directly during API requests?
 
-No. Request handlers read from SQLite and derivative directories. Scanning is a
-separate service.
+Local filesystem scanning runs as a separate service. Local browsing reads SQLite and derivative files, generating missing derivatives on demand in lazy mode. Immich metadata synchronization also runs separately; remote media requests can fetch files from Immich or its private Foldergram cache. During Immich outages, affected sources show an unavailable state with Retry while local content remains usable.
 
 ## Are files in the gallery root indexed?
 

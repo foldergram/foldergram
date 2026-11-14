@@ -14,6 +14,8 @@ interface LikesState {
   loading: boolean;
   error: string | null;
   initialized: boolean;
+  generation: number;
+  initialization: Promise<void> | null;
 }
 
 const LOCAL_FAVORITES_STORAGE_KEY = 'foldergram-local-favorites';
@@ -94,7 +96,9 @@ export const useLikesStore = defineStore('likes', {
     pendingIds: [],
     loading: false,
     error: null,
-    initialized: false
+    initialized: false,
+    generation: 0,
+    initialization: null
   }),
   getters: {
     isLiked: (state) => (id: number) => state.likedIds.includes(id),
@@ -155,6 +159,8 @@ export const useLikesStore = defineStore('likes', {
     resetForRebuild() {
       const authStore = useAuthStore();
 
+      this.generation++;
+      this.initialization = null;
       this.mode = authStore.likesMode;
       this.items = [];
       this.likedIds = [];
@@ -171,36 +177,63 @@ export const useLikesStore = defineStore('likes', {
         return;
       }
 
-      if ((this.initialized && this.mode === authStore.likesMode && !force) || this.loading) {
+      const mode = authStore.likesMode;
+      if (this.mode !== mode) this.resetForRebuild();
+      if (this.initialization) return this.initialization;
+      if (this.initialized && !force) {
         return;
       }
 
       this.loading = true;
       this.error = null;
+      const generation = this.generation;
 
-      try {
-        if (authStore.likesMode === 'shared') {
-          const payload = await fetchLikes();
-          this.syncFromItems(payload.items, 'shared');
-        } else {
-          this.syncFromItems(readLocalFavorites(), 'local');
+      const request = (async () => {
+        try {
+          if (mode === 'shared') {
+            const payload = await fetchLikes();
+            if (generation !== this.generation || mode !== authStore.likesMode || !authStore.canUseSavedItems) return;
+            this.syncFromItems(payload.items, mode);
+          } else {
+            this.syncFromItems(readLocalFavorites(), mode);
+          }
+
+          this.initialized = true;
+        } catch (error) {
+          if (generation !== this.generation) return;
+          this.error = error instanceof Error
+            ? error.message
+            : mode === 'local'
+              ? i18n.global.t('likes.errors.loadLocal')
+              : i18n.global.t('likes.errors.loadShared');
+        } finally {
+          if (generation === this.generation) this.loading = false;
         }
+      })();
 
-        this.initialized = true;
-      } catch (error) {
-        this.error = error instanceof Error
-          ? error.message
-          : this.mode === 'local'
-            ? i18n.global.t('likes.errors.loadLocal')
-            : i18n.global.t('likes.errors.loadShared');
+      this.initialization = request;
+      try {
+        await request;
       } finally {
-        this.loading = false;
+        if (this.initialization === request) this.initialization = null;
+      }
+    },
+
+    ensureLocalFavoritesLoaded() {
+      if (useAuthStore().likesMode === 'local' && (!this.initialized || this.mode !== 'local')) {
+        this.syncFromItems(readLocalFavorites(), 'local');
+        this.initialized = true;
       }
     },
 
     async toggleLike(item: FeedItem) {
       const authStore = useAuthStore();
       if (!authStore.canUseSavedItems || this.pendingIds.includes(item.id)) {
+        return;
+      }
+
+      await this.initialize();
+      if (!authStore.canUseSavedItems || !this.initialized || this.mode !== authStore.likesMode || this.pendingIds.includes(item.id)) {
         return;
       }
 
@@ -251,6 +284,7 @@ export const useLikesStore = defineStore('likes', {
     },
 
     removeImage(id: number) {
+      this.ensureLocalFavoritesLoaded();
       this.likedIds = this.likedIds.filter((entry) => entry !== id);
       this.items = this.items.filter((entry) => entry.id !== id);
       this.pendingIds = this.pendingIds.filter((entry) => entry !== id);
@@ -261,6 +295,7 @@ export const useLikesStore = defineStore('likes', {
     },
 
     removeFolderItems(folderSlug: string) {
+      this.ensureLocalFavoritesLoaded();
       const removedIds = new Set(this.items.filter((item) => item.folderSlug === folderSlug).map((item) => item.id));
       this.items = this.items.filter((item) => item.folderSlug !== folderSlug);
       this.likedIds = this.likedIds.filter((id) => !removedIds.has(id));
@@ -272,6 +307,7 @@ export const useLikesStore = defineStore('likes', {
     },
 
     updateImageCaption(id: number, caption: string | null) {
+      this.ensureLocalFavoritesLoaded();
       this.items = updateCaptionInItems(this.items, id, caption);
 
       if (this.mode === 'local') {

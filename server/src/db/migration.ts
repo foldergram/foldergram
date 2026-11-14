@@ -24,6 +24,8 @@ const FOLDER_SHARES_MIGRATION_VERSION = '000004';
 const POSTS_MIGRATION_VERSION = '000005';
 const SCHEMA_MIGRATIONS_TABLE_SQL = 'CREATE TABLE IF NOT EXISTS schema_migrations (version TEXT PRIMARY KEY)';
 const APP_SCHEMA_TABLES = [
+  'media_sources',
+  'folder_media_memberships',
   'folders',
   'images',
   'posts',

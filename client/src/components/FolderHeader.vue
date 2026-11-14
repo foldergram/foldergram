@@ -45,6 +45,7 @@
         >
           {{ t('folder.header.editButton') }}
         </button>
+        <span v-if="folder.sourceId" class="eyebrow">Immich · Read-only source</span>
         <button
           v-if="authStore.canManageLibrary"
           type="button"

@@ -56,13 +56,15 @@ const DEFAULT_COLLECTION_SLUG = 'saved';
 const DEFAULT_COLLECTION_NAME = 'Saved';
 const COVER_FILENAMES = ['cover.jpg', 'cover.jpeg', 'cover.png', 'cover.webp', 'cover.avif', 'cover.gif'] as const;
 const COVER_FILENAME_SQL = COVER_FILENAMES.map((name) => `'${name}'`).join(', ');
-const NORMAL_FOLDER_ROLE_SQL = "folders.role = 'normal'";
-const NORMAL_FOLDER_ID_SUBQUERY_SQL = "SELECT id FROM folders WHERE role = 'normal'";
+const SOURCE_FOLDER_VISIBLE_SQL = "(folders.source_id IS NULL OR (folders.remote_visible=1 AND EXISTS (SELECT 1 FROM media_sources WHERE media_sources.id=folders.source_id AND enabled=1 AND status!='revoked')))";
+const NORMAL_FOLDER_ROLE_SQL = "folders.role = 'normal' AND " + SOURCE_FOLDER_VISIBLE_SQL;
+const NORMAL_FOLDER_ID_SUBQUERY_SQL = `SELECT id FROM folders WHERE ${NORMAL_FOLDER_ROLE_SQL}`;
+const POST_FOLDER_MEMBERSHIP_SQL = `posts.id IN (SELECT id FROM posts WHERE folder_id=? UNION SELECT membership_items.post_id FROM folder_media_memberships AS memberships JOIN post_items AS membership_items ON membership_items.image_id=memberships.image_id WHERE memberships.folder_id=?)`;
 
 const VISIBLE_IMAGE_WHERE_SQL =
-  `images.is_deleted = 0 AND images.is_trashed = 0 AND LOWER(images.filename) NOT IN (${COVER_FILENAME_SQL}) AND ${NORMAL_FOLDER_ROLE_SQL}`;
+  `images.is_deleted = 0 AND images.is_trashed = 0 AND (images.source_id IS NOT NULL OR LOWER(images.filename) NOT IN (${COVER_FILENAME_SQL})) AND ${NORMAL_FOLDER_ROLE_SQL}`;
 const VISIBLE_IMAGE_WHERE_UNSCOPED_SQL =
-  `is_deleted = 0 AND is_trashed = 0 AND LOWER(filename) NOT IN (${COVER_FILENAME_SQL}) AND folder_id IN (${NORMAL_FOLDER_ID_SUBQUERY_SQL})`;
+  `is_deleted = 0 AND is_trashed = 0 AND (source_id IS NOT NULL OR LOWER(filename) NOT IN (${COVER_FILENAME_SQL})) AND folder_id IN (${NORMAL_FOLDER_ID_SUBQUERY_SQL})`;
 
 const NOT_EXPLICIT_FOLDER_COVER_SQL =
   `NOT EXISTS (` +
@@ -70,7 +72,7 @@ const NOT_EXPLICIT_FOLDER_COVER_SQL =
   `INNER JOIN images AS cover_images ON cover_images.id = cover_items.image_id ` +
   `WHERE cover_items.post_id = posts.id ` +
   `AND cover_items.position = 1 ` +
-  `AND cover_images.folder_id = posts.folder_id ` +
+  `AND cover_images.source_id IS NULL AND cover_images.folder_id = posts.folder_id ` +
   `AND LOWER(cover_images.filename) IN (${COVER_FILENAME_SQL})` +
   `)`;
 
@@ -103,6 +105,7 @@ const ACTIVE_FOLDER_AVATAR_IMAGE_ID_SQL = `
   WHERE avatar_images.id = folders.avatar_image_id
     AND (
       avatar_images.folder_id = folders.id
+      OR EXISTS (SELECT 1 FROM folder_media_memberships WHERE image_id=avatar_images.id AND folder_id=folders.id)
       OR EXISTS (
         SELECT 1
         FROM folders AS avatar_source_folders
@@ -119,7 +122,7 @@ const ACTIVE_FOLDER_AVATAR_IMAGE_ID_SQL = `
 const EXPLICIT_FOLDER_COVER_IMAGE_ID_SQL = `
   SELECT cover_images.id
   FROM images AS cover_images
-  WHERE cover_images.folder_id = folders.id
+  WHERE cover_images.source_id IS NULL AND cover_images.folder_id = folders.id
     AND cover_images.is_deleted = 0
     AND cover_images.is_trashed = 0
     AND LOWER(cover_images.filename) IN (${COVER_FILENAME_SQL})
@@ -142,7 +145,7 @@ const NEWEST_POST_AVATAR_IMAGE_ID_SQL = `
   FROM posts AS p
   JOIN post_items AS pi ON pi.post_id = p.id AND pi.position = 1
   JOIN images AS fallback_images ON fallback_images.id = pi.image_id
-  WHERE p.folder_id = folders.id
+  WHERE p.id IN (SELECT id FROM posts WHERE folder_id=folders.id UNION SELECT post_id FROM folder_media_memberships JOIN post_items ON post_items.image_id=folder_media_memberships.image_id WHERE folder_id=folders.id)
     AND p.is_deleted = 0
     AND p.is_trashed = 0
   ORDER BY p.sort_timestamp DESC, p.id DESC
@@ -162,21 +165,30 @@ const FOLDER_SUMMARY_AVATAR_IMAGE_ID_SQL = `
 function folderSummaryCtes(whereSql: string): string {
   return `
     WITH folder_candidates AS MATERIALIZED (
-      SELECT * FROM folders WHERE ${whereSql}
+      SELECT * FROM folders WHERE (${whereSql}) AND ${SOURCE_FOLDER_VISIBLE_SQL}
+    ), folder_post_ids AS MATERIALIZED (
+      SELECT posts.id AS post_id, posts.folder_id AS folder_id
+      FROM folder_candidates JOIN posts ON posts.folder_id=folder_candidates.id
+      WHERE posts.is_deleted=0 AND posts.is_trashed=0
+      UNION
+      SELECT post_items.post_id, memberships.folder_id
+      FROM folder_candidates JOIN folder_media_memberships AS memberships ON memberships.folder_id=folder_candidates.id
+      JOIN post_items ON post_items.image_id=memberships.image_id
     ), folder_media_stats AS (
       SELECT folders.id AS folder_id,
         COUNT(DISTINCT posts.id) AS post_count,
         SUM(CASE WHEN post_items.position = 1 AND NOT (
-          images.folder_id = posts.folder_id AND LOWER(images.filename) IN (${COVER_FILENAME_SQL})
+          images.source_id IS NULL AND images.folder_id = posts.folder_id AND LOWER(images.filename) IN (${COVER_FILENAME_SQL})
         ) THEN 1 ELSE 0 END) AS image_count,
         SUM(CASE WHEN post_items.position = 1 AND posts.post_type = 'carousel' AND NOT (
-          images.folder_id = posts.folder_id AND LOWER(images.filename) IN (${COVER_FILENAME_SQL})
+          images.source_id IS NULL AND images.folder_id = posts.folder_id AND LOWER(images.filename) IN (${COVER_FILENAME_SQL})
         ) THEN 1 ELSE 0 END) AS carousel_count,
         SUM(CASE WHEN post_items.position = 1 AND posts.post_type = 'single'
           AND images.media_type = 'video' THEN 1 ELSE 0 END) AS video_count,
         MAX(images.mtime_ms) AS latest_image_mtime_ms
       FROM folder_candidates AS folders
-      LEFT JOIN posts ON posts.folder_id = folders.id AND posts.is_deleted = 0 AND posts.is_trashed = 0
+      LEFT JOIN folder_post_ids ON folder_post_ids.folder_id=folders.id
+      LEFT JOIN posts ON posts.id=folder_post_ids.post_id AND posts.is_deleted=0 AND posts.is_trashed=0
       LEFT JOIN post_items ON post_items.post_id = posts.id
       LEFT JOIN images ON images.id = post_items.image_id
       GROUP BY folders.id
@@ -199,7 +211,7 @@ const FOLDER_SUMMARY_COLUMNS_SQL = `
 const FOLDER_SUMMARY_AVATAR_JOIN_SQL = `
   LEFT JOIN images AS summary_avatar ON summary_avatar.id = folders.summary_avatar_image_id
 `;
-const FOLDER_SUMMARY_VISIBILITY_SQL = '(post_count > 0 OR summary_avatar_image_id IS NOT NULL)';
+const FOLDER_SUMMARY_VISIBILITY_SQL = '(post_count > 0 OR summary_avatar_image_id IS NOT NULL OR (folders.source_id IS NOT NULL AND folders.remote_visible=1))';
 const FOLDER_DIRECTORY_ORDER_SQL: Record<FolderDirectorySort, string> = {
   'recent-desc': 'folders.latest_image_mtime_ms DESC, folders.name COLLATE NOCASE ASC, folders.folder_path COLLATE NOCASE ASC, folders.id ASC',
   'images-desc': 'folders.image_count DESC, folders.name COLLATE NOCASE ASC, folders.folder_path COLLATE NOCASE ASC, folders.id ASC',
@@ -258,6 +270,8 @@ const POST_SAVED_SELECT_SQL = `
 const BASE_POST_SELECT_SQL = `
   SELECT
     posts.id,
+    posts.source_id AS sourceId,
+    CASE WHEN posts.source_id IS NULL THEN 1 ELSE COALESCE((SELECT json_extract(config_json,'$.allowOriginals') FROM media_sources WHERE id=posts.source_id),0) END AS originalDownloadsAllowed,
     posts.folder_id AS folderId,
     folders.slug AS folderSlug,
     folders.name AS folderName,
@@ -293,6 +307,8 @@ const BASE_POST_SELECT_SQL = `
 const REEL_CANDIDATE_SELECT_SQL = `
   SELECT
     posts.id,
+    posts.source_id AS sourceId,
+    CASE WHEN posts.source_id IS NULL THEN 1 ELSE COALESCE((SELECT json_extract(config_json,'$.allowOriginals') FROM media_sources WHERE id=posts.source_id),0) END AS originalDownloadsAllowed,
     posts.folder_id AS folderId,
     folders.slug AS folderSlug,
     folders.name AS folderName,
@@ -344,7 +360,7 @@ const REEL_CANDIDATE_WHERE_SQL = `
   ${VISIBLE_POST_WHERE_SQL}
   AND posts.post_type = 'single'
   AND images.media_type = 'video'
-  AND LOWER(images.filename) NOT IN (${COVER_FILENAME_SQL})
+  AND (images.source_id IS NOT NULL OR LOWER(images.filename) NOT IN (${COVER_FILENAME_SQL}))
 `;
 
 const REEL_RANDOM_ORDER_SQL = 'reel_random_rank(posts.id, ?), posts.id DESC';
@@ -666,11 +682,11 @@ export interface UpsertCityPlaceInput {
 
 export const folderRepository = {
   getAll(): FolderRecord[] {
-    return database.prepare('SELECT * FROM folders ORDER BY folder_path COLLATE NOCASE ASC').all() as unknown as FolderRecord[];
+    return database.prepare('SELECT * FROM folders WHERE source_id IS NULL ORDER BY folder_path COLLATE NOCASE ASC').all() as unknown as FolderRecord[];
   },
 
   getNormalBySlug(slug: string): FolderRecord | undefined {
-    return database.prepare("SELECT * FROM folders WHERE slug = ? AND role = 'normal'").get(slug) as FolderRecord | undefined;
+    return database.prepare("SELECT * FROM folders WHERE slug = ? AND role = 'normal' AND (source_id IS NULL OR (remote_visible=1 AND source_id IN (SELECT id FROM media_sources WHERE enabled=1 AND status!='revoked')))").get(slug) as FolderRecord | undefined;
   },
 
   getAllSummaries(): FolderSummaryRecord[] {
@@ -692,7 +708,7 @@ export const folderRepository = {
     const rows = database.prepare(`
       ${folderSummaryCtes(whereSql)},
       directory_visible AS MATERIALIZED (
-        SELECT * FROM folder_summaries WHERE ${FOLDER_SUMMARY_VISIBILITY_SQL}
+        SELECT * FROM folder_summaries AS folders WHERE ${FOLDER_SUMMARY_VISIBILITY_SQL}
       ), directory_page AS (
         SELECT * FROM directory_visible AS folders ORDER BY ${orderSql} LIMIT ? OFFSET ?
       )
@@ -760,6 +776,7 @@ export const folderRepository = {
   },
 
   upsert(input: UpsertFolderInput): FolderRecord {
+    if (this.getByFolderPath(input.folderPath)?.source_id) throw new Error('Local indexing cannot overwrite Immich records.');
     const normalizedFolderPath = normalizePath(input.folderPath);
     const role = input.role ?? 'normal';
     const storyOwnerFolderId = input.storyOwnerFolderId ?? null;
@@ -782,6 +799,7 @@ export const folderRepository = {
   },
 
   save(input: UpsertFolderInput): SaveFolderResult {
+    if (this.getByFolderPath(input.folderPath)?.source_id) throw new Error('Local indexing cannot overwrite Immich records.');
     const normalizedFolderPath = normalizePath(input.folderPath);
     const existing = this.getByFolderPath(normalizedFolderPath);
     const role = input.role ?? 'normal';
@@ -829,9 +847,9 @@ export const folderRepository = {
             `
             SELECT COUNT(*) AS count
             FROM folders
-            WHERE folders.role = 'normal'
+            WHERE ${NORMAL_FOLDER_ROLE_SQL}
               AND (
-                EXISTS (
+                folders.source_id IS NOT NULL OR EXISTS (
                   SELECT 1
                   FROM posts
                   WHERE posts.folder_id = folders.id AND posts.is_deleted = 0 AND posts.is_trashed = 0
@@ -863,7 +881,7 @@ export const folderRepository = {
   },
 
   updateMetadata(slug: string, name: string, description: string | null): FolderRecord | undefined {
-    database.prepare("UPDATE folders SET name = ?, description = ?, updated_at = ? WHERE slug = ? AND role = 'normal'").run(
+    database.prepare("UPDATE folders SET metadata_override = 1, name = ?, description = ?, updated_at = ? WHERE slug = ? AND role = 'normal'").run(
       name,
       description,
       nowIso(),
@@ -873,6 +891,7 @@ export const folderRepository = {
   },
 
   delete(id: number): void {
+    if (this.getById(id)?.source_id) throw new Error('Immich folders are read-only. Manage the source in Settings.');
     database.prepare('DELETE FROM folders WHERE id = ?').run(id);
   },
 
@@ -885,7 +904,7 @@ export const folderRepository = {
     if (folder.avatar_source === 'manual' && folder.avatar_image_id !== null) {
       const manualImage = imageRepository.getById(folder.avatar_image_id);
       const manualImageFolder = manualImage ? this.getById(manualImage.folder_id) : undefined;
-      const belongsToFolder = manualImage?.folder_id === folderId || (
+      const belongsToFolder = manualImage?.folder_id === folderId || Boolean(manualImage && database.prepare('SELECT 1 FROM folder_media_memberships WHERE folder_id=? AND image_id=?').get(folderId,manualImage.id)) || (
         manualImageFolder?.role === 'carousel_source' &&
         manualImageFolder.carousel_owner_folder_id === folderId
       );
@@ -1161,6 +1180,7 @@ export const postRepository = {
     const existingByMembership = input.existingPostId !== undefined ? this.findById(input.existingPostId) : undefined;
     const existingBySource = this.findBySourcePath(input.sourcePath);
     const targetPost = existingByMembership ?? existingBySource;
+    if (targetPost?.source_id) throw new Error('Local indexing cannot overwrite Immich records.');
 
     if (targetPost) {
       database.prepare(
@@ -1398,6 +1418,7 @@ export const postRepository = {
         INNER JOIN images ON images.id = post_items.image_id
         WHERE posts.id = ?
           AND folders.role = 'normal'
+          AND images.source_id IS NULL
           AND images.folder_id = posts.folder_id
           AND LOWER(images.filename) IN (${COVER_FILENAME_SQL})
         LIMIT 1
@@ -1418,6 +1439,7 @@ export const postRepository = {
   },
 
   deletePostAndImages(postId: number): { id: number; folderSlug: string } | undefined {
+    if (this.findById(postId)?.source_id) throw new Error('Immich media is read-only.');
     database.exec('BEGIN IMMEDIATE');
     try {
       const post = this.findById(postId);
@@ -1585,6 +1607,15 @@ export const postRepository = {
     );
   },
 
+  hasVisibleLocalPosts(): boolean {
+    return Boolean(database.prepare(`
+      SELECT 1 FROM posts
+      INNER JOIN folders ON folders.id = posts.folder_id
+      WHERE posts.source_id IS NULL AND ${VISIBLE_POST_WHERE_SQL}
+      LIMIT 1
+    `).get());
+  },
+
   countVisibleMediaAssets(): number {
     return Number((database.prepare(
       `SELECT COUNT(*) AS count
@@ -1629,11 +1660,11 @@ export const postRepository = {
     const posts = database.prepare(
       `
       ${BASE_POST_SELECT_SQL}
-      WHERE posts.folder_id = ? AND ${VISIBLE_POST_WHERE_SQL}${mediaTypeClause}
+      WHERE ${POST_FOLDER_MEMBERSHIP_SQL} AND ${VISIBLE_POST_WHERE_SQL}${mediaTypeClause}
       ORDER BY ${orderBySql}
       LIMIT ? OFFSET ?
       `
-    ).all(...(mediaType ? [folderId, mediaType, limit, offset] : [folderId, limit, offset])) as unknown as FeedPost[];
+    ).all(...(mediaType ? [folderId, folderId, mediaType, limit, offset] : [folderId, folderId, limit, offset])) as unknown as FeedPost[];
 
     return this.hydratePostItems(posts);
   },
@@ -1650,10 +1681,10 @@ export const postRepository = {
             INNER JOIN folders ON folders.id = posts.folder_id
             JOIN post_items ON post_items.post_id = posts.id AND post_items.position = 1
             JOIN images ON images.id = post_items.image_id
-            WHERE posts.folder_id = ? AND ${VISIBLE_POST_WHERE_SQL}${mediaTypeClause}
+            WHERE ${POST_FOLDER_MEMBERSHIP_SQL} AND ${VISIBLE_POST_WHERE_SQL}${mediaTypeClause}
             `
           )
-          .get(...(mediaType ? [folderId, mediaType] : [folderId])) as { count: number }
+          .get(...(mediaType ? [folderId, folderId, mediaType] : [folderId, folderId])) as { count: number }
       ).count
     );
   },
@@ -1794,12 +1825,12 @@ export const postRepository = {
           SELECT posts.id
           ${REEL_CANDIDATE_ID_FROM_SQL}
           WHERE ${REEL_CANDIDATE_WHERE_SQL}
-            AND folders.slug IN (${placeholders})
+            AND (folders.slug IN (${placeholders}) OR EXISTS (SELECT 1 FROM folder_media_memberships JOIN folders AS affinity_folders ON affinity_folders.id=folder_media_memberships.folder_id WHERE image_id=images.id AND affinity_folders.slug IN (${placeholders})))
           ORDER BY posts.sort_timestamp DESC, posts.id DESC
           LIMIT ?
         )
       `);
-      parameters.push(...folderSlugs, REEL_RECOMMENDED_WINDOW_SLICES.affinity);
+      parameters.push(...folderSlugs, ...folderSlugs, REEL_RECOMMENDED_WINDOW_SLICES.affinity);
     }
 
     candidateBranches.push(`
@@ -1998,6 +2029,8 @@ export const postRepository = {
       `
       SELECT
         posts.id,
+    posts.source_id AS sourceId,
+    CASE WHEN posts.source_id IS NULL THEN 1 ELSE COALESCE((SELECT json_extract(config_json,'$.allowOriginals') FROM media_sources WHERE id=posts.source_id),0) END AS originalDownloadsAllowed,
         posts.folder_id AS folderId,
         folders.slug AS folderSlug,
         folders.name AS folderName,
@@ -2045,7 +2078,8 @@ export const postRepository = {
 
   getPostDetail(
     id: number,
-    folderImageOrder: FolderImageOrder = 'newest'
+    folderImageOrder: FolderImageOrder = 'newest',
+    browsingFolderId?: number
   ): PostDetail | undefined {
     const resolvedId = id;
     const nextComparisonSql = folderImageOrder === 'oldest'
@@ -2061,6 +2095,8 @@ export const postRepository = {
       `
       SELECT
         posts.id,
+    posts.source_id AS sourceId,
+    CASE WHEN posts.source_id IS NULL THEN 1 ELSE COALESCE((SELECT json_extract(config_json,'$.allowOriginals') FROM media_sources WHERE id=posts.source_id),0) END AS originalDownloadsAllowed,
         posts.folder_id AS folderId,
         folders.slug AS folderSlug,
         folders.name AS folderName,
@@ -2107,27 +2143,30 @@ export const postRepository = {
     const hydratedPosts = this.hydratePostItems([detailRow as unknown as FeedPost]);
     const hydratedPost = hydratedPosts[0];
 
+    const navigationWhere = browsingFolderId === undefined ? 'folder_id = ?' : POST_FOLDER_MEMBERSHIP_SQL;
+    const navigationParameters = browsingFolderId === undefined ? [hydratedPost.folderId] : [browsingFolderId, browsingFolderId];
+
     const next = database.prepare(
       `
       SELECT id
       FROM posts
-      WHERE folder_id = ? AND ${VISIBLE_POST_WHERE_UNSCOPED_SQL}
+      WHERE ${navigationWhere} AND ${VISIBLE_POST_WHERE_UNSCOPED_SQL}
         AND ${nextComparisonSql}
       ORDER BY ${nextOrderSql}
       LIMIT 1
       `
-    ).get(hydratedPost.folderId, hydratedPost.sortTimestamp, hydratedPost.sortTimestamp, hydratedPost.id) as { id: number } | undefined;
+    ).get(...navigationParameters, hydratedPost.sortTimestamp, hydratedPost.sortTimestamp, hydratedPost.id) as { id: number } | undefined;
 
     const previous = database.prepare(
       `
       SELECT id
       FROM posts
-      WHERE folder_id = ? AND ${VISIBLE_POST_WHERE_UNSCOPED_SQL}
+      WHERE ${navigationWhere} AND ${VISIBLE_POST_WHERE_UNSCOPED_SQL}
         AND ${previousComparisonSql}
       ORDER BY ${previousOrderSql}
       LIMIT 1
       `
-    ).get(hydratedPost.folderId, hydratedPost.sortTimestamp, hydratedPost.sortTimestamp, hydratedPost.id) as { id: number } | undefined;
+    ).get(...navigationParameters, hydratedPost.sortTimestamp, hydratedPost.sortTimestamp, hydratedPost.id) as { id: number } | undefined;
 
     const nextPostId = next?.id ?? null;
     const previousPostId = previous?.id ?? null;
@@ -2162,7 +2201,7 @@ export const postRepository = {
   softDeleteMissingByFolder(folderId: number, activeSourcePaths: string[], postType?: PostType): number {
     const rows = postType
       ? (database.prepare('SELECT source_path FROM posts WHERE folder_id = ? AND post_type = ? AND is_deleted = 0').all(folderId, postType) as Array<{ source_path: string }>)
-      : (database.prepare('SELECT source_path FROM posts WHERE folder_id = ? AND is_deleted = 0').all(folderId) as Array<{ source_path: string }>);
+      : (database.prepare('SELECT source_path FROM posts WHERE source_id IS NULL AND folder_id = ? AND is_deleted = 0').all(folderId) as Array<{ source_path: string }>);
     const active = new Set(activeSourcePaths);
     let removedCount = 0;
 
@@ -2179,7 +2218,7 @@ export const postRepository = {
   softDeleteMissingReservedCarousels(folderId: number, carouselsRootPath: string, activeSourcePaths: string[]): number {
     const normalizedPrefix = `${normalizePath(carouselsRootPath)}/`;
     const rows = database
-      .prepare('SELECT source_path FROM posts WHERE folder_id = ? AND is_deleted = 0 AND source_path LIKE ?')
+      .prepare('SELECT source_path FROM posts WHERE source_id IS NULL AND folder_id = ? AND is_deleted = 0 AND source_path LIKE ?')
       .all(folderId, `${normalizedPrefix}%`) as Array<{ source_path: string }>;
     const active = new Set(activeSourcePaths.map((sourcePath) => normalizePath(sourcePath)));
     let removedCount = 0;
@@ -2223,6 +2262,7 @@ export const postRepository = {
   },
 
   trashPost(id: number, trashedAt = nowIso()): boolean {
+    if (this.findById(id)?.source_id) throw new Error('Immich media is read-only.');
     const resolvedId = id;
     const now = nowIso();
     const result = database
@@ -2249,6 +2289,7 @@ export const postRepository = {
   },
 
   restoreTrashedPost(id: number): boolean {
+    if (this.findById(id)?.source_id) throw new Error('Immich media is read-only.');
     const resolvedId = id;
     const now = nowIso();
     const result = database
@@ -2275,6 +2316,7 @@ export const postRepository = {
   },
 
   deletePost(id: number): { id: number; folderSlug: string } | undefined {
+    if (this.findById(id)?.source_id) throw new Error('Immich media is read-only.');
     const post = this.findById(id);
     if (!post) {
       return undefined;
@@ -2316,11 +2358,12 @@ export const imageRepository = {
 
   listDerivativeReferences(): Array<Pick<ImageRecord, 'thumbnail_path' | 'preview_path' | 'is_deleted' | 'deleted_at'>> {
     return database
-      .prepare('SELECT thumbnail_path, preview_path, is_deleted, deleted_at FROM images')
+      .prepare('SELECT thumbnail_path, preview_path, is_deleted, deleted_at FROM images WHERE source_id IS NULL')
       .all() as Array<Pick<ImageRecord, 'thumbnail_path' | 'preview_path' | 'is_deleted' | 'deleted_at'>>;
   },
 
   upsert(input: UpsertImageInput): ImageRecord {
+    if (this.getByRelativePath(input.relativePath)?.source_id) throw new Error('Local indexing cannot overwrite Immich records.');
     database.prepare(
       `
       INSERT INTO images (
@@ -2408,6 +2451,7 @@ export const imageRepository = {
   },
 
   refreshIndexed(input: RefreshIndexedImageInput): ImageRecord {
+    if (this.getByRelativePath(input.relativePath)?.source_id) throw new Error('Local indexing cannot overwrite Immich records.');
     database.prepare(
       `
       UPDATE images
@@ -2491,15 +2535,15 @@ export const imageRepository = {
   markDeleted(relativePath: string): void {
     const deletedAt = nowIso();
     database
-      .prepare('UPDATE images SET is_deleted = 1, deleted_at = COALESCE(deleted_at, ?), updated_at = ? WHERE relative_path = ?')
+      .prepare('UPDATE images SET is_deleted = 1, deleted_at = COALESCE(deleted_at, ?), updated_at = ? WHERE source_id IS NULL AND relative_path = ?')
       .run(deletedAt, deletedAt, relativePath);
     database
-      .prepare('UPDATE posts SET is_deleted = 1, deleted_at = COALESCE(deleted_at, ?), updated_at = ? WHERE source_path = ?')
+      .prepare('UPDATE posts SET is_deleted = 1, deleted_at = COALESCE(deleted_at, ?), updated_at = ? WHERE source_id IS NULL AND source_path = ?')
       .run(deletedAt, deletedAt, relativePath);
   },
 
   markFolderImagesDeleted(folderId: number, activeRelativePaths: string[]): number {
-    const rows = database.prepare('SELECT relative_path FROM images WHERE folder_id = ? AND is_deleted = 0').all(folderId) as Array<{ relative_path: string }>;
+    const rows = database.prepare('SELECT relative_path FROM images WHERE source_id IS NULL AND folder_id = ? AND is_deleted = 0').all(folderId) as Array<{ relative_path: string }>;
     const active = new Set(activeRelativePaths);
     let removedCount = 0;
 
@@ -2516,7 +2560,7 @@ export const imageRepository = {
   markAllDeletedByFolder(folderId: number, postType?: PostType): number {
     const deletedAt = nowIso();
     const result = database
-      .prepare('UPDATE images SET is_deleted = 1, deleted_at = COALESCE(deleted_at, ?), updated_at = ? WHERE folder_id = ? AND is_deleted = 0')
+      .prepare('UPDATE images SET is_deleted = 1, deleted_at = COALESCE(deleted_at, ?), updated_at = ? WHERE source_id IS NULL AND folder_id = ? AND is_deleted = 0')
       .run(deletedAt, deletedAt, folderId);
     if (postType) {
       database
@@ -2524,7 +2568,7 @@ export const imageRepository = {
         .run(deletedAt, deletedAt, folderId, postType);
     } else {
       database
-        .prepare('UPDATE posts SET is_deleted = 1, deleted_at = COALESCE(deleted_at, ?), updated_at = ? WHERE folder_id = ? AND is_deleted = 0')
+        .prepare('UPDATE posts SET is_deleted = 1, deleted_at = COALESCE(deleted_at, ?), updated_at = ? WHERE source_id IS NULL AND folder_id = ? AND is_deleted = 0')
         .run(deletedAt, deletedAt, folderId);
     }
     return Number(result.changes ?? 0);
@@ -2532,8 +2576,8 @@ export const imageRepository = {
 
   reactivate(relativePath: string): void {
     const timestamp = nowIso();
-    database.prepare('UPDATE images SET is_deleted = 0, deleted_at = NULL, updated_at = ? WHERE relative_path = ?').run(timestamp, relativePath);
-    database.prepare('UPDATE posts SET is_deleted = 0, deleted_at = NULL, updated_at = ? WHERE source_path = ?').run(timestamp, relativePath);
+    database.prepare('UPDATE images SET is_deleted = 0, deleted_at = NULL, updated_at = ? WHERE source_id IS NULL AND relative_path = ?').run(timestamp, relativePath);
+    database.prepare('UPDATE posts SET is_deleted = 0, deleted_at = NULL, updated_at = ? WHERE source_id IS NULL AND source_path = ?').run(timestamp, relativePath);
   },
 
   countByMediaType(mediaType?: MediaType): number {
@@ -2597,6 +2641,7 @@ export const imageRepository = {
   },
 
   reconcileMove(input: ReconcileImageMoveInput): ImageRecord {
+    if (this.getById(input.id)?.source_id) throw new Error('Local indexing cannot overwrite Immich records.');
     database.prepare(
       `
       UPDATE images
@@ -2684,6 +2729,7 @@ export const imageRepository = {
   },
 
   deleteById(id: number): boolean {
+    if (this.getById(id)?.source_id) throw new Error('Immich media is read-only.');
     const postRes = postRepository.deletePost(id);
     const result = database.prepare('DELETE FROM images WHERE id = ?').run(id);
     return Number(result.changes ?? 0) > 0 || postRes !== undefined;
@@ -2882,7 +2928,7 @@ export const imageRepository = {
     return Number(
       (
         database
-          .prepare(`SELECT COUNT(*) AS count FROM images WHERE folder_id = ? AND is_deleted = 0${mediaTypeClause}`)
+          .prepare(`SELECT COUNT(*) AS count FROM images WHERE source_id IS NULL AND folder_id = ? AND is_deleted = 0${mediaTypeClause}`)
           .get(...(mediaType ? [folderId, mediaType] : [folderId])) as { count: number }
       ).count
     );
@@ -2925,7 +2971,7 @@ export const imageRepository = {
 
   listActiveByFolder(folderId: number): ImageRecord[] {
     return database
-      .prepare('SELECT * FROM images WHERE folder_id = ? AND is_deleted = 0 ORDER BY id ASC')
+      .prepare('SELECT * FROM images WHERE source_id IS NULL AND folder_id = ? AND is_deleted = 0 ORDER BY id ASC')
       .all(folderId) as unknown as ImageRecord[];
   },
 
@@ -2937,13 +2983,13 @@ export const imageRepository = {
 
   listActive(): ImageRecord[] {
     return database
-      .prepare('SELECT * FROM images WHERE is_deleted = 0 ORDER BY folder_id ASC, sort_timestamp DESC, id DESC')
+      .prepare('SELECT * FROM images WHERE source_id IS NULL AND is_deleted = 0 ORDER BY folder_id ASC, sort_timestamp DESC, id DESC')
       .all() as unknown as ImageRecord[];
   },
 
   refreshAbsolutePathsForGalleryRoot(galleryRoot: string): number {
     const rows = database
-      .prepare('SELECT id, relative_path, absolute_path FROM images WHERE is_deleted = 0 ORDER BY id ASC')
+      .prepare('SELECT id, relative_path, absolute_path FROM images WHERE source_id IS NULL AND is_deleted = 0 ORDER BY id ASC')
       .all() as Array<Pick<ImageRecord, 'id' | 'relative_path' | 'absolute_path'>>;
     const updates = rows.flatMap((row) => {
       const nextAbsolutePath = safeJoin(galleryRoot, row.relative_path);
@@ -2979,7 +3025,7 @@ export const imageRepository = {
 
   listByIdRange(afterId: number, limit: number): ImageRecord[] {
     return database
-      .prepare('SELECT * FROM images WHERE id > ? ORDER BY id ASC LIMIT ?')
+      .prepare('SELECT * FROM images WHERE source_id IS NULL AND id > ? ORDER BY id ASC LIMIT ?')
       .all(afterId, limit) as unknown as ImageRecord[];
   },
 
@@ -2998,16 +3044,16 @@ export const imageRepository = {
   },
 
   countAll(): number {
-    return Number((database.prepare('SELECT COUNT(*) AS count FROM images').get() as { count: number }).count);
+    return Number((database.prepare('SELECT COUNT(*) AS count FROM images WHERE source_id IS NULL').get() as { count: number }).count);
   },
 
   countUpToId(id: number): number {
-    return Number((database.prepare('SELECT COUNT(*) AS count FROM images WHERE id <= ?').get(id) as { count: number }).count);
+    return Number((database.prepare('SELECT COUNT(*) AS count FROM images WHERE source_id IS NULL AND id <= ?').get(id) as { count: number }).count);
   },
 
   countMissingAssetKeys(): number {
     return Number(
-      (database.prepare('SELECT COUNT(*) AS count FROM images WHERE asset_key IS NULL OR asset_key = \'\'').get() as { count: number }).count
+      (database.prepare('SELECT COUNT(*) AS count FROM images WHERE source_id IS NULL AND (asset_key IS NULL OR asset_key = \'\')').get() as { count: number }).count
     );
   },
 
@@ -3019,7 +3065,7 @@ export const imageRepository = {
             `
             SELECT COUNT(*) AS count
             FROM images
-            WHERE asset_key IS NULL
+            WHERE source_id IS NULL AND (asset_key IS NULL
               OR TRIM(asset_key) = ''
               OR LOWER(thumbnail_path) != LOWER(SUBSTR(TRIM(asset_key), 1, 2) || '/' || LOWER(TRIM(asset_key)) || '.webp')
               OR LOWER(preview_path) != LOWER(
@@ -3027,7 +3073,7 @@ export const imageRepository = {
                 || '/'
                 || LOWER(TRIM(asset_key))
                 || CASE WHEN media_type = 'video' THEN '.mp4' ELSE '.webp' END
-              )
+              ))
             `
           )
           .get() as { count: number }
@@ -3040,7 +3086,7 @@ export const imageRepository = {
       (
         database
           .prepare(
-            'SELECT COUNT(*) AS count FROM images WHERE folder_id = ? AND is_deleted = 0 AND (taken_at IS NULL OR taken_at_source IS NULL)'
+            'SELECT COUNT(*) AS count FROM images WHERE source_id IS NULL AND folder_id = ? AND is_deleted = 0 AND (taken_at IS NULL OR taken_at_source IS NULL)'
           )
           .get(folderId) as { count: number }
       ).count
@@ -3052,7 +3098,7 @@ export const imageRepository = {
       (
         database
           .prepare(
-            "SELECT COUNT(*) AS count FROM images WHERE folder_id = ? AND is_deleted = 0 AND media_type = 'video' AND (playback_strategy IS NULL OR playback_strategy = '')"
+            "SELECT COUNT(*) AS count FROM images WHERE source_id IS NULL AND folder_id = ? AND is_deleted = 0 AND media_type = 'video' AND (playback_strategy IS NULL OR playback_strategy = '')"
           )
           .get(folderId) as { count: number }
       ).count
@@ -3074,9 +3120,9 @@ export const imageRepository = {
       `SELECT pi.image_id
        FROM posts p
        JOIN post_items pi ON pi.post_id = p.id AND pi.position = 1
-       WHERE p.folder_id = ? AND p.is_deleted = 0 AND p.is_trashed = 0
+       WHERE (p.folder_id = ? OR EXISTS (SELECT 1 FROM folder_media_memberships WHERE image_id=pi.image_id AND folder_id=?)) AND p.is_deleted = 0 AND p.is_trashed = 0
        ORDER BY p.sort_timestamp DESC, p.id DESC LIMIT 1`
-    ).get(folderId) as { image_id: number } | undefined;
+    ).get(folderId,folderId) as { image_id: number } | undefined;
     if (row) return row.image_id;
 
     const imgRow = database.prepare(
@@ -3130,9 +3176,10 @@ export const imageRepository = {
     id: number,
     mediaType?: MediaType,
     allowHiddenCover = false,
-    folderImageOrder: FolderImageOrder = 'newest'
+    folderImageOrder: FolderImageOrder = 'newest',
+    browsingFolderId?: number
   ): ImageDetail | undefined {
-    return postRepository.getPostDetail(id, folderImageOrder) as ImageDetail | undefined;
+    return postRepository.getPostDetail(id, folderImageOrder, browsingFolderId) as ImageDetail | undefined;
   },
 
   countDeleted(): number {
@@ -3164,7 +3211,7 @@ export const imageRepository = {
       `
       SELECT *
       FROM images
-      WHERE file_size = ?
+      WHERE source_id IS NULL AND file_size = ?
         AND ROUND(mtime_ms) = ?
         AND LOWER(extension) = LOWER(?)
         AND is_deleted = 0
@@ -3179,7 +3226,7 @@ export const imageRepository = {
       `
       SELECT id, thumbnail_path, preview_path
       FROM images
-      WHERE is_deleted = 1
+      WHERE source_id IS NULL AND is_deleted = 1
         AND deleted_at IS NOT NULL
         AND deleted_at <= ?
       ORDER BY id ASC
@@ -3231,6 +3278,8 @@ export const likeRepository = {
       `
       SELECT
         posts.id,
+    posts.source_id AS sourceId,
+    CASE WHEN posts.source_id IS NULL THEN 1 ELSE COALESCE((SELECT json_extract(config_json,'$.allowOriginals') FROM media_sources WHERE id=posts.source_id),0) END AS originalDownloadsAllowed,
         posts.folder_id AS folderId,
         folders.slug AS folderSlug,
         folders.name AS folderName,
@@ -3276,6 +3325,8 @@ export const likeRepository = {
       `
       SELECT
         posts.id,
+    posts.source_id AS sourceId,
+    CASE WHEN posts.source_id IS NULL THEN 1 ELSE COALESCE((SELECT json_extract(config_json,'$.allowOriginals') FROM media_sources WHERE id=posts.source_id),0) END AS originalDownloadsAllowed,
         posts.folder_id AS folderId,
         folders.slug AS folderSlug,
         folders.name AS folderName,
@@ -3320,6 +3371,8 @@ export const likeRepository = {
       `
       SELECT
         posts.id,
+    posts.source_id AS sourceId,
+    CASE WHEN posts.source_id IS NULL THEN 1 ELSE COALESCE((SELECT json_extract(config_json,'$.allowOriginals') FROM media_sources WHERE id=posts.source_id),0) END AS originalDownloadsAllowed,
         posts.folder_id AS folderId,
         folders.slug AS folderSlug,
         folders.name AS folderName,
@@ -3688,6 +3741,8 @@ export const collectionRepository = {
       `
       SELECT
         posts.id,
+    posts.source_id AS sourceId,
+    CASE WHEN posts.source_id IS NULL THEN 1 ELSE COALESCE((SELECT json_extract(config_json,'$.allowOriginals') FROM media_sources WHERE id=posts.source_id),0) END AS originalDownloadsAllowed,
         posts.folder_id AS folderId,
         folders.slug AS folderSlug,
         folders.name AS folderName,
@@ -4051,20 +4106,14 @@ export const maintenanceRepository = {
   resetLibraryIndex(): void {
     database.exec(`
       BEGIN;
-      UPDATE folders SET avatar_image_id = NULL;
-      DELETE FROM likes;
-      DELETE FROM collection_items;
-      DELETE FROM collections WHERE is_default = 0;
-      DELETE FROM folder_share_passwords;
-      DELETE FROM folder_share_links;
-      DELETE FROM post_items;
-      DELETE FROM posts;
-      DELETE FROM images;
-      DELETE FROM folders;
+      UPDATE folders SET avatar_image_id = NULL WHERE source_id IS NULL;
+      DELETE FROM folder_share_passwords WHERE folder_id IN (SELECT id FROM folders WHERE source_id IS NULL);
+      DELETE FROM folder_share_links WHERE folder_id IN (SELECT id FROM folders WHERE source_id IS NULL);
+      DELETE FROM posts WHERE source_id IS NULL;
+      DELETE FROM images WHERE source_id IS NULL;
+      DELETE FROM folders WHERE source_id IS NULL;
       DELETE FROM folder_scan_state;
       DELETE FROM scan_runs;
-      DELETE FROM app_settings WHERE key = '${SHARE_SESSION_SECRET_SETTING_KEY}';
-      DELETE FROM sqlite_sequence WHERE name IN ('folders', 'images', 'posts', 'scan_runs');
       COMMIT;
     `);
   }

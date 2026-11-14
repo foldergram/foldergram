@@ -1,4 +1,10 @@
 {
+  "sources": {
+    "unavailableTitle": "Immich is unavailable",
+    "unavailableMessage": "Unable to connect to your Immich server. Check that it’s running, then try again.",
+    "reconnecting": "Reconnecting automatically",
+    "checking": "Checking…"
+  },
   "common": {
     "cancel": "Cancel",
     "close": "Close",
@@ -96,6 +102,10 @@
       "general": {
         "label": "General Settings",
         "description": "Stories mode, excluded folders, and feed defaults"
+      },
+      "sources": {
+        "label": "Sources",
+        "description": "Set up and manage Immich integration"
       },
       "places": {
         "label": "Places",

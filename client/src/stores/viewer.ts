@@ -29,13 +29,13 @@ export const useViewerStore = defineStore('viewer', {
       this.error = null;
     },
 
-    async loadImage(id: number, mediaType?: 'image' | 'video') {
+    async loadImage(id: number, mediaType?: 'image' | 'video', folderSlug?: string) {
       const requestToken = ++viewerLoadToken;
       this.loading = true;
       this.error = null;
 
       try {
-        const image = await fetchImage(id, mediaType);
+        const image = folderSlug ? await fetchImage(id,mediaType,folderSlug) : await fetchImage(id, mediaType);
         if (requestToken !== viewerLoadToken) {
           return;
         }

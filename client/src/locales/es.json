@@ -1,4 +1,10 @@
 {
+  "sources": {
+    "unavailableTitle": "Immich no está disponible",
+    "unavailableMessage": "No se puede conectar con tu servidor de Immich. Comprueba que esté en funcionamiento e inténtalo de nuevo.",
+    "reconnecting": "Reconectando automáticamente",
+    "checking": "Comprobando…"
+  },
   "common": {
     "cancel": "Cancelar",
     "close": "Cerrar",
@@ -96,6 +102,10 @@
       "general": {
         "label": "Ajustes generales",
         "description": "Modo de stories, carpetas excluidas y valores del feed"
+      },
+      "sources": {
+        "label": "Fuentes",
+        "description": "Configura y administra la integración con Immich"
       },
       "places": {
         "label": "Lugares",

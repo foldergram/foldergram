@@ -1,3 +1,4 @@
+import { sourcesRouter } from './immich/routes.js';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -37,7 +38,7 @@ export function createApp() {
     applyApiNoStoreHeaders(response);
     next();
   });
-  app.use('/api', blockPublicDemoMutations, requireTrustedMutationRequest, requireApiAuthentication, apiRouter);
+  app.use('/api', blockPublicDemoMutations, requireTrustedMutationRequest, requireApiAuthentication, sourcesRouter, apiRouter);
 
   if (appConfig.nodeEnv === 'production') {
     const clientDist = path.join(repositoryRoot, 'client', 'dist');

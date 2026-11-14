@@ -9,7 +9,8 @@ const appPackage = JSON.parse(
 const guideItems = [
   { text: 'Quick Start', link: '/quick-start' },
   { text: 'Installation', link: '/installation' },
-  { text: 'Configuration', link: '/configuration' }
+  { text: 'Configuration', link: '/configuration' },
+  { text: 'Immich Integration', link: '/immich' }
 ];
 
 const productItems = [

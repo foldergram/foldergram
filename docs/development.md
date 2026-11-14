@@ -176,3 +176,9 @@ static files from their configured directories.
 ## Carousel verification
 
 Focused coverage lives in `server/test/carousel-posts-feature.test.ts` and `server/test/migration-bootstrap.test.ts`. Fixtures should cover reserved and legacy discovery, natural ordering, mixed media, warnings, the 20-item cap, stable post identity, post-wide mutations, and migration metadata preservation. Run server/client tests plus app and documentation builds before shipping carousel changes.
+
+## Immich integration validation
+
+Tests use an isolated temporary database/cache, an empty or fixture local gallery, and a fake Immich server. They cover multi-album identities, uploaded/external/shared assets, mixed and remote-only operation, scanner isolation, pagination/retries/partial failures, metadata overrides, moves/visibility/deletion/membership reconciliation, formats, ranges, cache access and mutation guards. Live v3.3.5 validation on 2026-11-13 imported 237 external assets (197 images, 40 videos) across 15 groups into an empty `data-test/gallery`, preserving the index after a local scan. All seven geotagged assets resolved to Places using a separate copy of the existing offline GeoNames dataset. Thumbnail/preview responses were WebP/JPEG, and two distinct video byte ranges returned HTTP 206 with exact lengths. The production index and gallery were untouched; no live albums or media were created or deleted.
+
+Live validation must use a separate data root and an empty local gallery; never repoint the production index for testing.

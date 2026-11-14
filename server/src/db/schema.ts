@@ -1,3 +1,5 @@
+import { immichSchemaSql } from '../immich/schema.js';
+
 export const schemaSql = `
 PRAGMA foreign_keys = ON;
 
@@ -234,4 +236,5 @@ CREATE INDEX IF NOT EXISTS idx_collection_items_created ON collection_items(coll
 CREATE INDEX IF NOT EXISTS idx_folder_share_links_folder_id ON folder_share_links(folder_id);
 CREATE INDEX IF NOT EXISTS idx_folder_share_links_expires_at ON folder_share_links(expires_at);
 
+${immichSchemaSql}
 `;

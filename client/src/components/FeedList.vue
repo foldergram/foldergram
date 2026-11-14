@@ -2,7 +2,7 @@
   <section class="flex flex-col gap-[1.2rem]">
     <SkeletonCard v-if="showSkeleton" v-for="index in 4" :key="index" />
     <FeedCard
-      v-for="item in items"
+      v-for="item in availableItems"
       :key="item.id"
       :item="item"
       :context="context"
@@ -19,6 +19,7 @@
 import { computed, reactive, watch } from 'vue';
 
 import { useFoldersStore } from '../stores/folders';
+import { useSourcesStore } from '../stores/sources';
 import type { FeedItem } from '../types/api';
 import FeedCard from './FeedCard.vue';
 import SkeletonCard from './SkeletonCard.vue';
@@ -47,6 +48,8 @@ const emit = defineEmits<{
 }>();
 
 const foldersStore = useFoldersStore();
+const sourcesStore = useSourcesStore();
+const availableItems = computed(() => props.items.filter(item => sourcesStore.canBrowse(item.sourceId)));
 const folderLookup = computed(() => new Map([...foldersStore.items, ...Object.values(foldersStore.summaryBySlug)].map((folder) => [folder.slug, folder])));
 function folderAvatar(item: FeedItem) {
   const folder = folderLookup.value.get(item.folderSlug);

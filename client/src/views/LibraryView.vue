@@ -1,5 +1,6 @@
 <template>
   <section class="w-[min(100%,72rem)] mx-auto flex flex-col gap-[1.4rem]">
+    <SourceUnavailable v-for="source in sourcesStore.unavailable" :key="source.id" :name="source.name" variant="banner" />
     <!-- Page header -->
     <header
       class="flex items-end justify-between gap-4 max-sm:flex-col max-sm:items-start"
@@ -154,7 +155,7 @@
               <p
                 class="m-0 hidden text-muted text-[0.74rem] truncate font-mono opacity-70 sm:block"
               >
-                {{ folder.folderPath }}
+                {{ folder.sourceId ? 'Immich' : folder.folderPath }}
               </p>
               <div class="mt-1 grid gap-[0.1rem] sm:hidden">
                 <span class="text-[0.74rem] font-semibold text-text">
@@ -242,7 +243,7 @@
           <span>{{ t('libraryPage.openFolder') }}</span>
         </button>
         <button
-          v-if="authStore.canDeleteMedia"
+          v-if="authStore.canDeleteMedia && !menuFolder?.sourceId"
           class="flex items-center gap-[0.8rem] w-full px-4 py-[0.95rem] border-0 border-b border-border text-[#d93025] bg-transparent cursor-pointer text-left"
           type="button"
           :disabled="loadingDeleteDetails"
@@ -334,6 +335,8 @@
 
 <script setup lang="ts">
   import { computed, onMounted, onUnmounted, ref, watch } from "vue"
+  import SourceUnavailable from '../components/SourceUnavailable.vue';
+  import { useSourcesStore } from '../stores/sources';
   import { useI18n } from "vue-i18n"
   import { RouterLink, useRouter } from "vue-router"
 
@@ -361,6 +364,7 @@
     | "path-asc"
 
   const appStore = useAppStore()
+  const sourcesStore = useSourcesStore();
   const authStore = useAuthStore()
   const feedStore = useFeedStore()
   const likesStore = useLikesStore()
@@ -464,7 +468,7 @@
     return formatFolderTitle(folder, appStore.nestedFolderTitleFormat)
   }
 
-  const filteredFolders = computed(() => directory.items)
+  const filteredFolders = computed(() => directory.items.filter(folder => sourcesStore.canBrowse(folder.sourceId)))
 
   function openMenu(folder: FolderSummary) {
     deleteError.value = null

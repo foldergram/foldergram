@@ -166,6 +166,27 @@ describe('SettingsView', () => {
     vi.spyOn(galleryApi, 'fetchAdminStats').mockResolvedValue(createAppStats());
   });
 
+  it('opens and focuses the local folder exclusions from Sources', async () => {
+    useAppStore().$patch({ stats: createAppStatus() });
+    vi.spyOn(galleryApi, 'fetchPlacesStatus').mockResolvedValue(createPlacesStatus(true));
+    const wrapper = mount(SettingsView, {
+      attachTo: document.body,
+      global: { stubs: {
+        ConfirmDialog: true,
+        SourceSettings: { template: '<button data-test="open-exclusions" @click="$emit(\'manage-local-exclusions\')">Open folder exclusions</button>' }
+      } }
+    });
+    await flushPromises();
+    await wrapper.findAll('button').find(button => button.text().includes('Set up and manage Immich integration'))!.trigger('click');
+    await wrapper.find('[data-test="open-exclusions"]').trigger('click');
+    await flushPromises();
+    expect(wrapper.text()).toContain('Excluded source folders');
+    const input = wrapper.find('textarea[placeholder*="@eaDir"]');
+    expect(document.activeElement).toBe(input.element);
+    expect(scrollIntoViewSpy).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' });
+    wrapper.unmount();
+  });
+
   it('shows a persistent warning when permanent deletion recovery needs attention', async () => {
     const appStore = useAppStore();
     appStore.$patch({ stats: createAppStatus() });
