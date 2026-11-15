@@ -1,3 +1,4 @@
+import { startSources, stopSources } from './immich/source-service.js';
 /*
     Foldergram - Local-only photo and video gallery
     Copyright (C) 2026 Sajjad Ali
@@ -82,6 +83,7 @@ async function bootstrap(): Promise<void> {
 
   server.listen(appConfig.port, () => {
     logServerReady();
+    void startSources().catch(() => log.info("Immich source startup failed; local content remains available. Check source configuration."));
     const startupAction = scannerService.handleStartup("startup");
     if (startupAction === "blocked") {
       log.info("Gallery watcher deferred until the library rebuild completes");
@@ -97,6 +99,7 @@ async function bootstrap(): Promise<void> {
 
   async function shutdown(signal: string): Promise<void> {
     log.info(`Received ${signal}, shutting down`);
+    stopSources();
     await watcherService.stop();
     server.close(() => {
       databaseManager.close();

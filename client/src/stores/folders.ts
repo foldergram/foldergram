@@ -268,18 +268,21 @@ export const useFoldersStore = defineStore('folders', {
 
       this.loadingFolder = true;
       this.folderError = null;
+      const generation = this.listGeneration;
 
       try {
         const payload = await fetchFolderImages(slug, this.currentPage, this.currentLimit, mediaType);
+        if (generation !== this.listGeneration) return;
         this.currentFolder = payload.folder;
         this.currentImages.push(...payload.items);
         this.currentPage += 1;
         this.currentHasMore = payload.hasMore;
       } catch (error) {
+        if (generation !== this.listGeneration) return;
         this.currentFolder = null;
         this.folderError = error instanceof Error ? error.message : i18n.global.t('errors.loadFolder');
       } finally {
-        this.loadingFolder = false;
+        if (generation === this.listGeneration) this.loadingFolder = false;
       }
     },
 

@@ -6,6 +6,10 @@ services:
     environment:
       IMAGE_DETAIL_SOURCE: preview
       DERIVATIVE_MODE: eager
+      # Optional Immich integration: see docs/immich.md for explicit roots/albums and Docker secrets.
+      # IMMICH_URL: http://immich-server:2283
+      # IMMICH_API_KEY_FILE: /run/secrets/immich_api_key
+      # Persist data/db/immich-encryption.key with the database.
       # Optional: skip specific source folders by name or by exact relative path.
       # GALLERY_EXCLUDED_FOLDERS: "@eaDir,thumbnails,Archive/cache"
       # Optional: enable read-only public demo behavior.
@@ -14,6 +18,9 @@ services:
       # CSRF_TRUSTED_ORIGINS: https://foldergram.example.com
     volumes:
       - ./data/gallery:/app/data/gallery
+      # Optional: mount additional locations, then add the container paths in Settings > Sources.
+      # - /home/alex/Pictures:/sources/pictures:ro
+      # - /mnt/external/Photos:/sources/external:ro
       - ./data/db:/app/data/db
       - ./data/thumbnails:/app/data/thumbnails
       - ./data/previews:/app/data/previews

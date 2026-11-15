@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import { appConfig } from '../config/env.js';
+import { checkLocalSourceDirectory, getLocalSource, isImmichSource, listLocalSources, primaryLocalSource, resolveLocalPath, type LocalSource } from '../sources/local-source.js';
 import { folderRepository, postRepository } from '../db/repositories.js';
 import type { ImageRecord } from '../types/models.js';
 import { normalizePath } from '../utils/path-utils.js';
@@ -15,7 +16,7 @@ import {
 import { storageService } from './storage-service.js';
 
 const QUARANTINE_DIRECTORY_NAME = PERMANENT_DELETION_QUARANTINE_DIRECTORY_NAME;
-const JOURNAL_VERSION = 1;
+const JOURNAL_VERSION = 2;
 
 type DeletionRoot = 'gallery' | 'thumbnails' | 'previews';
 
@@ -28,6 +29,7 @@ interface FileIdentity {
 
 export interface PermanentDeletionRecoveryFailure {
   journalName: string;
+  sourceId: number;
   operationId: string | null;
   postId: number | null;
   folderSlug: string | null;
@@ -65,7 +67,9 @@ interface DeletionJournalEntry {
 }
 
 interface DeletionJournal {
-  version: typeof JOURNAL_VERSION;
+  version: 1 | typeof JOURNAL_VERSION;
+  sourceId?: number;
+  rootPath?: string;
   operationId: string;
   postId: number;
   folderSlug: string;
@@ -97,8 +101,8 @@ interface ValidatedDeletionTarget {
   identity: FileIdentity | null;
 }
 
-function getRootPath(root: DeletionRoot): string {
-  if (root === 'gallery') return appConfig.galleryRoot;
+function getRootPath(root: DeletionRoot, galleryRoot: string): string {
+  if (root === 'gallery') return galleryRoot;
   if (root === 'thumbnails') return appConfig.thumbnailsDir;
   return appConfig.previewsDir;
 }
@@ -344,7 +348,8 @@ async function pruneEmptyAncestors(rootPath: string, startDirectory: string, sto
 function parseJournal(value: unknown): DeletionJournal {
   if (!value || typeof value !== 'object') throw new Error('Deletion journal is not an object');
   const candidate = value as Partial<DeletionJournal>;
-  if (candidate.version !== JOURNAL_VERSION ||
+  if ((candidate.version !== 1 && candidate.version !== JOURNAL_VERSION) ||
+      (candidate.version === JOURNAL_VERSION && (!Number.isSafeInteger(candidate.sourceId) || typeof candidate.rootPath !== 'string' || !path.isAbsolute(candidate.rootPath))) ||
       typeof candidate.operationId !== 'string' || !/^[0-9a-f-]{36}$/i.test(candidate.operationId) ||
       !Number.isSafeInteger(candidate.postId) || Number(candidate.postId) <= 0 ||
       typeof candidate.folderSlug !== 'string' ||
@@ -411,6 +416,19 @@ export class PermanentDeletionService {
     return this.recoverPendingDeletionsInternal();
   }
 
+  hasPendingSourceRecovery(sourceId: number): boolean {
+    return [...this.recoveryFailures.values()].some(failure => failure.sourceId === sourceId);
+  }
+
+  private journalRoot(journal: DeletionJournal): string {
+    if (journal.version === 1) return checkLocalSourceDirectory(primaryLocalSource());
+    const source = journal.sourceId === undefined ? undefined : getLocalSource(journal.sourceId);
+    if (!source || checkLocalSourceDirectory(source) !== journal.rootPath) {
+      throw new Error('Deletion journal does not match the registered local source.');
+    }
+    return journal.rootPath!;
+  }
+
   getRecoveryStatus(): PermanentDeletionRecoveryStatus {
     const failures = [...this.recoveryFailures.values()]
       .sort((left, right) => left.journalName.localeCompare(right.journalName));
@@ -421,11 +439,13 @@ export class PermanentDeletionService {
   }
 
   private recordRecoveryFailure(
+    sourceId: number,
     journalName: string,
     error: unknown,
     journal?: Pick<DeletionJournal, 'operationId' | 'postId' | 'folderSlug' | 'createdAt'>
   ): void {
-    this.recoveryFailures.set(journalName, {
+    this.recoveryFailures.set(`${sourceId}:${journalName}`, {
+      sourceId,
       journalName,
       operationId: journal?.operationId ?? null,
       postId: journal?.postId ?? null,
@@ -491,11 +511,19 @@ export class PermanentDeletionService {
 
     const post = postRepository.findById(postId);
     if (!post) return null;
+    if (isImmichSource(post.source_id)) throw new Error('Immich media is read-only.');
+    const source = getLocalSource(post.source_id);
+    if (!source?.enabled || source.config.readOnlyOriginals) throw new Error('This source does not permit original-file deletion.');
+    if (this.hasPendingSourceRecovery(source.id)) throw new Error('Resolve pending deletion recovery for this source first.');
+    if (source.managed_by === 'environment' && path.resolve(source.config.rootPath) !== path.resolve(appConfig.galleryRoot)) throw new Error('Resolve the primary gallery relocation before deleting files.');
+    const rootPath = checkLocalSourceDirectory(source);
     const folderSlug = folderRepository.getById(post.folder_id)?.slug ?? '';
     const operationId = randomUUID();
-    const targets = await this.buildValidatedTargets(operationId, postRepository.listImageRecords(post.id));
+    const targets = await this.buildValidatedTargets(operationId, postRepository.listImageRecords(post.id), source, rootPath);
     const journal: DeletionJournal = {
       version: JOURNAL_VERSION,
+      sourceId: source.id,
+      rootPath,
       operationId,
       postId: post.id,
       folderSlug,
@@ -575,9 +603,10 @@ export class PermanentDeletionService {
     return deleted;
   }
 
-  private async buildValidatedTargets(operationId: string, images: ImageRecord[]): Promise<ValidatedDeletionTarget[]> {
+  private async buildValidatedTargets(operationId: string, images: ImageRecord[], source: LocalSource, galleryRoot: string): Promise<ValidatedDeletionTarget[]> {
     const candidates: Array<{ root: DeletionRoot; relativePath: string; label: string }> = [];
     for (const image of images) {
+      resolveLocalPath(source, image.relative_path, { allowMissing: true });
       candidates.push(
         { root: 'gallery', relativePath: image.relative_path, label: 'Stored original path' },
         { root: 'thumbnails', relativePath: image.thumbnail_path, label: 'Stored thumbnail path' },
@@ -588,7 +617,7 @@ export class PermanentDeletionService {
     const targets: ValidatedDeletionTarget[] = [];
     const seenAbsolutePaths = new Set<string>();
     for (const [index, candidate] of candidates.entries()) {
-      const rootPath = getRootPath(candidate.root);
+      const rootPath = getRootPath(candidate.root, galleryRoot);
       const normalizedCandidatePath = normalizePath(candidate.relativePath).replace(/^\/+/, '');
       if (normalizedCandidatePath === QUARANTINE_DIRECTORY_NAME || normalizedCandidatePath.startsWith(`${QUARANTINE_DIRECTORY_NAME}/`)) {
         throw new Error(`${candidate.label} overlaps private quarantine storage`);
@@ -627,15 +656,16 @@ export class PermanentDeletionService {
   }
 
   private async writeJournal(journal: DeletionJournal): Promise<string> {
-    const journalDirectory = path.join(appConfig.galleryRoot, QUARANTINE_DIRECTORY_NAME, 'journals');
-    await ensurePrivateDirectory(appConfig.galleryRoot, journalDirectory);
+    const galleryRoot = this.journalRoot(journal);
+    const journalDirectory = path.join(galleryRoot, QUARANTINE_DIRECTORY_NAME, 'journals');
+    await ensurePrivateDirectory(galleryRoot, journalDirectory);
     const finalPath = resolveRelativePathWithinRoot(
-      appConfig.galleryRoot,
+      galleryRoot,
       path.join(QUARANTINE_DIRECTORY_NAME, 'journals', `${journal.operationId}.json`),
       'Deletion journal path'
     );
     const temporaryPath = `${finalPath}.${randomUUID()}.tmp`;
-    const directoryGuard = captureDirectoryGuard(appConfig.galleryRoot, journalDirectory, 'Deletion journal directory');
+    const directoryGuard = captureDirectoryGuard(galleryRoot, journalDirectory, 'Deletion journal directory');
     assertDirectoryGuardStable(directoryGuard, 'Deletion journal directory');
     if (lstatSyncIfPresent(finalPath) || lstatSyncIfPresent(temporaryPath)) {
       throw new Error('Deletion journal destination is already occupied');
@@ -656,7 +686,7 @@ export class PermanentDeletionService {
 
   private getMoveMarkerPath(journal: DeletionJournal, entryIndex: number): string {
     return resolveRelativePathWithinRoot(
-      appConfig.galleryRoot,
+      this.journalRoot(journal),
       path.join(QUARANTINE_DIRECTORY_NAME, 'journals', `${journal.operationId}.${entryIndex}.moved`),
       'Deletion move marker path'
     );
@@ -665,7 +695,7 @@ export class PermanentDeletionService {
   private async writeMoveMarker(journal: DeletionJournal, entryIndex: number): Promise<void> {
     const markerPath = this.getMoveMarkerPath(journal, entryIndex);
     const markerDirectory = path.dirname(markerPath);
-    const directoryGuard = captureDirectoryGuard(appConfig.galleryRoot, markerDirectory, 'Deletion move marker directory');
+    const directoryGuard = captureDirectoryGuard(this.journalRoot(journal), markerDirectory, 'Deletion move marker directory');
     assertDirectoryGuardStable(directoryGuard, 'Deletion move marker directory');
     const fileDescriptor = fsSync.openSync(markerPath, 'wx', 0o600);
     try {
@@ -680,7 +710,7 @@ export class PermanentDeletionService {
 
   private async hasMoveMarker(journal: DeletionJournal, entryIndex: number): Promise<boolean> {
     const markerPath = this.getMoveMarkerPath(journal, entryIndex);
-    await assertNoSymlinkTraversal(appConfig.galleryRoot, markerPath, 'Deletion move marker path');
+    await assertNoSymlinkTraversal(this.journalRoot(journal), markerPath, 'Deletion move marker path');
     const stats = await lstatIfPresent(markerPath);
     if (!stats) return false;
     if (!stats.isFile() || stats.isSymbolicLink()) {
@@ -692,7 +722,7 @@ export class PermanentDeletionService {
   private async removeMoveMarkers(journal: DeletionJournal): Promise<void> {
     for (const entryIndex of journal.entries.keys()) {
       this.unlinkInternalFileIfPresent(
-        appConfig.galleryRoot,
+        this.journalRoot(journal),
         this.getMoveMarkerPath(journal, entryIndex),
         'Deletion move marker'
       );
@@ -708,7 +738,7 @@ export class PermanentDeletionService {
     for (let entryIndex = journal.entries.length - 1; entryIndex >= 0; entryIndex -= 1) {
       try {
         const moveCompleted = completedMoves.has(entryIndex) || await this.hasMoveMarker(journal, entryIndex);
-        await this.restoreEntry(journal.entries[entryIndex], moveCompleted);
+        await this.restoreEntry(journal.entries[entryIndex], moveCompleted, this.journalRoot(journal));
       } catch (error) {
         restoreErrors.push(error);
       }
@@ -716,7 +746,7 @@ export class PermanentDeletionService {
 
     if (restoreErrors.length > 0) {
       const restoreError = new AggregateError(restoreErrors, `Unable to restore ${restoreErrors.length} quarantined deletion target(s)`);
-      this.recordRecoveryFailure(path.basename(journalPath), restoreError, journal);
+      this.recordRecoveryFailure(journal.sourceId ?? primaryLocalSource().id, path.basename(journalPath), restoreError, journal);
       log.error('Permanent deletion rollback requires recovery', {
         operationId: journal.operationId,
         postId: journal.postId,
@@ -726,13 +756,13 @@ export class PermanentDeletionService {
     }
 
     await this.removeMoveMarkers(journal);
-    this.unlinkInternalFileIfPresent(appConfig.galleryRoot, journalPath, 'Deletion journal');
-    this.recoveryFailures.delete(path.basename(journalPath));
+    this.unlinkInternalFileIfPresent(this.journalRoot(journal), journalPath, 'Deletion journal');
+    this.recoveryFailures.delete(`${journal.sourceId ?? primaryLocalSource().id}:${path.basename(journalPath)}`);
   }
 
-  private async restoreEntry(entry: DeletionJournalEntry, moveCompleted: boolean): Promise<void> {
+  private async restoreEntry(entry: DeletionJournalEntry, moveCompleted: boolean, galleryRoot: string): Promise<void> {
     if (!entry.wasPresent || !entry.identity) return;
-    const rootPath = getRootPath(entry.root);
+    const rootPath = getRootPath(entry.root, galleryRoot);
     const originalPath = resolveRelativePathWithinRoot(rootPath, entry.originalRelativePath, 'Journal original path');
     const quarantinePath = resolveRelativePathWithinRoot(rootPath, entry.quarantineRelativePath, 'Journal quarantine path');
     await assertNoSymlinkTraversal(rootPath, originalPath, 'Journal original path');
@@ -766,15 +796,31 @@ export class PermanentDeletionService {
   }
 
   private async recoverPendingDeletionsInternal(): Promise<void> {
-    const journalDirectory = path.join(appConfig.galleryRoot, QUARANTINE_DIRECTORY_NAME, 'journals');
+    this.recoveryFailures.clear();
+    for (const source of listLocalSources()) {
+      if (source.managed_by === 'settings' && source.config.readOnlyOriginals) continue;
+      await this.recoverSourceJournals(source);
+    }
+  }
+
+  private async recoverSourceJournals(source: LocalSource): Promise<void> {
+    let galleryRoot: string;
+    try {
+      galleryRoot = checkLocalSourceDirectory(source);
+    } catch {
+      if (source.managed_by === 'settings' || path.resolve(source.config.rootPath) !== path.resolve(appConfig.galleryRoot)) {
+        this.recordRecoveryFailure(source.id, 'journals', new Error('Reconnect the source to check its deletion journals.'));
+      }
+      return;
+    }
+    const journalDirectory = path.join(galleryRoot, QUARANTINE_DIRECTORY_NAME, 'journals');
     let journalNames: string[];
     try {
       const directoryStats = await lstatIfPresent(journalDirectory);
       if (!directoryStats) {
-        this.recoveryFailures.clear();
         return;
       }
-      await assertNoSymlinkTraversal(appConfig.galleryRoot, journalDirectory, 'Deletion journal directory');
+      await assertNoSymlinkTraversal(galleryRoot, journalDirectory, 'Deletion journal directory');
       if (!directoryStats.isDirectory() || directoryStats.isSymbolicLink()) {
         throw new Error('Deletion journal path is not a directory');
       }
@@ -786,35 +832,32 @@ export class PermanentDeletionService {
         throw new Error('Cannot recover permanent deletions while the configured database is offline');
       }
     } catch (error) {
-      this.recordRecoveryFailure('journals', error);
+      this.recordRecoveryFailure(source.id, 'journals', error);
       log.error('Permanent deletion recovery check failed; server operation will continue', error);
       return;
     }
-
-    const activeJournalNames = new Set(journalNames);
-    for (const recordedName of this.recoveryFailures.keys()) {
-      if (recordedName !== 'journals' && !activeJournalNames.has(recordedName)) {
-        this.recoveryFailures.delete(recordedName);
-      }
-    }
-    this.recoveryFailures.delete('journals');
 
     for (const journalName of journalNames) {
       let journal: DeletionJournal | undefined;
       try {
         const journalPath = resolveRelativePathWithinRoot(
-          appConfig.galleryRoot,
+          galleryRoot,
           path.join(QUARANTINE_DIRECTORY_NAME, 'journals', journalName),
           'Deletion journal path'
         );
-        await assertNoSymlinkTraversal(appConfig.galleryRoot, journalPath, 'Deletion journal path');
+        await assertNoSymlinkTraversal(galleryRoot, journalPath, 'Deletion journal path');
         const stats = await fs.lstat(journalPath);
         if (!stats.isFile() || stats.isSymbolicLink()) {
           throw new Error(`Deletion journal is not a regular file: ${journalName}`);
         }
         journal = parseJournal(JSON.parse(await fs.readFile(journalPath, 'utf8')));
 
-        if (postRepository.findById(journal.postId)) {
+        if ((journal.version === 1 && source.managed_by !== 'environment') ||
+            (journal.version === JOURNAL_VERSION && journal.sourceId !== source.id) ||
+            this.journalRoot(journal) !== galleryRoot) throw new Error('Deletion journal belongs to a different source.');
+        const post = postRepository.findById(journal.postId);
+        if (post && post.source_id !== source.id) throw new Error('Deletion journal post belongs to a different source.');
+        if (post) {
           await this.restoreJournal(journal, journalPath);
           log.info('Recovered interrupted permanent deletion by restoring quarantined files', {
             operationId: journal.operationId,
@@ -823,9 +866,8 @@ export class PermanentDeletionService {
         } else {
           await this.cleanupCommittedJournal(journal, journalPath);
         }
-        this.recoveryFailures.delete(journalName);
       } catch (error) {
-        this.recordRecoveryFailure(journalName, error, journal);
+        this.recordRecoveryFailure(source.id, journalName, error, journal);
         log.error('Permanent deletion recovery remains pending; server operation will continue', {
           journalName,
           operationId: journal?.operationId ?? null,
@@ -839,9 +881,9 @@ export class PermanentDeletionService {
   private async tryCleanupCommittedJournal(journal: DeletionJournal, journalPath: string): Promise<void> {
     try {
       await this.cleanupCommittedJournal(journal, journalPath);
-      this.recoveryFailures.delete(path.basename(journalPath));
+      this.recoveryFailures.delete(`${journal.sourceId ?? primaryLocalSource().id}:${path.basename(journalPath)}`);
     } catch (error) {
-      this.recordRecoveryFailure(path.basename(journalPath), error, journal);
+      this.recordRecoveryFailure(journal.sourceId ?? primaryLocalSource().id, path.basename(journalPath), error, journal);
       log.error('Permanent deletion cleanup is pending and will be retried', {
         operationId: journal.operationId,
         postId: journal.postId,
@@ -856,7 +898,7 @@ export class PermanentDeletionService {
     const quarantineOperationDirectories = new Map<string, { rootPath: string; directoryPath: string; stopPath: string }>();
 
     for (const entry of journal.entries) {
-      const rootPath = getRootPath(entry.root);
+      const rootPath = getRootPath(entry.root, this.journalRoot(journal));
       const originalPath = resolveRelativePathWithinRoot(rootPath, entry.originalRelativePath, 'Journal original path');
       const quarantinePath = resolveRelativePathWithinRoot(rootPath, entry.quarantineRelativePath, 'Journal quarantine path');
       await assertNoSymlinkTraversal(rootPath, originalPath, 'Journal original path');
@@ -887,7 +929,7 @@ export class PermanentDeletionService {
     }
 
     await this.removeMoveMarkers(journal);
-    this.unlinkInternalFileIfPresent(appConfig.galleryRoot, journalPath, 'Deletion journal');
+    this.unlinkInternalFileIfPresent(this.journalRoot(journal), journalPath, 'Deletion journal');
     await this.syncDirectoryIfSupported(path.dirname(journalPath));
   }
 

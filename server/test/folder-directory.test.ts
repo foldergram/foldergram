@@ -45,6 +45,35 @@ afterAll(() => {
 });
 
 describe('folder directory', () => {
+  it('recognizes usable local posts while excluding deleted, trashed, story and cover-only content', async () => {
+    seedDirectory(databaseManager.connection, 3, 3);
+    const { postRepository } = await import('../src/db/repositories.js');
+    const db = databaseManager.connection;
+    expect(postRepository.hasVisibleLocalPosts()).toBe(true);
+    db.exec(`
+      UPDATE posts SET is_deleted=1 WHERE folder_id=1;
+      UPDATE posts SET is_trashed=1 WHERE folder_id=2;
+      UPDATE folders SET role='story_root' WHERE id=3;
+    `);
+    expect(postRepository.hasVisibleLocalPosts()).toBe(false);
+    db.exec('UPDATE posts SET is_deleted=0 WHERE folder_id=1');
+    expect(postRepository.hasVisibleLocalPosts()).toBe(true);
+    db.exec("UPDATE images SET filename='cover.jpg' WHERE folder_id=1");
+    expect(postRepository.hasVisibleLocalPosts()).toBe(false);
+  });
+  it('counts a large local library using the folder index without scanning all posts', async () => {
+    seedDirectory(databaseManager.connection, 1000, 30000);
+    const { folderRepository } = await modules();
+    const prepare = vi.spyOn(databaseManager.connection, 'prepare');
+    const start = performance.now();
+    expect(folderRepository.count()).toBe(1000);
+    expect(performance.now() - start).toBeLessThan(500);
+    const sql = prepare.mock.calls.find(([query]) => query.includes('SELECT COUNT(*) AS count'))![0];
+    prepare.mockRestore();
+    const plan = databaseManager.connection.prepare(`EXPLAIN QUERY PLAN ${sql}`).all() as Array<{ detail: string }>;
+    expect(plan.some(row => /SEARCH posts USING COVERING INDEX idx_posts_folder_visible_sort/.test(row.detail))).toBe(true);
+    expect(plan.some(row => /SCAN posts/.test(row.detail))).toBe(false);
+  });
   it('matches legacy counts, covers, stories, fallback ordering, and role visibility', async () => {
     seedDirectory(databaseManager.connection, 14, 56);
     const db = databaseManager.connection;
@@ -71,7 +100,8 @@ describe('folder directory', () => {
     `);
     const { folderRepository } = await modules();
     const prepare = vi.spyOn(db, 'prepare');
-    expect(folderRepository.getAllSummaries()).toEqual(db.prepare(legacySql).all());
+    const summaries = folderRepository.getAllSummaries().map(({ source_kind, source_name, source_managed_by, can_write_originals, ...row }) => row);
+    expect(summaries).toEqual(db.prepare(legacySql).all());
     const summarySql = prepare.mock.calls.find(([sql]) => sql.includes('WITH folder_candidates'))![0];
     prepare.mockRestore();
     const storyPlan = db.prepare(`EXPLAIN QUERY PLAN ${summarySql}`).all() as Array<{ detail: string }>;

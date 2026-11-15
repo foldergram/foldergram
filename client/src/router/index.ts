@@ -172,7 +172,7 @@ export const router = createRouter({
       return savedPosition;
     }
 
-    if (shouldPreserveModalScroll(to, from)) {
+    if ((to.name === 'settings' && from.name === 'settings') || shouldPreserveModalScroll(to, from)) {
       return false;
     }
 

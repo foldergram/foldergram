@@ -1,3 +1,6 @@
+import { authorizedImage, imageFolderIds, serveRemoteMedia } from '../immich/media.js';
+import { isImmichSource, isSourceVisible, isLocalOriginalUnavailable } from '../sources/local-source.js';
+import { imageRepository, folderRepository, postRepository } from '../db/repositories.js';
 import express from 'express';
 import { z } from 'zod';
 
@@ -911,7 +914,17 @@ router.get('/share/images/:id', (request, response) => {
     return;
   }
 
-  if (!ensureShareFolderAccess(request, response, image.folderId)) {
+  const post = postRepository.findById(image.id);
+  if (post && isImmichSource(post.source_id)) {
+    const media = postRepository.listImageRecords(post.id)[0];
+    const granted = media && imageFolderIds(media.id).find(id => folderShareService.getFolderGrant(request,id));
+    if (!media || !authorizedImage(request,media,true) || !granted) { sendShareAccessDenied(response); return; }
+    const folder = folderRepository.getById(granted)!;
+    image.folderId=folder.id; image.folderSlug=folder.slug; image.folderName=folder.name;
+    image.nextImageId=null; image.previousImageId=null;
+    if ('nextPostId' in image) image.nextPostId=null;
+    if ('previousPostId' in image) image.previousPostId=null;
+  } else if (!ensureShareFolderAccess(request, response, image.folderId)) {
     return;
   }
 
@@ -928,7 +941,17 @@ router.get('/share/posts/:id', (request, response) => {
     return;
   }
 
-  if (!ensureShareFolderAccess(request, response, image.folderId)) {
+  const post = postRepository.findById(image.id);
+  if (post && isImmichSource(post.source_id)) {
+    const media = postRepository.listImageRecords(post.id)[0];
+    const granted = media && imageFolderIds(media.id).find(id => folderShareService.getFolderGrant(request,id));
+    if (!media || !authorizedImage(request,media,true) || !granted) { sendShareAccessDenied(response); return; }
+    const folder = folderRepository.getById(granted)!;
+    image.folderId=folder.id; image.folderSlug=folder.slug; image.folderName=folder.name;
+    image.nextImageId=null; image.previousImageId=null;
+    if ('nextPostId' in image) image.nextPostId=null;
+    if ('previousPostId' in image) image.previousPostId=null;
+  } else if (!ensureShareFolderAccess(request, response, image.folderId)) {
     return;
   }
 
@@ -944,10 +967,12 @@ router.get('/share/images/:id/thumbnail', async (request, response) => {
     return;
   }
 
-  if (!ensureShareFolderAccess(request, response, image.folder_id)) {
+  if (isImmichSource(image.source_id) ? !authorizedImage(request,image,true) : !ensureShareFolderAccess(request, response, image.folder_id)) {
+    if (isImmichSource(image.source_id)) sendShareAccessDenied(response);
     return;
   }
 
+  if (isImmichSource(image.source_id)) { await serveRemoteMedia(request,response,image,'thumbnail',true); return; }
   await serveDerivativeForImage(response, image, 'thumbnail', { noStore: true });
 });
 
@@ -960,10 +985,12 @@ router.get('/share/images/:id/preview', async (request, response) => {
     return;
   }
 
-  if (!ensureShareFolderAccess(request, response, image.folder_id)) {
+  if (isImmichSource(image.source_id) ? !authorizedImage(request,image,true) : !ensureShareFolderAccess(request, response, image.folder_id)) {
+    if (isImmichSource(image.source_id)) sendShareAccessDenied(response);
     return;
   }
 
+  if (isImmichSource(image.source_id)) { await serveRemoteMedia(request,response,image,'preview',true); return; }
   await serveDerivativeForImage(response, image, 'preview', { noStore: true });
 });
 
@@ -1129,9 +1156,9 @@ router.get('/trash/images', requireCapability('canDeleteMedia', 'Admin access is
 
 router.get(['/posts/:id', '/images/:id'], (request, response) => {
   const params = imageIdSchema.parse(request.params);
-  const query = mediaTypeQuerySchema.parse(request.query);
+  const query = mediaTypeQuerySchema.extend({folder:z.string().min(1).max(240).optional()}).parse(request.query);
   const isLegacyImageAlias = request.path.includes('/images/');
-  const image = galleryService.getImageDetail(params.id, query.mediaType, { isLegacyImageAlias });
+  const image = galleryService.getImageDetail(params.id, query.mediaType, { isLegacyImageAlias, folderSlug:query.folder });
 
   if (!image) {
     response.status(404).json({ message: 'Post not found' });
@@ -1283,12 +1310,21 @@ router.delete(['/posts/:id', '/images/:id'], requireCapability('canDeleteMedia',
   });
 });
 
-router.get('/originals/:id', (request, response) => {
+router.get('/originals/:id', async (request, response) => {
   const params = imageIdSchema.parse(request.params);
   const query = originalMediaQuerySchema.parse(request.query);
+  const remote = imageRepository.getById(params.id);
+  if (remote && isImmichSource(remote.source_id)) {
+    if (query.download) response.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(remote.filename)}`);
+    await serveRemoteMedia(request,response,remote,'original'); return;
+  }
   const originalMedia = galleryService.getOriginalMediaFile(params.id);
 
   if (!originalMedia) {
+    if (remote && isSourceVisible(remote.source_id) && !remote.is_deleted && !remote.is_trashed && isLocalOriginalUnavailable(remote.source_id)) {
+      response.status(503).json({ message: 'The local source is unavailable. Check its drive or mount.' });
+      return;
+    }
     response.status(404).json({ message: 'Original media not found' });
     return;
   }
@@ -1328,7 +1364,7 @@ router.post(
   const body = manualRescanBodySchema.parse(request.body === undefined ? {} : request.body);
 
   try {
-    if (scannerService.isLibraryRebuildRequired()) {
+    if (scannerService.isLibraryRebuildRequired() && !scannerService.hasEnabledAdditionalSources()) {
       response.status(409).json({
         message: LIBRARY_REBUILD_REQUIRED_MESSAGE
       });
@@ -1375,7 +1411,7 @@ router.post(
   adminMutationRateLimiter,
   requireNoScanInProgress,
   async (_request, response) => {
-  if (scannerService.isLibraryRebuildRequired()) {
+  if (scannerService.isLibraryRebuildRequired() && !scannerService.hasEnabledAdditionalSources()) {
     response.status(409).json({
       message: LIBRARY_REBUILD_REQUIRED_MESSAGE
     });

@@ -1,4 +1,51 @@
 {
+  "sources": {
+    "title": "来源",
+    "description": "管理 Foldergram 中显示的本地文件夹和 Immich 媒体库。",
+    "connect": "连接来源",
+    "connectImmich": "连接 Immich",
+    "syncNow": "立即同步",
+    "edit": "编辑",
+    "local": {
+      "add": "添加本地文件夹",
+      "type": "本地文件夹",
+      "name": "名称",
+      "path": "服务器文件夹路径",
+      "pathHelp": "输入 Foldergram 服务器上文件夹的绝对路径。使用 Docker 时，请输入容器内的路径。",
+      "discoveryHelp": "Foldergram 会索引子文件夹中的媒体，并跳过直接存放在所选文件夹中的媒体。",
+      "readOnly": "原始文件只读",
+      "readOnlyHelp": "阻止 Foldergram 永久删除原始文件。仍可整理内容或将帖子移到回收站。",
+      "pathValid": "可以读取此路径。",
+      "sampled": "已检查前 1,000 个条目。",
+      "ignored": "已跳过根文件夹中的 {count} 个媒体文件。",
+      "validate": "验证路径",
+      "save": "保存更改",
+      "saveSync": "保存并同步",
+      "queued": "同步已排队。",
+      "saved": "已保存更改。",
+      "disabled": "已停用",
+      "syncing": "正在同步",
+      "review": "检查空文件夹",
+      "unavailable": "不可用",
+      "ready": "已连接",
+      "error": "需要处理",
+      "pending": "尚未同步",
+      "counts": "{assets} 个照片和视频 · {folders} 个文件夹",
+      "progress": "正在同步… {progress}%",
+      "noMedia": "未找到媒体。请将照片或视频放进子文件夹后重新同步。",
+      "confirmEmpty": "确认文件夹已清空",
+      "changeTitle": "更新本地来源",
+      "emptyMessage": "确认已主动清空此文件夹？同步会从索引中移除缺失的项目。",
+      "disableMessage": "要停用此来源吗？再次启用之前，内容和共享链接将被隐藏。已保存的项目和缓存会保留。",
+      "removeMessage": "要移除此来源吗？Foldergram 会移除其索引、缓存、点赞、收藏关联和共享链接。原始文件会保留在磁盘上。",
+      "unavailableTitle": "本地来源不可用",
+      "unavailableMessage": "请检查驱动器或挂载点。已生成的缩略图和预览仍可使用。"
+    },
+    "unavailableTitle": "Immich 暂时不可用",
+    "unavailableMessage": "无法连接到你的 Immich 服务器。请确认服务器正在运行，然后重试。",
+    "reconnecting": "正在自动重新连接",
+    "checking": "正在检查…"
+  },
   "common": {
     "cancel": "取消",
     "close": "关闭",
@@ -96,6 +143,10 @@
       "general": {
         "label": "常规设置",
         "description": "Stories 模式、排除文件夹和动态流默认项"
+      },
+      "sources": {
+        "label": "媒体来源",
+        "description": "设置和管理本地文件夹与 Immich 集成。"
       },
       "places": {
         "label": "地点",

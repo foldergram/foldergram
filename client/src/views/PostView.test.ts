@@ -8,6 +8,7 @@ import { useFoldersStore } from '../stores/folders';
 import { useAppStore } from '../stores/app';
 import type { AppStatus, FolderSummary, ImageDetail } from '../types/api';
 import { useViewerStore } from '../stores/viewer';
+import { useSourcesStore } from '../stores/sources';
 import PostView from './PostView.vue';
 
 const { routerReplace } = vi.hoisted(() => ({ routerReplace: vi.fn() }));
@@ -105,6 +106,25 @@ describe('PostView', () => {
     vi.restoreAllMocks();
     routerReplace.mockReset();
     setActivePinia(createPinia());
+  });
+
+  it('replaces a remote viewer with connection guidance and restores it after Retry', async () => {
+    const viewer = useViewerStore();
+    vi.spyOn(viewer, 'loadImage').mockImplementation(async id => { viewer.image = { ...createImageDetail(id), sourceId: 1 }; });
+    vi.spyOn(useFoldersStore(), 'ensureSummary').mockResolvedValue({} as FolderSummary);
+    const sources = useSourcesStore();
+    sources.items = [{ id: 1, name: 'Immich', enabled: 1, status: 'ready', generation: 1, updated_at: '', available: false, syncing: false }];
+    vi.spyOn(sources, 'refresh').mockImplementation(async () => { sources.items[0]!.available = true; });
+    const wrapper = mount(PostView, { props: { id: '90' } });
+    await flushPromises();
+    expect(wrapper.text()).toContain('Immich is unavailable');
+    expect(wrapper.text()).toContain('Unable to connect to your Immich server.');
+    expect(wrapper.find('[data-test="post-viewer"]').exists()).toBe(false);
+    await wrapper.get('button').trigger('click');
+    await flushPromises();
+    expect(sources.refresh).toHaveBeenCalledWith(true);
+    expect(wrapper.find('[data-test="post-viewer"]').exists()).toBe(true);
+    wrapper.unmount();
   });
 
   it('does not render the previously loaded post while a new modal image is loading', async () => {

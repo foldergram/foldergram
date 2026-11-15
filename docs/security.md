@@ -5,7 +5,7 @@ description: The real security posture of Foldergram, including admin/viewer/pub
 
 # Security
 
-Foldergram is built for local-only and self-hosted browsing.
+Foldergram is built for local-first, self-hosted browsing. The optional [Immich integration](./immich.md) uses an encrypted API credential and a server-side media proxy; remote cache access remains subject to authentication, membership, source visibility and share grants.
 Its security model is intentionally narrow even though it now supports an
 optional admin/viewer/public access gate for homelab and LAN use.
 

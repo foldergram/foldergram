@@ -19,6 +19,22 @@ function deferred<T>() {
 beforeEach(() => { setActivePinia(createPinia()); vi.restoreAllMocks(); });
 
 describe('folder directory stores', () => {
+  it('ignores a pre-sync folder response after the source index changes', async () => {
+    const pending = deferred<Awaited<ReturnType<typeof api.fetchFolderImages>>>();
+    const fresh = deferred<Awaited<ReturnType<typeof api.fetchFolderImages>>>();
+    vi.spyOn(api, 'fetchFolderImages').mockReturnValueOnce(pending.promise).mockReturnValueOnce(fresh.promise);
+    const folders = useFoldersStore();
+    const oldLoad = folders.loadFolder('album-1');
+    folders.resetForRebuild();
+    const newLoad = folders.loadFolder('album-1');
+    pending.resolve({ folder: folder(1), items: [], page: 1, limit: 24, total: 0, hasMore: false });
+    await oldLoad;
+    expect(folders.currentFolder).toBeNull();
+    expect(folders.loadingFolder).toBe(true);
+    fresh.resolve({ folder: { ...folder(1), name: 'Updated after sync' }, items: [], page: 1, limit: 24, total: 0, hasMore: false });
+    await newLoad;
+    expect(folders.currentFolder?.name).toBe('Updated after sync');
+  });
   it('bounds bootstrap requests and keeps its total separate from the recommendation array', async () => {
     const fetch = vi.spyOn(api, 'fetchFolderDirectory').mockResolvedValue(page([1, 2], 140));
     const legacy = vi.spyOn(api, 'fetchFolders');

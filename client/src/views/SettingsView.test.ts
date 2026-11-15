@@ -1,5 +1,6 @@
 import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises, mount } from '@vue/test-utils';
+import { createMemoryHistory, createRouter, type Router } from 'vue-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as galleryApi from '../api/gallery';
@@ -9,11 +10,7 @@ import { useFeedStore } from '../stores/feed';
 import { useFoldersStore } from '../stores/folders';
 import SettingsView from './SettingsView.vue';
 
-vi.mock('vue-router', () => ({
-  useRoute: () => ({
-    query: {}
-  })
-}));
+let router: Router;
 
 const scrollIntoViewSpy = vi.fn();
 
@@ -133,6 +130,7 @@ function createPlacesStatus(prepared = false): PlacesStatus {
 function mountSettingsView() {
   return mount(SettingsView, {
     global: {
+      plugins: [router],
       stubs: {
         ConfirmDialog: true
       }
@@ -141,21 +139,18 @@ function mountSettingsView() {
 }
 
 async function openGeneralSettingsSidebarTab(wrapper: ReturnType<typeof mountSettingsView>) {
-  const generalSettingsButton = wrapper
-    .findAll('button')
-    .find((button) =>
-      ['General Settings', 'Ajustes generales', '通用设置'].some((label) => button.text().includes(label))
-    );
-
-  expect(generalSettingsButton).toBeDefined();
-
-  await generalSettingsButton!.trigger('click');
+  await wrapper.get('a[href="/settings#general"]').trigger('click');
   await flushPromises();
 }
 
 describe('SettingsView', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     setActivePinia(createPinia());
+    router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: '/settings', name: 'settings', component: SettingsView }]
+    });
+    await router.push('/settings');
     vi.restoreAllMocks();
     window.localStorage.clear();
     scrollIntoViewSpy.mockReset();
@@ -164,6 +159,52 @@ describe('SettingsView', () => {
       value: scrollIntoViewSpy
     });
     vi.spyOn(galleryApi, 'fetchAdminStats').mockResolvedValue(createAppStats());
+  });
+
+  it('selects settings sections from their URLs and keeps old Sources links working', async () => {
+    await router.push('/settings?section=sources');
+    const wrapper = mountSettingsView();
+    await flushPromises();
+    expect(wrapper.findAll('a[aria-current="location"]').map(link => link.attributes('href'))).toEqual([
+      '/settings#sources', '/settings#sources'
+    ]);
+    expect(wrapper.text()).toContain('Set up and manage local folders & Immich Integration.');
+
+    for (const section of ['library', 'general', 'places', 'access', 'status', 'sources']) {
+      await wrapper.get(`a[href="/settings#${section}"]`).trigger('click');
+      await flushPromises();
+      expect(router.currentRoute.value.fullPath).toBe(`/settings#${section}`);
+      expect(wrapper.findAll('a[aria-current="location"]').map(link => link.attributes('href'))).toEqual([
+        `/settings#${section}`, `/settings#${section}`
+      ]);
+    }
+    wrapper.unmount();
+  });
+
+  it('opens and focuses the local folder exclusions from Sources', async () => {
+    useAppStore().$patch({ stats: createAppStatus() });
+    vi.spyOn(galleryApi, 'fetchPlacesStatus').mockResolvedValue(createPlacesStatus(true));
+    const wrapper = mount(SettingsView, {
+      attachTo: document.body,
+      global: {
+        plugins: [router],
+        stubs: {
+          ConfirmDialog: true,
+          SourceSettings: { template: '<button data-test="open-exclusions" @click="$emit(\'manage-local-exclusions\')">Open folder exclusions</button>' }
+        }
+      }
+    });
+    await flushPromises();
+    await wrapper.get('a[href="/settings#sources"]').trigger('click');
+    await flushPromises();
+    await wrapper.find('[data-test="open-exclusions"]').trigger('click');
+    await flushPromises();
+    expect(wrapper.text()).toContain('Excluded source folders');
+    expect(router.currentRoute.value.hash).toBe('#general');
+    const input = wrapper.find('textarea[placeholder*="@eaDir"]');
+    expect(document.activeElement).toBe(input.element);
+    expect(scrollIntoViewSpy).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' });
+    wrapper.unmount();
   });
 
   it('shows a persistent warning when permanent deletion recovery needs attention', async () => {

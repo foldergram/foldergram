@@ -169,6 +169,7 @@ describe.sequential('trash flow', () => {
 
   it('keeps trashed posts hidden across rescans, including missing and reappeared files', async () => {
     await createSourceFile('archive/old.jpg');
+    await createSourceFile('archive/other.jpg');
     await scanAll('initial');
 
     const image = mustGetImage('archive/old.jpg');
@@ -243,6 +244,7 @@ describe.sequential('trash flow', () => {
 
   it('keeps scan-driven missing/reappeared is_deleted behavior intact for non-trashed files', async () => {
     await createSourceFile('reactivate/keep.jpg');
+    await createSourceFile('reactivate/other.jpg');
     await scanAll('initial');
 
     const image = mustGetImage('reactivate/keep.jpg');

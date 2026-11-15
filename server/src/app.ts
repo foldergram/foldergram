@@ -1,3 +1,4 @@
+import { sourcesRouter } from './immich/routes.js';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -10,8 +11,7 @@ import { blockPublicDemoMutations } from './middleware/public-demo-mode.js';
 import { routeTimingMiddleware } from './middleware/route-timing.js';
 import { apiRouter } from './routes/api.js';
 import { authService } from './services/auth-service.js';
-import { lazyThumbnailsRouter, lazyPreviewsRouter, previewOriginalResolutionRouter } from './routes/lazy-derivatives.js';
-import { createProtectedStaticOptions } from './utils/media-response.js';
+import { cachedThumbnailsRouter, cachedPreviewsRouter, lazyThumbnailsRouter, lazyPreviewsRouter } from './routes/lazy-derivatives.js';
 
 export function applyApiNoStoreHeaders(response: Pick<express.Response, 'setHeader'>) {
   authService.setNoStoreHeaders(response as express.Response);
@@ -29,15 +29,15 @@ export function createApp() {
     app.use('/thumbnails', requireMediaAuthentication, lazyThumbnailsRouter);
     app.use('/previews', requireMediaAuthentication, lazyPreviewsRouter);
   } else {
-    app.use('/thumbnails', requireMediaAuthentication, express.static(appConfig.thumbnailsDir, createProtectedStaticOptions()));
-    app.use('/previews', requireMediaAuthentication, previewOriginalResolutionRouter, express.static(appConfig.previewsDir, createProtectedStaticOptions()));
+    app.use('/thumbnails', requireMediaAuthentication, cachedThumbnailsRouter);
+    app.use('/previews', requireMediaAuthentication, cachedPreviewsRouter);
   }
 
   app.use('/api', routeTimingMiddleware, (_request, response, next) => {
     applyApiNoStoreHeaders(response);
     next();
   });
-  app.use('/api', blockPublicDemoMutations, requireTrustedMutationRequest, requireApiAuthentication, apiRouter);
+  app.use('/api', blockPublicDemoMutations, requireTrustedMutationRequest, requireApiAuthentication, sourcesRouter, apiRouter);
 
   if (appConfig.nodeEnv === 'production') {
     const clientDist = path.join(repositoryRoot, 'client', 'dist');

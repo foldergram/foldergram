@@ -135,10 +135,10 @@ describe.sequential('reels scaling', () => {
 function seedSyntheticLibrary(videoCount: number, folderCount: number): void {
   const database = databaseManager.connection;
   const insertFolder = database.prepare(
-    `INSERT INTO folders (slug, name, folder_path, role) VALUES (?, ?, ?, 'normal')`
+    `INSERT INTO folders (source_id, slug, name, folder_path, role) VALUES ((SELECT id FROM media_sources WHERE kind = 'local' AND managed_by = 'environment'), ?, ?, ?, 'normal')`
   );
   const insertImage = database.prepare(`
-    INSERT INTO images (
+    INSERT INTO images (source_id,
       folder_id,
       filename,
       extension,
@@ -161,11 +161,11 @@ function seedSyntheticLibrary(videoCount: number, folderCount: number): void {
       thumbnail_path,
       preview_path,
       playback_strategy
-    ) VALUES (?, ?, '.mp4', ?, ?, 2048, 1080, 1920, 'video', 'video/mp4', 18000, 0, ?, ?, ?, ?, ?, 'mtime', '{}', ?, ?, 'preview')
+    ) VALUES ((SELECT id FROM media_sources WHERE kind = 'local' AND managed_by = 'environment'), ?, ?, '.mp4', ?, ?, 2048, 1080, 1920, 'video', 'video/mp4', 18000, 0, ?, ?, ?, ?, ?, 'mtime', '{}', ?, ?, 'preview')
   `);
   const insertPost = database.prepare(`
-    INSERT INTO posts (folder_id, source_path, post_type, sort_timestamp, taken_at, taken_at_source)
-    VALUES (?, ?, 'single', ?, ?, 'mtime')
+    INSERT INTO posts (source_id, folder_id, source_path, post_type, sort_timestamp, taken_at, taken_at_source)
+    VALUES ((SELECT id FROM media_sources WHERE kind = 'local' AND managed_by = 'environment'), ?, ?, 'single', ?, ?, 'mtime')
   `);
   const insertPostItem = database.prepare(
     `INSERT INTO post_items (post_id, image_id, position) VALUES (?, ?, 1)`

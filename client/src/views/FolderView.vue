@@ -1,7 +1,8 @@
 <template>
   <section class="w-full">
+    <SourceUnavailable v-if="sourcesStore.isUnavailable(foldersStore.currentFolder?.sourceId)" />
     <EmptyState
-      v-if="appStore.isLibraryUnavailable"
+      v-else-if="appStore.isLibraryUnavailable"
       class="mx-auto w-[min(100%,56rem)]"
       :title="t('common.libraryUnavailableTitle')"
       :description="appStore.libraryUnavailableReason"
@@ -199,6 +200,8 @@
 
 <script setup lang="ts">
   import { computed, onMounted, ref, watch } from "vue"
+  import SourceUnavailable from '../components/SourceUnavailable.vue';
+  import { useSourcesStore } from '../stores/sources';
   import { useI18n } from "vue-i18n"
   import { useRoute, useRouter } from "vue-router"
 
@@ -220,6 +223,7 @@
   }>()
 
   const appStore = useAppStore()
+  const sourcesStore = useSourcesStore();
   const authStore = useAuthStore()
   const likesStore = useLikesStore()
   const folderStoriesStore = useFolderStoriesStore()

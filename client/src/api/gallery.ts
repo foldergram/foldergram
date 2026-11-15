@@ -300,12 +300,13 @@ export function fetchSharedImage(id: number, mediaType?: 'image' | 'video') {
   return fetchSharedDetail('images', id, mediaType);
 }
 
-export function fetchImage(id: number, mediaType?: 'image' | 'video') {
+export function fetchImage(id: number, mediaType?: 'image' | 'video', folderSlug?: string) {
   const params = new URLSearchParams();
   if (mediaType) {
     params.set('mediaType', mediaType);
   }
 
+  if (folderSlug) params.set('folder',folderSlug);
   const suffix = params.size > 0 ? `?${params.toString()}` : '';
   return requestJson<ImageDetail>(`/api/posts/${id}${suffix}`);
 }

@@ -10,7 +10,7 @@
 
 # Foldergram
 
-**Local-only photo and video gallery for folders, with an Instagram-inspired browsing pattern.**
+**Local-first photo and video gallery for your folders, with Instagram-inspired browsing and optional read-only Immich integration.**
 
 [![Available on GHCR](https://img.shields.io/badge/GHCR-foldergram-blue?style=flat-square&logo=docker)](https://github.com/foldergram/foldergram/pkgs/container/foldergram)
 [![LIVE DEMO](https://img.shields.io/badge/LIVE%20DEMO-FOLDERGRAM-a951ab?style=flat-square&logo=googlechrome&logoColor=white)](https://foldergram.intentdeep.com/)
@@ -27,6 +27,31 @@
 ---
 
 Foldergram turns your local photo and video folders into a self-hosted gallery with a familiar feed, folder profiles, and a media viewer. It indexes your library in SQLite and uses thumbnails and previews for fast browsing, while keeping your originals untouched.
+
+## Additional local folders
+
+Your existing gallery appears automatically in **Settings → Sources** as **Primary gallery**. Its root is set by `GALLERY_ROOT` or defaults to the `gallery` folder in `DATA_ROOT`. Choose **Add local folder**, enter a name and an absolute server path, then choose **Validate path** and **Save & Sync**. Foldergram indexes files in subfolders and skips media files directly in the selected root. Each enabled source contributes to the combined feeds. You can sync one location from Sources or run **Scan library** to scan all enabled local sources.
+
+On a native installation, use a path the Foldergram process can read. The path is resolved on the server running Foldergram. Photos on a different computer must first be made available to that server. In Docker, add a bind mount for each location alongside the existing volumes:
+
+```yaml
+      - /home/alex/Pictures:/sources/pictures:ro
+      - /mnt/external/Photos:/sources/external:ro
+```
+
+The left side is the host path. The right side is the container path to enter in Sources, such as `/sources/pictures`. After changing mounts, run `docker compose up -d`. Docker Desktop users may need to share the host drive or folder with Docker first. Mount external drives before starting or syncing Foldergram. Your existing `GALLERY_ROOT` and database settings can remain in place. Keep SQLite and the derivative directories writable. A read-only photo mount is sufficient for indexing.
+
+New locations default to read-only originals. This setting still allows Foldergram metadata edits and moving an indexed post to Trash. Disabling a source hides its content and shares while retaining its index and saved state. Removing a source clears its index, saved associations, shares, and derivatives. Original files stay on disk.
+
+A disconnected drive retains its index and cached derivatives. If a previously populated location appears completely empty, check the mount and sync again. Use **Confirm empty location** only after intentionally clearing the folder. Foldergram cannot reliably detect every filesystem replacement or disappearing nested mount. Local and Immich connections to the same files can produce duplicate posts.
+
+### Upgrading an existing installation
+
+Back up the SQLite database and application state before upgrading, including the Immich encryption key if used. The upgrade assigns existing records to the primary gallery while preserving IDs, saved state, shares, and derivative paths. Deploy the updated server and client together. To roll back, restore the pre-upgrade backup with the matching older version.
+
+## Optional Immich integration
+
+Connect your Immich v3.3.x server in **Settings → Sources** for read-only browsing of external directories and albums alongside local folders, or use an empty local gallery for Immich-only browsing. Every selected album membership is preserved while each asset appears once in Home. Media uses Immich derivatives through Foldergram's authenticated, bounded cache and streaming proxy. See the [setup, permissions, Docker networking and cache policy](docs/immich.md). Choose one source for an overlapping dataset to avoid duplicate posts.
 
 ## Features
 
@@ -45,11 +70,11 @@ Foldergram turns your local photo and video folders into a self-hosted gallery w
 - Phase-aware scan progress for first indexing, derivative migration, and rebuilds.
 - A web app manifest plus production service worker registration.
 - A debounced filesystem watcher in development mode only.
-- No multi-user accounts, cloud sync, uploads, comments, messaging, notifications, or remote APIs.
+- No multi-user accounts, cloud uploads, comments, messaging, or notifications. Local sources need no remote APIs; the optional [Immich integration](docs/immich.md) synchronizes remote metadata and fetches media through its read-only API.
 
 ## How It Works
 
-Foldergram maps directly to your filesystem:
+For local sources, Foldergram maps directly to your filesystem:
 
 1. **App Folders:** Any non-hidden folder under `GALLERY_ROOT` that directly contains supported media becomes one indexed App Folder. In reserved carousel mode, a folder also qualifies when its `carousels/` directory has an immediate child containing supported media directly.
 2. **Posts:** Each supported image or video directly inside an App Folder becomes one indexed post. Media in `AppFolder/carousels/Post name/` is grouped into a carousel post in reserved mode.

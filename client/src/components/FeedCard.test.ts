@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MediaStorage } from 'vidstack';
 
 import { useAppStore } from '../stores/app';
+import { useSourcesStore } from '../stores/sources';
 import { useAuthStore } from '../stores/auth';
 import type { FeedItem } from '../types/api';
 import FeedCard from './FeedCard.vue';
@@ -172,6 +173,32 @@ describe('FeedCard', () => {
         unobserve() {}
       }
     );
+  });
+
+  it('hides the menu original action when Immich original downloads are disabled', async () => {
+    const wrapper = mount(FeedCard, {
+      props: { item: { ...createImageItem(807), sourceId: 1, originalDownloadsAllowed: false }, avatarUrl: null },
+      global: { stubs: globalStubs }
+    });
+    await wrapper.get('button[aria-label="More options"]').trigger('click');
+    expect(wrapper.text()).not.toContain('Open original file');
+    await wrapper.setProps({ item: { ...createImageItem(807), sourceId: 1, originalDownloadsAllowed: true } });
+    expect(wrapper.text()).toContain('Open original file');
+    wrapper.unmount();
+  });
+
+  it('keeps local feed cards visible during an Immich outage and restores remote cards on reconnection', async () => {
+    const sources = useSourcesStore();
+    sources.items = [{ id: 1, name: 'Immich', enabled: 1, status: 'ready', generation: 1, updated_at: '', available: false, syncing: false }];
+    const wrapper = mount(FeedList, {
+      props: { items: [createImageItem(1), { ...createImageItem(2), sourceId: 1 }] },
+      global: { stubs: { FeedCard: { props: ['item'], template: '<div data-test="card">{{ item.id }}</div>' } } }
+    });
+    expect(wrapper.findAll('[data-test="card"]').map(card => card.text())).toEqual(['1']);
+    sources.items[0]!.available = true;
+    await flushPromises();
+    expect(wrapper.findAll('[data-test="card"]').map(card => card.text())).toEqual(['1', '2']);
+    wrapper.unmount();
   });
 
   it('keeps the saved mute preference through provider initialization and a page reload', async () => {

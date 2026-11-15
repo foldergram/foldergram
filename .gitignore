@@ -10,6 +10,7 @@ data/gallery.sqlite
 data/gallery.sqlite-shm
 data/gallery.sqlite-wal
 coverage
+.playwright-mcp/
 client/test-results/
 client/playwright-report/
 client/dist
@@ -27,3 +28,5 @@ gallery/*
 thumbnails/*
 previews/*
 .mocks/
+# Isolated Immich integration data and credentials
+data-test/

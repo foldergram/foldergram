@@ -372,6 +372,7 @@ describe.sequential('DERIVATIVE_MODE lazy behavior', () => {
     maintenanceRepository.resetLibraryIndex();
     const folder = folderRepository.upsert({ slug: 'thumbs', name: 'Thumbs', folderPath: 'thumbs' });
     const image = createIndexedMedia(folder, 'photo.jpg', 2000, 'preview');
+    await createSourceFile(image.relative_path);
     const requestPath = `/${encodeRelativePath(image.thumbnail_path)}`;
     const firstResponse = await dispatchRoute(lazyThumbnailsRouter, requestPath);
     expect(firstResponse.statusCode).toBe(200);
@@ -515,6 +516,7 @@ describe.sequential('DERIVATIVE_MODE lazy behavior', () => {
     maintenanceRepository.resetLibraryIndex();
     const folder = folderRepository.upsert({ slug: 'secured', name: 'Secured', folderPath: 'secured' });
     const image = createIndexedMedia(folder, 'photo.jpg', 2500, 'preview');
+    await createSourceFile(image.relative_path);
 
     const response = await dispatchRoute(lazyThumbnailsRouter, `/${encodeRelativePath(image.thumbnail_path)}`);
 
@@ -527,6 +529,7 @@ describe.sequential('DERIVATIVE_MODE lazy behavior', () => {
     await reset('lazy');
     const folder = folderRepository.upsert({ slug: 'empty-video', name: 'Videos', folderPath: 'empty-video' });
     const video = createIndexedMedia(folder, 'clip.mp4', 4000, 'preview', 5000);
+    await createSourceFile(video.relative_path);
     const output = path.join(appConfig.previewsDir, video.preview_path);
     await fs.mkdir(path.dirname(output), { recursive: true });
     await fs.writeFile(output, '');
@@ -543,13 +546,14 @@ describe.sequential('DERIVATIVE_MODE lazy behavior', () => {
     await reset('lazy');
     const folder = folderRepository.upsert({ slug: 'failed-video', name: 'Videos', folderPath: 'failed-video' });
     const video = createIndexedMedia(folder, 'clip.mp4', 4000, 'preview', 5000);
+    await createSourceFile(video.relative_path);
     const output = path.join(appConfig.previewsDir, video.preview_path);
     await fs.mkdir(path.dirname(output), { recursive: true });
     await fs.writeFile(output, '');
     generatePreviewDerivativeMock.mockRejectedValueOnce(new Error('No audio track has an available FFmpeg decoder'));
     const response = await dispatchRoute(lazyPreviewsRouter, `/${encodeRelativePath(video.preview_path)}`);
     expect(response.statusCode).toBe(500);
-    expect(response.body).toMatchObject({ message: expect.stringContaining('No audio track') });
+    expect(response.body).toEqual({ message: 'Failed to generate derivative.' });
     expect(generatePreviewDerivativeMock).toHaveBeenCalledOnce();
   });
 
@@ -559,6 +563,7 @@ describe.sequential('DERIVATIVE_MODE lazy behavior', () => {
     maintenanceRepository.resetLibraryIndex();
     const folder = folderRepository.upsert({ slug: 'previews', name: 'Previews', folderPath: 'previews' });
     const image = createIndexedMedia(folder, 'photo.jpg', 3000, 'preview');
+    await createSourceFile(image.relative_path);
     const response = await dispatchRoute(lazyPreviewsRouter, `/${encodeRelativePath(image.preview_path)}`);
     expect(response.statusCode).toBe(200);
     expect(response.body).toBe('image-preview:photo.webp');
@@ -594,6 +599,7 @@ describe.sequential('DERIVATIVE_MODE lazy behavior', () => {
     const image = createIndexedMedia(folder, 'clip.avif', 3_400, 'preview', null, {
       isAnimated: true
     });
+    await createSourceFile(image.relative_path);
 
     const response = await dispatchRoute(lazyPreviewsRouter, `/${encodeRelativePath(image.preview_path)}`);
 
@@ -627,12 +633,12 @@ describe.sequential('DERIVATIVE_MODE lazy behavior', () => {
     await reset('eager');
 
     maintenanceRepository.resetLibraryIndex();
-    const { previewOriginalResolutionRouter } = await import('../src/routes/lazy-derivatives.js');
+    const { cachedPreviewsRouter } = await import('../src/routes/lazy-derivatives.js');
     const folder = folderRepository.upsert({ slug: 'eager-originals', name: 'Eager Originals', folderPath: 'eager-originals' });
     const video = createIndexedMedia(folder, 'clip.mp4', 4200, 'original', 5000);
     await createSourceFile(video.relative_path);
 
-    const response = await dispatchRoute(previewOriginalResolutionRouter, `/${encodeRelativePath(video.preview_path)}`);
+    const response = await dispatchRoute(cachedPreviewsRouter, `/${encodeRelativePath(video.preview_path)}`);
 
     expect(response.statusCode).toBe(200);
     expect(response.body).toBe(`source:${video.relative_path}`);
@@ -659,6 +665,7 @@ describe.sequential('DERIVATIVE_MODE lazy behavior', () => {
     maintenanceRepository.resetLibraryIndex();
     const folder = folderRepository.upsert({ slug: 'videos', name: 'Videos', folderPath: 'videos' });
     const video = createIndexedMedia(folder, 'clip.webm', 4000, 'preview', 5000);
+    await createSourceFile(video.relative_path);
     let releaseGeneration: (() => void) | null = null;
     const generationStarted = new Promise<void>((resolve) => {
       generatePreviewDerivativeMock.mockImplementationOnce(async (_src: string, relativePath: string, _force = false, overrides?: { previewPath?: string }) => {
@@ -693,7 +700,9 @@ describe.sequential('DERIVATIVE_MODE lazy behavior', () => {
     maintenanceRepository.resetLibraryIndex();
     const folder = folderRepository.upsert({ slug: 'queue', name: 'Queue', folderPath: 'queue' });
     const firstImage = createIndexedMedia(folder, 'photo-1.jpg', 5000, 'preview');
+    await createSourceFile(firstImage.relative_path);
     const secondImage = createIndexedMedia(folder, 'photo-2.jpg', 6000, 'preview');
+    await createSourceFile(secondImage.relative_path);
 
     let activeGenerations = 0;
     let maxActiveGenerations = 0;

@@ -130,49 +130,63 @@
     </section>
 
     <nav
-      class="sticky top-3 z-20 grid w-full grid-cols-5 gap-1.5 rounded-[1.2rem] border border-border bg-[color-mix(in_srgb,var(--bg)_90%,var(--surface)_10%)] p-1.5 shadow-[0_12px_34px_rgba(15,20,25,0.08)] backdrop-blur-[18px] md:hidden"
+      class="sticky top-3 z-20 grid w-full grid-cols-6 gap-1.5 rounded-[1.2rem] border border-border bg-[color-mix(in_srgb,var(--bg)_90%,var(--surface)_10%)] p-1.5 shadow-[0_12px_34px_rgba(15,20,25,0.08)] backdrop-blur-[18px] md:hidden"
       :aria-label="t('settings.sections.navigation')"
     >
-      <button
-        @click="currentCategory = 'library'"
-        class="flex min-h-[3.15rem] items-center justify-center rounded-[0.95rem] border-0 bg-transparent p-0 text-muted transition-colors duration-150 cursor-pointer"
+      <RouterLink
+        :to="categoryLocation('library')"
+        :aria-current-value="currentCategory === 'library' ? 'location' : 'false'"
+        class="flex min-h-[3.15rem] items-center justify-center rounded-[0.95rem] border-0 bg-transparent p-0 text-muted no-underline transition-colors duration-150"
         :class="currentCategory === 'library' ? 'bg-surface-alt text-text' : 'hover:bg-surface-hover hover:text-text'"
         :aria-label="t('settings.sections.library.shortLabel')"
       >
         <span class="h-[1.55rem] w-[1.55rem]" :class="currentCategory === 'library' ? 'i-fluent-folder-sync-20-filled' : 'i-fluent-folder-sync-20-regular'" aria-hidden="true"></span>
-      </button>
-      <button
-        @click="currentCategory = 'general'"
-        class="flex min-h-[3.15rem] items-center justify-center rounded-[0.95rem] border-0 bg-transparent p-0 text-muted transition-colors duration-150 cursor-pointer"
+      </RouterLink>
+      <RouterLink
+        :to="categoryLocation('general')"
+        :aria-current-value="currentCategory === 'general' ? 'location' : 'false'"
+        class="flex min-h-[3.15rem] items-center justify-center rounded-[0.95rem] border-0 bg-transparent p-0 text-muted no-underline transition-colors duration-150"
         :class="currentCategory === 'general' ? 'bg-surface-alt text-text' : 'hover:bg-surface-hover hover:text-text'"
         :aria-label="t('settings.sections.general.label')"
       >
         <span class="h-[1.55rem] w-[1.55rem]" :class="currentCategory === 'general' ? 'i-fluent-settings-20-filled' : 'i-fluent-settings-20-regular'" aria-hidden="true"></span>
-      </button>
-      <button
-        @click="currentCategory = 'places'"
-        class="flex min-h-[3.15rem] items-center justify-center rounded-[0.95rem] border-0 bg-transparent p-0 text-muted transition-colors duration-150 cursor-pointer"
+      </RouterLink>
+      <RouterLink
+        :to="categoryLocation('sources')"
+        :aria-current-value="currentCategory === 'sources' ? 'location' : 'false'"
+        class="flex min-h-[3.15rem] items-center justify-center rounded-[0.95rem] border-0 bg-transparent p-0 text-muted no-underline transition-colors duration-150"
+        :class="currentCategory === 'sources' ? 'bg-surface-alt text-text' : 'hover:bg-surface-hover hover:text-text'"
+        :aria-label="t('settings.sections.sources.label')"
+      >
+        <span class="h-[1.55rem] w-[1.55rem]" :class="currentCategory === 'sources' ? 'i-fluent-plug-connected-20-filled' : 'i-fluent-plug-connected-20-regular'" aria-hidden="true"></span>
+      </RouterLink>
+      <RouterLink
+        :to="categoryLocation('places')"
+        :aria-current-value="currentCategory === 'places' ? 'location' : 'false'"
+        class="flex min-h-[3.15rem] items-center justify-center rounded-[0.95rem] border-0 bg-transparent p-0 text-muted no-underline transition-colors duration-150"
         :class="currentCategory === 'places' ? 'bg-surface-alt text-text' : 'hover:bg-surface-hover hover:text-text'"
         :aria-label="t('settings.sections.places.label')"
       >
         <span class="h-[1.55rem] w-[1.55rem]" :class="currentCategory === 'places' ? 'i-fluent-location-20-filled' : 'i-fluent-location-20-regular'" aria-hidden="true"></span>
-      </button>
-      <button
-        @click="currentCategory = 'access'"
-        class="flex min-h-[3.15rem] items-center justify-center rounded-[0.95rem] border-0 bg-transparent p-0 text-muted transition-colors duration-150 cursor-pointer"
+      </RouterLink>
+      <RouterLink
+        :to="categoryLocation('access')"
+        :aria-current-value="currentCategory === 'access' ? 'location' : 'false'"
+        class="flex min-h-[3.15rem] items-center justify-center rounded-[0.95rem] border-0 bg-transparent p-0 text-muted no-underline transition-colors duration-150"
         :class="currentCategory === 'access' ? 'bg-surface-alt text-text' : 'hover:bg-surface-hover hover:text-text'"
         :aria-label="t('settings.sections.access.shortLabel')"
       >
         <span class="h-[1.55rem] w-[1.55rem]" :class="currentCategory === 'access' ? 'i-fluent-lock-shield-20-filled' : 'i-fluent-lock-shield-20-regular'" aria-hidden="true"></span>
-      </button>
-      <button
-        @click="currentCategory = 'status'"
-        class="flex min-h-[3.15rem] items-center justify-center rounded-[0.95rem] border-0 bg-transparent p-0 text-muted transition-colors duration-150 cursor-pointer"
+      </RouterLink>
+      <RouterLink
+        :to="categoryLocation('status')"
+        :aria-current-value="currentCategory === 'status' ? 'location' : 'false'"
+        class="flex min-h-[3.15rem] items-center justify-center rounded-[0.95rem] border-0 bg-transparent p-0 text-muted no-underline transition-colors duration-150"
         :class="currentCategory === 'status' ? 'bg-surface-alt text-text' : 'hover:bg-surface-hover hover:text-text'"
         :aria-label="t('settings.sections.status.label')"
       >
         <span class="h-[1.55rem] w-[1.55rem]" :class="currentCategory === 'status' ? 'i-fluent-data-usage-20-filled' : 'i-fluent-data-usage-20-regular'" aria-hidden="true"></span>
-      </button>
+      </RouterLink>
     </nav>
 
     <div class="flex flex-col md:flex-row gap-8 items-start mt-[0.5rem]">
@@ -181,9 +195,10 @@
         class="hidden w-full shrink-0 md:flex md:w-[16rem] md:flex-col md:gap-2 md:sticky md:top-[6.5rem]"
         :aria-label="t('settings.sections.navigation')"
       >
-        <button
-          @click="currentCategory = 'library'"
-          class="flex items-start gap-3 rounded-[0.85rem] border-0 px-4 py-[0.85rem] text-left text-[1rem] transition-colors duration-150 cursor-pointer"
+        <RouterLink
+          :to="categoryLocation('library')"
+          :aria-current-value="currentCategory === 'library' ? 'location' : 'false'"
+          class="flex items-start gap-3 rounded-[0.85rem] border-0 px-4 py-[0.85rem] text-left text-[1rem] no-underline transition-colors duration-150"
           :class="currentCategory === 'library' ? 'bg-surface-alt font-bold text-text' : 'bg-transparent text-muted hover:bg-surface-hover hover:text-text'"
         >
           <span class="mt-[0.1rem] h-[1.25rem] w-[1.25rem] shrink-0" :class="currentCategory === 'library' ? 'i-fluent-folder-sync-20-filled' : 'i-fluent-folder-sync-20-regular'" aria-hidden="true"></span>
@@ -191,10 +206,11 @@
             <span>{{ t('settings.sections.library.label') }}</span>
             <span class="text-[0.75rem] font-normal text-muted">{{ t('settings.sections.library.description') }}</span>
           </span>
-        </button>
-        <button
-          @click="currentCategory = 'general'"
-          class="flex items-start gap-3 rounded-[0.85rem] border-0 px-4 py-[0.85rem] text-left text-[1rem] transition-colors duration-150 cursor-pointer"
+        </RouterLink>
+        <RouterLink
+          :to="categoryLocation('general')"
+          :aria-current-value="currentCategory === 'general' ? 'location' : 'false'"
+          class="flex items-start gap-3 rounded-[0.85rem] border-0 px-4 py-[0.85rem] text-left text-[1rem] no-underline transition-colors duration-150"
           :class="currentCategory === 'general' ? 'bg-surface-alt font-bold text-text' : 'bg-transparent text-muted hover:bg-surface-hover hover:text-text'"
         >
           <span class="mt-[0.1rem] h-[1.25rem] w-[1.25rem] shrink-0" :class="currentCategory === 'general' ? 'i-fluent-settings-20-filled' : 'i-fluent-settings-20-regular'" aria-hidden="true"></span>
@@ -202,10 +218,23 @@
             <span class="truncate">{{ t('settings.sections.general.label') }}</span>
             <span class="text-[0.75rem] font-normal text-muted">{{ t('settings.sections.general.description') }}</span>
           </span>
-        </button>
-        <button
-          @click="currentCategory = 'places'"
-          class="flex items-start gap-3 rounded-[0.85rem] border-0 px-4 py-[0.85rem] text-left text-[1rem] transition-colors duration-150 cursor-pointer"
+        </RouterLink>
+        <RouterLink
+          :to="categoryLocation('sources')"
+          :aria-current-value="currentCategory === 'sources' ? 'location' : 'false'"
+          class="flex items-start gap-3 rounded-[0.85rem] border-0 px-4 py-[0.85rem] text-left text-[1rem] no-underline transition-colors duration-150"
+          :class="currentCategory === 'sources' ? 'bg-surface-alt font-bold text-text' : 'bg-transparent text-muted hover:bg-surface-hover hover:text-text'"
+        >
+          <span class="mt-[0.1rem] h-[1.25rem] w-[1.25rem] shrink-0" :class="currentCategory === 'sources' ? 'i-fluent-plug-connected-20-filled' : 'i-fluent-plug-connected-20-regular'" aria-hidden="true"></span>
+          <span class="flex min-w-0 flex-col gap-[0.1rem]">
+            <span>{{ t('settings.sections.sources.label') }}</span>
+            <span class="text-[0.75rem] font-normal text-muted">{{ t('settings.sections.sources.description') }}</span>
+          </span>
+        </RouterLink>
+        <RouterLink
+          :to="categoryLocation('places')"
+          :aria-current-value="currentCategory === 'places' ? 'location' : 'false'"
+          class="flex items-start gap-3 rounded-[0.85rem] border-0 px-4 py-[0.85rem] text-left text-[1rem] no-underline transition-colors duration-150"
           :class="currentCategory === 'places' ? 'bg-surface-alt font-bold text-text' : 'bg-transparent text-muted hover:bg-surface-hover hover:text-text'"
         >
           <span class="mt-[0.1rem] h-[1.25rem] w-[1.25rem] shrink-0" :class="currentCategory === 'places' ? 'i-fluent-location-20-filled' : 'i-fluent-location-20-regular'" aria-hidden="true"></span>
@@ -213,10 +242,11 @@
             <span>{{ t('settings.sections.places.label') }}</span>
             <span class="text-[0.75rem] font-normal text-muted">{{ t('settings.sections.places.description') }}</span>
           </span>
-        </button>
-        <button
-          @click="currentCategory = 'access'"
-          class="flex items-start gap-3 rounded-[0.85rem] border-0 px-4 py-[0.85rem] text-left text-[1rem] transition-colors duration-150 cursor-pointer"
+        </RouterLink>
+        <RouterLink
+          :to="categoryLocation('access')"
+          :aria-current-value="currentCategory === 'access' ? 'location' : 'false'"
+          class="flex items-start gap-3 rounded-[0.85rem] border-0 px-4 py-[0.85rem] text-left text-[1rem] no-underline transition-colors duration-150"
           :class="currentCategory === 'access' ? 'bg-surface-alt font-bold text-text' : 'bg-transparent text-muted hover:bg-surface-hover hover:text-text'"
         >
           <span class="mt-[0.1rem] h-[1.25rem] w-[1.25rem] shrink-0" :class="currentCategory === 'access' ? 'i-fluent-lock-shield-20-filled' : 'i-fluent-lock-shield-20-regular'" aria-hidden="true"></span>
@@ -224,10 +254,11 @@
             <span>{{ t('settings.sections.access.label') }}</span>
             <span class="text-[0.75rem] font-normal text-muted">{{ t('settings.sections.access.description') }}</span>
           </span>
-        </button>
-        <button
-          @click="currentCategory = 'status'"
-          class="flex items-start gap-3 rounded-[0.85rem] border-0 px-4 py-[0.85rem] text-left text-[1rem] transition-colors duration-150 cursor-pointer"
+        </RouterLink>
+        <RouterLink
+          :to="categoryLocation('status')"
+          :aria-current-value="currentCategory === 'status' ? 'location' : 'false'"
+          class="flex items-start gap-3 rounded-[0.85rem] border-0 px-4 py-[0.85rem] text-left text-[1rem] no-underline transition-colors duration-150"
           :class="currentCategory === 'status' ? 'bg-surface-alt font-bold text-text' : 'bg-transparent text-muted hover:bg-surface-hover hover:text-text'"
         >
           <span class="mt-[0.1rem] h-[1.25rem] w-[1.25rem] shrink-0" :class="currentCategory === 'status' ? 'i-fluent-data-usage-20-filled' : 'i-fluent-data-usage-20-regular'" aria-hidden="true"></span>
@@ -235,12 +266,13 @@
             <span>{{ t('settings.sections.status.label') }}</span>
             <span class="text-[0.75rem] font-normal text-muted">{{ t('settings.sections.status.description') }}</span>
           </span>
-        </button>
+        </RouterLink>
       </nav>
 
       <!-- Content Area -->
       <div class="flex-1 w-full min-w-0 flex flex-col gap-[1.15rem]">
         
+        <SourceSettings v-if="currentCategory === 'sources'" @manage-local-exclusions="openExcludedFolders" />
         <!-- CATEGORY: ACCESS -->
         <template v-if="currentCategory === 'access'">
           <section class="card grid gap-[1.15rem] p-8">
@@ -1026,7 +1058,7 @@
                 </button>
               </div>
 
-              <div class="grid gap-4 px-6 py-4">
+              <div ref="excludedFoldersSection" class="grid scroll-mt-24 gap-4 px-6 py-4">
                 <div class="min-w-0">
                   <div class="flex flex-wrap items-center gap-2">
                     <p class="m-0 text-[0.96rem] font-semibold text-text">{{ t('settings.general.excludedFolders.label') }}</p>
@@ -1040,6 +1072,7 @@
                 <label class="grid gap-[0.45rem]">
                   <span class="text-[0.76rem] font-bold uppercase tracking-[0.08em] text-muted">{{ t('settings.general.excludedFolders.customRules') }}</span>
                   <textarea
+                    ref="excludedFoldersInput"
                     v-model="customExcludedFoldersDraft"
                     class="min-h-[10rem] rounded-[0.95rem] border border-border bg-[color-mix(in_srgb,var(--surface-alt)_84%,transparent_16%)] px-4 py-3 text-[0.95rem] leading-[1.55] text-text outline-none transition-[border-color,box-shadow] duration-180 placeholder:text-muted focus:border-[color-mix(in_srgb,var(--accent)_48%,var(--border)_52%)] focus:shadow-[0_0_0_4px_color-mix(in_srgb,var(--accent-soft)_76%,transparent_24%)]"
                     :disabled="savingGeneralSettings || adminStats === null"
@@ -1381,8 +1414,9 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 
+import SourceSettings from '../components/SourceSettings.vue';
 import ConfirmDialog from '../components/ConfirmDialog.vue';
 import {
   fetchAdminStats,
@@ -1419,7 +1453,26 @@ const momentsStore = useMomentsStore();
 const placesStore = usePlacesStore();
 const viewerStore = useViewerStore();
 const route = useRoute();
-const currentCategory = ref<'library' | 'general' | 'places' | 'access' | 'status'>('library');
+const router = useRouter();
+const settingsCategories = ['library', 'general', 'sources', 'places', 'access', 'status'] as const;
+type SettingsCategory = (typeof settingsCategories)[number];
+const currentCategory = computed(() =>
+  settingsCategories.find(category => route.hash === `#${category}`) ??
+  settingsCategories.find(category => route.query.section === category) ??
+  'library'
+);
+function categoryLocation(category: SettingsCategory) {
+  const { section: _section, ...query } = route.query;
+  return { name: 'settings', query, hash: `#${category}` };
+}
+const excludedFoldersSection = ref<HTMLElement | null>(null);
+const excludedFoldersInput = ref<HTMLTextAreaElement | null>(null);
+async function openExcludedFolders() {
+  await router.push(categoryLocation('general'));
+  await nextTick();
+  excludedFoldersSection.value?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  excludedFoldersInput.value?.focus({ preventScroll: true });
+}
 const scanError = ref<string | null>(null);
 const rebuildError = ref<string | null>(null);
 const thumbnailRebuildError = ref<string | null>(null);
@@ -2567,7 +2620,7 @@ function dismissPlacesOnboardingBanner() {
 }
 
 function openPlacesTab() {
-  currentCategory.value = 'places';
+  return router.push(categoryLocation('places'));
 }
 
 function toggleStoriesAnnouncementStructure() {

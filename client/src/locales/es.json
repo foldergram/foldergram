@@ -1,4 +1,51 @@
 {
+  "sources": {
+    "title": "Fuentes",
+    "description": "Administra las carpetas locales y las bibliotecas de Immich que aparecen en Foldergram.",
+    "connect": "Conectar una fuente",
+    "connectImmich": "Conectar Immich",
+    "syncNow": "Sincronizar ahora",
+    "edit": "Editar",
+    "local": {
+      "add": "Añadir carpeta local",
+      "type": "Carpeta local",
+      "name": "Nombre",
+      "path": "Ruta de la carpeta en el servidor",
+      "pathHelp": "Escribe la ruta absoluta de una carpeta del servidor de Foldergram. En Docker, usa la ruta dentro del contenedor.",
+      "discoveryHelp": "Foldergram indexa los archivos de las subcarpetas. Omite los archivos multimedia que estén directamente en la carpeta seleccionada.",
+      "readOnly": "Originales de solo lectura",
+      "readOnlyHelp": "Impide que Foldergram elimine permanentemente los archivos originales. Puedes organizar el contenido y enviar publicaciones a la papelera.",
+      "pathValid": "La ruta es accesible.",
+      "sampled": "Se comprobaron las primeras 1000 entradas.",
+      "ignored": "Archivos multimedia omitidos en la carpeta raíz: {count}.",
+      "validate": "Validar ruta",
+      "save": "Guardar cambios",
+      "saveSync": "Guardar y sincronizar",
+      "queued": "Sincronización en cola.",
+      "saved": "Cambios guardados.",
+      "disabled": "Desactivada",
+      "syncing": "Sincronizando",
+      "review": "Revisar carpeta vacía",
+      "unavailable": "No disponible",
+      "ready": "Conectada",
+      "error": "Requiere atención",
+      "pending": "Sin sincronizar",
+      "counts": "{assets} fotos y vídeos · {folders} carpetas",
+      "progress": "Sincronizando… {progress} %",
+      "noMedia": "No se encontraron archivos multimedia. Coloca fotos o vídeos en una subcarpeta y vuelve a sincronizar.",
+      "confirmEmpty": "Confirmar carpeta vacía",
+      "changeTitle": "Actualizar fuente local",
+      "emptyMessage": "¿Has vaciado esta carpeta intencionadamente? La sincronización quitará del índice los elementos que falten.",
+      "disableMessage": "¿Desactivar esta fuente? Se ocultarán el contenido y los enlaces compartidos hasta que vuelvas a activarla. Se mantendrán los elementos guardados y la caché.",
+      "removeMessage": "¿Eliminar esta fuente? Foldergram quitará su índice, caché, Me gusta, vínculos a colecciones y enlaces compartidos. Los archivos originales permanecerán en el disco.",
+      "unavailableTitle": "Fuente local no disponible",
+      "unavailableMessage": "Comprueba la unidad o el punto de montaje. Las miniaturas y vistas previas ya generadas siguen disponibles."
+    },
+    "unavailableTitle": "Immich no está disponible",
+    "unavailableMessage": "No se puede conectar con tu servidor de Immich. Comprueba que esté en funcionamiento e inténtalo de nuevo.",
+    "reconnecting": "Reconectando automáticamente",
+    "checking": "Comprobando…"
+  },
   "common": {
     "cancel": "Cancelar",
     "close": "Cerrar",
@@ -96,6 +143,10 @@
       "general": {
         "label": "Ajustes generales",
         "description": "Modo de stories, carpetas excluidas y valores del feed"
+      },
+      "sources": {
+        "label": "Fuentes",
+        "description": "Configura y administra las carpetas locales y la integración con Immich."
       },
       "places": {
         "label": "Lugares",

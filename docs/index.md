@@ -25,7 +25,7 @@ features:
       width: "36"
       height: "36"
     title: Local-first
-    details: Originals stay in your gallery folder, untouched. Indexed metadata lives in SQLite on disk. No cloud sync, no external API, no accounts needed.
+    details: Originals stay in your gallery folder, untouched. Indexed metadata lives in SQLite on disk. Local folders need no external API or account. The optional read-only Immich integration reuses media from your self-hosted server.
   - icon:
       src: /icons/fast-feed.svg
       width: "36"

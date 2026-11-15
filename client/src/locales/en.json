@@ -1,4 +1,51 @@
 {
+  "sources": {
+    "title": "Sources",
+    "description": "Manage the local folders and Immich libraries shown in Foldergram.",
+    "connect": "Connect a source",
+    "connectImmich": "Connect Immich",
+    "syncNow": "Sync now",
+    "edit": "Edit",
+    "local": {
+      "add": "Add local folder",
+      "type": "Local folder",
+      "name": "Name",
+      "path": "Server folder path",
+      "pathHelp": "Enter the absolute path to a folder on the Foldergram server. In Docker, use the path inside the container.",
+      "discoveryHelp": "Foldergram indexes media in subfolders. Media files directly inside the selected folder are skipped.",
+      "readOnly": "Read-only originals",
+      "readOnlyHelp": "Keep Foldergram from permanently deleting original files. You can still organize content and move posts to Trash.",
+      "pathValid": "Path is readable.",
+      "sampled": "Checked the first 1,000 entries.",
+      "ignored": "Root-level media files found and skipped: {count}.",
+      "validate": "Validate path",
+      "save": "Save changes",
+      "saveSync": "Save & Sync",
+      "queued": "Sync queued.",
+      "saved": "Changes saved.",
+      "disabled": "Disabled",
+      "syncing": "Syncing",
+      "review": "Review empty location",
+      "unavailable": "Unavailable",
+      "ready": "Connected",
+      "error": "Needs attention",
+      "pending": "Not synced yet",
+      "counts": "{assets} photos and videos · {folders} folders",
+      "progress": "Syncing… {progress}%",
+      "noMedia": "No media found. Put photos or videos in a subfolder and sync again.",
+      "confirmEmpty": "Confirm empty location",
+      "changeTitle": "Update local source",
+      "emptyMessage": "Confirm this location was intentionally emptied? Sync will remove the missing items from the index.",
+      "disableMessage": "Disable this source? Its items and shares are hidden until you enable it again. Saved items and cached media are retained.",
+      "removeMessage": "Remove this source? Foldergram will remove its index, cached derivatives, likes, collection memberships and shares. Your original files will stay on disk.",
+      "unavailableTitle": "Local source unavailable",
+      "unavailableMessage": "Check the drive or mount. Previously generated thumbnails and previews remain available."
+    },
+    "unavailableTitle": "Immich is unavailable",
+    "unavailableMessage": "Unable to connect to your Immich server. Check that it’s running, then try again.",
+    "reconnecting": "Reconnecting automatically",
+    "checking": "Checking…"
+  },
   "common": {
     "cancel": "Cancel",
     "close": "Close",
@@ -96,6 +143,10 @@
       "general": {
         "label": "General Settings",
         "description": "Stories mode, excluded folders, and feed defaults"
+      },
+      "sources": {
+        "label": "Sources",
+        "description": "Set up and manage local folders & Immich Integration."
       },
       "places": {
         "label": "Places",

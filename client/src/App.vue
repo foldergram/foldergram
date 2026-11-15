@@ -13,9 +13,9 @@
   <RouterView v-else-if="isPublicShareRoute" />
   <AuthGate v-else-if="authStore.requiresLogin" />
   <AppShell v-else>
-    <RouterView :route="displayRoute" />
+    <RouterView :key="displayRoute?.name === 'settings' ? 'settings' : sourcesStore.contentRevision" :route="displayRoute" />
     <div v-if="showImageModal" class="app__image-modal-layer" @click.self="closeImageModal">
-      <PostView :id="String(route.params.id ?? '')" modal @close="closeImageModal" />
+      <PostView :key="sourcesStore.contentRevision" :id="String(route.params.id ?? '')" modal @close="closeImageModal" />
     </div>
   </AppShell>
   <AdminUnlockDialog v-if="authStore.unlockDialogOpen" />
@@ -42,6 +42,7 @@ import { useMomentsStore } from './stores/moments';
 import { useReelsStore } from './stores/reels';
 import { useTrashStore } from './stores/trash';
 import { useViewerStore } from './stores/viewer';
+import { useSourcesStore } from './stores/sources';
 
 const { t } = useI18n();
 const appStore = useAppStore();
@@ -57,6 +58,7 @@ const route = useRoute();
 const router = useRouter();
 const trashStore = useTrashStore();
 const viewerStore = useViewerStore();
+const sourcesStore = useSourcesStore();
 let lockedScrollX = 0;
 let lockedScrollY = 0;
 let modalScrollLocked = false;
@@ -110,6 +112,7 @@ function resetProtectedState() {
   protectedStateLoadGeneration = -1;
   unlockModalScroll();
   appStore.resetProtectedState();
+  sourcesStore.stop();
   feedStore.resetForRebuild();
   foldersStore.resetForRebuild();
   likesStore.resetForRebuild();
@@ -208,6 +211,7 @@ function unlockModalScroll() {
 onUnmounted(() => {
   unlockModalScroll();
   appStore.stopStatsPolling();
+  sourcesStore.stop();
 });
 
 watch(
@@ -243,6 +247,7 @@ watch(
     }
 
     if (!hadAccess || !appStore.stats || likesMode !== previousLikesMode) {
+      sourcesStore.start();
       await loadProtectedState(Boolean(hadAccess));
     }
   },

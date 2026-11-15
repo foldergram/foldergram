@@ -1,8 +1,10 @@
 import { createPinia, setActivePinia } from 'pinia';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import * as api from '../api/gallery';
 import { DEFAULT_LOCALE, i18n } from '../locales';
 import type { FeedItem } from '../types/api';
+import { useAuthStore } from './auth';
 import { useLikesStore } from './likes';
 
 function createFeedItem(id: number): FeedItem {
@@ -65,5 +67,93 @@ describe('useLikesStore localization', () => {
 
     store.items = store.items.filter(item => item.id !== 1);
     expect(store.itemsForFolder('animal-planet').map(item => item.id)).toEqual([3]);
+  });
+});
+
+describe('likes initialization before mutations', () => {
+  const storageKey = 'foldergram-local-favorites';
+  const savedIds = () => (JSON.parse(window.localStorage.getItem(storageKey)!) as FeedItem[]).map(item => item.id);
+  function useLocalFavorites() {
+    const auth = useAuthStore();
+    auth.$patch({ likesMode: 'local', capabilities: { canUseSharedLikes: false, canUseLocalFavorites: true } });
+    window.localStorage.setItem(storageKey, JSON.stringify([createFeedItem(1), createFeedItem(2)]));
+    return useLikesStore();
+  }
+
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    window.localStorage.clear();
+    vi.restoreAllMocks();
+  });
+
+  it('preserves existing browser favorites when liking another post after invalidation', async () => {
+    const likes = useLocalFavorites();
+    await likes.initialize();
+    likes.resetForRebuild();
+    await likes.toggleLike(createFeedItem(3));
+    expect(savedIds()).toEqual([3, 1, 2]);
+    expect(likes.likedIds).toEqual([3, 1, 2]);
+  });
+
+  it('loads existing favorites before deciding whether a heart click adds or removes a favorite', async () => {
+    const likes = useLocalFavorites();
+    likes.resetForRebuild();
+    await likes.toggleLike(createFeedItem(2));
+    expect(savedIds()).toEqual([1]);
+    expect(likes.isLiked(2)).toBe(false);
+  });
+
+  it('waits for an existing shared-likes load before concurrent mutations', async () => {
+    let resolve!: (payload: Awaited<ReturnType<typeof api.fetchLikes>>) => void;
+    const fetch = vi.spyOn(api, 'fetchLikes').mockReturnValue(new Promise(r => { resolve = r; }));
+    const like = vi.spyOn(api, 'likeImage').mockResolvedValue({ id: 3, liked: true, ok: true });
+    const unlike = vi.spyOn(api, 'unlikeImage').mockResolvedValue({ id: 1, liked: false, ok: true });
+    const likes = useLikesStore();
+    const load = likes.initialize();
+    const remove = likes.toggleLike(createFeedItem(1));
+    const add = likes.toggleLike(createFeedItem(3));
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(like).not.toHaveBeenCalled();
+    expect(unlike).not.toHaveBeenCalled();
+    resolve({ items: [createFeedItem(1), createFeedItem(2)] });
+    await Promise.all([load, remove, add]);
+    expect(unlike).toHaveBeenCalledWith(1);
+    expect(like).toHaveBeenCalledWith(3);
+    expect(likes.likedIds).toEqual([3, 2]);
+  });
+
+  it('does not mutate shared likes when initialization fails', async () => {
+    vi.spyOn(api, 'fetchLikes').mockRejectedValue(new Error('Unable to load likes.'));
+    const like = vi.spyOn(api, 'likeImage');
+    const likes = useLikesStore();
+    await likes.toggleLike(createFeedItem(3));
+    expect(like).not.toHaveBeenCalled();
+    expect(likes.likedIds).toEqual([]);
+    expect(likes.error).toBe('Unable to load likes.');
+  });
+
+  it.each(['removeImage', 'removeFolderItems', 'updateImageCaption'] as const)('loads browser favorites before %s writes local storage', action => {
+    const likes = useLocalFavorites();
+    likes.resetForRebuild();
+    if (action === 'removeImage') likes.removeImage(1);
+    else if (action === 'removeFolderItems') likes.removeFolderItems('other-folder');
+    else likes.updateImageCaption(1, 'Updated caption');
+    expect(savedIds()).toEqual(action === 'removeImage' ? [2] : [1, 2]);
+    if (action === 'updateImageCaption') expect(likes.items[0].caption).toBe('Updated caption');
+  });
+
+  it('discards a shared-likes response after switching to browser favorites', async () => {
+    let resolve!: (payload: Awaited<ReturnType<typeof api.fetchLikes>>) => void;
+    vi.spyOn(api, 'fetchLikes').mockReturnValue(new Promise(r => { resolve = r; }));
+    const likes = useLikesStore();
+    const oldLoad = likes.initialize();
+    useLocalFavorites();
+    likes.resetForRebuild();
+    await likes.toggleLike(createFeedItem(3));
+    resolve({ items: [createFeedItem(99)] });
+    await oldLoad;
+    expect(likes.mode).toBe('local');
+    expect(likes.likedIds).toEqual([3, 1, 2]);
+    expect(savedIds()).toEqual([3, 1, 2]);
   });
 });

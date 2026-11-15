@@ -1,20 +1,22 @@
+import path from 'node:path';
 import chokidar, { type FSWatcher } from 'chokidar';
 
 import { appConfig } from '../config/env.js';
+import { checkLocalSourceDirectory, listLocalSources } from '../sources/local-source.js';
 import { getEffectiveExcludedFolderRules, matchesExcludedFolder, parseExcludedFolderRulesFromSetting } from '../utils/excluded-folder-rules.js';
 import { EXCLUDED_FOLDERS_SETTING_KEY } from '../constants/app-setting-keys.js';
 import { appSettingsRepository } from '../db/repositories.js';
 import { scannerService } from './scanner-service.js';
 import { log } from './log-service.js';
 import { storageService } from './storage-service.js';
-import { getRelativeGalleryPath, getSourceFolderPathFromRelativePath, isHiddenPath, matchesRelativeRoot } from '../utils/path-utils.js';
+import { ensureWithinRoot, getRelativeGalleryPath, getSourceFolderPathFromRelativePath, isHiddenPath, matchesRelativeRoot } from '../utils/path-utils.js';
 import { isExclusionMarkerFilename, readExclusionMarkerState } from '../utils/exclusion-marker.js';
 
 class WatcherService {
   private watcher: FSWatcher | null = null;
-  private pendingPaths = new Set<string>();
+  private pendingPaths = new Map<number, Set<string>>();
   private debounceTimer: NodeJS.Timeout | null = null;
-  private fullRescanRequested = false;
+  private fullRescanRequested = new Set<number>();
   private watcherReady = false;
   private markerStates = new Map<string, boolean>();
   private markerChecks: Promise<void> = Promise.resolve();
@@ -39,12 +41,29 @@ class WatcherService {
       return;
     }
 
-    this.watcher = chokidar.watch(appConfig.galleryRoot, {
-      ignoreInitial: false
+    const sources = listLocalSources().flatMap(source => {
+      if (!source.enabled) return [];
+      if (source.managed_by === 'environment' && scannerService.isLibraryRebuildRequired(source.id)) return [];
+      try {
+        return [{ source, root: checkLocalSourceDirectory(source) }];
+      } catch {
+        return [];
+      }
+    });
+    if (sources.length === 0) return;
+
+    this.watcher = chokidar.watch(sources.map(({ root }) => root), {
+      ignoreInitial: false,
+      followSymlinks: true
     });
 
     this.watcher.on('all', async (eventName: string, absolutePath: string) => {
-      const relativePath = getRelativeGalleryPath(appConfig.galleryRoot, absolutePath);
+      const location = sources.find(({ root }) => ensureWithinRoot(root, path.resolve(absolutePath)));
+      if (!location) return;
+      const { source, root } = location;
+      const ignores = source.managed_by === 'environment' ? appConfig.managedGalleryRelativeIgnores : [];
+      const relativePath = getRelativeGalleryPath(root, absolutePath);
+      const eventKey = `${source.id}:${relativePath}`;
       if (isExclusionMarkerFilename(relativePath.split('/').at(-1) ?? '')) {
         if (eventName !== 'add' && eventName !== 'unlink' && eventName !== 'change') return;
 
@@ -52,7 +71,7 @@ class WatcherService {
         if (
           !containingFolder ||
           isHiddenPath(containingFolder) ||
-          matchesRelativeRoot(containingFolder, appConfig.managedGalleryRelativeIgnores) ||
+          matchesRelativeRoot(containingFolder, ignores) ||
           matchesExcludedFolder(containingFolder, this.getEffectiveExcludedFolderRules())
         ) {
           return;
@@ -60,16 +79,16 @@ class WatcherService {
 
         const initial = !this.watcherReady;
         this.markerChecks = this.markerChecks.then(async () => {
-          const current = await readExclusionMarkerState(appConfig.galleryRoot, containingFolder) === true;
-          const previous = this.markerStates.get(relativePath) ?? false;
-          this.markerStates.set(relativePath, current);
+          const current = await readExclusionMarkerState(root, containingFolder) === true;
+          const previous = this.markerStates.get(eventKey) ?? false;
+          this.markerStates.set(eventKey, current);
 
           if (initial || (eventName === 'change' && previous === current)) return;
-          this.fullRescanRequested = true;
+          this.fullRescanRequested.add(source.id);
           this.scheduleScan();
         }).catch((error: unknown) => {
           log.error('Unable to inspect gallery exclusion marker', error instanceof Error ? error.message : String(error));
-          this.fullRescanRequested = true;
+          this.fullRescanRequested.add(source.id);
           this.scheduleScan();
         });
         return this.markerChecks;
@@ -81,7 +100,7 @@ class WatcherService {
         return;
       }
 
-      if (matchesRelativeRoot(relativePath, appConfig.managedGalleryRelativeIgnores)) {
+      if (matchesRelativeRoot(relativePath, ignores)) {
         return;
       }
 
@@ -95,9 +114,11 @@ class WatcherService {
       }
 
       if (eventName === 'addDir' || eventName === 'unlinkDir') {
-        this.fullRescanRequested = true;
+        this.fullRescanRequested.add(source.id);
       } else {
-        this.pendingPaths.add(relativePath);
+        const paths = this.pendingPaths.get(source.id) ?? new Set<string>();
+        paths.add(relativePath);
+        this.pendingPaths.set(source.id, paths);
       }
 
       this.scheduleScan();
@@ -126,22 +147,38 @@ class WatcherService {
     }
 
     this.debounceTimer = setTimeout(async () => {
-      const queued = [...this.pendingPaths];
+      const queued = new Map(this.pendingPaths);
+      const full = new Set(this.fullRescanRequested);
       this.pendingPaths.clear();
+      this.fullRescanRequested.clear();
       this.debounceTimer = null;
 
-      if (this.fullRescanRequested) {
-        this.fullRescanRequested = false;
-        await scannerService.scanAll('watcher', {
-          allowDerivativeMigration: false
-        });
-        return;
-      }
-
-      if (queued.length > 0) {
-        await scannerService.scanChangedPaths(queued, 'watcher');
+      try {
+        for (const id of full) {
+          const sources = listLocalSources().filter(source => source.enabled);
+          if (sources.length === 1 && sources[0].managed_by === 'environment') {
+            await scannerService.scanAll('watcher', { allowDerivativeMigration: false });
+          } else {
+            await scannerService.scanSource(id, 'watcher', { allowDerivativeMigration: false });
+          }
+        }
+        for (const [id, paths] of queued) {
+          if (!full.has(id)) {
+            const primary = listLocalSources().find(source => source.managed_by === 'environment');
+            if (id === primary?.id) await scannerService.scanChangedPaths([...paths], 'watcher');
+            else await scannerService.scanChangedPaths([...paths], 'watcher', id);
+          }
+        }
+      } catch (error) {
+        log.error('Gallery watcher scan failed', error instanceof Error ? error.message : String(error));
       }
     }, 700);
+  }
+
+  async refresh(): Promise<void> {
+    if (!this.watcher) return;
+    await this.stop();
+    await this.start();
   }
 
   async stop(): Promise<void> {
@@ -159,7 +196,7 @@ class WatcherService {
     await this.markerChecks;
     this.markerStates.clear();
     this.pendingPaths.clear();
-    this.fullRescanRequested = false;
+    this.fullRescanRequested.clear();
   }
 }
 

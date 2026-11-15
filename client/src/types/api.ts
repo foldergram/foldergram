@@ -79,6 +79,11 @@ export interface PostMediaItem {
 }
 
 export interface FeedItem {
+  sourceId?: number | null;
+  sourceKind?: 'local' | 'immich';
+  sourceName?: string;
+  canWriteOriginals?: boolean;
+  originalDownloadsAllowed?: boolean;
   id: number;
   folderId: number;
   folderSlug: string;
@@ -131,6 +136,11 @@ export interface PlaceDetail extends PlaceSummary {
 }
 
 export interface FolderSummary {
+  canDeleteSourceFolder?: boolean;
+  sourceId?: number | null;
+  sourceKind?: 'local' | 'immich';
+  sourceName?: string;
+  canWriteOriginals?: boolean;
   id: number;
   slug: string;
   name: string;
