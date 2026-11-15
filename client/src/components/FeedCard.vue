@@ -310,7 +310,7 @@
         {{ caption }}
       </p>
       <p class="m-0 text-muted text-[0.72rem] uppercase tracking-[0.05em]">
-        {{ formattedDate }}<span v-if="item.sourceId"> · Immich</span>
+        {{ formattedDate }}<span v-if="item.sourceKind === 'immich'"> · Immich</span>
       </p>
     </div>
 
@@ -344,7 +344,7 @@
           <span>{{ t('post.viewer.openOriginalFile') }}</span>
         </button>
         <button
-          v-if="authStore.canDeleteMedia && !item?.sourceId"
+          v-if="authStore.canDeleteMedia && item?.sourceKind !== 'immich'"
           class="flex items-center gap-[0.8rem] w-full px-4 py-[0.95rem] border-0 border-b border-border text-[#d93025] bg-transparent cursor-pointer text-left disabled:opacity-70 disabled:cursor-wait"
           type="button"
           :disabled="deleting"
@@ -403,7 +403,7 @@
       @confirm="confirmDelete"
     >
       <template #details>
-        <label class="flex items-start gap-3 mt-3 cursor-pointer select-none">
+        <label v-if="item?.canWriteOriginals !== false" class="flex items-start gap-3 mt-3 cursor-pointer select-none">
           <input
             v-model="deleteOriginalFromDisk"
             class="mt-[0.2rem]"

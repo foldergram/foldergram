@@ -642,7 +642,7 @@ class DerivativeMigrationService {
     const previewAbsolutePath = safeJoin(appConfig.previewsDir, targetPreviewPath);
     let sourcePath: string | null = null;
     try {
-      sourcePath = resolveOriginalPath(row.relative_path);
+      sourcePath = resolveOriginalPath(row.relative_path, row.source_id);
     } catch {
       sourcePath = null;
     }

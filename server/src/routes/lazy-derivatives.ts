@@ -12,6 +12,7 @@ import { scannerService } from '../services/scanner-service.js';
 import { galleryService } from '../services/gallery-service.js';
 import { maintenanceOperationLock } from '../services/maintenance-operation-lock.js';
 import { resolveOriginalPath } from '../utils/media-paths.js';
+import { isImmichSource, isLocalOriginalUnavailable, isSourceVisible } from '../sources/local-source.js';
 import {
   applyDerivativeErrorHeaders,
   applyNoStoreMediaHeaders,
@@ -19,7 +20,7 @@ import {
   applyProtectedMediaHeaders
 } from '../utils/media-response.js';
 import { isNonemptyDerivative } from '../utils/derivative-cache.js';
-import { normalizePath, safeJoin } from '../utils/path-utils.js';
+import { safeJoin } from '../utils/path-utils.js';
 import { resolveVideoPlaybackSource } from '../utils/video-playback-policy.js';
 
 // In-memory map to deduplicate concurrent generation requests for the same derivative path.
@@ -33,9 +34,13 @@ class DerivativeRecordNotFoundError extends Error {}
 function getRequestedPath(request: express.Request): string | null {
   const rawPath = request.params.path;
   const relativePath = Array.isArray(rawPath) ? rawPath.join('/') : rawPath ?? '';
-  const normalizedPath = normalizePath(relativePath).replace(/^\/+/, '');
-
-  return normalizedPath.length > 0 ? normalizedPath : null;
+  // Express has already decoded the route parameters. Accept only canonical
+  // relative paths so the same path is used for the lookup and the file read.
+  if (relativePath.includes('\\') || relativePath.includes('\0') ||
+      relativePath.split('/').some(segment => !segment || segment === '.' || segment === '..')) {
+    return null;
+  }
+  return relativePath;
 }
 
 function resolveDerivativePath(rootDir: string, requestedPath: string): string | null {
@@ -57,7 +62,12 @@ function findCurrentImageRecord(
   if (!imageRecord || (expectedImageId !== undefined && imageRecord.id !== expectedImageId)) {
     return null;
   }
-  return imageRecord.source_id ? null : imageRecord;
+  return isImmichSource(imageRecord.source_id) || !isSourceVisible(imageRecord.source_id) ? null : imageRecord;
+}
+
+function sendLocalSourceUnavailable(response: express.Response): void {
+  applyDerivativeErrorHeaders(response);
+  response.status(503).json({ message: 'The local source is unavailable. Check its drive or mount.' });
 }
 
 function sendDerivativeNotFound(response: express.Response): void {
@@ -111,7 +121,7 @@ function queueLazyGeneration(
       source: imageRecord.relative_path
     });
 
-    const sourcePath = resolveOriginalPath(imageRecord.relative_path);
+    const sourcePath = resolveOriginalPath(imageRecord.relative_path, imageRecord.source_id);
     if (kind === 'thumbnail') {
       await generateThumbnailDerivative(sourcePath, imageRecord.relative_path, false, {
         thumbnailPath: imageRecord.thumbnail_path
@@ -183,7 +193,8 @@ async function serveOrGenerate(
   request: express.Request,
   response: express.Response,
   rootDir: string,
-  kind: 'thumbnail' | 'preview'
+  kind: 'thumbnail' | 'preview',
+  generateMissing: boolean
 ): Promise<void> {
   const requestedPath = getRequestedPath(request);
   if (!requestedPath) {
@@ -222,6 +233,10 @@ async function serveOrGenerate(
 
   // Fast path: reuse only a nonempty cached derivative.
   if (await isNonemptyDerivative(absoluteOutputPath)) {
+    if (!findCurrentImageRecord(requestedPath, kind, initialImageRecord.id)) {
+      sendDerivativeNotFound(response);
+      return;
+    }
     try {
       const result = await sendDerivativeFile(response, absoluteOutputPath);
       if (result === 'aborted') {
@@ -238,14 +253,17 @@ async function serveOrGenerate(
     return;
   }
 
-  // Missing or empty derivatives fall through to generation.
+  if (isLocalOriginalUnavailable(initialImageRecord.source_id)) {
+    sendLocalSourceUnavailable(response);
+    return;
+  }
 
-  if (kind === 'preview' && isEligibleNormalVideo(initialImageRecord)) {
+  if (!generateMissing || (kind === 'preview' && isEligibleNormalVideo(initialImageRecord))) {
     sendDerivativeNotFound(response);
     return;
   }
 
-  if (scannerService.isLibraryRebuildRequired()) {
+  if (scannerService.isLibraryRebuildRequired(initialImageRecord.source_id)) {
     applyDerivativeErrorHeaders(response);
     response.status(409).json({ message: 'Library rebuild required before generating derivatives.' });
     return;
@@ -269,9 +287,12 @@ async function serveOrGenerate(
       sendDerivativeNotFound(response);
       return;
     }
-    const message = error instanceof Error ? error.message : 'Failed to generate derivative.';
+    if (isLocalOriginalUnavailable(initialImageRecord.source_id)) {
+      sendLocalSourceUnavailable(response);
+      return;
+    }
     applyDerivativeErrorHeaders(response);
-    response.status(500).json({ message });
+    response.status(500).json({ message: 'Failed to generate derivative.' });
     return;
   }
 
@@ -334,8 +355,12 @@ export async function serveDerivativeForImage(
   }
 
   // Missing or empty derivatives fall through to generation.
+  if (isLocalOriginalUnavailable(initialImageRecord.source_id)) {
+    sendLocalSourceUnavailable(response);
+    return;
+  }
 
-  if (scannerService.isLibraryRebuildRequired()) {
+  if (scannerService.isLibraryRebuildRequired(initialImageRecord.source_id)) {
     applyDerivativeErrorHeaders(response);
     response.status(409).json({ message: 'Library rebuild required before generating derivatives.' });
     return;
@@ -359,9 +384,12 @@ export async function serveDerivativeForImage(
       sendDerivativeNotFound(response);
       return;
     }
-    const message = error instanceof Error ? error.message : 'Failed to generate derivative.';
+    if (isLocalOriginalUnavailable(initialImageRecord.source_id)) {
+      sendLocalSourceUnavailable(response);
+      return;
+    }
     applyDerivativeErrorHeaders(response);
-    response.status(500).json({ message });
+    response.status(500).json({ message: 'Failed to generate derivative.' });
     return;
   }
 
@@ -385,52 +413,18 @@ export async function serveDerivativeForImage(
   }
 }
 
-const lazyThumbnailsRouter = express.Router();
-const lazyPreviewsRouter = express.Router();
-const previewOriginalResolutionRouter = express.Router();
+function createDerivativeRouter(kind: 'thumbnail' | 'preview', generateMissing: boolean) {
+  const router = express.Router();
+  const rootDir = kind === 'thumbnail' ? appConfig.thumbnailsDir : appConfig.previewsDir;
 
-lazyThumbnailsRouter.get('/*path', async (request, response) => {
-  await serveOrGenerate(request, response, appConfig.thumbnailsDir, 'thumbnail');
-});
+  router.get('/*path', (request, response) =>
+    serveOrGenerate(request, response, rootDir, kind, generateMissing)
+  );
 
-lazyPreviewsRouter.get('/*path', async (request, response) => {
-  await serveOrGenerate(request, response, appConfig.previewsDir, 'preview');
-});
+  return router;
+}
 
-previewOriginalResolutionRouter.get('/*path', async (request, response, next) => {
-  const requestedPath = getRequestedPath(request);
-  if (!requestedPath) {
-    next();
-    return;
-  }
-
-  const imageRecord = findCurrentImageRecord(requestedPath, 'preview');
-  if (!imageRecord || imageRecord.media_type !== 'video') {
-    next();
-    return;
-  }
-
-  const originalPath = resolveEligibleOriginalPath(imageRecord);
-  if (!originalPath) {
-    const cachedPreviewPath = resolveDerivativePath(appConfig.previewsDir, requestedPath);
-    if (cachedPreviewPath && await isNonemptyDerivative(cachedPreviewPath)) {
-      next();
-      return;
-    }
-
-    sendDerivativeNotFound(response);
-    return;
-  }
-
-  try {
-    await sendDerivativeFile(response, originalPath, { original: true });
-  } catch {
-    if (response.headersSent) {
-      return;
-    }
-
-    sendDerivativeNotFound(response);
-  }
-});
-
-export { lazyThumbnailsRouter, lazyPreviewsRouter, previewOriginalResolutionRouter };
+export const lazyThumbnailsRouter = createDerivativeRouter('thumbnail', true);
+export const lazyPreviewsRouter = createDerivativeRouter('preview', true);
+export const cachedThumbnailsRouter = createDerivativeRouter('thumbnail', false);
+export const cachedPreviewsRouter = createDerivativeRouter('preview', false);

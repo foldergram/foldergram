@@ -45,7 +45,8 @@
         >
           {{ t('folder.header.editButton') }}
         </button>
-        <span v-if="folder.sourceId" class="eyebrow">Immich · Read-only source</span>
+        <span v-if="folder.sourceKind === 'immich'" class="eyebrow">Immich · Read-only source</span>
+        <span v-else-if="folder.sourceName" class="eyebrow">{{ folder.sourceName }}</span>
         <button
           v-if="authStore.canManageLibrary"
           type="button"

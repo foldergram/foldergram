@@ -1,13 +1,37 @@
-import { immichSchemaSql } from '../immich/schema.js';
-
 export const schemaSql = `
 PRAGMA foreign_keys = ON;
+
+CREATE TABLE media_sources (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'immich' CHECK (kind IN ('local', 'immich')),
+  server_url TEXT,
+  api_key_ciphertext TEXT,
+  managed_by TEXT NOT NULL DEFAULT 'settings',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  config_json TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'idle',
+  last_error TEXT,
+  last_success TEXT,
+  progress INTEGER NOT NULL DEFAULT 0,
+  asset_count INTEGER NOT NULL DEFAULT 0,
+  folder_count INTEGER NOT NULL DEFAULT 0,
+  generation INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CHECK ((kind = 'local' AND server_url IS NULL AND api_key_ciphertext IS NULL)
+      OR (kind = 'immich' AND server_url IS NOT NULL AND api_key_ciphertext IS NOT NULL))
+);
+CREATE UNIQUE INDEX idx_sources_environment ON media_sources(kind) WHERE managed_by = 'environment';
 
 CREATE TABLE IF NOT EXISTS folders (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   slug TEXT NOT NULL UNIQUE,
   name TEXT NOT NULL,
   folder_path TEXT NOT NULL,
+  source_id INTEGER NOT NULL REFERENCES media_sources(id),
+  external_id TEXT,
+  remote_visible INTEGER NOT NULL DEFAULT 1,
+  metadata_override INTEGER NOT NULL DEFAULT 0,
   role TEXT NOT NULL DEFAULT 'normal',
   story_owner_folder_id INTEGER NULL,
   carousel_owner_folder_id INTEGER NULL,
@@ -17,6 +41,7 @@ CREATE TABLE IF NOT EXISTS folders (
   share_password_version INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (source_id, folder_path),
   FOREIGN KEY (avatar_image_id) REFERENCES images(id),
   FOREIGN KEY (story_owner_folder_id) REFERENCES folders(id) ON DELETE SET NULL,
   FOREIGN KEY (carousel_owner_folder_id) REFERENCES folders(id) ON DELETE SET NULL
@@ -29,7 +54,11 @@ CREATE TABLE IF NOT EXISTS images (
   asset_key TEXT NULL,
   filename TEXT NOT NULL,
   extension TEXT NOT NULL,
-  relative_path TEXT NOT NULL UNIQUE,
+  relative_path TEXT NOT NULL,
+  source_id INTEGER NOT NULL REFERENCES media_sources(id),
+  external_asset_id TEXT,
+  remote_version TEXT,
+  sync_generation INTEGER,
   absolute_path TEXT NOT NULL,
   file_size INTEGER NOT NULL,
   width INTEGER NOT NULL,
@@ -56,6 +85,7 @@ CREATE TABLE IF NOT EXISTS images (
   trashed_at TEXT NULL,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (source_id, relative_path),
   FOREIGN KEY (folder_id) REFERENCES folders(id) ON DELETE CASCADE,
   FOREIGN KEY (place_id) REFERENCES places(id) ON DELETE SET NULL
 );
@@ -64,7 +94,8 @@ CREATE TABLE IF NOT EXISTS posts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   folder_id INTEGER NOT NULL,
   place_id INTEGER NULL,
-  source_path TEXT NOT NULL UNIQUE,
+  source_path TEXT NOT NULL,
+  source_id INTEGER NOT NULL REFERENCES media_sources(id),
   post_type TEXT NOT NULL DEFAULT 'single',
   caption TEXT NULL,
   sort_timestamp INTEGER NOT NULL,
@@ -76,6 +107,7 @@ CREATE TABLE IF NOT EXISTS posts (
   trashed_at TEXT NULL,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (source_id, source_path),
   FOREIGN KEY (folder_id) REFERENCES folders(id) ON DELETE CASCADE,
   FOREIGN KEY (place_id) REFERENCES places(id) ON DELETE SET NULL,
   CHECK (post_type IN ('single', 'carousel'))
@@ -125,7 +157,8 @@ CREATE TABLE IF NOT EXISTS scan_runs (
   removed_files INTEGER NOT NULL DEFAULT 0,
   error_text TEXT NULL,
   warning_count INTEGER NOT NULL DEFAULT 0,
-  warning_text TEXT NULL
+  warning_text TEXT NULL,
+  source_id INTEGER REFERENCES media_sources(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS app_settings (
@@ -134,12 +167,14 @@ CREATE TABLE IF NOT EXISTS app_settings (
 );
 
 CREATE TABLE IF NOT EXISTS folder_scan_state (
-  folder_path TEXT PRIMARY KEY,
+  folder_path TEXT NOT NULL,
+  source_id INTEGER NOT NULL REFERENCES media_sources(id) ON DELETE CASCADE,
   signature TEXT NOT NULL,
   file_count INTEGER NOT NULL,
   max_mtime_ms REAL NOT NULL,
   total_size INTEGER NOT NULL,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (source_id, folder_path)
 );
 
 CREATE TABLE IF NOT EXISTS likes (
@@ -189,7 +224,6 @@ CREATE TABLE IF NOT EXISTS folder_share_passwords (
 );
 
 CREATE INDEX IF NOT EXISTS idx_folders_slug ON folders(slug);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_folders_folder_path ON folders(folder_path);
 CREATE INDEX IF NOT EXISTS idx_folders_role ON folders(role);
 CREATE INDEX IF NOT EXISTS idx_folders_story_owner_role ON folders(story_owner_folder_id, role, folder_path COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS idx_folders_carousel_owner ON folders(carousel_owner_folder_id);
@@ -236,5 +270,45 @@ CREATE INDEX IF NOT EXISTS idx_collection_items_created ON collection_items(coll
 CREATE INDEX IF NOT EXISTS idx_folder_share_links_folder_id ON folder_share_links(folder_id);
 CREATE INDEX IF NOT EXISTS idx_folder_share_links_expires_at ON folder_share_links(expires_at);
 
-${immichSchemaSql}
+CREATE UNIQUE INDEX idx_images_remote_identity ON images(source_id, external_asset_id) WHERE source_id IS NOT NULL;
+CREATE UNIQUE INDEX idx_folders_remote_identity ON folders(source_id, external_id) WHERE source_id IS NOT NULL;
+CREATE INDEX idx_posts_source ON posts(source_id);
+CREATE INDEX idx_images_source ON images(source_id);
+CREATE INDEX idx_images_thumbnail_path ON images(thumbnail_path);
+CREATE INDEX idx_images_preview_path ON images(preview_path);
+CREATE TABLE folder_media_memberships (
+  folder_id INTEGER NOT NULL REFERENCES folders(id) ON DELETE CASCADE,
+  image_id INTEGER NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+  position INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY(folder_id, image_id)
+);
+CREATE INDEX idx_memberships_image ON folder_media_memberships(image_id, folder_id);
+
+CREATE TRIGGER folders_source_immutable BEFORE UPDATE OF source_id ON folders
+WHEN NEW.source_id <> OLD.source_id
+BEGIN SELECT RAISE(ABORT, 'Cannot change folder source'); END;
+
+CREATE TRIGGER images_source_insert BEFORE INSERT ON images
+WHEN NEW.source_id IS NOT (SELECT source_id FROM folders WHERE id = NEW.folder_id)
+BEGIN SELECT RAISE(ABORT, 'Image source must match folder source'); END;
+
+CREATE TRIGGER images_source_update BEFORE UPDATE OF folder_id, source_id ON images
+WHEN NEW.source_id <> OLD.source_id OR NEW.source_id IS NOT (SELECT source_id FROM folders WHERE id = NEW.folder_id)
+BEGIN SELECT RAISE(ABORT, 'Image source must match folder source'); END;
+
+CREATE TRIGGER posts_source_insert BEFORE INSERT ON posts
+WHEN NEW.source_id IS NOT (SELECT source_id FROM folders WHERE id = NEW.folder_id)
+BEGIN SELECT RAISE(ABORT, 'Post source must match folder source'); END;
+
+CREATE TRIGGER posts_source_update BEFORE UPDATE OF folder_id, source_id ON posts
+WHEN NEW.source_id <> OLD.source_id OR NEW.source_id IS NOT (SELECT source_id FROM folders WHERE id = NEW.folder_id)
+BEGIN SELECT RAISE(ABORT, 'Post source must match folder source'); END;
+
+CREATE TRIGGER post_items_source_insert BEFORE INSERT ON post_items
+WHEN (SELECT source_id FROM posts WHERE id = NEW.post_id) IS NOT (SELECT source_id FROM images WHERE id = NEW.image_id)
+BEGIN SELECT RAISE(ABORT, 'Post and image must share a source'); END;
+
+CREATE TRIGGER post_items_source_update BEFORE UPDATE OF post_id, image_id ON post_items
+WHEN (SELECT source_id FROM posts WHERE id = NEW.post_id) IS NOT (SELECT source_id FROM images WHERE id = NEW.image_id)
+BEGIN SELECT RAISE(ABORT, 'Post and image must share a source'); END;
 `;

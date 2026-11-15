@@ -12,6 +12,7 @@ import { useViewerStore } from './viewer';
 
 export interface SourceStatus {
   id: number;
+  kind?: 'local' | 'immich';
   name: string;
   enabled: number;
   status: string;
@@ -26,6 +27,7 @@ export const useSourcesStore = defineStore('sources', {
     items: [] as SourceStatus[],
     initialized: false,
     hasLocalPosts: null as boolean | null,
+    hasVisiblePosts: null as boolean | null,
     contentRevision: 0,
     timer: null as ReturnType<typeof setInterval> | null,
     request: null as Promise<void> | null,
@@ -34,16 +36,16 @@ export const useSourcesStore = defineStore('sources', {
   getters: {
     unavailable: state => state.items.filter(s => s.enabled && s.status !== 'revoked' && !s.available),
     allContentUnavailable: state => state.initialized && state.hasLocalPosts === false &&
-      state.items.some(s => s.enabled && s.status !== 'revoked' && !s.available) &&
-      state.items.every(s => !s.enabled || s.status === 'revoked' || !s.available)
+      state.items.some(s => s.kind !== 'local' && s.enabled && s.status !== 'revoked' && !s.available) &&
+      state.items.every(s => !s.enabled || s.kind === 'local' || s.status === 'revoked' || !s.available)
   },
   actions: {
     isUnavailable(id?: number | null) {
-      return Boolean(id && this.unavailable.some(s => s.id === id));
+      return Boolean(id && this.unavailable.some(s => s.id === id && s.kind !== 'local'));
     },
     canBrowse(id?: number | null) {
       const source = this.items.find(s => s.id === id);
-      return !id || !source || Boolean(source.enabled && source.status !== 'revoked' && source.available);
+      return !id || !source || Boolean(source.enabled && (source.kind === 'local' || (source.status !== 'revoked' && source.available)));
     },
     refresh(retry = false): Promise<void> {
       const session = this.session;
@@ -57,12 +59,13 @@ export const useSourcesStore = defineStore('sources', {
       }
       const request = (async () => {
         try {
-          const payload = await requestJson<{ items: SourceStatus[]; hasLocalPosts?: boolean }>(`/api/sources/status${retry ? '?retry=1' : ''}`);
+          const payload = await requestJson<{ items: SourceStatus[]; hasLocalPosts?: boolean; hasVisiblePosts?: boolean }>(`/api/sources/status${retry ? '?retry=1' : ''}`);
           if (session !== this.session) return;
-          const fingerprint = (items: SourceStatus[]) => JSON.stringify(items.map(s => [s.id, s.name, s.enabled, s.generation, s.updated_at, s.status === 'revoked']));
+          const fingerprint = (items: SourceStatus[]) => JSON.stringify(items.map(s => [s.id, s.name, s.enabled, s.generation, s.kind === 'local' ? null : s.updated_at, s.status === 'revoked']));
           const changed = this.initialized && fingerprint(this.items) !== fingerprint(payload.items);
           this.items = payload.items;
           this.hasLocalPosts = payload.hasLocalPosts ?? null;
+          this.hasVisiblePosts = payload.hasVisiblePosts ?? null;
           this.initialized = true;
           if (changed) {
             useFeedStore().resetForRebuild();
@@ -101,6 +104,7 @@ export const useSourcesStore = defineStore('sources', {
       this.items = [];
       this.initialized = false;
       this.hasLocalPosts = null;
+      this.hasVisiblePosts = null;
     }
   }
 });

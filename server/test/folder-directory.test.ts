@@ -100,7 +100,8 @@ describe('folder directory', () => {
     `);
     const { folderRepository } = await modules();
     const prepare = vi.spyOn(db, 'prepare');
-    expect(folderRepository.getAllSummaries()).toEqual(db.prepare(legacySql).all());
+    const summaries = folderRepository.getAllSummaries().map(({ source_kind, source_name, source_managed_by, can_write_originals, ...row }) => row);
+    expect(summaries).toEqual(db.prepare(legacySql).all());
     const summarySql = prepare.mock.calls.find(([sql]) => sql.includes('WITH folder_candidates'))![0];
     prepare.mockRestore();
     const storyPlan = db.prepare(`EXPLAIN QUERY PLAN ${summarySql}`).all() as Array<{ detail: string }>;

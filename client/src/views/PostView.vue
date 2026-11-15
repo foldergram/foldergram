@@ -24,7 +24,7 @@
       @confirm="handleDelete"
     >
       <template #details>
-        <label class="flex items-start gap-3 mt-3 cursor-pointer select-none">
+        <label v-if="activeImage?.canWriteOriginals !== false" class="flex items-start gap-3 mt-3 cursor-pointer select-none">
           <input
             v-model="deleteOriginalFromDisk"
             class="mt-[0.2rem]"

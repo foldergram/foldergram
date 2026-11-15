@@ -1,3 +1,4 @@
+import { isSourceVisible } from '../sources/local-source.js';
 import { createHash, createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 
 import type express from 'express';
@@ -527,6 +528,8 @@ export const folderShareService = {
   },
 
   getFolderGrant(request: express.Request, folderId: number): FolderShareGrant | null {
+    const folder = folderRepository.getById(folderId);
+    if (!folder || !isSourceVisible(folder.source_id) || folder.remote_visible === 0) return null;
     const globalGrant = getGlobalGrant(request, folderId);
     if (globalGrant) {
       return globalGrant;

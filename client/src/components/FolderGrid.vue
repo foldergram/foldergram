@@ -1,6 +1,6 @@
 <template>
   <section class="grid gap-[1px]" :class="columns === 'three' ? 'grid-cols-3' : 'grid-cols-3 md:grid-cols-4'">
-    <RouterLink v-for="item in items" :key="item.id" custom :to="buildImageRoute(item.id, 'sourceId' in item ? item.sourceId : null)" v-slot="{ href, navigate }">
+    <RouterLink v-for="item in items" :key="item.id" custom :to="buildImageRoute(item.id, 'sourceKind' in item && item.sourceKind === 'immich')" v-slot="{ href, navigate }">
       <a
         :href="href"
         class="group relative overflow-hidden bg-surface-alt"
@@ -62,7 +62,7 @@ const appStore = useAppStore();
 const route = useRoute();
 const { t } = useI18n();
 
-function buildImageRoute(id: number, sourceId?: number | null) {
+function buildImageRoute(id: number, useAlbumRoute: boolean) {
   if (props.sharedSlug) {
     return {
       name: 'shared-post',
@@ -77,7 +77,7 @@ function buildImageRoute(id: number, sourceId?: number | null) {
   return {
     name: 'image',
     params: { id: String(id) },
-    query: sourceId && route.name === 'folder' ? {...route.query,folder:String(route.params.slug)} : route.query
+    query: useAlbumRoute && route.name === 'folder' ? {...route.query,folder:String(route.params.slug)} : route.query
   };
 }
 

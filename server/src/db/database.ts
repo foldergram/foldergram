@@ -10,6 +10,7 @@ import {
   type SqliteWalCheckpointResult
 } from './sqlite-connection.js';
 import { appConfig } from '../config/env.js';
+import { initializePrimaryLocalSource } from '../sources/local-source.js';
 import { log } from '../services/log-service.js';
 import { storageService } from '../services/storage-service.js';
 import { getParentRelativePath } from '../utils/path-utils.js';
@@ -101,6 +102,7 @@ class DatabaseManager {
       } else {
         assertNoLegacySchema(db);
       }
+      initializePrimaryLocalSource(db);
     } catch (error) {
       db.close();
       throw error;

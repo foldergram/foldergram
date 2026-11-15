@@ -1,6 +1,7 @@
-import { appConfig } from '../config/env.js';
-import { safeJoin } from './path-utils.js';
+import { getLocalSource, primaryLocalSource, resolveLocalPath } from '../sources/local-source.js';
 
-export function resolveOriginalPath(relativePath: string): string {
-  return safeJoin(appConfig.galleryRoot, relativePath);
+export function resolveOriginalPath(relativePath: string, sourceId?: number | null, allowMissing = false): string {
+  const source = sourceId == null ? primaryLocalSource() : getLocalSource(sourceId);
+  if (!source) throw new Error('The requested file is unavailable.');
+  return resolveLocalPath(source, relativePath, { allowMissing });
 }

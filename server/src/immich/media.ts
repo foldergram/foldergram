@@ -6,12 +6,13 @@ import { pipeline } from 'node:stream/promises';
 import pLimit from 'p-limit';
 import type express from 'express';
 import { appConfig } from '../config/env.js';
+import { isSourceVisible } from '../sources/local-source.js';
 import { databaseManager } from '../db/database.js';
 import { imageRepository } from '../db/repositories.js';
 import { authService } from '../services/auth-service.js';
 import { folderShareService } from '../services/folder-share-service.js';
 import type { ImageRecord } from '../types/models.js';
-import { getSource, markSourceUnavailable, revokeSource, selectionSchema, sourceAvailable, sourceClient, sourceVisible } from './source-service.js';
+import { getSource, markSourceUnavailable, revokeSource, sameConnection, selectionSchema, sourceAvailable, sourceClient } from './source-service.js';
 export type RemoteMediaKind = 'thumbnail' | 'preview' | 'original';
 const concurrency = Math.floor(Math.max(1, Math.min(16, Number(process.env.IMMICH_FETCH_CONCURRENCY) || 4)));
 const limit = pLimit(concurrency);
@@ -39,7 +40,7 @@ export function imageFolderIds(imageId: number): number[] {
     return rows.map(r => r.folder_id);
 }
 export function authorizedImage(request: express.Request, image: ImageRecord, shareOnly = false): boolean {
-    if (image.is_deleted || image.is_trashed || image.source_id && !sourceVisible(image.source_id))
+    if (image.is_deleted || image.is_trashed || !isSourceVisible(image.source_id))
         return false;
     if (!shareOnly && (!authService.isEnabled() || authService.isAuthenticatedRequest(request) || authService.isPublicViewerAccessEnabled()))
         return true;
@@ -116,12 +117,17 @@ export async function serveRemoteMedia(request: express.Request, response: expre
     response.setHeader('Cache-Control', 'private, no-store');
     response.vary('Cookie');
     response.setHeader('X-Content-Type-Options', 'nosniff');
-    const current = () => { const row = imageRepository.getById(image.id); return row && authorizedImage(request, row, shareOnly) ? row : null; };
-    if (!image.source_id || !image.external_asset_id || !current()) {
+    const source = getSource(image.source_id);
+    const connectionIsCurrent = () => Boolean(source && sameConnection(source, getSource(source.id)));
+    const current = () => {
+        if (!connectionIsCurrent()) return null;
+        const row = imageRepository.getById(image.id);
+        return row && authorizedImage(request, row, shareOnly) ? row : null;
+    };
+    if (!source || !image.external_asset_id || !current()) {
         response.status(404).end();
         return;
     }
-    const source = getSource(image.source_id)!;
     const endpoint = `/api/assets/${image.external_asset_id}/${kind === 'original' ? 'original' : kind === 'preview' && image.media_type === 'video' ? 'video/playback' : `thumbnail?size=${kind}`}`;
     const cacheEpoch = cacheEpochs.get(source.id) ?? 0;
     const canWriteCache = () => !clearingSources.has(source.id) && cacheEpoch === (cacheEpochs.get(source.id) ?? 0);
@@ -225,6 +231,11 @@ export async function serveRemoteMedia(request: express.Request, response: expre
             try {
                 const client = sourceClient(source);
                 const upstream = await client.open(endpoint, { range, signal: controller.signal });
+                if (!connectionIsCurrent()) {
+                    upstream.destroy();
+                    response.status(404).end();
+                    return;
+                }
                 const status = upstream.statusCode ?? 502;
                 if (status === 401)
                     revokeSource(source.id);
@@ -346,7 +357,7 @@ export async function serveRemoteMedia(request: express.Request, response: expre
         }
     }
     catch (error) {
-        if (!response.destroyed && error instanceof Error && error.name !== 'AbortError') markSourceUnavailable(source.id, endpoint);
+        if (!response.destroyed && connectionIsCurrent() && error instanceof Error && error.name !== 'AbortError') markSourceUnavailable(source.id, endpoint);
         if (response.headersSent)
             response.destroy();
         else if (!response.destroyed)

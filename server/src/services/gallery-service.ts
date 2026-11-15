@@ -1,4 +1,6 @@
 import { databaseManager } from '../db/database.js';
+import { checkLocalSourceDirectory, getLocalSource, isImmichSource, isSourceVisible, resolveLocalPath } from '../sources/local-source.js';
+import { maintenanceOperationLock } from './maintenance-operation-lock.js';
 import { imageBelongsToFolder } from '../immich/media.js';
 import fs from 'node:fs';
 import fsPromises from 'node:fs/promises';
@@ -387,18 +389,18 @@ function mapPlaceSummaryFromRow(image: PlaceRowFields) {
 }
 
 function resolveOriginalMediaFile(id: number): { path: string; filename: string } | null {
-  if (!storageService.getState().libraryAvailable || scannerService.isLibraryRebuildRequired()) {
+  if (!storageService.getState().libraryAvailable) {
     return null;
   }
 
   const detail = imageRepository.getById(id);
-  if (!detail || detail.source_id || detail.is_deleted || detail.is_trashed) {
+  if (!detail || isImmichSource(detail.source_id) || !isSourceVisible(detail.source_id) || detail.is_deleted || detail.is_trashed || scannerService.isLibraryRebuildRequired(detail.source_id)) {
     return null;
   }
 
   let resolvedPath: string;
   try {
-    resolvedPath = resolveOriginalPath(detail.relative_path);
+    resolvedPath = resolveOriginalPath(detail.relative_path, detail.source_id);
   } catch {
     return null;
   }
@@ -411,14 +413,6 @@ function resolveOriginalMediaFile(id: number): { path: string; filename: string 
     path: resolvedPath,
     filename: detail.filename
   };
-}
-
-function resolveIndexedOriginalPath(relativePath: string): string | null {
-  try {
-    return resolveOriginalPath(relativePath);
-  } catch {
-    return null;
-  }
 }
 
 function resolveWithinRoot(rootPath: string, targetPath: string): string | null {
@@ -516,20 +510,25 @@ function isSameOrDescendantFolderPath(rootFolderPath: string, candidateFolderPat
   return candidateFolderPath === rootFolderPath || candidateFolderPath.startsWith(`${rootFolderPath}/`);
 }
 
-function getParentFolderDisplayName(folderPath: string, parentNames?: Map<string, string>): string | null {
+function getParentFolderDisplayName(folderPath: string, parentNames?: Map<string, string>, sourceId?: number | null): string | null {
   const parentFolderPath = getParentRelativePath(folderPath);
-  if (!parentFolderPath) {
-    return null;
-  }
-
+  if (!parentFolderPath) return null;
   if (parentNames) return parentNames.get(parentFolderPath)?.trim() || getLeafPathName(parentFolderPath);
+  const parentFolder = folderRepository.getByFolderPath(parentFolderPath, sourceId ?? undefined);
+  return parentFolder?.name.trim() || getLeafPathName(parentFolderPath);
+}
 
-  const parentFolder = folderRepository.getByFolderPath(parentFolderPath);
-  if (parentFolder?.name.trim()) {
-    return parentFolder.name.trim();
+function getParentNamesBySource<T>(items: T[], getSourceId: (item: T) => number | null | undefined, getPath: (item: T) => string) {
+  const pathsBySource = new Map<number | null | undefined, Set<string>>();
+  for (const item of items) {
+    const parent = getParentRelativePath(getPath(item));
+    if (!parent) continue;
+    const id = getSourceId(item);
+    const paths = pathsBySource.get(id) ?? new Set<string>();
+    paths.add(parent);
+    pathsBySource.set(id, paths);
   }
-
-  return getLeafPathName(parentFolderPath);
+  return new Map([...pathsBySource].map(([sourceId, paths]) => [sourceId, folderRepository.getNamesByFolderPaths([...paths], sourceId ?? undefined)]));
 }
 
 function mapFeedImage(image: IndexedFeedImage, derivativeVersion = getDerivativeAssetVersion(), parentNames?: Map<string, string>): FeedImage {
@@ -546,13 +545,14 @@ function mapFeedImage(image: IndexedFeedImage, derivativeVersion = getDerivative
   });
   return {
     ...rest,
+    canWriteOriginals: rest.canWriteOriginals === undefined ? undefined : Boolean(rest.canWriteOriginals),
     originalDownloadsAllowed: rest.originalDownloadsAllowed === undefined ? true : Boolean(rest.originalDownloadsAllowed),
     postType: rest.postType ?? 'single',
     carouselTitle: rest.postType === 'carousel' && rest.sourcePath ? getLeafPathName(rest.sourcePath) : null,
     isAnimated: Boolean(rest.isAnimated),
     isSaved: Boolean(isSaved),
-    folderParentName: rest.sourceId ? null : getParentFolderDisplayName(rest.folderPath, parentNames),
-    folderBreadcrumb: rest.sourceId ? 'Immich' : getPathBreadcrumb(rest.folderPath),
+    folderParentName: rest.sourceKind === 'immich' ? null : getParentFolderDisplayName(rest.folderPath, parentNames, rest.sourceId),
+    folderBreadcrumb: rest.sourceKind === 'immich' ? 'Immich' : [rest.sourceName && rest.sourceName !== 'Primary gallery' ? rest.sourceName : null, getPathBreadcrumb(rest.folderPath)].filter(Boolean).join(' / ') || null,
     thumbnailUrl: toPublicMediaUrl('/thumbnails', rest.thumbnailUrl, derivativeVersion),
     previewUrl: buildPreviewUrl({
       id: representativeImageId,
@@ -684,14 +684,15 @@ function mapImageDetail(image: IndexedImageDetail, derivativeVersion = getDeriva
   });
   return {
     ...rest,
+    canWriteOriginals: rest.canWriteOriginals === undefined ? undefined : Boolean(rest.canWriteOriginals),
     originalDownloadsAllowed: rest.originalDownloadsAllowed === undefined ? true : Boolean(rest.originalDownloadsAllowed),
     postType: rest.postType ?? 'single',
     carouselTitle: rest.postType === 'carousel' && rest.sourcePath ? getLeafPathName(rest.sourcePath) : null,
     isAnimated: Boolean(rest.isAnimated),
     isSaved: Boolean(isSaved),
     exif: deserializeImageExifData(exifJson),
-    folderParentName: rest.sourceId ? null : getParentFolderDisplayName(rest.folderPath),
-    folderBreadcrumb: rest.sourceId ? 'Immich' : getPathBreadcrumb(rest.folderPath),
+    folderParentName: rest.sourceKind === 'immich' ? null : getParentFolderDisplayName(rest.folderPath, undefined, rest.sourceId),
+    folderBreadcrumb: rest.sourceKind === 'immich' ? 'Immich' : [rest.sourceName && rest.sourceName !== 'Primary gallery' ? rest.sourceName : null, getPathBreadcrumb(rest.folderPath)].filter(Boolean).join(' / ') || null,
     thumbnailUrl: toPublicMediaUrl('/thumbnails', rest.thumbnailUrl, derivativeVersion),
     previewUrl: buildPreviewUrl({
       id: representativeImageId,
@@ -786,10 +787,24 @@ function mapTrashImage(image: IndexedTrashImage, derivativeVersion = getDerivati
 }
 
 function buildFolderSummaries(folders: FolderSummaryRecord[]) {
-  const parentPaths = [...new Set(folders.map((folder) => getParentRelativePath(folder.folder_path)).filter((value): value is string => Boolean(value)))];
-  const parentNames = folderRepository.getNamesByFolderPaths(parentPaths);
+  const parentNames = getParentNamesBySource(folders, folder => folder.source_id, folder => folder.folder_path);
   const derivativeVersion = getDerivativeAssetVersion();
-  return folders.map((folder) => buildFolderSummary(folder, parentNames, derivativeVersion));
+  return folders.map((folder) => buildFolderSummary(folder, parentNames.get(folder.source_id), derivativeVersion));
+}
+
+function folderSourceMetadata(folder: FolderSummaryRecord) {
+  return {
+    sourceId: folder.source_id,
+    sourceKind: folder.source_kind,
+    sourceName: folder.source_name,
+    canDeleteSourceFolder: folder.source_managed_by === 'environment',
+    canWriteOriginals: folder.can_write_originals === undefined ? undefined : Boolean(folder.can_write_originals)
+  };
+}
+
+function folderBreadcrumb(folder: FolderSummaryRecord): string | null {
+  if (folder.source_kind === 'immich') return 'Immich';
+  return [folder.source_managed_by === 'settings' ? folder.source_name : null, getPathBreadcrumb(folder.folder_path)].filter(Boolean).join(' / ') || null;
 }
 
 function buildFolderSummary(folder: FolderSummaryRecord, parentNames?: Map<string, string>, derivativeVersion = getDerivativeAssetVersion()) {
@@ -798,14 +813,14 @@ function buildFolderSummary(folder: FolderSummaryRecord, parentNames?: Map<strin
 
   if (hasPreloadedAvatarSummary) {
     return {
-      sourceId: folder.source_id ?? null,
+      ...folderSourceMetadata(folder),
     id: folder.id,
       slug: folder.slug,
       name: folder.name,
       description: folder.description,
-      parentFolderName: folder.source_id ? null : getParentFolderDisplayName(folder.folder_path, parentNames),
+      parentFolderName: folder.source_kind === 'immich' ? null : getParentFolderDisplayName(folder.folder_path, parentNames, folder.source_id),
       folderPath: folder.folder_path,
-      breadcrumb: folder.source_id ? 'Immich' : getPathBreadcrumb(folder.folder_path),
+      breadcrumb: folderBreadcrumb(folder),
       imageCount: folder.image_count,
       postCount: folder.post_count,
       videoCount: folder.video_count,
@@ -827,14 +842,14 @@ function buildFolderSummary(folder: FolderSummaryRecord, parentNames?: Map<strin
   }
 
   return {
-    sourceId: folder.source_id ?? null,
+    ...folderSourceMetadata(folder),
     id: folder.id,
     slug: folder.slug,
     name: folder.name,
     description: folder.description,
-    parentFolderName: folder.source_id ? null : getParentFolderDisplayName(folder.folder_path, parentNames),
+    parentFolderName: folder.source_kind === 'immich' ? null : getParentFolderDisplayName(folder.folder_path, parentNames, folder.source_id),
     folderPath: folder.folder_path,
-    breadcrumb: folder.source_id ? 'Immich' : getPathBreadcrumb(folder.folder_path),
+    breadcrumb: folderBreadcrumb(folder),
     imageCount: folder.image_count,
     postCount: folder.post_count,
     videoCount: folder.video_count,
@@ -918,13 +933,12 @@ function formatMonthYear(date: Date): string {
 }
 
 function mapFeedItems(items: IndexedFeedImage[], derivativeVersion = getDerivativeAssetVersion()): FeedImage[] {
-  const parentPaths = [...new Set(items.map((item) => getParentRelativePath(item.folderPath)).filter((value): value is string => Boolean(value)))];
-  const parentNames = folderRepository.getNamesByFolderPaths(parentPaths);
+  const parentNames = getParentNamesBySource(items, item => item.sourceId, item => item.folderPath);
   const metadata = new Map(folderRepository.getFeedFolderMetadata([...new Set(items.map((item) => item.folderId))]).map((folder) => [folder.id, folder]));
   return items.map((item) => {
     const folder = metadata.get(item.folderId);
     return {
-      ...mapFeedImage(item, derivativeVersion, parentNames),
+      ...mapFeedImage(item, derivativeVersion, parentNames.get(item.sourceId)),
       folderAvatarUrl: folder?.thumbnail_path ? toPublicMediaUrl('/thumbnails', folder.thumbnail_path, derivativeVersion) : null,
       folderHasAvatarStory: Boolean(folder?.has_avatar_story)
     };
@@ -1407,7 +1421,7 @@ function listFallbackAvatarStoryItems(
 
 function mediaIndexAvailable(): boolean {
   if (storageService.getState().libraryAvailable) return true;
-  return Boolean(databaseManager.connection.prepare("SELECT 1 FROM media_sources WHERE enabled=1 AND status!='revoked' LIMIT 1").get());
+  return Boolean(databaseManager.connection.prepare("SELECT 1 FROM media_sources WHERE kind='immich' AND enabled=1 AND status!='revoked' LIMIT 1").get());
 }
 
 export const galleryService = {
@@ -1805,6 +1819,7 @@ export const galleryService = {
       return null;
     }
 
+    if (!folderRepository.getNormalBySlug(slug)) return null;
     folderRepository.updateMetadata(slug, name, description);
     const folder = folderRepository.getSummaryBySlug(slug);
     if (!folder) {
@@ -1820,7 +1835,7 @@ export const galleryService = {
     }
 
     const post = resolvePostRecord(id, options.isLegacyImageAlias);
-    if (!post || post.is_deleted || post.is_trashed) {
+    if (!post || !isSourceVisible(post.source_id) || post.is_deleted || post.is_trashed) {
       return null;
     }
 
@@ -1941,7 +1956,7 @@ export const galleryService = {
       folder: buildFolderSummary(folder),
       items: imageRepository
         .listFolderImages(folder.id, page, limit, mediaType, defaultFolderImageOrder)
-        .map((image) => mapFeedImage(folder.source_id ? { ...image,folderId:folder.id,folderSlug:folder.slug,folderName:folder.name,folderPath:folder.folder_path } : image, derivativeVersion)),
+        .map((image) => mapFeedImage(isImmichSource(folder.source_id) ? { ...image,folderId:folder.id,folderSlug:folder.slug,folderName:folder.name,folderPath:folder.folder_path } : image, derivativeVersion)),
       page,
       limit,
       total,
@@ -1981,12 +1996,12 @@ export const galleryService = {
     }
 
     const post = resolvePostRecord(id, options.isLegacyImageAlias);
-    if (!post || post.is_deleted || post.is_trashed) {
+    if (!post || !isSourceVisible(post.source_id) || post.is_deleted || post.is_trashed) {
       return null;
     }
 
-    const browsingFolder = options.folderSlug && post.source_id ? folderRepository.getNormalBySlug(options.folderSlug) : undefined;
-    if (options.folderSlug && post.source_id) {
+    const browsingFolder = options.folderSlug && isImmichSource(post.source_id) ? folderRepository.getNormalBySlug(options.folderSlug) : undefined;
+    if (options.folderSlug && isImmichSource(post.source_id)) {
       const media = postRepository.listImageRecords(post.id)[0];
       if (!browsingFolder || browsingFolder.source_id !== post.source_id || !media || !imageBelongsToFolder(media.id,browsingFolder.id)) return null;
     }
@@ -2013,7 +2028,7 @@ export const galleryService = {
     }
 
     const post = resolvePostRecord(id, options.isLegacyImageAlias);
-    if (!post || post.is_deleted || post.is_trashed) {
+    if (!post || !isSourceVisible(post.source_id) || post.is_deleted || post.is_trashed) {
       return null;
     }
 
@@ -2130,7 +2145,7 @@ export const galleryService = {
     }
 
     const post = resolvePostRecord(id, options.isLegacyImageAlias);
-    if (!post || post.is_deleted || post.is_trashed) {
+    if (!post || !isSourceVisible(post.source_id) || post.is_deleted || post.is_trashed) {
       return null;
     }
 
@@ -2190,7 +2205,7 @@ export const galleryService = {
     }
 
     const post = resolvePostRecord(id, options.isLegacyImageAlias);
-    if (!post || post.is_deleted || post.is_trashed || isCoverPost(post.id)) {
+    if (!post || !isSourceVisible(post.source_id) || post.is_deleted || post.is_trashed || isCoverPost(post.id)) {
       return null;
     }
 
@@ -2211,7 +2226,7 @@ export const galleryService = {
     }
 
     const post = resolvePostRecord(id, options.isLegacyImageAlias);
-    if (!post || post.is_deleted || post.is_trashed || isCoverPost(post.id)) {
+    if (!post || !isSourceVisible(post.source_id) || post.is_deleted || post.is_trashed || isCoverPost(post.id)) {
       return null;
     }
 
@@ -2230,7 +2245,7 @@ export const galleryService = {
     }
 
     const post = resolvePostRecord(id, options.isLegacyImageAlias);
-    if (!post || post.is_deleted || post.is_trashed || isCoverPost(post.id)) {
+    if (!post || !isSourceVisible(post.source_id) || post.is_deleted || post.is_trashed || isCoverPost(post.id)) {
       return null;
     }
 
@@ -2257,7 +2272,7 @@ export const galleryService = {
     }
 
     const post = resolvePostRecord(id, options.isLegacyImageAlias);
-    if (!post || post.is_deleted || post.is_trashed || isCoverPost(post.id)) {
+    if (!post || !isSourceVisible(post.source_id) || post.is_deleted || post.is_trashed || isCoverPost(post.id)) {
       return null;
     }
 
@@ -2304,7 +2319,7 @@ export const galleryService = {
     }
 
     const post = resolvePostRecord(id, options.isLegacyImageAlias);
-    if (!post || post.is_deleted || post.is_trashed || isCoverPost(post.id)) {
+    if (!post || !isSourceVisible(post.source_id) || post.is_deleted || post.is_trashed || isCoverPost(post.id)) {
       return null;
     }
 
@@ -2322,7 +2337,7 @@ export const galleryService = {
     }
 
     const post = resolvePostRecord(id, options.isLegacyImageAlias);
-    if (!post || post.is_deleted || post.is_trashed || isCoverPost(post.id)) {
+    if (!post || !isSourceVisible(post.source_id) || post.is_deleted || post.is_trashed || isCoverPost(post.id)) {
       return null;
     }
 
@@ -2340,7 +2355,7 @@ export const galleryService = {
     }
 
     const post = resolvePostRecord(id, options.isLegacyImageAlias);
-    if (!post || post.is_deleted) {
+    if (!post || !isSourceVisible(post.source_id) || post.is_deleted) {
       return null;
     }
 
@@ -2366,7 +2381,7 @@ export const galleryService = {
     }
 
     const post = resolvePostRecord(id, options.isLegacyImageAlias);
-    if (!post || post.is_deleted || post.is_trashed === 0) {
+    if (!post || !isSourceVisible(post.source_id) || post.is_deleted || post.is_trashed === 0) {
       return null;
     }
 
@@ -2594,22 +2609,22 @@ export const galleryService = {
   },
 
   getOriginalMediaFile(id: number): { path: string; filename: string } | null {
-    if (imageRepository.getById(id)?.source_id) return null;
+    if (isImmichSource(imageRepository.getById(id)?.source_id)) return null;
     return resolveOriginalMediaFile(id);
   },
 
   getOriginalImagePath(id: number): string | null {
-    if (imageRepository.getById(id)?.source_id) return null;
+    if (isImmichSource(imageRepository.getById(id)?.source_id)) return null;
     return resolveOriginalMediaFile(id)?.path ?? null;
   },
 
   async deleteImage(id: number, options: { isLegacyImageAlias?: boolean } = {}) {
-    if (!storageService.getState().libraryAvailable || scannerService.isLibraryRebuildRequired()) {
+    if (!storageService.getState().libraryAvailable) {
       return null;
     }
 
     const post = resolvePostRecord(id, options.isLegacyImageAlias);
-    if (!post) {
+    if (!post || !isSourceVisible(post.source_id) || scannerService.isLibraryRebuildRequired(post.source_id)) {
       return null;
     }
 
@@ -2617,112 +2632,124 @@ export const galleryService = {
   },
 
   async deleteFolder(slug: string, options: DeleteFolderOptions = {}) {
-    if (!storageService.getState().libraryAvailable || scannerService.isLibraryRebuildRequired()) {
-      return null;
-    }
+    return maintenanceOperationLock.runExclusive(async () => {
+      if (!storageService.getState().libraryAvailable) {
+        return null;
+      }
 
-    const folder = folderRepository.getSummaryBySlug(slug);
-    if (!folder) {
-      return null;
-    }
+      const folder = folderRepository.getSummaryBySlug(slug);
+      if (!folder) {
+        return null;
+      }
 
-    if (folder.source_id) throw new Error('Immich folders are read-only. Disable or remove the source in Settings.');
-    const deleteSourceFolder = options.deleteSourceFolder === true;
-    const normalizedFolderPath = folder.folder_path;
-    const ownedFolders = folderRepository
-      .getAll()
-      .filter((entry) => entry.carousel_owner_folder_id === folder.id || entry.story_owner_folder_id === folder.id);
-    const affectedFolderIds = [folder.id, ...ownedFolders.map((entry) => entry.id)];
-    const images = affectedFolderIds.flatMap((id) => imageRepository.listForFolderDeletion(id));
+      if (isImmichSource(folder.source_id)) throw new Error('Immich folders are read-only. Disable or remove the source in Settings.');
+      const source = getLocalSource(folder.source_id);
+      if (!source?.enabled || source.config.readOnlyOriginals) throw new Error('This source does not permit original-file deletion.');
+      if (scannerService.isLibraryRebuildRequired(source.id)) return null;
+      await permanentDeletionService.recoverPendingDeletionsWhileLocked();
+      if (permanentDeletionService.hasPendingSourceRecovery(source.id)) throw new Error('Resolve pending deletion recovery for this source first.');
+      const rootPath = checkLocalSourceDirectory(source);
+      const deleteSourceFolder = options.deleteSourceFolder === true;
+      const normalizedFolderPath = folder.folder_path;
+      const ownedFolders = folderRepository
+        .getAll(source.id)
+        .filter((entry) => entry.carousel_owner_folder_id === folder.id || entry.story_owner_folder_id === folder.id);
+      const affectedFolderIds = [folder.id, ...ownedFolders.map((entry) => entry.id)];
+      const images = affectedFolderIds.flatMap((id) => imageRepository.listForFolderDeletion(id));
 
-    if (deleteSourceFolder) {
-      const affectedFolders = folderRepository
-        .getAll()
-        .filter((entry) => isSameOrDescendantFolderPath(normalizedFolderPath, entry.folder_path));
-      const affectedImages = affectedFolders.flatMap((entry) => imageRepository.listForFolderDeletion(entry.id));
-      const deletedImageCount = affectedImages.length;
+      if (deleteSourceFolder) {
+        if (source.managed_by !== 'environment') throw new Error('This location supports deleting indexed files individually.');
+        if (appConfig.managedGalleryRelativeIgnores.some(directory => isSameOrDescendantFolderPath(normalizedFolderPath, directory))) {
+          throw new Error('This directory contains Foldergram application storage.');
+        }
+        const affectedFolders = folderRepository
+          .getAll(source.id)
+          .filter((entry) => isSameOrDescendantFolderPath(normalizedFolderPath, entry.folder_path));
+        const affectedImages = affectedFolders.flatMap((entry) => imageRepository.listForFolderDeletion(entry.id));
+        const deletedImageCount = affectedImages.length;
 
-      await removeDirectoryTree(resolveWithinRoot(appConfig.galleryRoot, path.join(appConfig.galleryRoot, normalizedFolderPath)));
+        await removeDirectoryTree(resolveLocalPath(source, normalizedFolderPath, { allowMissing: true }));
+        await Promise.all(
+          affectedImages.flatMap((imageRecord) => {
+            const thumbnailPath = resolveStoredPathWithinRoot(appConfig.thumbnailsDir, imageRecord.thumbnail_path, 'thumbnail');
+            const previewPath = resolveStoredPathWithinRoot(appConfig.previewsDir, imageRecord.preview_path, 'preview');
+
+            return [
+              removeFileAndPruneAncestors(appConfig.thumbnailsDir, thumbnailPath),
+              removeFileAndPruneAncestors(appConfig.previewsDir, previewPath)
+            ];
+          })
+        );
+
+        folderScanStateRepository.deleteTree(normalizedFolderPath, source.id);
+
+        for (const affectedFolder of affectedFolders) {
+          folderRepository.setAvatar(affectedFolder.id, null, 'auto');
+          folderRepository.delete(affectedFolder.id);
+        }
+
+        return {
+          slug: folder.slug,
+          deletedImageCount,
+          deletedFolderCount: affectedFolders.length,
+          deletedSourceFolder: true
+        };
+      }
+
       await Promise.all(
-        affectedImages.flatMap((imageRecord) => {
+        images.map(async (imageRecord) => {
+          const originalPath = resolveLocalPath(source, imageRecord.relative_path, { allowMissing: true });
           const thumbnailPath = resolveStoredPathWithinRoot(appConfig.thumbnailsDir, imageRecord.thumbnail_path, 'thumbnail');
           const previewPath = resolveStoredPathWithinRoot(appConfig.previewsDir, imageRecord.preview_path, 'preview');
 
-          return [
+          if (!originalPath) {
+            throw new Error('Stored image path is outside the gallery root');
+          }
+
+          await Promise.all([
+            removeFileAndPruneAncestors(rootPath, originalPath),
             removeFileAndPruneAncestors(appConfig.thumbnailsDir, thumbnailPath),
             removeFileAndPruneAncestors(appConfig.previewsDir, previewPath)
-          ];
+          ]);
         })
       );
 
-      folderScanStateRepository.deleteTree(normalizedFolderPath);
-
-      for (const affectedFolder of affectedFolders) {
+      for (const affectedFolder of [...ownedFolders, folder]) {
+        folderScanStateRepository.delete(affectedFolder.folder_path, source.id);
         folderRepository.setAvatar(affectedFolder.id, null, 'auto');
         folderRepository.delete(affectedFolder.id);
       }
 
+      const cleanupRelativePaths = new Set<string>([normalizedFolderPath]);
+      for (const ownedFolder of ownedFolders) {
+        let candidatePath = ownedFolder.folder_path;
+        while (isSameOrDescendantFolderPath(normalizedFolderPath, candidatePath)) {
+          cleanupRelativePaths.add(candidatePath);
+          if (candidatePath === normalizedFolderPath) break;
+          const parentPath = path.posix.dirname(candidatePath);
+          if (parentPath === candidatePath || parentPath === '.') break;
+          candidatePath = parentPath;
+        }
+      }
+
+      const orderedCleanupPaths = [...cleanupRelativePaths].sort(
+        (left, right) => right.split('/').length - left.split('/').length
+      );
+      for (const relativePath of orderedCleanupPaths) {
+        await Promise.all([
+          removeDirectoryIfEmpty(resolveLocalPath(source, relativePath, { allowMissing: true })),
+          removeDirectoryIfEmpty(resolveWithinRoot(appConfig.thumbnailsDir, path.join(appConfig.thumbnailsDir, relativePath))),
+          removeDirectoryIfEmpty(resolveWithinRoot(appConfig.previewsDir, path.join(appConfig.previewsDir, relativePath)))
+        ]);
+      }
+
       return {
         slug: folder.slug,
-        deletedImageCount,
-        deletedFolderCount: affectedFolders.length,
-        deletedSourceFolder: true
+        deletedImageCount: images.length,
+        deletedFolderCount: 1,
+        deletedSourceFolder: false
       };
-    }
-
-    await Promise.all(
-      images.map(async (imageRecord) => {
-        const originalPath = resolveIndexedOriginalPath(imageRecord.relative_path);
-        const thumbnailPath = resolveStoredPathWithinRoot(appConfig.thumbnailsDir, imageRecord.thumbnail_path, 'thumbnail');
-        const previewPath = resolveStoredPathWithinRoot(appConfig.previewsDir, imageRecord.preview_path, 'preview');
-
-        if (!originalPath) {
-          throw new Error('Stored image path is outside the gallery root');
-        }
-
-        await Promise.all([
-          removeFileAndPruneAncestors(appConfig.galleryRoot, originalPath),
-          removeFileAndPruneAncestors(appConfig.thumbnailsDir, thumbnailPath),
-          removeFileAndPruneAncestors(appConfig.previewsDir, previewPath)
-        ]);
-      })
-    );
-
-    for (const affectedFolder of [...ownedFolders, folder]) {
-      folderScanStateRepository.delete(affectedFolder.folder_path);
-      folderRepository.setAvatar(affectedFolder.id, null, 'auto');
-      folderRepository.delete(affectedFolder.id);
-    }
-
-    const cleanupRelativePaths = new Set<string>([normalizedFolderPath]);
-    for (const ownedFolder of ownedFolders) {
-      let candidatePath = ownedFolder.folder_path;
-      while (isSameOrDescendantFolderPath(normalizedFolderPath, candidatePath)) {
-        cleanupRelativePaths.add(candidatePath);
-        if (candidatePath === normalizedFolderPath) break;
-        const parentPath = path.posix.dirname(candidatePath);
-        if (parentPath === candidatePath || parentPath === '.') break;
-        candidatePath = parentPath;
-      }
-    }
-
-    const orderedCleanupPaths = [...cleanupRelativePaths].sort(
-      (left, right) => right.split('/').length - left.split('/').length
-    );
-    for (const relativePath of orderedCleanupPaths) {
-      await Promise.all([
-        removeDirectoryIfEmpty(resolveWithinRoot(appConfig.galleryRoot, path.join(appConfig.galleryRoot, relativePath))),
-        removeDirectoryIfEmpty(resolveWithinRoot(appConfig.thumbnailsDir, path.join(appConfig.thumbnailsDir, relativePath))),
-        removeDirectoryIfEmpty(resolveWithinRoot(appConfig.previewsDir, path.join(appConfig.previewsDir, relativePath)))
-      ]);
-    }
-
-    return {
-      slug: folder.slug,
-      deletedImageCount: images.length,
-      deletedFolderCount: 1,
-      deletedSourceFolder: false
-    };
+    });
   },
 
   setTreatCarouselsAsFolders(treatCarouselsAsFolders: boolean) {

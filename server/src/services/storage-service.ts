@@ -83,7 +83,6 @@ class StorageService {
 
   private checkLibraryAvailability(): DirectoryStatus {
     const issues = [
-      this.ensureDirectory(appConfig.galleryRoot, 'Gallery directory'),
       this.ensureDirectory(appConfig.thumbnailsDir, 'Thumbnails directory'),
       this.ensureDirectory(appConfig.previewsDir, 'Previews directory')
     ]

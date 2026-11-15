@@ -22,6 +22,7 @@ export const sourceInputSchema = z.object({ name: z.string().trim().min(1).max(1
 export type Selection = z.infer<typeof selectionSchema>;
 export interface SourceRecord {
     id: number;
+    kind: 'immich';
     name: string;
     server_url: string;
     api_key_ciphertext: string;
@@ -38,14 +39,17 @@ export interface SourceRecord {
     updated_at: string;
 }
 const db = () => databaseManager.connection;
-export const getSource = (id: number) => db().prepare('SELECT * FROM media_sources WHERE id = ?').get(id) as unknown as SourceRecord | undefined;
+export const getSource = (id: number) => db().prepare('SELECT * FROM media_sources WHERE id = ? AND kind = \'immich\'').get(id) as unknown as SourceRecord | undefined;
 export function listSources() {
-    return (db().prepare('SELECT * FROM media_sources ORDER BY id').all() as unknown as SourceRecord[]).map(source => {
+    return (db().prepare('SELECT * FROM media_sources WHERE kind = \'immich\' ORDER BY id').all() as unknown as SourceRecord[]).map(source => {
         const { api_key_ciphertext, config_json, ...safe } = source;
         return { ...safe, hasApiKey: Boolean(api_key_ciphertext), selection: selectionSchema.parse(JSON.parse(config_json)), syncing: running.has(source.id) };
     });
 }
 export const sourceClient = (s: SourceRecord) => new ImmichClient(s.server_url, decryptCredential(s.api_key_ciphertext));
+export function sameConnection(first: SourceRecord, second?: SourceRecord): boolean {
+    return first.server_url === second?.server_url && first.api_key_ciphertext === second.api_key_ciphertext;
+}
 export function isWithinRoot(candidate: string, root: string): boolean { return candidate === root || candidate.startsWith(root === '/' ? '/' : `${root}/`); }
 export function sourceVisible(id: number): boolean { const s = getSource(id); return Boolean(s?.enabled && s.status !== 'revoked'); }
 export function revokeSource(id: number): void { db().prepare("UPDATE media_sources SET status = 'revoked', last_error = 'Immich API key was rejected. Update the key and sync to restore access.' WHERE id = ?").run(id); }
@@ -72,7 +76,7 @@ async function checkConnection(source: SourceRecord, retry = false): Promise<voi
             const upstream = await sourceClient(source).open(state.endpoint, { signal: AbortSignal.timeout(3000) });
             const status = upstream.statusCode ?? 502;
             upstream.destroy();
-            if (status === 401) revokeSource(source.id);
+            if (status === 401 && connections.get(source.id) === state) revokeSource(source.id);
             if (state.revision === revision) state.available = status < 500;
         } catch {
             if (state.revision === revision) state.available = false;
@@ -84,11 +88,11 @@ async function checkConnection(source: SourceRecord, retry = false): Promise<voi
     return state.checking;
 }
 export async function sourceStatuses(retry = false) {
-    const sources = db().prepare('SELECT * FROM media_sources ORDER BY id').all() as unknown as SourceRecord[];
+    const sources = db().prepare('SELECT * FROM media_sources WHERE kind = \'immich\' ORDER BY id').all() as unknown as SourceRecord[];
     await Promise.all(sources.filter(s => s.enabled && s.status !== 'revoked').map(s => checkConnection(s, retry && !sourceAvailable(s.id))));
-    return (db().prepare('SELECT id,name,enabled,status,generation,updated_at FROM media_sources ORDER BY id').all() as Array<{ id: number; name: string; enabled: number; status: string; generation: number; updated_at: string }>).map(s => ({ ...s, available: sourceAvailable(s.id), syncing: running.has(s.id) }));
+    return (db().prepare('SELECT id,kind,name,enabled,status,generation,updated_at FROM media_sources WHERE kind = \'immich\' ORDER BY id').all() as Array<{ id: number; kind: 'immich'; name: string; enabled: number; status: string; generation: number; updated_at: string }>).map(s => ({ ...s, available: sourceAvailable(s.id), syncing: running.has(s.id) }));
 }
-export function saveSource(input: z.infer<typeof sourceInputSchema>, id?: number, managedBy = 'settings'): number {
+function editableSource(id: number | undefined, managedBy: string): SourceRecord | undefined {
     const existing = id ? getSource(id) : undefined;
     if (id && !existing)
         throw new Error('Source not found.');
@@ -96,12 +100,29 @@ export function saveSource(input: z.infer<typeof sourceInputSchema>, id?: number
         throw new Error('Wait for this source synchronization to finish before changing its configuration.');
     if (existing?.managed_by === 'environment' && managedBy !== 'environment')
         throw new Error('This source is managed by environment configuration.');
+    return existing;
+}
+export function saveSource(input: z.infer<typeof sourceInputSchema>, id?: number, managedBy = 'settings'): number {
+    const existing = editableSource(id, managedBy);
+    const url = validateServerUrl(input.serverUrl);
+    if (existing && existing.server_url !== url)
+        throw new Error('Verify the new Immich address before saving.');
+    return persistSource(input, url, managedBy, existing);
+}
+export async function updateSource(input: z.infer<typeof sourceInputSchema>, id: number, managedBy = 'settings'): Promise<number> {
+    const existing = editableSource(id, managedBy)!;
+    const url = validateServerUrl(input.serverUrl);
+    if (existing.server_url !== url) {
+        await verifyConnection(url, input.apiKey, existing);
+        const current = editableSource(id, managedBy)!;
+        if (!sameConnection(existing, current) || current.updated_at !== existing.updated_at || current.generation !== existing.generation)
+            throw new Error('The source changed while verifying its new address. Reopen the source and try again.');
+    }
+    return persistSource(input, url, managedBy, existing);
+}
+function persistSource(input: z.infer<typeof sourceInputSchema>, url: string, managedBy: string, existing?: SourceRecord): number {
     if (!input.apiKey && !existing)
         throw new Error('An Immich API key is required.');
-    const url = validateServerUrl(input.serverUrl);
-    // Changing servers would bind existing IDs, shares and saved items to unrelated content.
-    if (existing && existing.server_url !== url)
-        throw new Error('Create a new source to change the Immich server URL.');
     let credentialChanged = Boolean(input.apiKey);
     if (existing && input.apiKey) {
         try {
@@ -112,11 +133,20 @@ export function saveSource(input: z.infer<typeof sourceInputSchema>, id?: number
     const encrypted = credentialChanged && input.apiKey ? encryptCredential(input.apiKey) : existing!.api_key_ciphertext;
     const contentSelection = ({ allowOriginals, intervalMinutes, initializedModes, ...content }: Selection) => JSON.stringify(content);
     if (existing) {
-        db().prepare("UPDATE media_sources SET name=?, api_key_ciphertext=?, enabled=?, config_json=?, status=CASE WHEN ? AND status!='revoked' THEN 'idle' ELSE status END, last_error=CASE WHEN ? AND status!='revoked' THEN NULL ELSE last_error END, updated_at=? WHERE id=?")
-            .run(input.name, encrypted, Number(input.enabled), JSON.stringify(input.selection), Number(credentialChanged), Number(credentialChanged), new Date().toISOString(), existing.id);
-        // Configuration edits fail closed until a complete sync: stale selections must not stay shareable.
-        if (credentialChanged || contentSelection(input.selection) !== contentSelection(selectionSchema.parse(JSON.parse(existing.config_json))))
-            hideSourceIndex(existing.id);
+        const connectionChanged = credentialChanged || existing.server_url !== url;
+        const selectionChanged = contentSelection(input.selection) !== contentSelection(selectionSchema.parse(JSON.parse(existing.config_json)));
+        db().exec('BEGIN IMMEDIATE');
+        try {
+            db().prepare("UPDATE media_sources SET name=?, server_url=?, api_key_ciphertext=?, enabled=?, config_json=?, status=CASE WHEN ? AND status!='revoked' THEN 'idle' ELSE status END, last_error=CASE WHEN ? AND status!='revoked' THEN NULL ELSE last_error END, updated_at=? WHERE id=?")
+                .run(input.name, url, encrypted, Number(input.enabled), JSON.stringify(input.selection), Number(connectionChanged), Number(connectionChanged), new Date().toISOString(), existing.id);
+            // Keep stale index rows hidden until a complete sync restores the current selection.
+            if (connectionChanged || selectionChanged) hideSourceIndex(existing.id);
+            db().exec('COMMIT');
+        } catch (error) {
+            db().exec('ROLLBACK');
+            throw error;
+        }
+        if (connectionChanged) connections.delete(existing.id);
         return existing.id;
     }
     return Number(db().prepare('INSERT INTO media_sources(name,server_url,api_key_ciphertext,managed_by,enabled,config_json) VALUES(?,?,?,?,?,?)').run(input.name, url, encrypted, managedBy, Number(input.enabled), JSON.stringify(input.selection)).lastInsertRowid);
@@ -157,9 +187,39 @@ async function verifyVersion(client: ImmichClient): Promise<string> {
         throw new Error('Unsupported Immich API version. Supported contract: v3.3.x; verified on v3.3.5.');
     return about.data.version;
 }
-export async function detectContent(serverUrl: string, key: string) {
-    const client = new ImmichClient(serverUrl, key);
+async function verifyConnection(serverUrl: string, apiKey?: string, source?: SourceRecord) {
+    const url = validateServerUrl(serverUrl);
+    const changedAddress = Boolean(source && source.server_url !== url);
+    if (changedAddress && !apiKey)
+        throw new Error('Enter an Immich API key to verify the new server address.');
+    const key = apiKey ?? (source ? decryptCredential(source.api_key_ciphertext) : undefined);
+    if (!key)
+        throw new Error('Enter an Immich API key.');
+    const client = new ImmichClient(url, key);
     const version = await verifyVersion(client);
+    if (changedAddress && source) await verifyLibraryIdentity(client, source.id);
+    return { client, version };
+}
+async function verifyLibraryIdentity(client: ImmichClient, sourceId: number): Promise<void> {
+    const assets = db().prepare('SELECT external_asset_id AS id FROM images WHERE source_id=? AND external_asset_id IS NOT NULL ORDER BY is_deleted, id DESC LIMIT 12')
+        .all(sourceId) as Array<{ id: string }>;
+    if (!assets.length) return;
+
+    // Immich asset IDs stay stable when the same database moves to another address.
+    const metadata = z.object({ id: remoteId });
+    for (const { id } of assets) {
+        try {
+            const match = metadata.safeParse(await client.json(`/api/assets/${id}`));
+            if (match.success && match.data.id === id) return;
+        } catch (error) {
+            // Immich can return 400 for a missing asset as well as 403 or 404.
+            if (!(error instanceof ImmichError) || ![400, 403, 404].includes(error.status)) throw error;
+        }
+    }
+    throw new Error('Could not match this address to the existing Immich library. Check the URL and API key, or add a separate source for a different library.');
+}
+export async function detectContent(serverUrl: string, key?: string, source?: SourceRecord) {
+    const { client, version } = await verifyConnection(serverUrl, key, source);
     const warnings: string[] = [];
     let libraries: Array<{
         id: string;
@@ -351,9 +411,9 @@ function commitIndex(source: SourceRecord, assets: Map<string, ImmichAsset>, gro
                 id: number;
                 place_id: number | null;
             };
-            connection.prepare(`INSERT INTO posts(folder_id,source_id,source_path,sort_timestamp,taken_at,taken_at_source,place_id) VALUES(?,?,?,?,?,'exif',?) ON CONFLICT(source_path) DO UPDATE SET folder_id=excluded.folder_id,sort_timestamp=excluded.sort_timestamp,taken_at=excluded.taken_at,place_id=excluded.place_id,is_deleted=0,deleted_at=NULL,updated_at=?`)
+            connection.prepare(`INSERT INTO posts(folder_id,source_id,source_path,sort_timestamp,taken_at,taken_at_source,place_id) VALUES(?,?,?,?,?,'exif',?) ON CONFLICT(source_id,source_path) DO UPDATE SET folder_id=excluded.folder_id,sort_timestamp=excluded.sort_timestamp,taken_at=excluded.taken_at,place_id=excluded.place_id,is_deleted=0,deleted_at=NULL,updated_at=?`)
                 .run(folderId, source.id, relative, taken, taken, image.place_id, now);
-            const post = connection.prepare('SELECT id FROM posts WHERE source_path=?').get(relative) as {
+            const post = connection.prepare('SELECT id FROM posts WHERE source_id=? AND source_path=?').get(source.id, relative) as {
                 id: number;
             };
             connection.prepare('INSERT OR IGNORE INTO post_items(post_id,image_id,position) VALUES(?,?,1)').run(post.id, image.id);
@@ -381,15 +441,16 @@ let scheduler: NodeJS.Timeout | undefined;
 export let sourceBootstrapError: string | null = null;
 export async function startSources(): Promise<void> {
     sourceBootstrapError = null;
-    db().prepare("UPDATE media_sources SET status='error',last_error='Synchronization interrupted by server restart. Run sync again.' WHERE status='syncing'").run();
+    db().prepare("UPDATE media_sources SET status='error',last_error='Synchronization interrupted by server restart. Run sync again.' WHERE kind='immich' AND status='syncing'").run();
     if (process.env.IMMICH_URL) {
-        const existing = db().prepare("SELECT id FROM media_sources WHERE managed_by='environment'").get() as {
+        const existing = db().prepare("SELECT id FROM media_sources WHERE kind='immich' AND managed_by='environment'").get() as {
             id: number;
         } | undefined;
         try {
             const key = process.env.IMMICH_API_KEY_FILE ? fs.readFileSync(process.env.IMMICH_API_KEY_FILE, 'utf8').trim() : process.env.IMMICH_API_KEY;
             const selection = selectionSchema.parse({ mode: process.env.IMMICH_SYNC_MODE || 'folders', roots: JSON.parse(process.env.IMMICH_ROOTS || '[]'), albumIds: (process.env.IMMICH_ALBUM_IDS || '').split(',').filter(Boolean), includeUnfiled: process.env.IMMICH_INCLUDE_UNFILED === 'true', allowOriginals: process.env.IMMICH_ALLOW_ORIGINALS === 'true', intervalMinutes: Number(process.env.IMMICH_SYNC_INTERVAL_MINUTES || 0) });
-            const id = saveSource({ name: process.env.IMMICH_NAME || 'Immich (environment)', serverUrl: process.env.IMMICH_URL, apiKey: key, enabled: true, selection }, existing?.id, 'environment');
+            const input = { name: process.env.IMMICH_NAME || 'Immich (environment)', serverUrl: process.env.IMMICH_URL, apiKey: key, enabled: true, selection };
+            const id = existing ? await updateSource(input, existing.id, 'environment') : saveSource(input, undefined, 'environment');
             if (process.env.IMMICH_AUTO_SYNC === 'true')
                 void syncSource(id).catch(() => { });
         }
@@ -400,7 +461,7 @@ export async function startSources(): Promise<void> {
         }
     }
     else
-        db().prepare("UPDATE media_sources SET enabled=0,managed_by='settings' WHERE managed_by='environment'").run();
+        db().prepare("UPDATE media_sources SET enabled=0,managed_by='settings' WHERE kind='immich' AND managed_by='environment'").run();
     scheduler = setInterval(() => {
         for (const source of listSources())
             if (source.enabled && !source.syncing && source.selection.intervalMinutes && Date.now() - Date.parse(source.last_success ?? '1970-01-01') >= source.selection.intervalMinutes * 60000)

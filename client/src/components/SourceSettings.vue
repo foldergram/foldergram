@@ -1,9 +1,8 @@
 <template>
   <section class="card grid min-w-0 gap-6 p-6 max-sm:p-4" aria-labelledby="sources-title" :aria-busy="initialLoading">
     <header class="grid gap-2">
-      <span class="eyebrow justify-self-start">Sources</span>
-      <h2 id="sources-title" class="m-0 text-xl">Your photos, connected</h2>
-      <p class="m-0 text-[0.9rem] text-muted">Bring your Immich folders and albums into Foldergram.</p>
+      <h2 id="sources-title" class="m-0 text-xl">{{ t('sources.title') }}</h2>
+      <p class="m-0 text-[0.9rem] text-muted">{{ t('sources.description') }}</p>
     </header>
 
     <p v-if="error" role="alert" class="m-0 rounded-lg border border-red-500/30 bg-red-500/5 p-3 text-[0.85rem] text-red-600 dark:text-red-400">{{ error }}</p>
@@ -13,47 +12,75 @@
       <span v-if="initialLoading">Loading sources…</span>
       <button v-else type="button" class="btn-ghost" @click="loadInitialSources">Try again</button>
     </div>
-    <template v-else-if="!formOpen">
+    <template v-else-if="!formOpen && !localForm">
+      <div class="flex flex-wrap gap-2">
+        <button type="button" class="btn-primary" :disabled="busy" @click="openLocal()">{{ t('sources.local.add') }}</button>
+        <button type="button" class="btn-ghost" :disabled="busy" @click="newSource">{{ t('sources.connectImmich') }}</button>
+      </div>
       <article v-for="source in sources" :key="source.id" class="grid min-w-0 gap-4 rounded-xl border border-border p-4">
         <div class="flex items-start gap-3">
           <span class="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-accent-soft text-accent-strong"><svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 3 4 4m5 1 4 4M7 7l10 10M9 5l-3 3a5 5 0 0 0 0 7l3 3m6-12 3 3a5 5 0 0 1 0 7l-3 3M3 21l4-4m10-10 4-4" /></svg></span>
           <div class="grid min-w-0 flex-1 gap-1">
             <div class="flex flex-wrap items-center gap-2">
               <strong>{{ source.name }}</strong>
-              <span class="rounded-full bg-surface-alt px-2 py-0.5 text-xs text-muted">{{ source.enabled ? (source.syncing ? 'Syncing' : source.status === 'ready' ? 'Connected' : source.status === 'error' || source.status === 'revoked' ? 'Needs attention' : 'Not synced yet') : 'Disabled' }}</span>
+              <span v-if="source.kind === 'local'" class="text-xs text-muted">{{ t('sources.local.type') }}</span>
+              <span class="rounded-full bg-surface-alt px-2 py-0.5 text-xs text-muted">{{ source.kind === 'local' ? localStatus(source) : source.enabled ? (source.syncing ? 'Syncing' : source.status === 'ready' ? 'Connected' : source.status === 'error' || source.status === 'revoked' ? 'Needs attention' : 'Not synced yet') : 'Disabled' }}</span>
               <span v-if="source.managed_by === 'environment'" class="text-xs text-muted">Environment managed</span>
             </div>
-            <p class="m-0 break-all text-[0.8rem] text-muted">{{ source.server_url }}</p>
+            <p class="m-0 break-all text-[0.8rem] text-muted">{{ source.kind === 'local' ? source.rootPath : source.server_url }}</p>
           </div>
         </div>
-        <p class="m-0 text-[0.85rem]">{{ source.asset_count.toLocaleString() }} photos and videos · {{ source.folder_count }} groups</p>
-        <p v-if="source.syncing" role="status" class="m-0 text-[0.85rem] text-muted">Finding your media… {{ source.progress }} found so far.</p>
+        <p class="m-0 text-[0.85rem]">{{ source.kind === 'local' ? t('sources.local.counts', { assets: source.asset_count.toLocaleString(), folders: source.folder_count }) : `${source.asset_count.toLocaleString()} photos and videos · ${source.folder_count} groups` }}</p>
+        <p v-if="source.syncing" role="status" class="m-0 text-[0.85rem] text-muted">{{ source.kind === 'local' ? t('sources.local.progress', { progress: source.progress }) : `Finding your media… ${source.progress} found so far.` }}</p>
         <p v-if="source.last_error" role="alert" class="m-0 break-words text-[0.85rem] text-red-600 dark:text-red-400">{{ source.last_error }}</p>
-        <p v-if="source.status === 'ready' && !source.asset_count" class="m-0 text-[0.85rem] text-muted">No media in this selection. Edit the source to choose folders or albums.</p>
+        <p v-if="source.status === 'ready' && !source.asset_count" class="m-0 text-[0.85rem] text-muted">{{ source.kind === 'local' ? t('sources.local.noMedia') : 'No media in this selection. Edit the source to choose folders or albums.' }}</p>
         <div class="flex flex-wrap items-start gap-2">
-          <button type="button" class="btn-ghost" :disabled="busy || source.syncing || !source.enabled" @click="sync(source)">Sync now</button>
-          <button type="button" class="btn-ghost" :disabled="busy || source.syncing" @click="edit(source)">{{ source.managed_by === 'environment' ? 'View configuration' : 'Edit' }}</button>
+          <button type="button" class="btn-ghost" :disabled="busy || source.syncing || !source.enabled" @click="sync(source)">{{ t('sources.syncNow') }}</button>
+          <button v-if="source.kind === 'local' && source.status === 'empty_review'" type="button" class="btn-ghost" :disabled="busy || source.syncing" @click="reviewEmpty(source)">{{ t('sources.local.confirmEmpty') }}</button>
+          <button v-if="source.kind !== 'local' || source.managed_by !== 'environment'" type="button" class="btn-ghost" :disabled="busy || source.syncing" @click="source.kind === 'local' ? openLocal(source) : edit(source)">{{ source.managed_by === 'environment' ? 'View configuration' : t('sources.edit') }}</button>
+          <button v-if="source.kind !== 'local' && source.managed_by !== 'environment'" type="button" class="btn-ghost" :disabled="busy || source.syncing" @click="edit(source, 'connection')">Edit connection</button>
           <details class="min-w-0 flex-1 text-[0.8rem]">
             <summary class="min-h-9 cursor-pointer px-2 py-2 text-muted">More options</summary>
             <div class="grid gap-3 pt-3">
               <p class="m-0 text-muted">Last synced: {{ source.last_success ? new Date(source.last_success).toLocaleString() : 'Never' }}</p>
               <div class="flex flex-wrap gap-2">
                 <button v-if="source.managed_by !== 'environment'" type="button" class="btn-ghost" :disabled="busy || source.syncing" @click="toggle(source)">{{ source.enabled ? 'Disable' : 'Enable' }}</button>
-                <button type="button" class="btn-ghost" :disabled="busy || source.syncing" @click="clearCache(source)">Clear cache</button>
+                <button v-if="source.kind !== 'local'" type="button" class="btn-ghost" :disabled="busy || source.syncing" @click="clearCache(source)">Clear cache</button>
                 <button v-if="source.managed_by !== 'environment'" type="button" class="btn-ghost text-red-600 dark:text-red-400" :disabled="busy || source.syncing" @click="remove(source)">Remove</button>
               </div>
             </div>
           </details>
         </div>
       </article>
-      <div v-if="!sources.length" class="grid justify-items-center gap-3 rounded-xl border border-dashed border-border px-5 py-8 text-center">
-        <span class="grid h-12 w-12 place-items-center rounded-2xl bg-accent-soft text-accent-strong"><svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="3" width="15" height="15" rx="3" /><path d="M3 8v10a3 3 0 0 0 3 3h10M6 14l4-4 5 5 3-3 3 3" /><circle cx="16" cy="7.5" r="1" /></svg></span>
-        <strong>Connect your Immich library</strong>
-        <p class="m-0 max-w-sm text-[0.85rem] text-muted">Add your server and API key, then choose how you want to browse.</p>
-        <button type="button" class="btn-primary mt-1" @click="newSource">Connect Immich</button>
-      </div>
-      <button v-else type="button" class="btn-primary justify-self-start" :disabled="busy" @click="newSource">Connect Immich</button>
     </template>
+
+    <form v-else-if="localForm" class="grid min-w-0 gap-5 border-t border-border pt-5" :aria-busy="busy" @submit.prevent="saveLocal">
+      <h3 ref="formHeading" tabindex="-1" class="m-0 text-base focus:outline-none">{{ localFormId ? localForm.name : t('sources.local.add') }}</h3>
+      <p class="m-0 text-sm text-muted">{{ t('sources.local.pathHelp') }}</p>
+      <fieldset :disabled="busy" class="m-0 grid min-w-0 gap-4 border-0 p-0">
+        <label class="grid gap-2 text-sm font-medium">{{ t('sources.local.name') }}
+          <input v-model.trim="localForm.name" required maxlength="100" class="w-full rounded-lg border border-border bg-surface px-3 py-2.5 text-text focus:outline-accent" />
+        </label>
+        <label class="grid gap-2 text-sm font-medium">{{ t('sources.local.path') }}
+          <input v-model.trim="localForm.rootPath" required maxlength="4096" :readonly="localFormId !== null" spellcheck="false" placeholder="/sources/pictures" class="w-full rounded-lg border border-border bg-surface px-3 py-2.5 text-text focus:outline-accent" @input="pathCheck = null" />
+        </label>
+        <p class="m-0 text-xs text-muted">{{ t('sources.local.discoveryHelp') }}</p>
+        <label class="flex items-start gap-2 text-sm">
+          <input v-model="localForm.readOnlyOriginals" type="checkbox" class="mt-1 accent-accent" />
+          <span>{{ t('sources.local.readOnly') }}<span class="block text-xs text-muted">{{ t('sources.local.readOnlyHelp') }}</span></span>
+        </label>
+      </fieldset>
+      <p v-if="pathCheck" role="status" class="m-0 text-sm text-accent-strong">
+        {{ t('sources.local.pathValid') }}
+        {{ pathCheck.partial ? t('sources.local.sampled') : '' }}
+        {{ pathCheck.ignoredRootMediaCount ? t('sources.local.ignored', { count: pathCheck.ignoredRootMediaCount }) : '' }}
+      </p>
+      <div class="flex flex-wrap gap-2">
+        <button v-if="localFormId === null" type="button" class="btn-ghost" :disabled="busy || !localForm.rootPath" @click="validatePath">{{ t('sources.local.validate') }}</button>
+        <button type="submit" class="btn-primary" :disabled="busy">{{ localFormId ? t('sources.local.save') : t('sources.local.saveSync') }}</button>
+        <button type="button" class="btn-ghost" :disabled="busy" @click="localForm = null">{{ t('common.cancel') }}</button>
+      </div>
+    </form>
 
     <form v-else class="grid min-w-0 gap-6 border-t border-border pt-5" :aria-busy="busy" @submit.prevent="step === 'connection' ? detect() : save()">
       <div class="flex flex-wrap items-center justify-between gap-3">
@@ -69,25 +96,31 @@
       <fieldset :disabled="busy || environmentManaged" class="m-0 grid min-w-0 gap-5 border-0 p-0">
         <template v-if="step === 'connection'">
           <label class="grid gap-2 text-[0.85rem] font-medium">Immich server URL
-            <input v-model.trim="form.serverUrl" type="url" required :readonly="Boolean(editingId)" placeholder="http://immich-server:2283" spellcheck="false" class="w-full min-w-0 rounded-lg border border-border bg-surface px-3 py-2.5 text-text focus:outline-accent" @input="connectionChanged(true)" />
+            <input v-model.trim="form.serverUrl" type="url" required placeholder="http://localhost:2283" spellcheck="false" class="w-full min-w-0 rounded-lg border border-border bg-surface px-3 py-2.5 text-text focus:outline-accent" @input="connectionChanged(true)" />
           </label>
           <label class="grid gap-2 text-[0.85rem] font-medium">API key
-            <input v-model.trim="apiKey" type="password" autocomplete="new-password" :required="!editingId" :placeholder="editingId ? 'Leave blank to keep your current key' : 'Paste your Immich API key'" class="w-full min-w-0 rounded-lg border border-border bg-surface px-3 py-2.5 text-text focus:outline-accent" @input="connectionChanged(false)" />
+            <input v-model.trim="apiKey" type="password" autocomplete="new-password" :required="requiresApiKey" :placeholder="requiresApiKey ? 'Paste your Immich API key' : 'Leave blank to keep your current key'" class="w-full min-w-0 rounded-lg border border-border bg-surface px-3 py-2.5 text-text focus:outline-accent" @input="connectionChanged(false)" />
           </label>
+          <p v-if="addressChanged" class="m-0 text-[0.8rem] text-muted">Enter an API key again to verify the new address. You can reuse your key if it still has access to the same library.</p>
           <details class="text-[0.8rem] text-muted">
             <summary class="cursor-pointer">Need help connecting?</summary>
             <div class="grid gap-3 pt-3 leading-relaxed">
               <p class="m-0">Create an API key in Immich’s Account Settings → API Keys. Enable server.about, asset.read and asset.view; add album.read for albums. library.read is optional for external folder discovery.</p>
-              <p class="m-0">Use a server URL without /api. In Docker, use Immich’s service name on a shared network, such as http://immich-server:2283.</p>
+              <p class="m-0">Enter the base URL without <code>/api</code>. Use <code>http://localhost:2283</code> when Foldergram runs on the same host as Immich’s published port, or use your configured host port. If both apps run in Docker on a shared network, use Immich’s service name, such as <code>http://immich-server:2283</code>. You can also use a LAN or reverse proxy URL reachable from Foldergram.</p>
             </div>
           </details>
         </template>
 
         <template v-else>
           <div class="flex min-w-0 flex-wrap items-center gap-2 rounded-lg bg-surface-alt px-3 py-2.5 text-[0.8rem]">
-            <svg class="h-4 w-4 shrink-0 text-accent-strong" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="m8 12 3 3 5-6" /></svg>
-            <span class="min-w-0 flex-1 break-all text-muted">{{ form.serverUrl }}</span>
-            <button v-if="!environmentManaged" type="button" class="cursor-pointer border-0 bg-transparent p-1 text-accent-strong" @click="step = 'connection'">{{ editingId ? 'Update API key' : 'Change' }}</button>
+            <div class="grid min-w-0 flex-1 gap-0.5">
+              <span v-if="detection" class="flex items-center gap-1.5 font-semibold text-green-700 dark:text-green-400" role="status">
+                <svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="m8 12 3 3 5-6" /></svg>
+                Connected to Immich
+              </span>
+              <span class="break-all text-muted">{{ form.serverUrl }}</span>
+            </div>
+            <button v-if="!environmentManaged" type="button" class="cursor-pointer border-0 bg-transparent p-1 text-accent-strong" @click="step = 'connection'">Edit connection</button>
           </div>
           <fieldset class="m-0 min-w-0 border-0 p-0">
             <legend class="mb-3 text-[0.95rem] font-semibold">What would you like to connect?</legend>
@@ -99,15 +132,19 @@
             </div>
           </fieldset>
 
-          <div class="grid gap-2" aria-live="polite">
-            <p class="m-0 text-[0.9rem] font-medium">{{ selectionSummary }}</p>
-            <p class="m-0 text-[0.8rem] text-muted">{{ editingId ? 'Your saved selection is kept. Uncheck anything you want to leave out.' : 'Everything found is selected to start. Uncheck anything you want to leave out.' }}</p>
-            <p v-if="form.selection.mode === 'both'" class="m-0 text-[0.8rem] text-muted">Photos in both a folder and an album appear only once in Home.</p>
-          </div>
-
-          <details class="rounded-xl border border-border" data-test="customize-selection">
-            <summary class="cursor-pointer px-4 py-3 text-[0.85rem] font-medium">Customize selection</summary>
+          <details :open="selectionOpen" class="group rounded-xl border" :class="detection ? 'border-green-600/50 dark:border-green-400/45' : 'border-border'" data-test="customize-selection" @toggle="updateSelectionOpen">
+            <summary class="flex cursor-pointer list-none items-center justify-between gap-3 rounded-xl px-4 py-3 group-open:rounded-b-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent [&::-webkit-details-marker]:hidden" :class="detection ? 'bg-green-500/8' : 'bg-surface-alt'">
+              <span class="grid min-w-0 gap-1">
+                <span class="text-[0.9rem] font-semibold">Customize selection</span>
+                <span class="text-xs text-muted" aria-live="polite">{{ selectionSummary }}</span>
+              </span>
+              <svg class="h-4 w-4 shrink-0 text-muted transition-transform group-open:rotate-180" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg>
+            </summary>
             <div class="grid min-w-0 gap-5 border-t border-border p-4">
+              <div class="grid gap-1">
+                <p class="m-0 text-[0.8rem] text-muted">{{ editingId ? 'Your saved selection is kept. Uncheck anything you want to leave out.' : 'Everything found is selected to start. Uncheck anything you want to leave out.' }}</p>
+                <p v-if="form.selection.mode === 'both'" class="m-0 text-xs text-muted">Photos in both a folder and an album appear only once in Home.</p>
+              </div>
               <label v-if="folderOptions.length + albumOptions.length > 6" class="grid gap-2 text-[0.8rem]">Search folders and albums
                 <input v-model="selectionSearch" type="search" placeholder="Search by name or path" class="w-full min-w-0 rounded-lg border border-border bg-surface px-3 py-2 text-text focus:outline-accent" />
               </label>
@@ -183,8 +220,8 @@
       <div class="grid gap-3 border-t border-border pt-4">
         <p v-if="step === 'content' && !hasSelection && !busy" class="m-0 text-[0.8rem] text-muted" role="status">Choose at least one folder, album, or uploads outside selected albums to continue.</p>
         <div class="flex flex-wrap gap-2">
-          <button v-if="!environmentManaged && step === 'connection'" type="submit" class="btn-primary min-w-28" :disabled="busy || !form.serverUrl || (!apiKey && !editingId)">{{ busy ? 'Connecting…' : 'Continue' }}<svg v-if="!busy" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12h16m-6-6 6 6-6 6" /></svg></button>
-          <button v-if="!environmentManaged && step === 'content'" type="submit" class="btn-primary" :disabled="busy || !hasSelection">{{ busy ? 'Please wait…' : editingId ? 'Save and sync' : 'Connect and sync' }}</button>
+          <button v-if="!environmentManaged && step === 'connection'" type="submit" class="btn-primary min-w-28" :disabled="busy || !form.serverUrl || (requiresApiKey && !apiKey)">{{ busy ? 'Connecting…' : editingId ? 'Check connection' : 'Continue' }}<svg v-if="!busy" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12h16m-6-6 6 6-6 6" /></svg></button>
+          <button v-if="!environmentManaged && step === 'content'" type="submit" class="btn-primary" :disabled="busy || !hasSelection || needsConnectionCheck">{{ busy ? 'Please wait…' : editingId ? 'Save and sync' : 'Connect and sync' }}</button>
           <button type="button" class="btn-ghost" :disabled="busy" @click="closeForm">{{ environmentManaged ? 'Close' : 'Cancel' }}</button>
         </div>
         <p v-if="!environmentManaged" class="m-0 text-xs text-muted">Read-only connection. Your originals stay in Immich.</p>
@@ -196,11 +233,12 @@
       <p class="mb-3 leading-relaxed">Foldergram can scan local folders as well as connect to Immich. If both include the same photos, they appear twice. To skip those local folders, use Settings → General Settings → Excluded source folders, save your rules, then run a scan in Scan &amp; Library.</p>
       <button type="button" class="cursor-pointer border-0 bg-transparent p-0 text-accent-strong" @click="emit('manage-local-exclusions')">Open folder exclusions</button>
     </details>
-    <ConfirmDialog v-if="confirmAction" title="Update Immich source" :message="confirmMessage" :confirm-label="confirmAction?.kind === 'remove' ? 'Remove source' : 'Continue'" @cancel="confirmAction=null" @confirm="confirmChange" />
+    <ConfirmDialog v-if="confirmAction" :title="confirmAction.source.kind === 'local' ? t('sources.local.changeTitle') : 'Update Immich source'" :message="confirmMessage" :confirm-label="confirmAction?.kind === 'remove' ? 'Remove source' : 'Continue'" @cancel="confirmAction=null" @confirm="confirmChange" />
   </section>
 </template>
 <script setup lang="ts">
 import { computed, nextTick, ref, watch, onMounted, onBeforeUnmount } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { requestJson } from '../api/http';
 import ConfirmDialog from './ConfirmDialog.vue';
 import { useSourcesStore } from '../stores/sources';
@@ -217,13 +255,11 @@ interface Selection {
     allowOriginals: boolean;
     intervalMinutes: number;
 }
-interface Source {
+interface SourceBase {
     id: number;
     name: string;
-    server_url: string;
     enabled: number;
     managed_by: string;
-    selection: Selection;
     status: string;
     last_error: string | null;
     last_success: string | null;
@@ -232,6 +268,9 @@ interface Source {
     progress: number;
     syncing: boolean;
 }
+type ImmichSource = SourceBase & { kind?: 'immich'; server_url: string; selection: Selection };
+type LocalSource = SourceBase & { kind: 'local'; rootPath: string; available: boolean; readOnlyOriginals: boolean };
+type Source = ImmichSource | LocalSource;
 interface Detection {
     version: string;
     assetCount: number;
@@ -254,6 +293,10 @@ interface Detection {
         shared?: boolean;
     }>;
 }
+const { t } = useI18n();
+const localForm = ref<{ name: string; rootPath: string; readOnlyOriginals: boolean } | null>(null);
+const localFormId = ref<number | null>(null);
+const pathCheck = ref<{ ignoredRootMediaCount: number; partial: boolean } | null>(null);
 const emit = defineEmits<{ 'manage-local-exclusions': [] }>();
 const sources = ref<Source[]>([]), error = ref(''), notice = ref(''), busy = ref(false), formOpen = ref(false), apiKey = ref(''), editingId = ref<number | null>(null), environmentManaged = ref(false), detection = ref<Detection | null>(null);
 const sourcesLoaded = ref(false), initialLoading = ref(true);
@@ -261,6 +304,21 @@ const initial = () => ({ name: 'Immich', serverUrl: '', enabled: true, selection
 const form = ref(initial()), manualLibrary = ref(''), manualRoot = ref(''), manualAlbum = ref(''), exclusionText = ref('');
 const step = ref<'connection' | 'content'>('connection'), selectionSearch = ref(''), selectionInitialized = ref(false);
 const formHeading = ref<HTMLElement | null>(null);
+const selectionOpen = ref(false);
+const savedServerUrl = ref('');
+const addressChanged = computed(() => {
+    if (!editingId.value) return false;
+    try {
+        return new URL(form.value.serverUrl).toString().replace(/\/+$/, '') !== savedServerUrl.value;
+    } catch {
+        return form.value.serverUrl !== savedServerUrl.value;
+    }
+});
+const requiresApiKey = computed(() => !editingId.value || addressChanged.value);
+const needsConnectionCheck = computed(() => !detection.value && (requiresApiKey.value || Boolean(apiKey.value)));
+function updateSelectionOpen(event: Event) {
+    selectionOpen.value = (event.currentTarget as HTMLDetailsElement).open;
+}
 const knownRoots = ref<Selection['roots']>([]), knownAlbumIds = ref<string[]>([]);
 const modes: Array<{ value: Selection['mode']; label: string; description: string }> = [
     { value: 'folders', label: 'Folders', description: 'Your external library folders' },
@@ -300,7 +358,7 @@ const selectionSummary = computed(() => {
     return `${parts.join(' · ')} selected`;
 });
 const confirmAction = ref<{
-    kind: 'remove' | 'disable' | 'cache';
+    kind: 'remove' | 'disable' | 'cache' | 'empty';
     source: Source;
 } | null>(null), confirmMessage = ref('');
 let timer: ReturnType<typeof setInterval> | undefined;
@@ -355,6 +413,8 @@ function resetFormState() {
     knownRoots.value = [];
     knownAlbumIds.value = [];
     selectionInitialized.value = false;
+    selectionOpen.value = false;
+    savedServerUrl.value = '';
 }
 function newSource() {
     resetFormState();
@@ -365,7 +425,7 @@ function newSource() {
     step.value = 'connection';
     formOpen.value = true;
 }
-function edit(source: Source) {
+function edit(source: ImmichSource, section: 'connection' | 'content' = 'content') {
     resetFormState();
     form.value = { name: source.name, serverUrl: source.server_url, enabled: Boolean(source.enabled), selection: JSON.parse(JSON.stringify(source.selection)) };
     // Older sources have no initialization markers. Keep active selections and
@@ -375,13 +435,14 @@ function edit(source: Source) {
         ...(source.selection.mode !== 'folders' || source.selection.albumIds.length ? ['albums' as const] : [])
     ];
     editingId.value = source.id;
+    savedServerUrl.value = source.server_url;
     environmentManaged.value = source.managed_by === 'environment';
     knownRoots.value = [...source.selection.roots];
     knownAlbumIds.value = [...source.selection.albumIds];
     exclusionText.value = source.selection.exclusions.join('\n');
-    step.value = 'content';
+    step.value = section;
     formOpen.value = true;
-    void detect();
+    if (section === 'content') void detect();
 }
 function closeForm() { formOpen.value = false; apiKey.value = ''; error.value = ''; }
 function connectionChanged(serverChanged: boolean) {
@@ -389,6 +450,7 @@ function connectionChanged(serverChanged: boolean) {
     error.value = '';
     if (serverChanged && !editingId.value) {
         selectionInitialized.value = false;
+        selectionOpen.value = false;
         form.value.selection = initial().selection;
         knownRoots.value = [];
         knownAlbumIds.value = [];
@@ -436,7 +498,7 @@ function addManualAlbum() {
     manualAlbum.value = '';
 }
 async function detect() {
-    if (busy.value || !form.value.serverUrl || (!apiKey.value && !editingId.value)) return;
+    if (busy.value || !form.value.serverUrl || (requiresApiKey.value && !apiKey.value)) return;
     await perform(async () => {
         detection.value = await requestJson<Detection>('/api/admin/sources/immich/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ serverUrl: form.value.serverUrl, apiKey: apiKey.value || undefined, sourceId: editingId.value || undefined }) });
         if (!editingId.value && !selectionInitialized.value) {
@@ -446,7 +508,9 @@ async function detect() {
             form.value.selection.initializedModes = ['folders', 'albums'];
             form.value.selection.includeUnfiled = !folderOptions.value.length && !detection.value.albums.length && detection.value.uploadCount > 0;
             selectionInitialized.value = true;
+            selectionOpen.value = true;
         }
+        if (addressChanged.value) selectionOpen.value = true;
         initializeModeSelection(form.value.selection.mode);
         step.value = 'content';
         await nextTick();
@@ -454,10 +518,10 @@ async function detect() {
     });
 }
 async function save() {
-    if (busy.value || environmentManaged.value || !hasSelection.value || (!editingId.value && !detection.value)) return;
+    if (busy.value || environmentManaged.value || !hasSelection.value || needsConnectionCheck.value) return;
     await perform(async () => {
         form.value.selection.exclusions = exclusionText.value.split('\n').map(v => v.trim()).filter(Boolean);
-        const source = await requestJson<Source>(editingId.value ? `/api/admin/sources/${editingId.value}` : '/api/admin/sources', { method: editingId.value ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...form.value, apiKey: apiKey.value || undefined }) });
+        const source = await requestJson<Source>(editingId.value ? `/api/admin/sources/${editingId.value}` : '/api/admin/sources', { method: editingId.value ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'immich', ...form.value, apiKey: apiKey.value || undefined }) });
         apiKey.value = '';
         if (editingId.value && source.enabled)
             await requestJson(`/api/admin/sources/${source.id}/sync`, { method: 'POST' });
@@ -466,22 +530,70 @@ async function save() {
         invalidate();
     });
 }
-async function sync(source: Source) { await perform(async () => { await requestJson(`/api/admin/sources/${source.id}/sync`, { method: 'POST' }); notice.value = 'Synchronization started.'; }); }
+function localStatus(source: LocalSource): string {
+    if (!source.enabled) return t('sources.local.disabled');
+    if (source.syncing) return t('sources.local.syncing');
+    if (source.status === 'empty_review') return t('sources.local.review');
+    if (!source.available) return t('sources.local.unavailable');
+    if (source.status === 'ready') return t('sources.local.ready');
+    if (source.status === 'error') return t('sources.local.error');
+    return t('sources.local.pending');
+}
+function openLocal(source?: LocalSource) {
+    resetFormState();
+    pathCheck.value = null;
+    localFormId.value = source?.id ?? null;
+    localForm.value = { name: source?.name ?? '', rootPath: source?.rootPath ?? '', readOnlyOriginals: source?.readOnlyOriginals ?? true };
+    void nextTick(() => formHeading.value?.focus());
+}
+async function validatePath() {
+    if (!localForm.value || busy.value) return;
+    pathCheck.value = null;
+    await perform(async () => {
+        pathCheck.value = await requestJson('/api/admin/sources/local/test', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rootPath: localForm.value?.rootPath })
+        });
+    });
+}
+async function saveLocal() {
+    if (!localForm.value || busy.value) return;
+    const input = { kind: 'local', ...localForm.value };
+    const id = localFormId.value;
+    await perform(async () => {
+        await requestJson(id === null ? '/api/admin/sources' : `/api/admin/sources/${id}`, {
+            method: id === null ? 'POST' : 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input)
+        });
+        localForm.value = null;
+        notice.value = t(id === null ? 'sources.local.queued' : 'sources.local.saved');
+        invalidate();
+    });
+}
+async function sync(source: Source) {
+    await perform(async () => {
+        await requestJson(`/api/admin/sources/${source.id}/sync`, { method: 'POST' });
+        notice.value = source.kind === 'local' ? t('sources.local.queued') : 'Synchronization started.';
+        invalidate();
+    });
+}
+function reviewEmpty(source: LocalSource) {
+    confirmAction.value = { kind: 'empty', source };
+    confirmMessage.value = t('sources.local.emptyMessage');
+}
 function toggle(source: Source) {
     if (source.enabled) {
         confirmAction.value = { kind: 'disable', source };
-        confirmMessage.value = 'Disable this source? Its content and shares become unavailable immediately. The Foldergram index, likes, saved items and cache are retained. Enable and sync to restore it.';
+        confirmMessage.value = source.kind === 'local' ? t('sources.local.disableMessage') : 'Disable this source? Its content and shares become unavailable immediately. The Foldergram index, likes, saved items and cache are retained. Enable and sync to restore it.';
     }
     else
         void perform(async () => { await updateEnabled(source, true); });
 }
 async function updateEnabled(source: Source, enabled: boolean) {
-    await requestJson(`/api/admin/sources/${source.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: source.name, serverUrl: source.server_url, selection: source.selection, enabled }) });
+    await requestJson(`/api/admin/sources/${source.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(source.kind === 'local' ? { kind: 'local', enabled } : { kind: 'immich', name: source.name, serverUrl: source.server_url, selection: source.selection, enabled }) });
     if (enabled)
         await requestJson(`/api/admin/sources/${source.id}/sync`, { method: 'POST' });
     invalidate();
 }
-function remove(source: Source) { confirmAction.value = { kind: 'remove', source }; confirmMessage.value = 'Remove this source and its Foldergram index, likes, saved memberships, shares and cache? Immich media will remain unchanged.'; }
+function remove(source: Source) { confirmAction.value = { kind: 'remove', source }; confirmMessage.value = source.kind === 'local' ? t('sources.local.removeMessage') : 'Remove this source and its Foldergram index, likes, saved memberships, shares and cache? Immich media will remain unchanged.'; }
 function clearCache(source: Source) { confirmAction.value = { kind: 'cache', source }; confirmMessage.value = 'Clear cached Immich derivatives? They will be fetched lazily again. Uncached media requires Immich to be online.'; }
 async function confirmChange() {
     const action = confirmAction.value;
@@ -491,6 +603,8 @@ async function confirmChange() {
     await perform(async () => {
         if (action.kind === 'disable')
             await updateEnabled(action.source, false);
+        else if (action.kind === 'empty')
+            await requestJson(`/api/admin/sources/${action.source.id}/sync`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirmEmpty: true }) });
         else
             await requestJson(`/api/admin/sources/${action.source.id}${action.kind === 'cache' ? '/cache' : ''}`, { method: 'DELETE' });
         invalidate();

@@ -12,6 +12,7 @@ for (const viewport of [{ name: 'desktop', width: 1440, height: 1000 }, { name: 
       page.on('pageerror', error => errors.push(error.message));
       const sources: Record<string, unknown>[] = [];
       const saves: Record<string, any>[] = [];
+      const checks: string[] = [];
       let holdSources = false;
       let releaseSources!: () => void;
       const sourcesGate = new Promise<void>(resolve => { releaseSources = resolve; });
@@ -29,6 +30,7 @@ for (const viewport of [{ name: 'desktop', width: 1440, height: 1000 }, { name: 
       await page.route('**/api/**', async route => {
         const path = new URL(route.request().url()).pathname;
         if (path === '/api/admin/sources/immich/test') {
+          checks.push(route.request().postDataJSON().serverUrl);
           await route.fulfill({ json: {
             version: '3.3.5', assetCount: 240, uploadCount: 0, warnings: [], suggestedMode: 'both',
             libraries: [{ id: 'library', name: 'Photos', importPaths: ['/photos'] }, { id: 'archive', name: 'Archive', importPaths: ['/archive'] }],
@@ -67,7 +69,7 @@ for (const viewport of [{ name: 'desktop', width: 1440, height: 1000 }, { name: 
         await route.fulfill({ json: responses[path] ?? { items: [] } });
       });
 
-      await page.goto('/settings?section=sources');
+      await page.goto('/settings#sources');
       await page.getByRole('button', { name: 'Connect Immich', exact: true }).click();
       await page.getByLabel('Immich server URL').fill('http://immich-server:2283');
       await page.getByLabel('API key', { exact: true }).fill('example-key');
@@ -76,14 +78,30 @@ for (const viewport of [{ name: 'desktop', width: 1440, height: 1000 }, { name: 
       await page.getByRole('button', { name: 'Continue', exact: true }).click();
       await expect(page.getByRole('radio', { name: /^Both(?: |$)/ })).toBeChecked();
       await expect(page.getByText('2 folders · 2 albums selected', { exact: true })).toBeVisible();
-      await expect(page.getByRole('checkbox')).toHaveCount(0); // Collapsed controls stay out of the accessibility tree.
+      await expect(page.getByText('Connected to Immich', { exact: true })).toBeVisible();
+      const selection = page.locator('[data-test="customize-selection"]');
+      const selectionHeader = selection.locator('summary');
+      await expect(selection).toHaveJSProperty('open', true);
+      await expect(selectionHeader).toHaveCSS('border-bottom-left-radius', '0px');
+      await expect(selectionHeader).toHaveCSS('border-bottom-right-radius', '0px');
+      await page.getByRole('radio', { name: /^Albums(?: |$)/ }).locator('..').click();
+      await expect(page.getByRole('checkbox', { name: /Family/ })).toBeVisible();
+      await expect(page.getByRole('checkbox', { name: /Archive/ })).toBeHidden();
+      await page.getByRole('radio', { name: /^Folders(?: |$)/ }).locator('..').click();
+      await expect(page.getByRole('checkbox', { name: /Archive/ })).toBeVisible();
+      await expect(page.getByRole('checkbox', { name: /Family/ })).toBeHidden();
+      await page.getByRole('radio', { name: /^Both(?: |$)/ }).locator('..').click();
       expect(saves).toHaveLength(0);
       await page.screenshot({ path: test.info().outputPath('content.png'), fullPage: true });
 
       const bounds = await page.locator('[aria-labelledby="sources-title"]').boundingBox();
       expect(bounds!.x).toBeGreaterThanOrEqual(0);
       expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(viewport.width);
-      await page.getByText('Customize selection', { exact: true }).click();
+      const customize = page.getByText('Customize selection', { exact: true });
+      await customize.click();
+      await expect(page.getByRole('checkbox')).toHaveCount(0);
+      await expect(selectionHeader).toHaveCSS('border-bottom-left-radius', await selectionHeader.evaluate(element => getComputedStyle(element).borderTopLeftRadius));
+      await customize.click();
       const archive = page.getByRole('checkbox', { name: /Archive/ });
       const family = page.getByRole('checkbox', { name: /Family/ });
       await expect(archive).toBeChecked();
@@ -99,9 +117,11 @@ for (const viewport of [{ name: 'desktop', width: 1440, height: 1000 }, { name: 
 
       // Reproduce a saved source from before inactive categories had defaults.
       sources[0].selection = { mode: 'albums', roots: [], albumIds: ['family'], exclusions: [], includeUnfiled: false, allowOriginals: false, intervalMinutes: 0 };
-      await page.getByRole('button', { name: /^General Settings(?: |$)/ }).click();
+      await page.getByRole('link', { name: /^General Settings(?: |$)/ }).click();
+      await expect(page).toHaveURL(/#general$/);
       holdSources = true;
-      await page.getByRole('button', { name: /^Sources(?: |$)/ }).click();
+      await page.getByRole('link', { name: /^Sources(?: |$)/ }).click();
+      await expect(page).toHaveURL(/#sources$/);
       await expect(page.getByText('Loading sources…', { exact: true })).toBeVisible();
       await expect(page.getByText('Connect your Immich library', { exact: true })).toHaveCount(0);
       releaseSources();
@@ -118,8 +138,24 @@ for (const viewport of [{ name: 'desktop', width: 1440, height: 1000 }, { name: 
       expect(saves[1].selection.albumIds).toEqual(['family']);
       expect(saves[1].selection.initializedModes).toEqual(['albums', 'folders']);
 
+      const previousChecks = checks.length;
+      await page.getByRole('button', { name: 'Edit connection', exact: true }).click();
+      const url = page.getByLabel('Immich server URL');
+      await expect(url).toHaveAttribute('placeholder', 'http://localhost:2283');
+      expect(checks).toHaveLength(previousChecks);
+      await url.fill('http://192.168.1.10:2282');
+      await expect(page.getByRole('button', { name: 'Check connection', exact: true })).toBeDisabled();
+      await page.getByLabel('API key', { exact: true }).fill('example-key');
+      await page.getByRole('button', { name: 'Check connection', exact: true }).click();
+      await expect(page.getByText('Connected to Immich', { exact: true })).toBeVisible();
+      await expect(page.getByRole('checkbox', { name: /Archive/ })).toBeChecked();
+      await page.getByRole('button', { name: 'Save and sync', exact: true }).click();
+      await expect(page.getByText('Source saved. Synchronization is running in the background.')).toBeVisible();
+      expect(saves[2].serverUrl).toBe('http://192.168.1.10:2282');
+
       await page.getByText('Using local folders too?', { exact: true }).click();
       await page.getByRole('button', { name: 'Open folder exclusions', exact: true }).click();
+      await expect(page).toHaveURL(/#general$/);
       await expect(page.getByText('Excluded source folders', { exact: true })).toBeVisible();
       await expect(page.getByRole('textbox', { name: 'Custom rules', exact: true })).toBeFocused();
       expect(errors).toEqual([]);

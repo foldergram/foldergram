@@ -551,7 +551,7 @@
             </a>
             <!-- Delete -->
             <button
-              v-if="authStore.canDeleteMedia && !image?.sourceId"
+              v-if="authStore.canDeleteMedia && image?.sourceKind !== 'immich'"
               class="viewer__sidebar-action inline-flex items-center justify-center p-0 border-0 bg-transparent cursor-pointer text-[#d93025] transition-[opacity,transform] duration-180 hover:opacity-72 hover:-translate-y-px disabled:opacity-45 disabled:cursor-wait disabled:transform-none"
               type="button"
               :aria-label="t('post.viewer.deletePost')"

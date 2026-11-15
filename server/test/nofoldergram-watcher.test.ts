@@ -19,9 +19,13 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('chokidar', () => ({ default: { watch: mocks.watch } }));
 vi.mock('../src/config/env.js', () => ({ appConfig: mocks.config }));
+vi.mock('../src/sources/local-source.js', () => ({
+  listLocalSources: () => [{ id: 1, enabled: 1, managed_by: 'environment' }],
+  checkLocalSourceDirectory: () => mocks.config.galleryRoot
+}));
 vi.mock('../src/db/repositories.js', () => ({ appSettingsRepository: { get: mocks.getSetting } }));
 vi.mock('../src/services/scanner-service.js', () => ({
-  scannerService: { scanAll: mocks.scanAll, scanChangedPaths: mocks.scanChangedPaths }
+  scannerService: { scanAll: mocks.scanAll, scanChangedPaths: mocks.scanChangedPaths, isLibraryRebuildRequired: () => false }
 }));
 vi.mock('../src/services/storage-service.js', () => ({
   storageService: { refreshAvailability: () => ({ libraryAvailable: true }) }

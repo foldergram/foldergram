@@ -86,6 +86,13 @@ describe.sequential('optional Immich sources', () => {
                 res.end(JSON.stringify({ assets: { items, total: items.length, nextCursor: offset + 2 < found.length ? String(offset + 2) : null } }));
                 return;
             }
+            const assetId = /^\/api\/assets\/([\w-]+)$/.exec(req.url ?? '')?.[1];
+            if (assetId) {
+                const asset = data.find(item => item.id === assetId);
+                res.statusCode = asset ? 200 : 404;
+                res.end(asset && JSON.stringify(asset));
+                return;
+            }
             if (req.url?.startsWith('/api/assets/')) {
                 mediaCalls++;
                 if (mediaFailure) {
@@ -157,7 +164,7 @@ describe.sequential('optional Immich sources', () => {
     afterAll(async () => { manager?.databaseManager.close(); await new Promise<void>(resolve => server.close(() => resolve())); await fs.rm(temp, { recursive: true, force: true }); vi.unstubAllEnvs(); });
     function add(mode: 'folders' | 'albums' | 'both' = 'both', extra: Record<string, unknown> = {}) { return sources.saveSource(sources.sourceInputSchema.parse({ name: 'Immich fixture', serverUrl: base, apiKey: 'fixture-secret', selection: { mode, roots: [{ libraryId: 'lib-one', path: '/photos' }], albumIds: ['album-a', 'album-b'], ...extra } })); }
     const feed = () => gallery.galleryService.getFeed(1, 60, 'recent');
-    const rows = () => manager.databaseManager.connection.prepare('SELECT * FROM images WHERE source_id IS NOT NULL ORDER BY id').all() as any[];
+    const rows = () => manager.databaseManager.connection.prepare('SELECT * FROM images WHERE source_id IN (SELECT id FROM media_sources WHERE kind = \'immich\') ORDER BY id').all() as any[];
     async function scan() { await scanner.scannerService.scanAll('immich-isolation-test'); }
     it('keeps local-only startup, scanner, and empty galleries usable', async () => {
         expect(sources.listSources()).toEqual([]);
@@ -196,6 +203,58 @@ describe.sequential('optional Immich sources', () => {
         await sources.syncSource(id);
         expect(rows()).toHaveLength(4);
         expect(feed().total).toBe(4);
+    });
+    it('changes the port for the same indexed Immich library and preserves post identities', async () => {
+        const id = add();
+        await sources.syncSource(id);
+        const post = feed().items[0];
+        repos.likeRepository.upsert(post.id);
+        const identities = rows().map(row => row.id);
+        let movedRequests = 0;
+        let sameLibrary = false;
+        const handleFixture = server.listeners('request')[0] as http.RequestListener;
+        const moved = http.createServer((req, res) => {
+            movedRequests++;
+            if (!sameLibrary && /^\/api\/assets\/[^/]+$/.test(req.url ?? '')) {
+                res.writeHead(400).end();
+                return;
+            }
+            handleFixture(req, res);
+        });
+        await new Promise<void>((resolve, reject) => { moved.once('error', reject); moved.listen(0, '127.0.0.1', resolve); });
+        try {
+            const address = moved.address();
+            if (!address || typeof address === 'string') throw new Error('Test listener has no port.');
+            const serverUrl = `http://127.0.0.1:${address.port}`;
+            const testUrl = '/api/admin/sources/immich/test';
+            const editUrl = `/api/admin/sources/${id}`;
+            const before = sources.listSources()[0];
+            const input = { name: before.name, serverUrl, selection: before.selection };
+            const check = (apiKey?: string) => requestTestApp(app, 'POST', testUrl, jsonHeaders, { serverUrl, sourceId: id, apiKey });
+            const patch = (apiKey?: string) => requestTestApp(app, 'PATCH', editUrl, jsonHeaders, { ...input, apiKey });
+
+            expect((await check()).body.message).toContain('Enter an Immich API key');
+            expect((await patch()).body.message).toContain('Enter an Immich API key');
+            expect(movedRequests).toBe(0);
+
+            expect((await check('fixture-secret')).body.message).toContain('existing Immich library');
+            expect((await patch('fixture-secret')).body.message).toContain('existing Immich library');
+            expect(sources.getSource(id)?.server_url).toBe(base);
+            expect(feed().total).toBe(4);
+
+            sameLibrary = true;
+            expect((await check('fixture-secret')).status).toBe(200);
+            expect((await patch('fixture-secret')).status).toBe(200);
+            expect(sources.getSource(id)?.server_url).toBe(serverUrl);
+            expect(feed().total).toBe(0);
+            await sources.syncSource(id);
+            expect(rows().map(row => row.id)).toEqual(identities);
+            expect(feed().items.some(item => item.id === post.id)).toBe(true);
+            expect(repos.likeRepository.getByPostId(post.id)).toBeTruthy();
+            expect((await requestTestApp(app, 'GET', post.thumbnailUrl)).status).toBe(200);
+        } finally {
+            await new Promise<void>(resolve => moved.close(() => resolve()));
+        }
     });
     it('enforces exact external roots and never maps internal upload directories', async () => {
         const id = add('folders');
@@ -316,11 +375,11 @@ describe.sequential('optional Immich sources', () => {
         expect((await requestTestApp(app, 'GET', video.previewUrl, { Range: 'bytes=2-5' })).status).toBe(503);
         const offline = await requestTestApp(app, 'GET', '/api/sources/status');
         expect(offline.body.hasLocalPosts).toBe(false);
-        expect(offline.body.items[0]).toMatchObject({ id, available: false });
-        expect(offline.body.items[0]).not.toHaveProperty('server_url');
-        expect(offline.body.items[0]).not.toHaveProperty('api_key_ciphertext');
+        expect(offline.body.items.find((source: { id: number }) => source.id === id)).toMatchObject({ id, available: false });
+        expect(offline.body.items.find((source: { id: number }) => source.id === id)).not.toHaveProperty('server_url');
+        expect(offline.body.items.find((source: { id: number }) => source.id === id)).not.toHaveProperty('api_key_ciphertext');
         mediaFailure = 0;
-        expect((await requestTestApp(app, 'GET', '/api/sources/status?retry=1')).body.items[0].available).toBe(true);
+        expect((await requestTestApp(app, 'GET', '/api/sources/status?retry=1')).body.items.find((source: { id: number }) => source.id === id).available).toBe(true);
         expect((await requestTestApp(app, 'GET', image.previewUrl)).status).toBe(200);
         const row = rows().find(r => r.external_asset_id === 'one');
         expect((await requestTestApp(app, 'GET', `/api/originals/${row.id}`)).status).toBe(403);
@@ -597,17 +656,17 @@ describe.sequential('optional Immich sources', () => {
         const id = add();
         await sources.syncSource(id);
         const remote = feed().items.find(p => p.sourceId === id)!;
-        const local = feed().items.find(p => !p.sourceId)!;
+        const local = feed().items.find(p => p.sourceKind === 'local')!;
         expect((await requestTestApp(app, 'GET', remote.previewUrl)).status).toBe(200);
         unavailable = true;
         const status = await requestTestApp(app, 'GET', '/api/sources/status');
-        expect(status.body.items[0].available).toBe(false);
+        expect(status.body.items.find((source: { id: number }) => source.id === id).available).toBe(false);
         expect(status.body.hasLocalPosts).toBe(true);
         expect((await requestTestApp(app, 'GET', remote.previewUrl)).status).toBe(503);
         expect((await requestTestApp(app, 'GET', local.previewUrl)).status).toBe(200);
         expect(feed().total).toBe(5);
         unavailable = false;
-        expect((await requestTestApp(app, 'GET', '/api/sources/status?retry=1')).body.items[0].available).toBe(true);
+        expect((await requestTestApp(app, 'GET', '/api/sources/status?retry=1')).body.items.find((source: { id: number }) => source.id === id).available).toBe(true);
         expect((await requestTestApp(app, 'GET', remote.previewUrl)).status).toBe(200);
         expect(sources.getSource(id)?.generation).toBe(1);
     });

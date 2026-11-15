@@ -21,7 +21,8 @@
         <button
           class="min-h-[2.35rem] px-4 py-[0.6rem] rounded-[0.75rem] border border-transparent bg-[#b42318] text-white font-semibold disabled:opacity-55 disabled:cursor-not-allowed"
           type="button"
-          :disabled="selectedCount === 0 || processing"
+          :disabled="selectedCount === 0 || processing || selectedReadOnly"
+          :title="selectedReadOnly ? t('sources.local.readOnlyHelp') : undefined"
           @click="permanentConfirmOpen = true"
         >
           {{ t('trashPage.deleteButton') }}
@@ -206,6 +207,7 @@ const restoreConfirmOpen = ref(false);
 const permanentConfirmOpen = ref(false);
 
 const selectedCount = computed(() => selectedIds.value.length);
+const selectedReadOnly = computed(() => trashStore.items.some(item => selectedIds.value.includes(item.id) && item.canWriteOriginals === false));
 const libraryUnavailableDescription = computed(() => appStore.stats?.storage.reason ?? t('trashPage.libraryUnavailableDescription'));
 const selectedCountLabel = computed(() => {
   const count = formatCount(selectedCount.value);

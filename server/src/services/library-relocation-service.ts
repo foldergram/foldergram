@@ -5,7 +5,7 @@ import { appConfig } from '../config/env.js';
 import { LAST_SUCCESSFUL_GALLERY_ROOT_SETTING_KEY } from '../constants/app-setting-keys.js';
 import { appSettingsRepository, folderRepository, imageRepository } from '../db/repositories.js';
 import type { ImageRecord } from '../types/models.js';
-import { resolveOriginalPath } from '../utils/media-paths.js';
+import { primaryLocalSource, resolveLocalPath, validateLocalPath } from '../sources/local-source.js';
 import { normalizePath } from '../utils/path-utils.js';
 
 export type LibraryRelocationValidationResult =
@@ -22,7 +22,7 @@ function validateSourceFile(row: ImageRecord): { ok: true } | { ok: false; missi
   let sourcePath: string;
 
   try {
-    sourcePath = resolveOriginalPath(row.relative_path);
+    sourcePath = resolveLocalPath(primaryLocalSource(), row.relative_path, { rootPath: appConfig.galleryRoot });
   } catch {
     return {
       ok: false,
@@ -86,10 +86,16 @@ class LibraryRelocationService {
       return { status: 'not_needed' };
     }
 
+    const primary = primaryLocalSource();
+    try {
+      validateLocalPath(appConfig.galleryRoot, primary.id, true);
+    } catch (error) {
+      return { status: 'failed', checked: 0, missing: 0, reason: error instanceof Error ? error.message : 'Gallery unavailable.' };
+    }
     let checked = 0;
     let missing = 0;
 
-    for (const row of imageRepository.listActive()) {
+    for (const row of imageRepository.listActive(primary.id)) {
       checked += 1;
       const validation = validateSourceFile(row);
 

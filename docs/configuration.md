@@ -23,8 +23,8 @@ yourself.
 | `DEV_CLIENT_PORT` | `4141` | Base Vite dev server port during `pnpm dev`. The client may fall forward through `4144`. The same range is allowed for non-production local-origin mutation checks. |
 | `DATA_ROOT` | `./data` | Base directory for app-managed storage. Other storage paths default under it unless overridden. |
 | `DATA_DIR` | unset | Optional alias that falls back into `DATA_ROOT` resolution when `DATA_ROOT` is absent. |
-| `GALLERY_ROOT` | `./data/gallery` | Source media root. Foldergram scans below this path. |
-| `GALLERY_EXCLUDED_FOLDERS` | unset | Comma-separated folder exclusion rules. Names match anywhere in the gallery tree; values with a slash match one exact relative path below `GALLERY_ROOT`. |
+| `GALLERY_ROOT` | `DATA_ROOT/gallery` | Primary media root. Add other locations in **Settings → Sources**. |
+| `GALLERY_EXCLUDED_FOLDERS` | unset | Comma-separated folder exclusion rules. Names match anywhere in the gallery tree; values with a slash match one exact path relative to each local source root. |
 | `DB_DIR` | `./data/db` | SQLite directory. Database file is `gallery.sqlite`, and startup Dbmate migrations run against it automatically when the directory is available. |
 | `THUMBNAILS_DIR` | `./data/thumbnails` | Generated thumbnail output root. |
 | `PREVIEWS_DIR` | `./data/previews` | Generated preview output root. |

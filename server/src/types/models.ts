@@ -24,7 +24,8 @@ export interface ImageExifData {
 }
 
 export interface FolderRecord {
-  source_id?: number | null;
+  source_id: number;
+  remote_visible?: number;
   id: number;
   slug: string;
   name: string;
@@ -63,6 +64,10 @@ export interface PlaceRecord {
 }
 
 export interface FolderSummaryRecord extends FolderRecord {
+  source_kind?: 'local' | 'immich';
+  source_name?: string;
+  source_managed_by?: 'environment' | 'settings';
+  can_write_originals?: number;
   image_count: number;
   post_count: number;
   carousel_count: number;
@@ -89,7 +94,7 @@ export interface FolderDirectoryPage {
 export interface ImageRecord {
   external_asset_id?: string | null;
   remote_version?: string | null;
-  source_id?: number | null;
+  source_id: number;
   id: number;
   folder_id: number;
   place_id: number | null;
@@ -126,7 +131,7 @@ export interface ImageRecord {
 }
 
 export interface PostRecord {
-  source_id?: number | null;
+  source_id: number;
   id: number;
   folder_id: number;
   place_id: number | null;
@@ -256,6 +261,9 @@ export interface PostMediaItem {
 
 export interface FeedImage {
   sourceId?: number | null;
+  sourceKind?: 'local' | 'immich';
+  sourceName?: string;
+  canWriteOriginals?: boolean;
   originalDownloadsAllowed?: boolean;
   id: number;
   folderId: number;

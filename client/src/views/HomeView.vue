@@ -20,6 +20,7 @@
         v-for="source in displayedUnavailableSources"
         :key="source.id"
         :name="source.name"
+        :kind="source.kind"
         :variant="showSourceOutageState ? 'panel' : 'banner'"
         class="mx-auto mb-5 w-full max-w-[29.375rem]"
         :class="{ 'mt-[clamp(1rem,6vh,4rem)]': showSourceOutageState }"
@@ -165,7 +166,8 @@
         <h2 class="m-0">{{ homeSetupNoticeTitle }}</h2>
         <p class="m-0 text-muted">{{ homeSetupNoticeDescription }}</p>
         <div class="flex items-center gap-4 max-sm:flex-col max-sm:items-start">
-          <button v-if="canManageLibrary" class="btn-primary min-w-[11.5rem]" type="button" :disabled="homeScanDisabled" @click="runHomeScan">
+          <RouterLink v-if="showConnectSource" class="btn-primary" :to="{ name: 'settings', hash: '#sources' }">{{ t('sources.connect') }}</RouterLink>
+          <button v-if="canManageLibrary" class="btn-ghost min-w-[11.5rem]" type="button" :disabled="homeScanDisabled" @click="runHomeScan">
             {{ homeScanButtonLabel }}
           </button>
           <p class="m-0 text-muted">{{ homeScanNote }}</p>
@@ -179,7 +181,7 @@
       </section>
       <section v-else-if="feedStore.initialized && feedStore.items.length === 0 && !showSourceOutageState">
         <EmptyState :title="t('home.feed.emptyTitle')" :description="t('home.feed.emptyDescription')" />
-        <RouterLink v-if="canManageLibrary" class="btn-primary mt-4" :to="{name:'settings',query:{section:'sources'}}">Connect Immich or review media sources</RouterLink>
+        <RouterLink v-if="showConnectSource" class="btn-primary mt-4" :to="{ name: 'settings', hash: '#sources' }">{{ t('sources.connect') }}</RouterLink>
       </section>
       <template v-else>
         <div
@@ -321,18 +323,18 @@ const foldersStore = useFoldersStore();
 const momentsStore = useMomentsStore();
 const sourcesStore = useSourcesStore();
 const visibleFeedItems = computed(() => feedStore.items.filter(item =>
-  !item.sourceId || (sourcesStore.initialized && sourcesStore.canBrowse(item.sourceId))
+  item.sourceKind === 'local' ? sourcesStore.canBrowse(item.sourceId) : !item.sourceId || (sourcesStore.initialized && sourcesStore.canBrowse(item.sourceId))
 ));
 const showSourceOutageState = computed(() =>
   sourcesStore.allContentUnavailable || (
-    sourcesStore.hasLocalPosts === null && sourcesStore.unavailable.length > 0 && feedStore.initialized && !feedStore.loading && !feedStore.hasMore &&
+    sourcesStore.hasLocalPosts === null && sourcesStore.unavailable.some(source => source.kind !== 'local') && feedStore.initialized && !feedStore.loading && !feedStore.hasMore &&
     !feedStore.error && visibleFeedItems.value.length === 0
   )
 );
 const displayedUnavailableSources = computed(() =>
   showSourceOutageState.value || visibleFeedItems.value.length > 0 || (
     sourcesStore.hasLocalPosts === true && feedStore.initialized && !feedStore.loading && !feedStore.hasMore
-  ) ? sourcesStore.unavailable : []
+  ) ? sourcesStore.unavailable : sourcesStore.unavailable.filter(source => source.kind === 'local' && sourcesStore.hasVisiblePosts !== null)
 );
 const showFeedSkeleton = computed(() =>
   !showSourceOutageState.value && visibleFeedItems.value.length === 0 && (
@@ -417,6 +419,9 @@ const ignoredRootMediaCount = computed(() => appStore.stats?.libraryIndex.ignore
 const hasIndexedFolders = computed(() => (appStore.stats?.folders ?? 0) > 0);
 const showHomeSetupNotice = computed(
   () =>
+    authStore.canManageLibrary &&
+    sourcesStore.hasVisiblePosts !== true &&
+    !sourcesStore.items.some(source => source.syncing) &&
     !appStore.isLibraryUnavailable &&
     !showSourceOutageState.value &&
     !showInitialScanState.value &&
@@ -454,6 +459,7 @@ const homeScanDisabled = computed(
     requestingHomeScan.value
 );
 const canManageLibrary = computed(() => authStore.canManageLibrary);
+const showConnectSource = computed(() => authStore.canAccessSettings && sourcesStore.hasVisiblePosts === false && !sourcesStore.items.some(source => source.syncing) && !appStore.isScanning);
 const homeScanButtonLabel = computed(() => {
   if (appStore.isScanning || requestingHomeScan.value) {
     return t('home.setup.scanning');

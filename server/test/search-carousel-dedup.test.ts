@@ -59,26 +59,26 @@ describe.sequential('search carousel deduplication (Issue 11)', () => {
     });
 
     const img1 = db.prepare(`
-      INSERT INTO images (folder_id, filename, relative_path, file_size, mtime_ms, media_type, mime_type, width, height, sort_timestamp, taken_at, checksum_or_fingerprint, first_seen_at, thumbnail_path, preview_path, extension, absolute_path)
-      VALUES (?, '01-safari-lion.jpg', 'wild-animals/carousels/Lions/01-safari-lion.jpg', 1000, 1000, 'image', 'image/jpeg', 1080, 1080, 1000, '2026-01-01', 'fp1', '2026-01-01', 't1', 'p1', 'jpg', '/abs/1')
+      INSERT INTO images (source_id, folder_id, filename, relative_path, file_size, mtime_ms, media_type, mime_type, width, height, sort_timestamp, taken_at, checksum_or_fingerprint, first_seen_at, thumbnail_path, preview_path, extension, absolute_path)
+      VALUES ((SELECT id FROM media_sources WHERE kind = 'local' AND managed_by = 'environment'), ?, '01-safari-lion.jpg', 'wild-animals/carousels/Lions/01-safari-lion.jpg', 1000, 1000, 'image', 'image/jpeg', 1080, 1080, 1000, '2026-01-01', 'fp1', '2026-01-01', 't1', 'p1', 'jpg', '/abs/1')
       RETURNING id
     `).get(carouselFolder.id) as { id: number };
 
     const img2 = db.prepare(`
-      INSERT INTO images (folder_id, filename, relative_path, file_size, mtime_ms, media_type, mime_type, width, height, sort_timestamp, taken_at, checksum_or_fingerprint, first_seen_at, thumbnail_path, preview_path, extension, absolute_path)
-      VALUES (?, '02-safari-cub.jpg', 'wild-animals/carousels/Lions/02-safari-cub.jpg', 1200, 1000, 'image', 'image/jpeg', 1080, 1080, 1000, '2026-01-01', 'fp2', '2026-01-01', 't2', 'p2', 'jpg', '/abs/2')
+      INSERT INTO images (source_id, folder_id, filename, relative_path, file_size, mtime_ms, media_type, mime_type, width, height, sort_timestamp, taken_at, checksum_or_fingerprint, first_seen_at, thumbnail_path, preview_path, extension, absolute_path)
+      VALUES ((SELECT id FROM media_sources WHERE kind = 'local' AND managed_by = 'environment'), ?, '02-safari-cub.jpg', 'wild-animals/carousels/Lions/02-safari-cub.jpg', 1200, 1000, 'image', 'image/jpeg', 1080, 1080, 1000, '2026-01-01', 'fp2', '2026-01-01', 't2', 'p2', 'jpg', '/abs/2')
       RETURNING id
     `).get(carouselFolder.id) as { id: number };
 
     const img3 = db.prepare(`
-      INSERT INTO images (folder_id, filename, relative_path, file_size, mtime_ms, media_type, mime_type, width, height, sort_timestamp, taken_at, checksum_or_fingerprint, first_seen_at, thumbnail_path, preview_path, extension, absolute_path)
-      VALUES (?, '03-safari-hunt.jpg', 'wild-animals/carousels/Lions/03-safari-hunt.jpg', 1100, 1000, 'image', 'image/jpeg', 1080, 1080, 1000, '2026-01-01', 'fp3', '2026-01-01', 't3', 'p3', 'jpg', '/abs/3')
+      INSERT INTO images (source_id, folder_id, filename, relative_path, file_size, mtime_ms, media_type, mime_type, width, height, sort_timestamp, taken_at, checksum_or_fingerprint, first_seen_at, thumbnail_path, preview_path, extension, absolute_path)
+      VALUES ((SELECT id FROM media_sources WHERE kind = 'local' AND managed_by = 'environment'), ?, '03-safari-hunt.jpg', 'wild-animals/carousels/Lions/03-safari-hunt.jpg', 1100, 1000, 'image', 'image/jpeg', 1080, 1080, 1000, '2026-01-01', 'fp3', '2026-01-01', 't3', 'p3', 'jpg', '/abs/3')
       RETURNING id
     `).get(carouselFolder.id) as { id: number };
 
     const post = db.prepare(`
-      INSERT INTO posts (folder_id, post_type, source_path, sort_timestamp, taken_at)
-      VALUES (?, 'carousel', 'wild-animals/carousels/Lions', 1000, '2026-01-01')
+      INSERT INTO posts (source_id, folder_id, post_type, source_path, sort_timestamp, taken_at)
+      VALUES ((SELECT id FROM media_sources WHERE kind = 'local' AND managed_by = 'environment'), ?, 'carousel', 'wild-animals/carousels/Lions', 1000, '2026-01-01')
       RETURNING id
     `).get(folder.id) as { id: number };
 
@@ -119,20 +119,20 @@ describe.sequential('search carousel deduplication (Issue 11)', () => {
     });
 
     const img1 = db.prepare(`
-      INSERT INTO images (folder_id, filename, relative_path, file_size, mtime_ms, media_type, mime_type, width, height, sort_timestamp, taken_at, checksum_or_fingerprint, first_seen_at, thumbnail_path, preview_path, extension, absolute_path)
-      VALUES (?, '01-arrival.jpg', 'vacation/carousels/Beach/01-arrival.jpg', 1000, 1000, 'image', 'image/jpeg', 1080, 1080, 1000, '2026-01-01', 'fp1', '2026-01-01', 't1', 'p1', 'jpg', '/abs/1')
+      INSERT INTO images (source_id, folder_id, filename, relative_path, file_size, mtime_ms, media_type, mime_type, width, height, sort_timestamp, taken_at, checksum_or_fingerprint, first_seen_at, thumbnail_path, preview_path, extension, absolute_path)
+      VALUES ((SELECT id FROM media_sources WHERE kind = 'local' AND managed_by = 'environment'), ?, '01-arrival.jpg', 'vacation/carousels/Beach/01-arrival.jpg', 1000, 1000, 'image', 'image/jpeg', 1080, 1080, 1000, '2026-01-01', 'fp1', '2026-01-01', 't1', 'p1', 'jpg', '/abs/1')
       RETURNING id
     `).get(carouselFolder.id) as { id: number };
 
     const img2 = db.prepare(`
-      INSERT INTO images (folder_id, filename, relative_path, file_size, mtime_ms, media_type, mime_type, width, height, sort_timestamp, taken_at, checksum_or_fingerprint, first_seen_at, thumbnail_path, preview_path, extension, absolute_path)
-      VALUES (?, '02-sunset-dolphin.jpg', 'vacation/carousels/Beach/02-sunset-dolphin.jpg', 1200, 1000, 'image', 'image/jpeg', 1080, 1080, 1000, '2026-01-01', 'fp2', '2026-01-01', 't2', 'p2', 'jpg', '/abs/2')
+      INSERT INTO images (source_id, folder_id, filename, relative_path, file_size, mtime_ms, media_type, mime_type, width, height, sort_timestamp, taken_at, checksum_or_fingerprint, first_seen_at, thumbnail_path, preview_path, extension, absolute_path)
+      VALUES ((SELECT id FROM media_sources WHERE kind = 'local' AND managed_by = 'environment'), ?, '02-sunset-dolphin.jpg', 'vacation/carousels/Beach/02-sunset-dolphin.jpg', 1200, 1000, 'image', 'image/jpeg', 1080, 1080, 1000, '2026-01-01', 'fp2', '2026-01-01', 't2', 'p2', 'jpg', '/abs/2')
       RETURNING id
     `).get(carouselFolder.id) as { id: number };
 
     const post = db.prepare(`
-      INSERT INTO posts (folder_id, post_type, source_path, sort_timestamp, taken_at)
-      VALUES (?, 'carousel', 'vacation/carousels/Beach', 1000, '2026-01-01')
+      INSERT INTO posts (source_id, folder_id, post_type, source_path, sort_timestamp, taken_at)
+      VALUES ((SELECT id FROM media_sources WHERE kind = 'local' AND managed_by = 'environment'), ?, 'carousel', 'vacation/carousels/Beach', 1000, '2026-01-01')
       RETURNING id
     `).get(folder.id) as { id: number };
 
@@ -167,20 +167,20 @@ describe.sequential('search carousel deduplication (Issue 11)', () => {
       });
 
       const imgA = db.prepare(`
-        INSERT INTO images (folder_id, filename, relative_path, file_size, mtime_ms, media_type, mime_type, width, height, sort_timestamp, taken_at, checksum_or_fingerprint, first_seen_at, thumbnail_path, preview_path, extension, absolute_path)
-        VALUES (?, 'forest-a.jpg', ?, 1000, 1000, 'image', 'image/jpeg', 1080, 1080, ?, '2026-01-01', ?, '2026-01-01', 'ta', 'pa', 'jpg', '/abs/a')
+        INSERT INTO images (source_id, folder_id, filename, relative_path, file_size, mtime_ms, media_type, mime_type, width, height, sort_timestamp, taken_at, checksum_or_fingerprint, first_seen_at, thumbnail_path, preview_path, extension, absolute_path)
+        VALUES ((SELECT id FROM media_sources WHERE kind = 'local' AND managed_by = 'environment'), ?, 'forest-a.jpg', ?, 1000, 1000, 'image', 'image/jpeg', 1080, 1080, ?, '2026-01-01', ?, '2026-01-01', 'ta', 'pa', 'jpg', '/abs/a')
         RETURNING id
       `).get(cFolder.id, `nature/carousels/Set${i}/forest-a.jpg`, i * 1000, `fpa${i}`) as { id: number };
 
       const imgB = db.prepare(`
-        INSERT INTO images (folder_id, filename, relative_path, file_size, mtime_ms, media_type, mime_type, width, height, sort_timestamp, taken_at, checksum_or_fingerprint, first_seen_at, thumbnail_path, preview_path, extension, absolute_path)
-        VALUES (?, 'forest-b.jpg', ?, 1000, 1000, 'image', 'image/jpeg', 1080, 1080, ?, '2026-01-01', ?, '2026-01-01', 'tb', 'pb', 'jpg', '/abs/b')
+        INSERT INTO images (source_id, folder_id, filename, relative_path, file_size, mtime_ms, media_type, mime_type, width, height, sort_timestamp, taken_at, checksum_or_fingerprint, first_seen_at, thumbnail_path, preview_path, extension, absolute_path)
+        VALUES ((SELECT id FROM media_sources WHERE kind = 'local' AND managed_by = 'environment'), ?, 'forest-b.jpg', ?, 1000, 1000, 'image', 'image/jpeg', 1080, 1080, ?, '2026-01-01', ?, '2026-01-01', 'tb', 'pb', 'jpg', '/abs/b')
         RETURNING id
       `).get(cFolder.id, `nature/carousels/Set${i}/forest-b.jpg`, i * 1000, `fpb${i}`) as { id: number };
 
       const post = db.prepare(`
-        INSERT INTO posts (folder_id, post_type, source_path, sort_timestamp, taken_at)
-        VALUES (?, 'carousel', ?, ?, '2026-01-01')
+        INSERT INTO posts (source_id, folder_id, post_type, source_path, sort_timestamp, taken_at)
+        VALUES ((SELECT id FROM media_sources WHERE kind = 'local' AND managed_by = 'environment'), ?, 'carousel', ?, ?, '2026-01-01')
         RETURNING id
       `).get(folder.id, `nature/carousels/Set${i}`, i * 1000) as { id: number };
 
@@ -227,26 +227,26 @@ describe.sequential('search carousel deduplication (Issue 11)', () => {
     });
 
     const img1 = db.prepare(`
-      INSERT INTO images (folder_id, filename, relative_path, file_size, mtime_ms, media_type, mime_type, width, height, sort_timestamp, taken_at, checksum_or_fingerprint, first_seen_at, thumbnail_path, preview_path, extension, absolute_path)
-      VALUES (?, 'mountain-peak.jpg', 'landscape/carousels/Mountains1/mountain-peak.jpg', 1000, 1000, 'image', 'image/jpeg', 1080, 1080, 1000, '2026-01-01', 'fp1', '2026-01-01', 't1', 'p1', 'jpg', '/abs/1')
+      INSERT INTO images (source_id, folder_id, filename, relative_path, file_size, mtime_ms, media_type, mime_type, width, height, sort_timestamp, taken_at, checksum_or_fingerprint, first_seen_at, thumbnail_path, preview_path, extension, absolute_path)
+      VALUES ((SELECT id FROM media_sources WHERE kind = 'local' AND managed_by = 'environment'), ?, 'mountain-peak.jpg', 'landscape/carousels/Mountains1/mountain-peak.jpg', 1000, 1000, 'image', 'image/jpeg', 1080, 1080, 1000, '2026-01-01', 'fp1', '2026-01-01', 't1', 'p1', 'jpg', '/abs/1')
       RETURNING id
     `).get(cFolder1.id) as { id: number };
 
     const img2 = db.prepare(`
-      INSERT INTO images (folder_id, filename, relative_path, file_size, mtime_ms, media_type, mime_type, width, height, sort_timestamp, taken_at, checksum_or_fingerprint, first_seen_at, thumbnail_path, preview_path, extension, absolute_path)
-      VALUES (?, 'mountain-peak.jpg', 'landscape/carousels/Mountains2/mountain-peak.jpg', 1000, 1000, 'image', 'image/jpeg', 1080, 1080, 2000, '2026-01-01', 'fp2', '2026-01-01', 't2', 'p2', 'jpg', '/abs/2')
+      INSERT INTO images (source_id, folder_id, filename, relative_path, file_size, mtime_ms, media_type, mime_type, width, height, sort_timestamp, taken_at, checksum_or_fingerprint, first_seen_at, thumbnail_path, preview_path, extension, absolute_path)
+      VALUES ((SELECT id FROM media_sources WHERE kind = 'local' AND managed_by = 'environment'), ?, 'mountain-peak.jpg', 'landscape/carousels/Mountains2/mountain-peak.jpg', 1000, 1000, 'image', 'image/jpeg', 1080, 1080, 2000, '2026-01-01', 'fp2', '2026-01-01', 't2', 'p2', 'jpg', '/abs/2')
       RETURNING id
     `).get(cFolder2.id) as { id: number };
 
     const post1 = db.prepare(`
-      INSERT INTO posts (folder_id, post_type, source_path, sort_timestamp, taken_at)
-      VALUES (?, 'carousel', 'landscape/carousels/Mountains1', 1000, '2026-01-01')
+      INSERT INTO posts (source_id, folder_id, post_type, source_path, sort_timestamp, taken_at)
+      VALUES ((SELECT id FROM media_sources WHERE kind = 'local' AND managed_by = 'environment'), ?, 'carousel', 'landscape/carousels/Mountains1', 1000, '2026-01-01')
       RETURNING id
     `).get(folder.id) as { id: number };
 
     const post2 = db.prepare(`
-      INSERT INTO posts (folder_id, post_type, source_path, sort_timestamp, taken_at)
-      VALUES (?, 'carousel', 'landscape/carousels/Mountains2', 2000, '2026-01-01')
+      INSERT INTO posts (source_id, folder_id, post_type, source_path, sort_timestamp, taken_at)
+      VALUES ((SELECT id FROM media_sources WHERE kind = 'local' AND managed_by = 'environment'), ?, 'carousel', 'landscape/carousels/Mountains2', 2000, '2026-01-01')
       RETURNING id
     `).get(folder.id) as { id: number };
 
@@ -278,34 +278,34 @@ describe.sequential('search carousel deduplication (Issue 11)', () => {
 
     // Single post (matches query "animals" on folder name only -> searchRank = 1)
     const singleImg = db.prepare(`
-      INSERT INTO images (folder_id, filename, relative_path, file_size, mtime_ms, media_type, mime_type, width, height, sort_timestamp, taken_at, checksum_or_fingerprint, first_seen_at, thumbnail_path, preview_path, extension, absolute_path)
-      VALUES (?, 'photo-zoo.jpg', 'animals/photo-zoo.jpg', 1000, 1000, 'image', 'image/jpeg', 1080, 1080, 2000, '2026-01-01', 'fp-single', '2026-01-01', 't-s', 'p-s', 'jpg', '/abs/s')
+      INSERT INTO images (source_id, folder_id, filename, relative_path, file_size, mtime_ms, media_type, mime_type, width, height, sort_timestamp, taken_at, checksum_or_fingerprint, first_seen_at, thumbnail_path, preview_path, extension, absolute_path)
+      VALUES ((SELECT id FROM media_sources WHERE kind = 'local' AND managed_by = 'environment'), ?, 'photo-zoo.jpg', 'animals/photo-zoo.jpg', 1000, 1000, 'image', 'image/jpeg', 1080, 1080, 2000, '2026-01-01', 'fp-single', '2026-01-01', 't-s', 'p-s', 'jpg', '/abs/s')
       RETURNING id
     `).get(folder.id) as { id: number };
 
     const singlePost = db.prepare(`
-      INSERT INTO posts (folder_id, post_type, source_path, sort_timestamp, taken_at)
-      VALUES (?, 'single', 'animals/photo-zoo.jpg', 2000, '2026-01-01')
+      INSERT INTO posts (source_id, folder_id, post_type, source_path, sort_timestamp, taken_at)
+      VALUES ((SELECT id FROM media_sources WHERE kind = 'local' AND managed_by = 'environment'), ?, 'single', 'animals/photo-zoo.jpg', 2000, '2026-01-01')
       RETURNING id
     `).get(folder.id) as { id: number };
     db.prepare(`INSERT INTO post_items (post_id, image_id, position) VALUES (?, ?, 1)`).run(singlePost.id, singleImg.id);
 
     // Carousel post with slide 1 (neutral filename) and slide 2 (exact filename match on "animals-tiger" -> searchRank = 100)
     const cImg1 = db.prepare(`
-      INSERT INTO images (folder_id, filename, relative_path, file_size, mtime_ms, media_type, mime_type, width, height, sort_timestamp, taken_at, checksum_or_fingerprint, first_seen_at, thumbnail_path, preview_path, extension, absolute_path)
-      VALUES (?, '01-grass.jpg', 'animals/carousels/Wildlife/01-grass.jpg', 1000, 1000, 'image', 'image/jpeg', 1080, 1080, 1000, '2026-01-01', 'fp-c1', '2026-01-01', 't-c1', 'p-c1', 'jpg', '/abs/c1')
+      INSERT INTO images (source_id, folder_id, filename, relative_path, file_size, mtime_ms, media_type, mime_type, width, height, sort_timestamp, taken_at, checksum_or_fingerprint, first_seen_at, thumbnail_path, preview_path, extension, absolute_path)
+      VALUES ((SELECT id FROM media_sources WHERE kind = 'local' AND managed_by = 'environment'), ?, '01-grass.jpg', 'animals/carousels/Wildlife/01-grass.jpg', 1000, 1000, 'image', 'image/jpeg', 1080, 1080, 1000, '2026-01-01', 'fp-c1', '2026-01-01', 't-c1', 'p-c1', 'jpg', '/abs/c1')
       RETURNING id
     `).get(carouselFolder.id) as { id: number };
 
     const cImg2 = db.prepare(`
-      INSERT INTO images (folder_id, filename, relative_path, file_size, mtime_ms, media_type, mime_type, width, height, sort_timestamp, taken_at, checksum_or_fingerprint, first_seen_at, thumbnail_path, preview_path, extension, absolute_path)
-      VALUES (?, '02-animals-tiger.jpg', 'animals/carousels/Wildlife/02-animals-tiger.jpg', 1000, 1000, 'image', 'image/jpeg', 1080, 1080, 1000, '2026-01-01', 'fp-c2', '2026-01-01', 't-c2', 'p-c2', 'jpg', '/abs/c2')
+      INSERT INTO images (source_id, folder_id, filename, relative_path, file_size, mtime_ms, media_type, mime_type, width, height, sort_timestamp, taken_at, checksum_or_fingerprint, first_seen_at, thumbnail_path, preview_path, extension, absolute_path)
+      VALUES ((SELECT id FROM media_sources WHERE kind = 'local' AND managed_by = 'environment'), ?, '02-animals-tiger.jpg', 'animals/carousels/Wildlife/02-animals-tiger.jpg', 1000, 1000, 'image', 'image/jpeg', 1080, 1080, 1000, '2026-01-01', 'fp-c2', '2026-01-01', 't-c2', 'p-c2', 'jpg', '/abs/c2')
       RETURNING id
     `).get(carouselFolder.id) as { id: number };
 
     const carouselPost = db.prepare(`
-      INSERT INTO posts (folder_id, post_type, source_path, sort_timestamp, taken_at)
-      VALUES (?, 'carousel', 'animals/carousels/Wildlife', 1000, '2026-01-01')
+      INSERT INTO posts (source_id, folder_id, post_type, source_path, sort_timestamp, taken_at)
+      VALUES ((SELECT id FROM media_sources WHERE kind = 'local' AND managed_by = 'environment'), ?, 'carousel', 'animals/carousels/Wildlife', 1000, '2026-01-01')
       RETURNING id
     `).get(folder.id) as { id: number };
     db.prepare(`INSERT INTO post_items (post_id, image_id, position) VALUES (?, ?, 1)`).run(carouselPost.id, cImg1.id);

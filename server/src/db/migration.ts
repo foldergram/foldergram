@@ -22,6 +22,8 @@ export const BASELINE_MIGRATION_VERSION = '000001';
 const CAPTION_MIGRATION_VERSION = '000002';
 const FOLDER_SHARES_MIGRATION_VERSION = '000004';
 const POSTS_MIGRATION_VERSION = '000005';
+const IMMICH_MIGRATION_VERSION = '000006';
+const LOCAL_SOURCE_OWNERSHIP_MIGRATION_VERSION = '000007';
 const SCHEMA_MIGRATIONS_TABLE_SQL = 'CREATE TABLE IF NOT EXISTS schema_migrations (version TEXT PRIMARY KEY)';
 const APP_SCHEMA_TABLES = [
   'media_sources',
@@ -99,7 +101,7 @@ function applyBaselineSchema(database: DatabaseSync, migrationsDirectory: string
 }
 
 function buildSqliteDatabaseUrl(databasePath: string): string {
-  return `sqlite:${pathToFileURL(databasePath).pathname}?_busy_timeout=${SQLITE_BUSY_TIMEOUT_MS}`;
+  return `sqlite:${pathToFileURL(databasePath).pathname}?_busy_timeout=${SQLITE_BUSY_TIMEOUT_MS}&_foreign_keys=off`;
 }
 
 function hasExistingAppSchema(database: DatabaseSync): boolean {
@@ -249,7 +251,47 @@ function repairInterruptedPostsMigrationMarker(database: DatabaseSync): void {
   log.info('Reset an interrupted migration 000005 marker so the posts migration can resume');
 }
 
-function repairKnownIncompleteMigrationMarkers(databasePath: string): void {
+function applyImmichSchemaAfterPostShares(database: DatabaseSync, migrationsDirectory: string): void {
+  const migrationPath = path.join(migrationsDirectory, `${IMMICH_MIGRATION_VERSION}_immich_sources.sql`);
+  if (!migrationVersionExists(database, IMMICH_MIGRATION_VERSION) ||
+      !tableExists(database, 'post_share_links') || !fs.existsSync(migrationPath)) {
+    return;
+  }
+
+  const immichSchema = () => [
+    tableExists(database, 'media_sources'),
+    tableExists(database, 'folder_media_memberships'),
+    ...['source_id', 'external_id', 'remote_visible', 'metadata_override'].map(column => tableHasColumn(database, 'folders', column)),
+    ...['source_id', 'external_asset_id', 'remote_version', 'sync_generation'].map(column => tableHasColumn(database, 'images', column)),
+    tableHasColumn(database, 'posts', 'source_id')
+  ];
+  if (immichSchema().every(Boolean)) return;
+
+  database.exec('BEGIN IMMEDIATE');
+  try {
+    // Another startup may have repaired this database while we waited for the write lock.
+    const schema = immichSchema();
+    if (schema.every(Boolean)) {
+      database.exec('COMMIT');
+      return;
+    }
+    if (schema.some(Boolean) || migrationVersionExists(database, LOCAL_SOURCE_OWNERSHIP_MIGRATION_VERSION)) {
+      throw new Error('The database contains a partial source schema after migration 000006. Restore from a backup before retrying the upgrade.');
+    }
+
+    // The post-sharing branch already owns the 000006 marker. Apply the missing
+    // additive Immich schema while preserving the marker and existing share links.
+    database.exec(extractMigrationUpSql(fs.readFileSync(migrationPath, 'utf8')));
+    database.exec('COMMIT');
+  } catch (error) {
+    database.exec('ROLLBACK');
+    throw error;
+  }
+
+  log.info('Applied the missing Immich schema alongside the existing migration 000006 post shares');
+}
+
+function repairKnownIncompleteMigrationMarkers(databasePath: string, migrationsDirectory: string): void {
   const database = openSqliteDatabase(databasePath);
 
   try {
@@ -259,6 +301,7 @@ function repairKnownIncompleteMigrationMarkers(databasePath: string): void {
 
     repairIncorrectFolderSharesMigrationMarker(database);
     repairInterruptedPostsMigrationMarker(database);
+    applyImmichSchemaAfterPostShares(database, migrationsDirectory);
   } finally {
     database.close();
   }
@@ -557,7 +600,7 @@ export function validatePostsMigrationCompleteness(database: DatabaseSync): void
   for (const [tableName, indexName, columns, unique] of requiredIndexes) {
     validateRequiredIndex(database, tableName, indexName, [...columns], unique);
   }
-  validateUniqueColumns(database, 'posts', ['source_path']);
+  validateUniqueColumns(database, 'posts', tableHasColumn(database, 'media_sources', 'kind') ? ['source_id', 'source_path'] : ['source_path']);
   validateUniqueColumns(database, 'post_items', ['image_id']);
 
   validateForeignKey(database, 'folders', 'carousel_owner_folder_id', 'folders', 'id', 'SET NULL');
@@ -649,7 +692,7 @@ export function runStartupMigrations(options: StartupMigrationOptions = {}): Sta
   }
 
   const baselineResult = baselineExistingDatabaseIfNeeded(databasePath, options);
-  repairKnownIncompleteMigrationMarkers(databasePath);
+  repairKnownIncompleteMigrationMarkers(databasePath, options.migrationsDirectory ?? defaultMigrationsDirectory());
   runDbmateUp(databasePath, options);
 
   const database = openSqliteDatabase(databasePath);

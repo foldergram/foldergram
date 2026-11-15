@@ -21,10 +21,10 @@
 
     <div class="min-w-0" :class="variant === 'banner' ? '' : 'mt-4'">
       <div class="flex flex-wrap items-center gap-x-2 gap-y-1" :class="variant === 'banner' ? '' : 'justify-center'">
-        <h2 class="m-0 text-[0.94rem] font-semibold tracking-[-0.02em] leading-snug text-text">{{ t('sources.unavailableTitle') }}</h2>
+        <h2 class="m-0 text-[0.94rem] font-semibold tracking-[-0.02em] leading-snug text-text">{{ t(kind === 'local' ? 'sources.local.unavailableTitle' : 'sources.unavailableTitle') }}</h2>
         <span v-if="sourceName" class="max-w-full break-words rounded-md bg-surface-hover px-1.5 py-0.5 text-[0.68rem] font-medium text-muted">{{ sourceName }}</span>
       </div>
-      <p class="mb-0 mt-2 text-[0.8rem] leading-[1.65] text-muted" :class="variant === 'banner' ? '' : 'mx-auto max-w-[20rem]'">{{ t('sources.unavailableMessage') }}</p>
+      <p class="mb-0 mt-2 text-[0.8rem] leading-[1.65] text-muted" :class="variant === 'banner' ? '' : 'mx-auto max-w-[20rem]'">{{ t(kind === 'local' ? 'sources.local.unavailableMessage' : 'sources.unavailableMessage') }}</p>
       <p class="mb-0 mt-3 flex items-center gap-1.5 text-[0.69rem] leading-normal text-muted" :class="variant === 'banner' ? '' : 'justify-center'">
         <span class="h-[5px] w-[5px] shrink-0 rounded-full bg-[#c7974b]" aria-hidden="true" />
         {{ t('sources.reconnecting') }}
@@ -50,7 +50,7 @@
 import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useSourcesStore } from '../stores/sources';
-const props = withDefaults(defineProps<{ name?: string; variant?: 'banner' | 'panel' }>(), { variant: 'panel' });
+const props = withDefaults(defineProps<{ name?: string; kind?: 'local' | 'immich'; variant?: 'banner' | 'panel' }>(), { variant: 'panel' });
 const sourceName = computed(() => props.name?.trim().toLowerCase() === 'immich' ? null : props.name?.trim());
 const { t } = useI18n();
 const sources = useSourcesStore();

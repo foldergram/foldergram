@@ -155,7 +155,7 @@
               <p
                 class="m-0 hidden text-muted text-[0.74rem] truncate font-mono opacity-70 sm:block"
               >
-                {{ folder.sourceId ? 'Immich' : folder.folderPath }}
+                {{ folder.sourceKind === 'immich' ? 'Immich' : folder.breadcrumb ?? folder.folderPath }}
               </p>
               <div class="mt-1 grid gap-[0.1rem] sm:hidden">
                 <span class="text-[0.74rem] font-semibold text-text">
@@ -243,7 +243,7 @@
           <span>{{ t('libraryPage.openFolder') }}</span>
         </button>
         <button
-          v-if="authStore.canDeleteMedia && !menuFolder?.sourceId"
+          v-if="authStore.canDeleteMedia && menuFolder?.sourceKind !== 'immich' && menuFolder?.canWriteOriginals !== false"
           class="flex items-center gap-[0.8rem] w-full px-4 py-[0.95rem] border-0 border-b border-border text-[#d93025] bg-transparent cursor-pointer text-left"
           type="button"
           :disabled="loadingDeleteDetails"
@@ -302,7 +302,7 @@
       @confirm="confirmDelete"
     >
       <template #details>
-        <label class="flex items-start gap-3 mt-3 cursor-pointer select-none">
+        <label v-if="confirmDeleteFolder?.canDeleteSourceFolder !== false" class="flex items-start gap-3 mt-3 cursor-pointer select-none">
           <input
             v-model="deleteSourceFolder"
             class="mt-[0.2rem]"

@@ -40,12 +40,3 @@ export function applyNoStoreMediaHeaders(response: HeaderResponse & { vary?: (fi
     response.setHeader('Vary', 'Cookie');
   }
 }
-
-export function createProtectedStaticOptions() {
-  return {
-    fallthrough: false,
-    setHeaders(response: HeaderResponse) {
-      applyProtectedMediaHeaders(response);
-    }
-  };
-}

@@ -83,10 +83,10 @@ describe('Immich source settings', () => {
         expect(wrapper.find('[role="alert"]').exists()).toBe(false);
     });
 
-    it('starts with a simple connect action and keeps local-folder guidance expandable', async () => {
+    it('offers local folders before Immich and keeps local-folder guidance expandable', async () => {
         wrapper = mount(SourceSettings);
         await flushPromises();
-        expect(wrapper.text()).toContain('Connect your Immich library');
+        expect(wrapper.findAll('button').slice(0, 2).map(action => action.text())).toEqual(['Add local folder', 'Connect Immich']);
         expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
         expect(wrapper.find('input').exists()).toBe(false);
         expect(wrapper.find('details').attributes('open')).toBeUndefined();
@@ -107,7 +107,8 @@ describe('Immich source settings', () => {
         expect(folderChecks().map(isChecked)).toEqual([true, true]);
         expect(albumChecks().map(isChecked)).toEqual([true, true]);
         expect(wrapper!.text()).toContain('2 folders · 2 albums selected');
-        expect(wrapper!.find('[data-test="customize-selection"]').attributes('open')).toBeUndefined();
+        expect(wrapper!.find('[data-test="customize-selection"]').attributes('open')).toBeDefined();
+        expect(wrapper!.text()).toContain('Connected to Immich');
         expect(wrapper!.find('[data-test="advanced-options"]').attributes('open')).toBeUndefined();
         await wrapper!.find('form').trigger('submit');
         await flushPromises();
@@ -134,7 +135,7 @@ describe('Immich source settings', () => {
         await connect();
         await albumChecks()[0].setValue(false);
         await wrapper!.find('input[value="albums"]').setValue(true);
-        await button('Change').trigger('click');
+        await button('Edit connection').trigger('click');
         await wrapper!.find('form').trigger('submit');
         await flushPromises();
         expect(isChecked(wrapper!.find('input[value="albums"]'))).toBe(true);
@@ -144,7 +145,7 @@ describe('Immich source settings', () => {
     it('starts a fresh selection when the server URL changes', async () => {
         await connect();
         await albumChecks()[0].setValue(false);
-        await button('Change').trigger('click');
+        await button('Edit connection').trigger('click');
         await wrapper!.find('input[type="url"]').setValue('http://another-immich:2283');
         discovery = { ...content(), suggestedMode: 'albums', libraries: [], roots: [], albums: [{ id: 'new-album', albumName: 'New server', shared: false }] };
         await wrapper!.find('form').trigger('submit');
@@ -216,7 +217,7 @@ describe('Immich source settings', () => {
         discovery = { ...content(), libraries: [], roots: [], albums: [], assetCount: 0, uploadCount: 0 };
         await connect();
         expect(button('Connect and sync').attributes('disabled')).toBeDefined();
-        expect(button('Change').exists()).toBe(true);
+        expect(button('Edit connection').exists()).toBe(true);
     });
 
     it('retains saved selections and advanced settings when editing, including after key rotation', async () => {
@@ -227,7 +228,7 @@ describe('Immich source settings', () => {
         await flushPromises();
         expect(albumChecks().map(isChecked)).toEqual([false, true]);
         expect(request.mock.calls.find(([url]) => url === '/api/admin/sources/immich/test')![1]!.body).not.toContain('apiKey');
-        await button('Update API key').trigger('click');
+        await button('Edit connection').trigger('click');
         await wrapper!.find('input[type="password"]').setValue('rotated-key');
         await wrapper!.find('form').trigger('submit');
         await flushPromises();
@@ -236,6 +237,33 @@ describe('Immich source settings', () => {
         await flushPromises();
         expect(savedBody('PATCH')).toMatchObject({ apiKey: 'rotated-key', selection: { mode: 'albums', roots: [], albumIds: ['family'], exclusions: ['/photos/private'], intervalMinutes: 60 } });
         expect(request.mock.calls.some(([url]) => url === '/api/admin/sources/1/sync')).toBe(true);
+    });
+
+    it('checks an edited server address with an explicitly entered key before saving', async () => {
+        sources = [savedSource({ selection: { ...emptySelection(), mode: 'albums', albumIds: ['family'] } })];
+        wrapper = mount(SourceSettings);
+        await flushPromises();
+        await button('Edit').trigger('click');
+        await flushPromises();
+        await button('Edit connection').trigger('click');
+        const url = wrapper.find('input[type="url"]');
+        expect(url.attributes('readonly')).toBeUndefined();
+        expect(button('Check connection').attributes('disabled')).toBeUndefined();
+        await url.setValue('http://immich:2282');
+        expect(button('Check connection').attributes('disabled')).toBeDefined();
+        const checks = () => request.mock.calls.filter(([endpoint]) => endpoint === '/api/admin/sources/immich/test');
+        await wrapper.find('form').trigger('submit');
+        expect(checks()).toHaveLength(1);
+
+        await wrapper.find('input[type="password"]').setValue('fixture-key');
+        await wrapper.find('form').trigger('submit');
+        await flushPromises();
+        expect(JSON.parse(checks().at(-1)![1]!.body as string)).toEqual({ serverUrl: 'http://immich:2282', apiKey: 'fixture-key', sourceId: 1 });
+        expect(wrapper.find('[data-test="customize-selection"]').attributes('open')).toBeDefined();
+        expect(albumChecks().map(isChecked)).toEqual([false, true]);
+        await wrapper.find('form').trigger('submit');
+        await flushPromises();
+        expect(savedBody('PATCH')).toMatchObject({ serverUrl: 'http://immich:2282', apiKey: 'fixture-key', selection: { albumIds: ['family'] } });
     });
 
     it('preselects folders when switching an older album-only source into an unused mode', async () => {

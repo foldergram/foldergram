@@ -23,8 +23,12 @@ vi.mock('chokidar', async (importOriginal) => {
   } } };
 });
 vi.mock('../src/config/env.js', () => ({ appConfig: mocks.config }));
+vi.mock('../src/sources/local-source.js', () => ({
+  listLocalSources: () => [{ id: 1, enabled: 1, managed_by: 'environment' }],
+  checkLocalSourceDirectory: () => mocks.config.galleryRoot
+}));
 vi.mock('../src/db/repositories.js', () => ({ appSettingsRepository: { get: () => null } }));
-vi.mock('../src/services/scanner-service.js', () => ({ scannerService: mocks }));
+vi.mock('../src/services/scanner-service.js', () => ({ scannerService: { ...mocks, isLibraryRebuildRequired: () => false } }));
 vi.mock('../src/services/storage-service.js', () => ({
   storageService: { refreshAvailability: () => ({ libraryAvailable: true }) }
 }));
