@@ -408,6 +408,18 @@
         "scanDescription": "已保存的轮播文件夹模式尚未应用到索引。请运行扫描以更新文件夹和帖子。",
         "rebuildDescription": "已保存的轮播文件夹模式尚未应用到索引。请使用下方的“重建图库索引”，将其应用到当前图库位置。"
       },
+      "heicImport": {
+        "label": "导入 HEIC/HEIF 照片",
+        "experimental": "实验性",
+        "description": "包含本地来源中受支持的 HEIC/HEIF 照片。启用后请运行扫描。",
+        "managed": "由环境变量管理。",
+        "loading": "正在加载 HEIC 导入设置…",
+        "saving": "正在保存 HEIC 导入设置…",
+        "saved": "HEIC 导入设置已保存。",
+        "busy": "请等待当前扫描或重建完成。",
+        "loadError": "无法加载 HEIC 导入设置。",
+        "saveError": "无法保存 HEIC 导入设置。"
+      },
       "scanCard": {
         "title": "扫描图库",
         "description": "扫描新增、更新和删除的媒体。选择修复派生文件还会检查未更改媒体对应的已生成文件。"

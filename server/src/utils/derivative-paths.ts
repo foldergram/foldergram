@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 
 import type { MediaType } from '../types/models.js';
 
@@ -34,18 +34,20 @@ export function getDerivativeShard(
 
 export function getThumbnailPathForAssetKey(
   assetKey: string,
-  layoutVersion: DerivativeStorageLayoutVersion = DERIVATIVE_STORAGE_LAYOUT_VERSION
+  layoutVersion: DerivativeStorageLayoutVersion = DERIVATIVE_STORAGE_LAYOUT_VERSION,
+  revision?: string
 ): string {
-  const normalized = normalizeAssetKey(assetKey);
-  return `${getDerivativeShard(normalized, layoutVersion)}/${normalized}.webp`;
+  return getPreviewPathForAssetKey(assetKey, 'image', layoutVersion, revision);
 }
 
 export function getPreviewPathForAssetKey(
   assetKey: string,
   mediaType: MediaType,
-  layoutVersion: DerivativeStorageLayoutVersion = DERIVATIVE_STORAGE_LAYOUT_VERSION
+  layoutVersion: DerivativeStorageLayoutVersion = DERIVATIVE_STORAGE_LAYOUT_VERSION,
+  revision?: string
 ): string {
   const normalized = normalizeAssetKey(assetKey);
   const extension = mediaType === 'video' ? '.mp4' : '.webp';
-  return `${getDerivativeShard(normalized, layoutVersion)}/${normalized}${extension}`;
+  const suffix = revision ? `-${createHash('sha256').update(revision).digest('hex').slice(0, 16)}` : '';
+  return `${getDerivativeShard(normalized, layoutVersion)}/${normalized}${suffix}${extension}`;
 }

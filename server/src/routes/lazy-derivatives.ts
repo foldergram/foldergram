@@ -1,7 +1,6 @@
 import path from 'node:path';
 
 import express from 'express';
-import pLimit from 'p-limit';
 
 import { appConfig } from '../config/env.js';
 import { imageRepository } from '../db/repositories.js';
@@ -9,7 +8,11 @@ import type { ImageRecord } from '../types/models.js';
 import { log } from '../services/log-service.js';
 import { generatePreviewDerivative, generateThumbnailDerivative } from '../services/derivative-service.js';
 import { scannerService } from '../services/scanner-service.js';
+import { authService } from '../services/auth-service.js';
 import { galleryService } from '../services/gallery-service.js';
+import { indexedHeicSource } from '../services/heic/indexed-source.js';
+import { derivativeWorkLimit, HeicError } from '../services/heic/service.js';
+import { isHeicFile } from '../utils/image-utils.js';
 import { maintenanceOperationLock } from '../services/maintenance-operation-lock.js';
 import { resolveOriginalPath } from '../utils/media-paths.js';
 import { isImmichSource, isLocalOriginalUnavailable, isSourceVisible } from '../sources/local-source.js';
@@ -25,7 +28,7 @@ import { resolveVideoPlaybackSource } from '../utils/video-playback-policy.js';
 
 // In-memory map to deduplicate concurrent generation requests for the same derivative path.
 const inflightGenerations = new Map<string, Promise<void>>();
-const generationLimit = pLimit(appConfig.scanDerivativeConcurrency);
+
 
 type SendDerivativeResult = 'sent' | 'aborted';
 
@@ -54,7 +57,8 @@ function resolveDerivativePath(rootDir: string, requestedPath: string): string |
 function findCurrentImageRecord(
   requestedPath: string,
   kind: 'thumbnail' | 'preview',
-  expectedImageId?: number
+  expectedImageId?: number,
+  allowTrashed = false
 ): ImageRecord | null {
   const imageRecord = kind === 'thumbnail'
     ? imageRepository.getByThumbnailPath(requestedPath)
@@ -62,7 +66,9 @@ function findCurrentImageRecord(
   if (!imageRecord || (expectedImageId !== undefined && imageRecord.id !== expectedImageId)) {
     return null;
   }
-  return isImmichSource(imageRecord.source_id) || !isSourceVisible(imageRecord.source_id) ? null : imageRecord;
+  if (isImmichSource(imageRecord.source_id) || !isSourceVisible(imageRecord.source_id)) return null;
+  if (isHeicFile(imageRecord.relative_path) && (imageRecord.is_deleted || (imageRecord.is_trashed && !allowTrashed))) return null;
+  return imageRecord;
 }
 
 function sendLocalSourceUnavailable(response: express.Response): void {
@@ -102,13 +108,17 @@ function queueLazyGeneration(
   absoluteOutputPath: string,
   requestedPath: string,
   kind: 'thumbnail' | 'preview',
-  expectedImageId: number
+  initialImage: ImageRecord,
+  allowTrashed = false
 ): Promise<void> {
-  const existingGeneration = inflightGenerations.get(absoluteOutputPath);
+  const expectedImageId = initialImage.id;
+  const isHeic = isHeicFile(initialImage.relative_path);
+  const key = JSON.stringify([absoluteOutputPath, expectedImageId, initialImage.checksum_or_fingerprint, allowTrashed]);
+  const existingGeneration = inflightGenerations.get(key);
   if (existingGeneration) return existingGeneration;
 
-  const generationWork = generationLimit(() => maintenanceOperationLock.runExclusive(async () => {
-    const imageRecord = findCurrentImageRecord(requestedPath, kind, expectedImageId);
+  const generate = async () => {
+    const imageRecord = findCurrentImageRecord(requestedPath, kind, expectedImageId, allowTrashed);
     if (!imageRecord) throw new DerivativeRecordNotFoundError('Derivative no longer has an indexed image record');
 
     // A scan or rebuild may have generated the file while this request waited
@@ -122,25 +132,45 @@ function queueLazyGeneration(
     });
 
     const sourcePath = resolveOriginalPath(imageRecord.relative_path, imageRecord.source_id);
+    const heicOptions = isHeic ? { heicSource: indexedHeicSource(imageRecord, sourcePath, { allowTrashed }), heicForeground: true } : {};
     if (kind === 'thumbnail') {
       await generateThumbnailDerivative(sourcePath, imageRecord.relative_path, false, {
-        thumbnailPath: imageRecord.thumbnail_path
+        thumbnailPath: imageRecord.thumbnail_path,
+        ...heicOptions
       });
       return;
     }
 
     await generatePreviewDerivative(sourcePath, imageRecord.relative_path, false, {
-      previewPath: imageRecord.preview_path
+      previewPath: imageRecord.preview_path,
+      ...heicOptions
     });
-  }));
+  };
+  // HEIC jobs use the shared derivative budget from inside their bounded
+  // queue. They recheck the indexed source before publishing.
+  const generationWork = isHeic ? generate() : maintenanceOperationLock.runExclusive(() => derivativeWorkLimit(generate));
   let trackedGeneration: Promise<void>;
   trackedGeneration = generationWork.finally(() => {
-    if (inflightGenerations.get(absoluteOutputPath) === trackedGeneration) {
-      inflightGenerations.delete(absoluteOutputPath);
+    if (inflightGenerations.get(key) === trackedGeneration) {
+      inflightGenerations.delete(key);
     }
   });
-  inflightGenerations.set(absoluteOutputPath, trackedGeneration);
+  inflightGenerations.set(key, trackedGeneration);
   return trackedGeneration;
+}
+
+function sendHeicGenerationError(error: unknown, response: express.Response): boolean {
+  if (!(error instanceof HeicError)) return false;
+  applyDerivativeErrorHeaders(response);
+  if (error.kind === 'busy' || error.kind === 'stale') {
+    response.setHeader('Retry-After', '2');
+    response.status(503).json({ message: 'HEIC processing is temporarily unavailable. Try again shortly.' });
+  } else if (error.kind === 'media') {
+    response.status(422).json({ message: error.message });
+  } else {
+    response.status(500).json({ message: 'Failed to generate HEIC derivative.' });
+  }
+  return true;
 }
 
 function isConnectionTerminationError(error: unknown): boolean {
@@ -210,7 +240,8 @@ async function serveOrGenerate(
     return;
   }
 
-  const initialImageRecord = findCurrentImageRecord(requestedPath, kind);
+  const allowTrashed = kind === 'thumbnail' && authService.hasCapability(request, 'canDeleteMedia');
+  const initialImageRecord = findCurrentImageRecord(requestedPath, kind, undefined, allowTrashed);
   if (!initialImageRecord) {
     sendDerivativeNotFound(response);
     return;
@@ -233,7 +264,7 @@ async function serveOrGenerate(
 
   // Fast path: reuse only a nonempty cached derivative.
   if (await isNonemptyDerivative(absoluteOutputPath)) {
-    if (!findCurrentImageRecord(requestedPath, kind, initialImageRecord.id)) {
+    if (!findCurrentImageRecord(requestedPath, kind, initialImageRecord.id, allowTrashed)) {
       sendDerivativeNotFound(response);
       return;
     }
@@ -258,7 +289,7 @@ async function serveOrGenerate(
     return;
   }
 
-  if (!generateMissing || (kind === 'preview' && isEligibleNormalVideo(initialImageRecord))) {
+  if ((!generateMissing && !isHeicFile(initialImageRecord.relative_path)) || (kind === 'preview' && isEligibleNormalVideo(initialImageRecord))) {
     sendDerivativeNotFound(response);
     return;
   }
@@ -270,10 +301,7 @@ async function serveOrGenerate(
   }
 
   const queuedGeneration = queueLazyGeneration(
-    absoluteOutputPath,
-    requestedPath,
-    kind,
-    initialImageRecord.id
+    absoluteOutputPath, requestedPath, kind, initialImageRecord, allowTrashed && Boolean(initialImageRecord.is_trashed)
   );
 
   try {
@@ -291,12 +319,13 @@ async function serveOrGenerate(
       sendLocalSourceUnavailable(response);
       return;
     }
+    if (sendHeicGenerationError(error, response)) return;
     applyDerivativeErrorHeaders(response);
     response.status(500).json({ message: 'Failed to generate derivative.' });
     return;
   }
 
-  if (!findCurrentImageRecord(requestedPath, kind, initialImageRecord.id)) {
+  if (!findCurrentImageRecord(requestedPath, kind, initialImageRecord.id, allowTrashed)) {
     sendDerivativeNotFound(response);
     return;
   }
@@ -366,12 +395,7 @@ export async function serveDerivativeForImage(
     return;
   }
 
-  const generationPromise = queueLazyGeneration(
-    absoluteOutputPath,
-    requestedPath,
-    kind,
-    initialImageRecord.id
-  );
+  const generationPromise = queueLazyGeneration(absoluteOutputPath, requestedPath, kind, initialImageRecord);
 
   try {
     await generationPromise;
@@ -388,6 +412,7 @@ export async function serveDerivativeForImage(
       sendLocalSourceUnavailable(response);
       return;
     }
+    if (sendHeicGenerationError(error, response)) return;
     applyDerivativeErrorHeaders(response);
     response.status(500).json({ message: 'Failed to generate derivative.' });
     return;

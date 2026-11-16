@@ -268,7 +268,8 @@
           <ResilientImage
             class="viewer__media-image"
             :src="image.previewUrl"
-            :fallback-src="image.originalUrl"
+            :fallback-src="getImageViewingFallback(image)"
+            :show-retry="needsWebpViewing(image)"
             :alt="image.filename"
             :width="image.width"
             :height="image.height"
@@ -511,8 +512,8 @@
             <!-- Open original -->
             <a
               class="viewer__sidebar-action inline-flex items-center justify-center p-0 border-0 bg-transparent cursor-pointer text-text transition-[opacity,transform] duration-180 hover:opacity-72 hover:-translate-y-px"
-              v-if="image?.originalDownloadsAllowed !== false"
-            :href="originalMediaUrl"
+              v-if="image?.originalDownloadsAllowed !== false && !isActiveLocalHeic"
+              :href="originalMediaUrl"
               target="_blank"
               rel="noreferrer"
               :aria-label="t('post.viewer.openOriginalFile')"
@@ -610,7 +611,7 @@
   import { useFoldersStore } from "../stores/folders"
   import { resolveDisplayCaption } from "../utils/caption"
   import { formatFolderTitle } from "../utils/folder-titles"
-  import { getOriginalMediaDownloadUrl, getOriginalMediaUrl } from "../utils/original-media"
+  import { getImageViewingFallback, getOriginalMediaDownloadUrl, getOriginalMediaUrl, isHeicFilename, needsWebpViewing } from "../utils/original-media"
   import { applyVideoMutePreference, createVideoMuteStorage } from "../utils/video-mute"
   import Avatar from "./Avatar.vue"
   import CarouselMediaStage from "./CarouselMediaStage.vue"
@@ -671,6 +672,8 @@
   const isCarousel = computed(() => props.image?.postType === 'carousel' && (props.image.mediaItems?.length ?? 0) > 1)
   const activeMediaItem = computed(() => isCarousel.value ? props.image?.mediaItems?.[carouselIndex.value] ?? null : null)
   const activeMediaImageId = computed(() => activeMediaItem.value?.imageId ?? props.image?.mediaItems?.[0]?.imageId ?? props.image?.id ?? null)
+  const isActiveLocalHeic = computed(() => props.image?.sourceKind !== 'immich'
+    && isHeicFilename(activeMediaItem.value?.filename ?? props.image?.filename ?? ""))
   const activeMediaWidth = computed(() => activeMediaItem.value?.width ?? props.image?.width ?? 0)
   const activeMediaHeight = computed(() => activeMediaItem.value?.height ?? props.image?.height ?? 0)
   const activeMediaDurationMs = computed(() => activeMediaItem.value?.durationMs ?? props.image?.durationMs ?? null)

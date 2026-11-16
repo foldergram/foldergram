@@ -10,7 +10,7 @@ import {
 import { appConfig } from '../config/env.js';
 import { appSettingsRepository, imageRepository, listFolderIdsRequiringSharedPreviews } from '../db/repositories.js';
 import type { ImageRecord } from '../types/models.js';
-import { getMediaTypeFromExtension, getPreviewRelativePath, getThumbnailRelativePath } from '../utils/image-utils.js';
+import { getMediaTypeFromExtension, getPreviewRelativePath, getThumbnailRelativePath, isHeicFile } from '../utils/image-utils.js';
 import { resolveOriginalPath } from '../utils/media-paths.js';
 import {
   DERIVATIVE_STORAGE_LAYOUT_VERSION,
@@ -23,6 +23,7 @@ import { isNonemptyDerivative } from '../utils/derivative-cache.js';
 import { shouldGenerateVideoPreview } from '../utils/video-playback-policy.js';
 import { normalizePath, safeJoin } from '../utils/path-utils.js';
 import { generateDerivatives } from './derivative-service.js';
+import { indexedHeicSource } from './heic/indexed-source.js';
 import { log } from './log-service.js';
 
 const MIGRATION_BATCH_SIZE = 200;
@@ -471,8 +472,9 @@ class DerivativeMigrationService {
     }
 
     const mediaType = row.media_type ?? getMediaTypeFromExtension(row.extension || path.extname(row.relative_path));
-    const nextThumbnailPath = getThumbnailPathForAssetKey(assetKey);
-    const nextPreviewPath = getPreviewPathForAssetKey(assetKey, mediaType);
+    const isHeic = isHeicFile(row.relative_path);
+    const nextThumbnailPath = isHeic ? row.thumbnail_path : getThumbnailPathForAssetKey(assetKey);
+    const nextPreviewPath = isHeic ? row.preview_path : getPreviewPathForAssetKey(assetKey, mediaType);
 
     let missingFiles = 0;
 
@@ -607,16 +609,19 @@ class DerivativeMigrationService {
     }
 
     const mediaType = row.media_type ?? getMediaTypeFromExtension(row.extension || path.extname(row.relative_path));
-    const targetThumbnailPath = getThumbnailPathForAssetKey(assetKey);
-    const targetPreviewPath = getPreviewPathForAssetKey(assetKey, mediaType);
+    const isHeic = isHeicFile(row.relative_path);
+    const targetThumbnailPath = isHeic ? row.thumbnail_path : getThumbnailPathForAssetKey(assetKey);
+    const targetPreviewPath = isHeic ? row.preview_path : getPreviewPathForAssetKey(assetKey, mediaType);
 
     const repairedThumbnail = await this.promoteDerivativeCandidate(
       appConfig.thumbnailsDir,
       targetThumbnailPath,
       this.uniqueDerivativePaths([
         row.thumbnail_path,
-        ...LEGACY_DERIVATIVE_STORAGE_LAYOUT_VERSIONS.map((layoutVersion) => getThumbnailPathForAssetKey(assetKey, layoutVersion)),
-        getThumbnailRelativePath(row.relative_path)
+        ...(isHeic ? [] : [
+          ...LEGACY_DERIVATIVE_STORAGE_LAYOUT_VERSIONS.map((layoutVersion) => getThumbnailPathForAssetKey(assetKey, layoutVersion)),
+          getThumbnailRelativePath(row.relative_path)
+        ])
       ])
     );
     if (repairedThumbnail > 0) {
@@ -629,8 +634,10 @@ class DerivativeMigrationService {
       targetPreviewPath,
       this.uniqueDerivativePaths([
         row.preview_path,
-        ...LEGACY_DERIVATIVE_STORAGE_LAYOUT_VERSIONS.map((layoutVersion) => getPreviewPathForAssetKey(assetKey, mediaType, layoutVersion)),
-        getPreviewRelativePath(row.relative_path, mediaType)
+        ...(isHeic ? [] : [
+          ...LEGACY_DERIVATIVE_STORAGE_LAYOUT_VERSIONS.map((layoutVersion) => getPreviewPathForAssetKey(assetKey, mediaType, layoutVersion)),
+          getPreviewRelativePath(row.relative_path, mediaType)
+        ])
       ])
     );
     if (repairedPreview > 0) {
@@ -657,6 +664,7 @@ class DerivativeMigrationService {
         const derivatives = await generateDerivatives(sourcePath, row.relative_path, false, {
           thumbnailPath: targetThumbnailPath,
           previewPath: targetPreviewPath,
+          ...(isHeic ? { heicSource: indexedHeicSource(row, sourcePath, { allowTrashed: true }) } : {}),
           ...(row.media_type === 'video'
             ? { videoPreviewPolicy: previewExpected ? 'required' as const : 'skip' as const }
             : {})

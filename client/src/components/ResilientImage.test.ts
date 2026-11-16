@@ -22,4 +22,23 @@ describe('ResilientImage', () => {
 
     expect(wrapper.get('img').attributes('src')).toContain('/api/originals/2770371');
   });
+
+  it('offers a manual retry after the WebP and fallback fail', async () => {
+    const wrapper = mount(ResilientImage, {
+      props: {
+        src: '/previews/photo.webp',
+        fallbackSrc: '/thumbnails/photo.webp',
+        alt: 'photo.HEIC',
+        showRetry: true,
+        retryWhile: true,
+        maxRetries: 0
+      }
+    });
+
+    await wrapper.get('img').trigger('error');
+    expect(wrapper.get('img').attributes('src')).toBe('/thumbnails/photo.webp');
+    await wrapper.get('img').trigger('error');
+    await wrapper.get('button').trigger('click');
+    expect(wrapper.get('img').attributes('src')).toBe('/previews/photo.webp?retry=1');
+  });
 });

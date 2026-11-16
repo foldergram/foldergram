@@ -5,6 +5,9 @@ import { performance } from 'node:perf_hooks';
 import path from 'node:path';
 
 import pLimit from 'p-limit';
+import { getHeicImportSetting } from './heic/import-setting.js';
+import { heicScanSource, indexedHeicSource } from './heic/indexed-source.js';
+import { derivativeWorkLimit, HeicError } from './heic/service.js';
 
 import {
   AVIF_METADATA_REPAIR_VERSION_SETTING_KEY,
@@ -33,7 +36,7 @@ import {
   postRepository,
   scanRunRepository
 } from '../db/repositories.js';
-import { generateDerivatives, generateThumbnailDerivative, readMediaMetadata } from './derivative-service.js';
+import { generateDerivatives, generateThumbnailDerivative, readMediaMetadata, type MediaMetadata } from './derivative-service.js';
 import {
   derivativeMigrationService,
   type DerivativeMigrationOperation,
@@ -54,6 +57,7 @@ import {
   getMediaTypeFromExtension,
   getMimeTypeFromExtension,
   getStableSortTimestamp,
+  isHeicFile,
   isSupportedMediaFile
 } from '../utils/image-utils.js';
 import { generateAssetKey, getPreviewPathForAssetKey, getThumbnailPathForAssetKey } from '../utils/derivative-paths.js';
@@ -111,6 +115,8 @@ interface ScanSummary {
 }
 
 interface DerivativeJob {
+  sourceId?: number;
+  inspectedHeicMetadata?: MediaMetadata;
   absolutePath: string;
   relativePath: string;
   folderId: number;
@@ -219,6 +225,7 @@ interface SourceFolderScanResult {
 
 interface ImageProcessingContext {
   source: LocalSource;
+  heicImportEnabled: boolean;
   root: string;
   removals: Map<number, string[]>;
   intentionalExclusion?: boolean;
@@ -301,7 +308,16 @@ export interface ScanProgressSnapshot {
 }
 
 const discoveryLimit = pLimit(appConfig.scanDiscoveryConcurrency);
-const derivativeLimit = pLimit(appConfig.scanDerivativeConcurrency);
+function isDiscoverableMediaFile(
+  relativePath: string,
+  context: Pick<ImageProcessingContext, 'source' | 'heicImportEnabled' | 'rebuildDerivativeReuseIndex'>
+): boolean {
+  return isSupportedMediaFile(relativePath, context.heicImportEnabled)
+    || (isHeicFile(relativePath) && (
+      context.rebuildDerivativeReuseIndex?.byRelativePath.has(relativePath)
+      || imageRepository.getByRelativePath(relativePath, context.source.id) !== undefined
+    ));
+}
 const HEARTBEAT_INTERVAL_MS = 5000;
 const DERIVATIVE_CACHE_KEEP_FILE = '.gitkeep';
 const ROOT_DISCOVERY_LABEL = '(root)';
@@ -655,6 +671,10 @@ class ScannerService {
     };
   }
 
+  hasPendingLibraryWork(): boolean {
+    return this.activeOrQueuedJobs > 0;
+  }
+
   hasEnabledAdditionalSources(): boolean {
     return listLocalSources().some(source => source.managed_by === 'settings' && source.enabled);
   }
@@ -837,7 +857,7 @@ class ScannerService {
   }
 
   private async enqueue(job: () => Promise<ScanSummary>, options: EnqueueScanOptions = {}): Promise<ScanSummary> {
-    if (options.rejectIfBusy && this.activeOrQueuedJobs > 0) {
+    if (options.rejectIfBusy && this.hasPendingLibraryWork()) {
       throw new ScanBusyError();
     }
 
@@ -1124,7 +1144,7 @@ class ScannerService {
   }
 
   private async walkMediaSourceFolders(
-    source: LocalSource,
+    context: ImageProcessingContext,
     currentAbsolutePath: string,
     onSourceFolder: (sourceFolder: SourceFolderCandidate) => Promise<void>,
     currentRelativePath: string | null = null,
@@ -1162,7 +1182,7 @@ class ScannerService {
       }
 
       if (entry.isDirectory()) {
-        if (this.isManagedGalleryPath(relativeEntryPath, source)) continue;
+        if (this.isManagedGalleryPath(relativeEntryPath, context.source)) continue;
         if (matchesExcludedFolder(relativeEntryPath, excludedFolderRules)) {
           onIntentionalExclusion(relativeEntryPath);
           continue;
@@ -1183,7 +1203,7 @@ class ScannerService {
       }
 
       if (entry.isSymbolicLink()) onIntentionalExclusion(relativeEntryPath, true);
-      if (currentRelativePath && entry.isFile() && isSupportedMediaFile(entry.name)) {
+      if (currentRelativePath && entry.isFile() && isDiscoverableMediaFile(normalizePath(relativeEntryPath), context)) {
         hasDirectImages = true;
       }
     }
@@ -1210,7 +1230,7 @@ class ScannerService {
       }
 
       await this.walkMediaSourceFolders(
-        source,
+        context,
         childDirectory.absolutePath,
         onSourceFolder,
         childDirectory.relativePath,
@@ -1258,8 +1278,9 @@ class ScannerService {
       return this.clearIndexedFolder(sourceFolderPath);
     }
 
-    const imageFiles = entries.filter(
-      (entry) => entry.isFile() && isSupportedMediaFile(entry.name) && !entry.name.startsWith('.')
+    const imageFiles = entries.filter(entry =>
+      entry.isFile() && !entry.name.startsWith('.')
+      && isDiscoverableMediaFile(normalizePath(`${sourceFolderPath}/${entry.name}`), context)
     );
 
     if (imageFiles.length === 0) {
@@ -1366,7 +1387,7 @@ class ScannerService {
   }
 
   private async collectRecursiveMediaFiles(
-    source: LocalSource,
+    context: ImageProcessingContext,
     currentAbsolutePath: string,
     currentRelativePath: string,
     excludedFolderRules: string[]
@@ -1391,15 +1412,15 @@ class ScannerService {
       }
 
       if (entry.isDirectory()) {
-        if (this.isManagedGalleryPath(relativeEntryPath, source) || matchesExcludedFolder(relativeEntryPath, excludedFolderRules)) {
+        if (this.isManagedGalleryPath(relativeEntryPath, context.source) || matchesExcludedFolder(relativeEntryPath, excludedFolderRules)) {
           continue;
         }
 
-        files.push(...await this.collectRecursiveMediaFiles(source, path.join(currentAbsolutePath, entry.name), relativeEntryPath, excludedFolderRules));
+        files.push(...await this.collectRecursiveMediaFiles(context, path.join(currentAbsolutePath, entry.name), relativeEntryPath, excludedFolderRules));
         continue;
       }
 
-      if (entry.isFile() && isSupportedMediaFile(entry.name)) {
+      if (entry.isFile() && isDiscoverableMediaFile(relativeEntryPath, context)) {
         files.push({
           absolutePath: path.join(currentAbsolutePath, entry.name),
           relativePath: relativeEntryPath
@@ -1458,7 +1479,8 @@ class ScannerService {
 
     const storyResults: SourceFolderScanResult[] = [];
     const directStoryFiles = storiesEntries
-      .filter((entry) => entry.isFile() && isSupportedMediaFile(entry.name) && !entry.name.startsWith('.'))
+      .filter(entry => entry.isFile() && !entry.name.startsWith('.')
+        && isDiscoverableMediaFile(normalizePath(`${storiesRelativePath}/${entry.name}`), context))
       .map((entry) => ({
         absolutePath: path.join(storiesAbsolutePath, entry.name),
         relativePath: normalizePath(`${storiesRelativePath}/${entry.name}`)
@@ -1521,7 +1543,7 @@ class ScannerService {
 
       const startedAt = performance.now();
       const nestedFiles = await this.collectRecursiveMediaFiles(
-        context.source,
+        context,
         path.join(storiesAbsolutePath, entry.name),
         capsuleRelativePath,
         excludedFolderRules
@@ -1627,8 +1649,9 @@ class ScannerService {
 
     const carouselResults: SourceFolderScanResult[] = [];
 
-    const rootMediaFiles = carouselsEntries.filter(
-      (entry) => entry.isFile() && isSupportedMediaFile(entry.name) && !entry.name.startsWith('.')
+    const rootMediaFiles = carouselsEntries.filter(entry =>
+      entry.isFile() && !entry.name.startsWith('.')
+      && isDiscoverableMediaFile(normalizePath(`${carouselsRelativePath}/${entry.name}`), context)
     );
     for (const rootFile of rootMediaFiles) {
       const relPath = normalizePath(`${carouselsRelativePath}/${rootFile.name}`);
@@ -1670,7 +1693,7 @@ class ScannerService {
       for (const nestedDir of nestedDirs) {
         const nestedRelPath = normalizePath(`${postRelativePath}/${nestedDir.name}`);
         const nestedMedia = await this.collectRecursiveMediaFiles(
-          context.source,
+          context,
           path.join(postAbsolutePath, nestedDir.name),
           nestedRelPath,
           excludedFolderRules
@@ -1682,8 +1705,9 @@ class ScannerService {
         }
       }
 
-      const directMediaEntries = postDirEntries.filter(
-        (e) => e.isFile() && isSupportedMediaFile(e.name) && !e.name.startsWith('.')
+      const directMediaEntries = postDirEntries.filter(entry =>
+        entry.isFile() && !entry.name.startsWith('.')
+        && isDiscoverableMediaFile(normalizePath(`${postRelativePath}/${entry.name}`), context)
       );
 
       if (directMediaEntries.length === 0) continue;
@@ -2037,7 +2061,7 @@ class ScannerService {
         await errors.add(detail);
         log.error(joinLogParts(['Failed to index media', formatStep('file', file.relativePath), message]));
 
-        if (appConfig.scanMediaErrorMode === 'fail' || error instanceof SourcePathAccessError) {
+        if (appConfig.scanMediaErrorMode === 'fail' || error instanceof SourcePathAccessError || (error instanceof HeicError && error.kind !== 'media')) {
           throw new Error(detail);
         }
       } finally {
@@ -2170,6 +2194,7 @@ class ScannerService {
           .filter((folderPath): folderPath is string => Boolean(folderPath))
       );
       const derivativeJobs: DerivativeJob[] = indexedImages.map((image) => ({
+        sourceId: image.source_id,
         absolutePath: resolveOriginalPath(image.relative_path, image.source_id, true),
         relativePath: image.relative_path,
         folderId: image.folder_id,
@@ -2289,6 +2314,7 @@ class ScannerService {
 
     const imageProcessingContext: ImageProcessingContext = {
       source,
+      heicImportEnabled: getHeicImportSetting().enabled,
       root: checkedRoot,
       removals: new Map(),
       galleryRootChanged,
@@ -2471,7 +2497,7 @@ class ScannerService {
       };
 
       const carouselDiscovery: CarouselDiscovery = { posts: [], scopes: [] };
-      await this.walkMediaSourceFolders(source, checkedRoot, async (sourceFolder) => {
+      await this.walkMediaSourceFolders(imageProcessingContext, checkedRoot, async (sourceFolder) => {
         discoveredSourceFolders += 1;
         const result = await this.scanSourceFolder(
           sourceFolder,
@@ -2577,7 +2603,7 @@ class ScannerService {
         ['Duration', formatDuration(metrics.discoveryDurationMs)]
       ]);
 
-      derivativeSummary = await this.processDerivativeJobs([...derivativeJobs.values()], errors, sharedPreviewFolderIds);
+      derivativeSummary = await this.processDerivativeJobs([...derivativeJobs.values()], errors, sharedPreviewFolderIds, checkedRoot);
 
       if (options.repairUnchangedDerivatives && summary.status !== 'failed' && derivativeMigrationService.isMigrationComplete()) {
         const reclaimedPreviews = await this.reclaimObsoleteVideoPreviews(errors, source.id);
@@ -2649,6 +2675,7 @@ class ScannerService {
     try { root = checkLocalSourceDirectory(source); } catch {
       return this.performFullScan(source, reason, resolveFullScanOptions({ allowDerivativeMigration: false }));
     }
+    const discoveryContext = { source, heicImportEnabled: getHeicImportSetting().enabled };
     const normalizedPaths = [...new Set(relativePaths.map((value) => normalizePath(value)).filter(Boolean))];
     const impactedSourceFolders = new Set<string>();
     const treatStoriesAsFolders = this.shouldTreatStoriesAsFolders();
@@ -2663,7 +2690,7 @@ class ScannerService {
         continue;
       }
 
-      if (!isSupportedMediaFile(path.basename(relativePath))) {
+      if (!isDiscoverableMediaFile(relativePath, discoveryContext)) {
         continue;
       }
 
@@ -2715,7 +2742,7 @@ class ScannerService {
         folderScanStateRepository.getAll(source.id).map((state) => [normalizePath(state.folder_path), state])
       );
       const imageProcessingContext: ImageProcessingContext = {
-        source,
+        ...discoveryContext,
         root,
         removals: new Map(),
         galleryRootChanged: false,
@@ -2768,7 +2795,7 @@ class ScannerService {
         checkLocalSourceDirectory(source);
         summary.removed_files += this.applyPendingRemovals(imageProcessingContext);
         postRepository.syncRepresentativePlaces(source.id);
-        await this.processDerivativeJobs([...derivativeJobs.values()], errors);
+        await this.processDerivativeJobs([...derivativeJobs.values()], errors, undefined, root);
       }
     } catch (error) {
       summary.status = 'failed';
@@ -2932,7 +2959,8 @@ class ScannerService {
   private async processDerivativeJobs(
     jobs: DerivativeJob[],
     errors: ScanErrorCollector,
-    sharedPreviewFolderIds = listFolderIdsRequiringSharedPreviews()
+    sharedPreviewFolderIds = listFolderIdsRequiringSharedPreviews(),
+    scanRoot?: string
   ): Promise<DerivativeProcessingSummary> {
     const startedAt = performance.now();
     let generatedThumbnails = 0;
@@ -2983,9 +3011,20 @@ class ScannerService {
           currentFolder: getSourceFolderPathFromRelativePath(job.relativePath)
         });
 
+        const indexedHeic = isHeicFile(job.relativePath)
+          ? imageRepository.getByRelativePath(job.relativePath, job.sourceId)
+          : undefined;
+        if (isHeicFile(job.relativePath) && !indexedHeic) {
+          throw new HeicError('stale', 'The indexed HEIC image is no longer available.');
+        }
+        const heicSource = indexedHeic
+          ? indexedHeicSource(indexedHeic, job.absolutePath, { scanRoot, allowTrashed: true })
+          : undefined;
+
         if (job.kind === 'thumbnail') {
           const thumbnail = await generateThumbnailDerivative(job.absolutePath, job.relativePath, job.force, {
-            thumbnailPath: job.thumbnailPath
+            thumbnailPath: job.thumbnailPath,
+            ...(heicSource ? { heicSource } : {})
           });
 
           if (thumbnail.generatedThumbnail) {
@@ -3000,6 +3039,7 @@ class ScannerService {
           const derivatives = await generateDerivatives(job.absolutePath, job.relativePath, job.force, {
             thumbnailPath: job.thumbnailPath,
             previewPath: job.previewPath,
+            ...(heicSource ? { heicSource, inspectedHeicMetadata: job.inspectedHeicMetadata } : {}),
             ...(job.videoPlaybackSource
               ? { videoPreviewPolicy: previewRequired ? 'required' as const : 'skip' as const }
               : {})
@@ -3027,7 +3067,7 @@ class ScannerService {
         await errors.add(detail);
         log.error(joinLogParts(['Derivative generation failed', formatStep('file', job.relativePath), message]));
 
-        if (appConfig.scanMediaErrorMode === 'fail') {
+        if (appConfig.scanMediaErrorMode === 'fail' || (error instanceof HeicError && error.kind !== 'media')) {
           throw new Error(detail);
         }
       } finally {
@@ -3039,10 +3079,36 @@ class ScannerService {
 
     if (appConfig.scanMediaErrorMode === 'fail') {
       for (const job of jobs) {
-        await processJob(job);
+        if (isHeicFile(job.relativePath)) await processJob(job);
+        else await derivativeWorkLimit(() => processJob(job));
       }
     } else {
-      await Promise.all(jobs.map((job) => derivativeLimit(() => processJob(job))));
+      const regularJobs: DerivativeJob[] = [];
+      const heicJobs: DerivativeJob[] = [];
+      for (const job of jobs) (isHeicFile(job.relativePath) ? heicJobs : regularJobs).push(job);
+
+      // Pull one job per runner. An entire scan in the shared limiter would
+      // make HEIC admission and on-demand work wait behind the scan backlog.
+      let failure: unknown;
+      const drainJobs = async (queue: Iterator<DerivativeJob>, run: typeof processJob) => {
+        for (let next = queue.next(); !next.done; next = queue.next()) {
+          try {
+            await run(next.value);
+          } catch (error) {
+            failure ??= error;
+          }
+        }
+      };
+      const heicIterator = heicJobs.values();
+      const regularIterator = regularJobs.values();
+      const workers = [
+        ...Array.from({ length: Math.min(heicJobs.length, appConfig.heicDecodeConcurrency) },
+          () => drainJobs(heicIterator, processJob)),
+        ...Array.from({ length: Math.min(regularJobs.length, appConfig.scanDerivativeConcurrency) },
+          () => drainJobs(regularIterator, job => derivativeWorkLimit(() => processJob(job))))
+      ];
+      await Promise.all(workers);
+      if (failure) throw failure;
     }
 
     const summary = {
@@ -3248,6 +3314,13 @@ class ScannerService {
     const fingerprint = createFingerprint(file.relativePath, file.stats.size, file.stats.mtimeMs);
     const extension = path.extname(file.absolutePath).toLowerCase();
     const mediaType = getMediaTypeFromExtension(extension);
+    const localHeic = isHeicFile(file.relativePath);
+    const metadataOptions = {
+      fileSize: file.stats.size,
+      ...(localHeic ? {
+        heicSource: heicScanSource(context.source, context.root, file.relativePath, file.absolutePath, fingerprint)
+      } : {})
+    };
     const existingByPath = imageRepository.getByRelativePath(file.relativePath, context.source.id);
     const moveCandidate = existingByPath ? undefined : await this.findMoveCandidate(file, extension, context);
     const rebuildDerivativeReuseCandidate = existingByPath || moveCandidate
@@ -3260,8 +3333,8 @@ class ScannerService {
         : false);
     const absolutePathChanged = existingByPath ? normalizePath(existingByPath.absolute_path) !== normalizePath(file.absolutePath) : false;
     const assetKey = existing?.asset_key ?? generateAssetKey();
-    const thumbnailPath = existing?.thumbnail_path ?? getThumbnailPathForAssetKey(assetKey);
-    const previewPath = existing?.preview_path ?? getPreviewPathForAssetKey(assetKey, mediaType);
+    let thumbnailPath = existing?.thumbnail_path ?? getThumbnailPathForAssetKey(assetKey);
+    let previewPath = existing?.preview_path ?? getPreviewPathForAssetKey(assetKey, mediaType);
     const needsTakenAtBackfill = existing?.taken_at === null || existing?.taken_at_source === null;
     const needsMediaBackfill = existing?.media_type !== mediaType || (mediaType === 'video' && existing?.duration_ms === null);
     const needsOrientationBackfill = mediaType === 'image' && existing?.display_orientation === null;
@@ -3299,9 +3372,7 @@ class ScannerService {
         || needsExifBackfill
         || needsAvifMetadataRepair
       ) {
-        const metadata = await readMediaMetadata(file.absolutePath, mediaType, {
-          fileSize: file.stats.size
-        });
+        const metadata = await readMediaMetadata(file.absolutePath, mediaType, metadataOptions);
         metadataTakenAt = metadata.takenAt;
         metadataDurationMs = metadata.durationMs;
         metadataWidth = metadata.width;
@@ -3387,6 +3458,7 @@ class ScannerService {
         derivativeJob: !appConfig.derivativeMode || appConfig.derivativeMode === 'eager'
           ? (shouldQueueDerivativeJobForStatus('unchanged', options) || needsPlaybackStrategyBackfill
             ? {
+                sourceId: context.source.id,
                 absolutePath: file.absolutePath,
                 relativePath: file.relativePath,
                 folderId: folder.id,
@@ -3403,9 +3475,7 @@ class ScannerService {
       };
     }
 
-    const metadata = await readMediaMetadata(file.absolutePath, mediaType, {
-      fileSize: file.stats.size
-    });
+    const metadata = await readMediaMetadata(file.absolutePath, mediaType, metadataOptions);
     const sortTimestamp = getStableSortTimestamp(
       existing
         ? {
@@ -3453,6 +3523,12 @@ class ScannerService {
     // Invalidate before committing the replacement fingerprint so failures can
     // be retried. Lazy scans also need this: a later share must never reuse the
     // previous source's preview, even when normal playback now uses originals.
+    if (existing && !canReuseDerivativeFiles && localHeic) {
+      // Use fresh per-revision storage so a stale cache cannot masquerade as the
+      // replacement. The prior file stays intact until normal orphan cleanup.
+      thumbnailPath = getThumbnailPathForAssetKey(assetKey, undefined, fingerprint);
+      previewPath = getPreviewPathForAssetKey(assetKey, mediaType, undefined, fingerprint);
+    }
     if (existing && !canReuseDerivativeFiles && mediaType === 'video') {
       await fs.rm(safeJoin(appConfig.previewsDir, previewPath), { force: true });
     }
@@ -3516,6 +3592,8 @@ class ScannerService {
       derivativeJob: appConfig.derivativeMode === 'lazy'
         ? null
         : {
+            sourceId: context.source.id,
+            inspectedHeicMetadata: localHeic ? metadata : undefined,
             absolutePath: file.absolutePath,
             relativePath: file.relativePath,
             folderId: folder.id,

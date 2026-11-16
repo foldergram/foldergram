@@ -28,7 +28,8 @@ yourself.
 | `DB_DIR` | `./data/db` | SQLite directory. Database file is `gallery.sqlite`, and startup Dbmate migrations run against it automatically when the directory is available. |
 | `THUMBNAILS_DIR` | `./data/thumbnails` | Generated thumbnail output root. |
 | `PREVIEWS_DIR` | `./data/previews` | Generated preview output root. |
-| `IMAGE_DETAIL_SOURCE` | `preview` | For image detail pages, use generated previews or stream originals. Videos ignore this flag. |
+| `IMAGE_DETAIL_SOURCE` | `preview` | For image details, use generated previews or stream originals. Local HEIC/HEIF always uses WebP for viewing. Videos follow their playback policy. |
+| `HEIC_ENABLED` | unset | Optional override for experimental local HEIC/HEIF imports. Either `true` or `false` takes precedence over the saved setting and locks the toggle. |
 | `DERIVATIVE_MODE` | `eager` | Generate derivatives during scans or lazily on the first protected derivative request. |
 | `LOG_VERBOSE` | `0` | Truthy values are `1`, `true`, `yes`, and `on`. |
 | `SCAN_MEDIA_ERROR_MODE` | `skip` | `skip` reports supported-media scan failures and continues. `fail` aborts on the first such error. |
@@ -36,6 +37,32 @@ yourself.
 | `SCAN_DERIVATIVE_CONCURRENCY` | `4` | Derivative concurrency, validated from `1` to `32`. |
 | `PUBLIC_DEMO_MODE` | `0` | When enabled, mutating API routes return `403` for read-only demo deployments. |
 | `CSRF_TRUSTED_ORIGINS` | unset | Comma-separated extra browser origins allowed for mutating API requests. Useful behind reverse proxies or HTTPS terminators. |
+
+### Local HEIC and HEIF imports
+
+Enable **Import HEIC/HEIF photos** in **Settings → Scan & Library**. Imports
+are off by default. The preference saves immediately and applies from the next
+scan. Run a scan after enabling it to discover files already on disk.
+
+Explicitly setting `HEIC_ENABLED=true` or `HEIC_ENABLED=false` in the server
+environment overrides the saved preference. Settings then shows the effective
+value and **Managed by environment**. Remove the override and restart the server
+to return control to the saved preference. Previously indexed HEIC/HEIF photos
+remain available and continue to be reconciled with their originals when imports
+are off.
+
+### Optional HEIC tuning
+
+Foldergram applies these defaults automatically. Set these advanced options
+only when you need to change a processing limit.
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `HEIC_DECODE_CONCURRENCY` | `1` | Active HEIC worker limit, from 1 to 4 and capped by `SCAN_DERIVATIVE_CONCURRENCY`. Use one worker during testing. |
+| `HEIC_DECODE_QUEUE_LIMIT` | `32` | Pending HEIC jobs, from 1 to 128. |
+| `HEIC_MAX_INPUT_BYTES` | `67108864` | Maximum original size, from 1 to 67108864 bytes (64 MiB). |
+| `HEIC_MAX_PIXELS` | `64000000` | Maximum pixels per image, from 1 to 64000000 (64 MP). |
+| `HEIC_JOB_TIMEOUT_MS` | `60000` | Time allowed for worker admission and execution, from 100 to 120000 milliseconds (60 seconds by default). |
 
 ## Database migrations
 

@@ -18,6 +18,7 @@ import type {
   FolderStoriesPayload,
   FolderStoryFeedPayload,
   HomeFeedDefaultSetting,
+  HeicImportSetting,
   UpdateCollectionResult,
   UpdateExcludedFoldersSettingResult,
   NestedFolderTitleFormatSetting,
@@ -599,6 +600,20 @@ export function updateNestedFolderTitleFormat(titleFormat: NestedFolderTitleForm
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ titleFormat })
+  });
+}
+
+const heicImportSettingPath = '/api/admin/settings/heic-import';
+
+export function fetchHeicImportSetting() {
+  return requestJson<HeicImportSetting>(heicImportSettingPath);
+}
+
+export function updateHeicImportSetting(enabled: boolean) {
+  return requestJson<HeicImportSetting>(heicImportSettingPath, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ enabled })
   });
 }
 

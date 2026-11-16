@@ -4,7 +4,8 @@ import type { ImageExifData, TakenAtSource } from '../types/models.js';
 const EXIF_DATE_TAGS = ['DateTimeOriginal', 'DateTimeDigitized', 'DateTime'] as const;
 const EXIF_METADATA_PARSE_OPTIONS = {
   ifd0: {
-    pick: ['Make', 'Model']
+    pick: ['Make', 'Model', 'DateTime', 'Orientation'],
+    translateValues: false
   },
   exif: {
     pick: [...EXIF_DATE_TAGS, 'LensModel', 'FNumber', 'ExposureTime', 'ISO', 'FocalLength', 'FocalLengthIn35mmFormat']
@@ -21,6 +22,7 @@ interface ExifDatePayload {
 }
 
 interface ExifMetadataPayload extends ExifDatePayload {
+  Orientation?: unknown;
   Make?: unknown;
   Model?: unknown;
   LensModel?: unknown;
@@ -38,6 +40,7 @@ interface GpsPayload {
 }
 
 export interface ExtractedImageExif {
+  orientation?: number;
   takenAt: number | null;
   exif: ImageExifData | null;
 }
@@ -231,7 +234,7 @@ export async function extractTakenAt(sourcePath: string): Promise<number | null>
   return extractTakenAtFromPayload(metadata);
 }
 
-export async function extractImageExif(sourcePath: string): Promise<ExtractedImageExif> {
+export async function extractImageExif(sourcePath: string | Uint8Array): Promise<ExtractedImageExif> {
   const [metadata, gps] = await Promise.all([
     (async () => {
       try {
@@ -249,7 +252,10 @@ export async function extractImageExif(sourcePath: string): Promise<ExtractedIma
     })()
   ]);
 
+  const orientation = typeof metadata?.Orientation === 'number' && Number.isInteger(metadata.Orientation)
+    && metadata.Orientation >= 1 && metadata.Orientation <= 8 ? metadata.Orientation : undefined;
   return {
+    ...(orientation === undefined ? {} : { orientation }),
     takenAt: extractTakenAtFromPayload(metadata),
     exif: normalizeImageExifData({
       cameraMake: metadata?.Make,

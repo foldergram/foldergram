@@ -24,6 +24,7 @@ import { createApp } from "./app.js";
 import { databaseManager } from "./db/database.js";
 import { collectionRepository } from "./db/repositories.js";
 import { log } from "./services/log-service.js";
+import { stopHeicProcessing } from "./services/heic/service.js";
 import { permanentDeletionService } from "./services/permanent-deletion-service.js";
 import { scannerService } from "./services/scanner-service.js";
 import { watcherService } from "./services/watcher-service.js";
@@ -100,7 +101,7 @@ async function bootstrap(): Promise<void> {
   async function shutdown(signal: string): Promise<void> {
     log.info(`Received ${signal}, shutting down`);
     stopSources();
-    await watcherService.stop();
+    await Promise.all([watcherService.stop(), stopHeicProcessing()]);
     server.close(() => {
       databaseManager.close();
       process.exit(0);

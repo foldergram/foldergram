@@ -408,6 +408,18 @@
         "scanDescription": "The saved Carousel folder mode has not been applied to the index. Run a scan to update folders and posts.",
         "rebuildDescription": "The saved Carousel folder mode has not been applied to the index. Rebuild Library Index below to apply it to the current gallery location."
       },
+      "heicImport": {
+        "label": "Import HEIC/HEIF photos",
+        "experimental": "Experimental",
+        "description": "Include supported HEIC/HEIF photos from local sources. Run a scan after enabling.",
+        "managed": "Managed by environment.",
+        "loading": "Loading HEIC import settings…",
+        "saving": "Saving HEIC import settings…",
+        "saved": "HEIC import setting saved.",
+        "busy": "Wait for the current scan or rebuild to finish.",
+        "loadError": "Could not load the HEIC import setting.",
+        "saveError": "Could not save the HEIC import setting."
+      },
       "scanCard": {
         "title": "Scan Library",
         "description": "Scan for additions, updates, and removals. Choose derivative repair to also check generated media for unchanged files."

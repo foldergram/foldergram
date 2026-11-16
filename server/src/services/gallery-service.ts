@@ -5,6 +5,7 @@ import { imageBelongsToFolder } from '../immich/media.js';
 import fs from 'node:fs';
 import fsPromises from 'node:fs/promises';
 import path from 'node:path';
+import { isHeicFile } from '../utils/image-utils.js';
 
 import {
   APP_DEFAULT_LOCALE_SETTING_KEY,
@@ -68,6 +69,7 @@ import { buildMonthDayKey, countFeedBursts, diversifyFeedCandidates, groupFeedBu
 import { shouldPreferMomentRail, type FeedRailKind } from '../utils/feed-rail-utils.js';
 import { parseNestedFolderTitleFormatSetting, serializeNestedFolderTitleFormatSetting } from '../utils/folder-title-format.js';
 import { countSupportedRootMediaFiles } from '../utils/gallery-root-utils.js';
+import { getHeicImportSetting } from './heic/import-setting.js';
 import { resolveOriginalPath } from '../utils/media-paths.js';
 import { getLeafPathName, getParentRelativePath, getPathBreadcrumb } from '../utils/path-utils.js';
 import { measureOperation } from '../utils/perf-timing.js';
@@ -672,7 +674,7 @@ function mapSharedFeedImage(image: IndexedFeedImage, derivativeVersion = getDeri
 
 function mapImageDetail(image: IndexedImageDetail, derivativeVersion = getDerivativeAssetVersion()): ImageDetail {
   const { playbackStrategy, exifJson, placeId, placeSlug, placeName, placeKind, placeIsApproximate, isSaved, mediaItems, itemCount, ...rest } = image as any;
-  const useOriginalForImages = appConfig.imageDetailSource === 'original';
+  const useOriginalForImages = appConfig.imageDetailSource === 'original' && !isHeicFile(rest.filename);
   const representativeImageId = mediaItems?.[0]?.imageId ?? rest.id;
   const videoPlaybackSource = getVideoPlaybackSource({
     mediaType: rest.mediaType,
@@ -2437,7 +2439,7 @@ export const galleryService = {
       libraryIndex: {
         rebuildRequired,
         reason: rebuildRequired ? 'gallery_root_changed' : null,
-        ignoredRootMediaCount: mediaIndexAvailable() ? countSupportedRootMediaFiles(appConfig.galleryRoot) : 0
+        ignoredRootMediaCount: mediaIndexAvailable() ? countSupportedRootMediaFiles(appConfig.galleryRoot, getHeicImportSetting().enabled) : 0
       },
       preferences: {
         defaultLocale,
@@ -2522,7 +2524,7 @@ export const galleryService = {
           lastSuccessfulGalleryRoot,
           legacyDerivativeMigrationPending: pendingDerivativeMigrationRows > 0,
           pendingDerivativeMigrationRows,
-          ignoredRootMediaCount: mediaIndexAvailable() ? countSupportedRootMediaFiles(currentGalleryRoot) : 0
+          ignoredRootMediaCount: mediaIndexAvailable() ? countSupportedRootMediaFiles(currentGalleryRoot, getHeicImportSetting().enabled) : 0
         },
         preferences: {
           defaultLocale,

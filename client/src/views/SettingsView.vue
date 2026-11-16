@@ -1245,6 +1245,39 @@
               </div>
             </div>
 
+            <div class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-2 rounded-[0.95rem] border border-border px-4 py-3">
+              <div class="min-w-0">
+                <div class="flex flex-wrap items-center gap-2">
+                  <p id="heic-import-label" class="m-0 text-[0.96rem] font-semibold text-text">{{ t('settings.library.heicImport.label') }}</p>
+                  <span class="rounded-full bg-surface-alt px-2 py-[0.2rem] text-[0.72rem] font-semibold uppercase tracking-[0.08em] text-muted">
+                    {{ t('settings.library.heicImport.experimental') }}
+                  </span>
+                </div>
+                <p id="heic-import-description" class="m-0 mt-1 text-[0.84rem] text-muted">{{ t('settings.library.heicImport.description') }}</p>
+              </div>
+              <button
+                class="inline-flex items-center justify-end border-0 bg-transparent p-0 cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
+                type="button"
+                role="switch"
+                aria-labelledby="heic-import-label"
+                aria-describedby="heic-import-description heic-import-status"
+                :aria-checked="heicImportSetting?.enabled ?? false"
+                :disabled="heicImportDisabled"
+                @click="saveHeicImportSetting"
+              >
+                <span
+                  class="inline-flex h-7 w-12 items-center rounded-full p-[0.15rem] transition-colors duration-180"
+                  :class="heicImportSetting?.enabled ? 'bg-accent' : 'bg-[color-mix(in_srgb,var(--border)_88%,var(--surface-alt)_12%)]'"
+                >
+                  <span class="h-[1.35rem] w-[1.35rem] rounded-full bg-white shadow-[0_2px_8px_rgba(0,0,0,0.18)] transition-transform duration-180" :class="heicImportSetting?.enabled ? 'translate-x-[1.2rem]' : 'translate-x-0'" />
+                </span>
+              </button>
+              <p id="heic-import-status" role="status" class="col-span-2 m-0 empty:hidden text-[0.84rem] text-muted">{{ heicImportStatusMessage }}</p>
+              <p v-if="heicImportError || heicImportLoadFailed" role="alert" class="col-span-2 m-0 text-[0.84rem] text-[#c0392b]">
+                {{ heicImportError || t('settings.library.heicImport.loadError') }}
+              </p>
+            </div>
+
             <div class="flex flex-col md:flex-row items-center gap-4 max-sm:items-stretch mt-4">
               <p class="m-0 flex-1 text-muted">{{ scanActionNote }}</p>
               <div class="flex flex-col gap-2 sm:flex-row">
@@ -1420,6 +1453,7 @@ import SourceSettings from '../components/SourceSettings.vue';
 import ConfirmDialog from '../components/ConfirmDialog.vue';
 import {
   fetchAdminStats,
+  fetchHeicImportSetting,
   triggerLibraryRebuild,
   triggerManualScan,
   triggerThumbnailRebuild,
@@ -1427,6 +1461,7 @@ import {
   updateExcludedFolders,
   updateFolderImageOrderDefault,
   updateHomeFeedDefault,
+  updateHeicImportSetting,
   updateNestedFolderTitleFormat,
   updateReelsFeedDefault,
   updateStoriesMode,
@@ -1441,7 +1476,7 @@ import { useLikesStore } from '../stores/likes';
 import { useMomentsStore } from '../stores/moments';
 import { usePlacesStore } from '../stores/places';
 import { useViewerStore } from '../stores/viewer';
-import type { AppStats, FeedMode, FolderImageOrder, NestedFolderTitleFormat, ReelsFeedMode, ViewerAccessMode } from '../types/api';
+import type { AppStats, FeedMode, FolderImageOrder, HeicImportSetting, NestedFolderTitleFormat, ReelsFeedMode, ViewerAccessMode } from '../types/api';
 
 const { t, locale } = useI18n();
 const appStore = useAppStore();
@@ -1474,6 +1509,12 @@ async function openExcludedFolders() {
   excludedFoldersInput.value?.focus({ preventScroll: true });
 }
 const scanError = ref<string | null>(null);
+const heicImportSetting = ref<HeicImportSetting | null>(null);
+const heicImportError = ref('');
+const heicImportLoadFailed = ref(false);
+const savingHeicImport = ref(false);
+const heicImportSaved = ref(false);
+let heicImportRevision = 0;
 const rebuildError = ref<string | null>(null);
 const thumbnailRebuildError = ref<string | null>(null);
 const requestingScan = ref(false);
@@ -2092,35 +2133,27 @@ const showPlacesOnboardingBanner = computed(
     placesStore.status?.prepared === false &&
     !dismissedPlacesOnboardingBanner.value
 );
-const scanActionDisabled = computed(
-  () =>
-    waitingForInitialStatus.value ||
-    appStore.isLibraryUnavailable ||
-    appStore.isLibraryRebuildRequired ||
-    appStore.isScanning ||
-    requestingScan.value ||
-    rebuilding.value ||
-    rebuildingThumbnails.value
+const libraryWorkActive = computed(
+  () => appStore.isScanning || requestingScan.value || rebuilding.value || rebuildingThumbnails.value
 );
+const heicImportWorkPending = computed(() => libraryWorkActive.value || heicImportSetting.value?.libraryWorkPending);
+const heicImportDisabled = computed(() =>
+  !heicImportSetting.value || heicImportSetting.value.managedByEnvironment ||
+  heicImportWorkPending.value || savingHeicImport.value
+);
+const heicImportStatusMessage = computed(() => {
+  if (heicImportSetting.value?.managedByEnvironment) return t('settings.library.heicImport.managed');
+  if (savingHeicImport.value) return t('settings.library.heicImport.saving');
+  if (heicImportWorkPending.value) return t('settings.library.heicImport.busy');
+  if (!heicImportSetting.value && !heicImportLoadFailed.value) return t('settings.library.heicImport.loading');
+  if (heicImportSaved.value) return t('settings.library.heicImport.saved');
+  return '';
+});
 const rebuildActionDisabled = computed(
-  () =>
-    waitingForInitialStatus.value ||
-    appStore.isLibraryUnavailable ||
-    appStore.isScanning ||
-    requestingScan.value ||
-    rebuilding.value ||
-    rebuildingThumbnails.value
+  () => waitingForInitialStatus.value || appStore.isLibraryUnavailable || libraryWorkActive.value || savingHeicImport.value
 );
-const thumbnailRebuildActionDisabled = computed(
-  () =>
-    waitingForInitialStatus.value ||
-    appStore.isLibraryUnavailable ||
-    appStore.isLibraryRebuildRequired ||
-    appStore.isScanning ||
-    requestingScan.value ||
-    rebuilding.value ||
-    rebuildingThumbnails.value
-);
+const scanActionDisabled = computed(() => rebuildActionDisabled.value || appStore.isLibraryRebuildRequired);
+const thumbnailRebuildActionDisabled = scanActionDisabled;
 const rebuildCardStyle = computed(() =>
   appStore.isLibraryRebuildRequired
     ? 'background: radial-gradient(circle at top right, rgba(210,161,51,0.2), transparent 42%), linear-gradient(180deg, var(--surface) 0%, color-mix(in srgb, var(--surface) 88%, #fff3c3 12%) 100%);'
@@ -3059,6 +3092,58 @@ async function loadAdminStats() {
     syncExcludedFoldersFromSaved();
   }
 }
+
+async function saveHeicImportSetting() {
+  const setting = heicImportSetting.value;
+  if (!setting || heicImportDisabled.value) return;
+
+  heicImportRevision++;
+  savingHeicImport.value = true;
+  heicImportSaved.value = false;
+  heicImportError.value = '';
+
+  try {
+    heicImportSetting.value = await updateHeicImportSetting(!setting.enabled);
+    heicImportSaved.value = true;
+    // Refresh the root-media notice using the new import preference.
+    void appStore.fetchStats({ background: true });
+  } catch {
+    heicImportError.value = t('settings.library.heicImport.saveError');
+  } finally {
+    savingHeicImport.value = false;
+  }
+}
+
+watch(currentCategory, (category, _previous, onCleanup) => {
+  if (category !== 'library') return;
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let stopped = false;
+  onCleanup(() => {
+    stopped = true;
+    clearTimeout(timer);
+  });
+
+  async function refreshHeicImportSetting() {
+    const revision = heicImportRevision;
+    if (!savingHeicImport.value) {
+      try {
+        const setting = await fetchHeicImportSetting();
+        if (!stopped && revision === heicImportRevision) {
+          heicImportSetting.value = setting;
+          heicImportLoadFailed.value = false;
+        }
+      } catch {
+        if (!stopped && revision === heicImportRevision && !heicImportSetting.value) {
+          heicImportLoadFailed.value = true;
+        }
+      }
+    }
+    if (!stopped) timer = setTimeout(refreshHeicImportSetting, 2000);
+  }
+
+  void refreshHeicImportSetting();
+}, { immediate: true });
 
 async function runManualScan(mode: 'changes' | 'repair' = 'changes') {
   if (scanActionDisabled.value) {

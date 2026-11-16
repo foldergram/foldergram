@@ -10,10 +10,22 @@
     @load="handleLoad"
     @error="handleError"
   />
+  <button
+    v-else-if="showRetry && failed"
+    type="button"
+    class="flex h-full w-full items-center justify-center bg-surface-alt text-sm text-fg-muted"
+    :aria-label="`${t('common.retry')} ${alt}`"
+    @click.stop="retryManually"
+  >
+    {{ t('common.retry') }}
+  </button>
 </template>
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
+
+const { t } = useI18n();
 
 const props = withDefaults(
   defineProps<{
@@ -24,6 +36,7 @@ const props = withDefaults(
     height?: number;
     loading?: 'lazy' | 'eager';
     retryWhile?: boolean;
+    showRetry?: boolean;
     maxRetries?: number;
     retryDelayMs?: number;
   }>(),
@@ -41,6 +54,7 @@ const attempt = ref(0);
 const loaded = ref(false);
 const hiddenUntilRetry = ref(false);
 const usingFallback = ref(false);
+const failed = ref(false);
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
 const activeSrc = computed(() => {
@@ -77,6 +91,12 @@ function resetState() {
   loaded.value = false;
   hiddenUntilRetry.value = false;
   usingFallback.value = false;
+  failed.value = false;
+}
+
+function retryManually() {
+  resetState();
+  attempt.value = 1;
 }
 
 function scheduleRetry() {
@@ -84,7 +104,7 @@ function scheduleRetry() {
     return;
   }
 
-  const canRetry = props.retryWhile || attempt.value < props.maxRetries;
+  const canRetry = (props.retryWhile && !props.showRetry) || attempt.value < props.maxRetries;
   if (!canRetry) {
     return;
   }
@@ -112,8 +132,9 @@ function handleError() {
     return;
   }
 
-  const canRetry = props.retryWhile || attempt.value < props.maxRetries;
+  const canRetry = (props.retryWhile && !props.showRetry) || attempt.value < props.maxRetries;
   if (!canRetry) {
+    failed.value = true;
     hiddenUntilRetry.value = true;
     return;
   }
@@ -126,7 +147,7 @@ watch(() => [props.src, props.fallbackSrc] as const, resetState);
 watch(
   () => props.retryWhile,
   (retryWhile) => {
-    if (retryWhile && hiddenUntilRetry.value) {
+    if (retryWhile && hiddenUntilRetry.value && !failed.value) {
       scheduleRetry();
     }
   }

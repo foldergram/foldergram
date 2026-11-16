@@ -159,6 +159,9 @@ describe('SettingsView', () => {
       value: scrollIntoViewSpy
     });
     vi.spyOn(galleryApi, 'fetchAdminStats').mockResolvedValue(createAppStats());
+    vi.spyOn(galleryApi, 'fetchHeicImportSetting').mockResolvedValue({
+      enabled: false, managedByEnvironment: false, libraryWorkPending: false
+    });
   });
 
   it('selects settings sections from their URLs and keeps old Sources links working', async () => {
@@ -247,6 +250,108 @@ describe('SettingsView', () => {
     await flushPromises();
 
     expect(vi.mocked(galleryApi.fetchAdminStats)).toHaveBeenCalledTimes(1);
+  });
+
+  it('places the experimental HEIC import switch above the scan actions and saves without scanning', async () => {
+    const appStore = useAppStore();
+    appStore.$patch({ stats: createAppStatus() });
+    vi.spyOn(appStore, 'fetchStats').mockResolvedValue();
+    const scan = vi.spyOn(galleryApi, 'triggerManualScan');
+    const { promise, resolve } = Promise.withResolvers<Awaited<ReturnType<typeof galleryApi.updateHeicImportSetting>>>();
+    const save = vi.spyOn(galleryApi, 'updateHeicImportSetting').mockReturnValueOnce(promise);
+    const wrapper = mountSettingsView();
+    const control = wrapper.get('button[aria-labelledby="heic-import-label"]');
+    expect(control.attributes('disabled')).toBeDefined();
+    expect(wrapper.get('#heic-import-status').text()).toBe('Loading HEIC import settings…');
+    await flushPromises();
+
+    const card = wrapper.findAll('section.card').find(section => section.find('h2').exists() && section.get('h2').text() === 'Scan Library')!;
+    expect(card.get('button[role="switch"]').element).toBe(control.element);
+    expect(card.text()).toContain('Experimental');
+    expect(card.text()).toContain('Include supported HEIC/HEIF photos from local sources. Run a scan after enabling.');
+    expect(card.text().indexOf('Import HEIC/HEIF photos')).toBeLessThan(card.text().indexOf('Scan for changes'));
+    expect(control.attributes('aria-checked')).toBe('false');
+    expect(control.attributes('disabled')).toBeUndefined();
+
+    await control.trigger('click');
+    expect(save).toHaveBeenCalledWith(true);
+    expect(control.attributes('disabled')).toBeDefined();
+    expect(wrapper.get('#heic-import-status').text()).toBe('Saving HEIC import settings…');
+    expect(card.findAll('button').every(button => button.attributes('disabled') !== undefined)).toBe(true);
+    resolve({ enabled: true, managedByEnvironment: false, libraryWorkPending: false });
+    await flushPromises();
+    expect(control.attributes('aria-checked')).toBe('true');
+    expect(wrapper.get('#heic-import-status').text()).toBe('HEIC import setting saved.');
+
+    save.mockResolvedValueOnce({ enabled: false, managedByEnvironment: false, libraryWorkPending: false });
+    await control.trigger('click');
+    await flushPromises();
+    expect(save).toHaveBeenLastCalledWith(false);
+    expect(control.attributes('aria-checked')).toBe('false');
+    expect(scan).not.toHaveBeenCalled();
+    await openGeneralSettingsSidebarTab(wrapper);
+    expect(wrapper.find('button[aria-labelledby="heic-import-label"]').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('keeps the saved HEIC setting and shows an error when saving fails', async () => {
+    const save = vi.spyOn(galleryApi, 'updateHeicImportSetting').mockRejectedValue(new Error('Save failed'));
+    const wrapper = mountSettingsView();
+    await flushPromises();
+    const control = wrapper.get('button[aria-labelledby="heic-import-label"]');
+    await control.trigger('click');
+    await flushPromises();
+
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(control.attributes('aria-checked')).toBe('false');
+    expect(control.attributes('disabled')).toBeUndefined();
+    expect(control.element.closest('.card')?.querySelector('[role="alert"]')?.textContent?.trim())
+      .toBe('Could not save the HEIC import setting.');
+    wrapper.unmount();
+  });
+
+  it.each([true, false])('displays the effective managed HEIC setting when it is %s', async (enabled) => {
+    vi.mocked(galleryApi.fetchHeicImportSetting).mockResolvedValue({ enabled, managedByEnvironment: true, libraryWorkPending: false });
+    const save = vi.spyOn(galleryApi, 'updateHeicImportSetting');
+    const wrapper = mountSettingsView();
+    await flushPromises();
+
+    const control = wrapper.get('button[aria-labelledby="heic-import-label"]');
+    expect(control.attributes('aria-checked')).toBe(String(enabled));
+    expect(control.attributes('disabled')).toBeDefined();
+    expect(wrapper.get('#heic-import-status').text()).toBe('Managed by environment.');
+    await control.trigger('click');
+    expect(save).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it('restricts HEIC edits during queued and active scans', async () => {
+    const fetchSetting = vi.mocked(galleryApi.fetchHeicImportSetting);
+    fetchSetting.mockResolvedValueOnce({ enabled: false, managedByEnvironment: false, libraryWorkPending: true });
+    const save = vi.spyOn(galleryApi, 'updateHeicImportSetting');
+    const appStore = useAppStore();
+    const stats = createAppStatus();
+    appStore.$patch({ stats });
+    const wrapper = mountSettingsView();
+    await flushPromises();
+
+    const controlSelector = 'button[aria-labelledby="heic-import-label"]';
+    expect(wrapper.get(controlSelector).attributes('disabled')).toBeDefined();
+    expect(wrapper.get('#heic-import-status').text()).toBe('Wait for the current scan or rebuild to finish.');
+    await wrapper.get(controlSelector).trigger('click');
+
+    await openGeneralSettingsSidebarTab(wrapper);
+    appStore.$patch({ stats: { ...stats, scan: { ...stats.scan, isScanning: true } } });
+    await router.push('/settings#library');
+    await flushPromises();
+    expect(wrapper.get(controlSelector).attributes('disabled')).toBeDefined();
+    await wrapper.get(controlSelector).trigger('click');
+    expect(save).not.toHaveBeenCalled();
+
+    appStore.$patch({ stats: { ...stats, scan: { ...stats.scan, isScanning: false } } });
+    await flushPromises();
+    expect(wrapper.get(controlSelector).attributes('disabled')).toBeUndefined();
+    wrapper.unmount();
   });
 
   it('renders the combined feed defaults card with separate home and reels groups', async () => {

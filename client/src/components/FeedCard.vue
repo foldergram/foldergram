@@ -280,7 +280,7 @@
           </a>
           <a
             class="inline-flex items-center justify-center w-8 h-8 border-0 bg-transparent cursor-pointer color-inherit transition-[opacity,transform] duration-180 hover:opacity-72 hover:-translate-y-px"
-            v-if="item?.originalDownloadsAllowed !== false"
+            v-if="item?.originalDownloadsAllowed !== false && !isActiveLocalHeic"
             :href="originalMediaUrl"
             target="_blank"
             rel="noreferrer"
@@ -455,7 +455,7 @@ import { resolveDisplayCaption } from '../utils/caption';
 import { formatFolderTitle } from '../utils/folder-titles';
 import { formatMediaDuration, formatVideoTimestamp } from '../utils/media';
 import { resolveFeedAspectRatio } from '../utils/media-layout';
-import { getOriginalMediaDownloadUrl, getOriginalMediaUrl } from '../utils/original-media';
+import { getOriginalMediaDownloadUrl, getOriginalMediaUrl, isHeicFilename } from '../utils/original-media';
 import { applyVideoMutePreference, createVideoMuteStorage } from '../utils/video-mute';
 import Avatar from './Avatar.vue';
 import CarouselMediaStage from './CarouselMediaStage.vue';
@@ -565,6 +565,8 @@ const activeMediaImageId = computed(() =>
     : props.item.mediaItems?.[0]?.imageId ?? props.item.id
 );
 const originalMediaUrl = computed(() => getOriginalMediaUrl(activeMediaImageId.value));
+const isActiveLocalHeic = computed(() => props.item.sourceKind !== 'immich'
+  && isHeicFilename(props.item.mediaItems?.find(media => media.imageId === activeMediaImageId.value)?.filename ?? props.item.filename));
 const downloadOriginalMediaUrl = computed(() => getOriginalMediaDownloadUrl(activeMediaImageId.value));
 const homeVideoSource = computed<PlayerSrc>(() => ({
   src: props.item.previewUrl,

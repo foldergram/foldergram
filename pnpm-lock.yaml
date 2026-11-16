@@ -93,6 +93,9 @@ importers:
       express:
         specifier: ^5.1.0
         version: 5.2.1(supports-color@8.1.1)
+      libheif-js:
+        specifier: 1.23.5
+        version: 1.23.5
       p-limit:
         specifier: ^6.2.0
         version: 6.2.0
@@ -2088,6 +2091,9 @@ packages:
 
   loupe@3.2.1:
     resolution: {integrity: sha512-CdzqowRJCeLU72bHvWqwRBBlLcMEtIvGrlvef74kMnV2AolS9Y8xUv1I0U/MNAWMhBlKIoyuEgoJ0t/bbwHbLQ==}
+
+  libheif-js@1.23.5:
+    resolution: {integrity: sha512-umXZPthnWZtF3iG/5mQG+AZ2V6i0UeYpo3z2CkggTEgL8dKmIIwJT6TDuAMuabXa1yTW8uJ1ZAgR+CxNTklYYw==}
 
   lru-cache@10.4.3:
     resolution: {integrity: sha512-JNAzZcXrCt42VGLuYz0zfAzDfAvJWW6AfYlDBQyDV5DClI2m5sAmK+OIO7s59XfsRsWHp02jAJrRadPRGTt6SQ==}
@@ -4705,6 +4711,8 @@ snapshots:
   lit-html@2.8.0:
     dependencies:
       '@types/trusted-types': 2.0.7
+
+  libheif-js@1.23.5: {}
 
   loupe@3.2.1: {}
 
