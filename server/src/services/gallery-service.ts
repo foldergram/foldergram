@@ -2463,6 +2463,7 @@ export const galleryService = {
       ...scanProgress,
       currentFolder: null,
       currentFile: null,
+      ...(scanProgress.operation ? { operation: { state: scanProgress.operation.state, controls: [] } } : {}),
       lastCompletedScan: toViewerSafeScanSummary(lastCompletedScan)
     };
   },
@@ -2473,6 +2474,7 @@ export const galleryService = {
 
     return {
       ...scanProgress,
+      recentIssues: scanRunRepository.recentIssues(),
       lastCompletedScan
     };
   },

@@ -230,6 +230,14 @@ Both modes still perform pending one-time metadata repairs and derivative-storag
 migration work. Neither mode turns directory traversal into a changed-path-only scan;
 discovery still reads the included gallery tree.
 
+## Scan activity
+
+Open **Library activity** above More in the desktop sidebar or in the mobile bottom navigation. Library shows a compact progress row, and **Settings → Scan & Library** shows detailed progress in the **Scan Library** card. Home shows detailed progress during the first import when the feed is empty.
+
+Use **Pause** to let in-flight scan work settle. Once the scan is paused, **Resume** continues from the same position as long as the server is still running. **Cancel scan** is available in the activity details and keeps completed indexing and derivative work. An ordinary scan repairs unfinished eager derivatives on the next run. Rebuilds, legacy migration, and Immich synchronization do not offer local scan controls.
+
+Automatic scans finish quietly. Administrators can review errors and acknowledge them in activity details. Earlier issues appear separately from the latest result. Matching issues from the same source are grouped for acknowledgement; new occurrences still need review. **Settings → Status** shows the last scan result.
+
 ## Scan progress phases
 
 Foldergram reports long-running scans in three phases:

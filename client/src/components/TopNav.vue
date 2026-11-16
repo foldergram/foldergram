@@ -1,6 +1,6 @@
 <template>
   <!-- Mobile bottom nav — hidden on desktop (md+) -->
-  <nav class="mobile-nav" :aria-label="t('nav.primary')">
+  <nav class="mobile-nav" :class="{ 'mobile-nav--activity': hasActivity }" :aria-label="t('nav.primary')">
     <div v-if="moreMenuOpen" class="mobile-nav__backdrop" @click="closeMoreMenu" />
 
     <div class="mobile-nav__bar">
@@ -94,6 +94,7 @@
           </a>
         </RouterLink>
 
+        <slot name="activity" />
         <div class="mobile-nav__more">
           <button
             class="mobile-nav__item mobile-nav__more-button"
@@ -109,6 +110,11 @@
           </button>
 
           <div v-if="moreMenuOpen" class="mobile-nav__menu">
+            <RouterLink v-if="showPlacesNav && hasActivity" class="mobile-nav__menu-item mobile-nav__menu-item--places"
+              :to="{ name: 'places' }" @click="closeMoreMenu">
+              <span class="mobile-nav__menu-icon i-fluent-location-20-regular" aria-hidden="true" />
+              <span>{{ t('nav.places') }}</span>
+            </RouterLink>
             <RouterLink v-if="authStore.canUseSavedItems" custom :to="{ name: 'likes' }" v-slot="{ href, navigate, isActive }">
               <a
                 :href="href"
@@ -232,6 +238,8 @@ const collectionsStore = useCollectionsStore();
 const likesStore = useLikesStore();
 const placesStore = usePlacesStore();
 const route = useRoute();
+const props = defineProps<{ panelOpen?: boolean; hasActivity?: boolean }>();
+const emit = defineEmits<{ openMore: [] }>();
 const moreMenuOpen = ref(false);
 const themeLabel = computed(() => (appStore.theme === 'light' ? t('nav.switchToDarkMode') : t('nav.switchToLightMode')));
 const signOutLabel = computed(() => (authStore.accessMode === 'public' ? t('nav.returnToPublicView') : t('nav.signOut')));
@@ -253,6 +261,7 @@ function closeMoreMenu() {
 }
 
 function toggleMoreMenu() {
+  if (!moreMenuOpen.value) emit('openMore');
   moreMenuOpen.value = !moreMenuOpen.value;
 }
 
@@ -298,6 +307,8 @@ watch(
     closeMoreMenu();
   }
 );
+
+watch(() => props.panelOpen, open => { if (open) closeMoreMenu(); });
 
 onMounted(() => {
   void placesStore.fetchPlaces();
@@ -356,7 +367,8 @@ onUnmounted(() => {
     gap: 0.34rem;
   }
 
-  .mobile-nav__item {
+  .mobile-nav__item,
+  :slotted(.mobile-nav__item) {
     display: inline-flex;
     width: 2.75rem;
     height: 2.7rem;
@@ -475,8 +487,22 @@ onUnmounted(() => {
     text-align: center;
   }
 
+  .mobile-nav--activity .mobile-nav__item--places {
+    display: none;
+  }
+
+  .mobile-nav--activity .mobile-nav__links {
+    justify-content: flex-end;
+  }
+
+  .mobile-nav--activity :deep(.scan-activity-trigger) {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+  }
+
   @media (hover: hover) {
-    .mobile-nav__item:hover {
+    .mobile-nav__item:hover,
+    :slotted(.mobile-nav__item):hover {
       background: var(--surface-hover);
       color: var(--text);
       transform: translateY(-1px);
@@ -493,7 +519,8 @@ onUnmounted(() => {
       gap: 0.28rem;
     }
 
-    .mobile-nav__item {
+    .mobile-nav__item,
+    :slotted(.mobile-nav__item) {
       width: 2.35rem;
     }
 
@@ -524,5 +551,23 @@ onUnmounted(() => {
       font-weight: 400;
     }
   }
+  @media (max-width: 399.98px) {
+    .mobile-nav--activity .mobile-nav__item--likes,
+    .mobile-nav--activity .mobile-nav__item--collections {
+      display: none;
+    }
+
+    .mobile-nav--activity .mobile-nav__menu-item--likes,
+    .mobile-nav--activity .mobile-nav__menu-item--collections {
+      display: flex;
+    }
+
+    .mobile-nav--activity .mobile-nav__more-button--likes-active:not([data-open='true']),
+    .mobile-nav--activity .mobile-nav__more-button--collections-active:not([data-open='true']) {
+      background: color-mix(in srgb, var(--accent-soft) 78%, transparent 22%);
+      color: var(--accent-strong);
+    }
+  }
+
 }
 </style>

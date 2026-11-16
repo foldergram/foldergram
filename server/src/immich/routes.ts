@@ -76,6 +76,11 @@ sourcesRouter.post('/admin/sources/:id/sync', (request, response) => {
         return;
     }
     if (local) {
+        const state = scannerService.getProgress().operation?.state;
+        if (state === 'paused' || state === 'pausing' || state === 'cancelling') {
+            response.status(409).json({ message: 'Resume the active scan or wait for it to stop before syncing this source.' });
+            return;
+        }
         const input = z.object({ confirmEmpty: z.boolean().optional() }).strict().parse(request.body ?? {});
         if (input.confirmEmpty && local.status !== 'empty_review') {
             response.status(409).json({ message: 'Sync the source before confirming an empty location.' });

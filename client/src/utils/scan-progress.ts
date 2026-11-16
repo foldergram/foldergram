@@ -1,5 +1,5 @@
 import { i18n } from '../locales';
-import type { ScanOperation, ScanProgress } from '../types/api';
+import type { ScanOperation, ScanProgress, ScanRunSummary } from '../types/api';
 
 export interface ScanBarState {
   indeterminate: boolean;
@@ -41,6 +41,19 @@ function calculateDeterminatePercent(current: number, total: number): number {
   return Math.max(0, Math.min(100, Math.round((current / total) * 100)));
 }
 
+export function getScanTitle(scan: ScanProgress | null): string {
+  if (scan?.scanReason === 'rebuild') return t('scanProgress.titles.rebuild');
+  if (scan?.scanReason === 'rebuild-thumbnails') return t('scanProgress.titles.thumbnails');
+  return t('scanProgress.titles.scan');
+}
+
+export function getScanResultLabel(result: ScanRunSummary): string {
+  if (result.status === 'cancelled') return t('scanActivity.cancelled');
+  if (result.status === 'completed') return t('scanActivity.completed');
+  if (result.status === 'completed_with_errors') return t('scanActivity.completedWithErrors');
+  return t('scanActivity.failed');
+}
+
 export function getScanPhaseLabel(scan: ScanProgress | null): string {
   if (!scan?.isScanning) {
     return t('scanProgress.phases.idle');
@@ -55,6 +68,14 @@ export function getScanPhaseLabel(scan: ScanProgress | null): string {
   }
 
   return t('scanProgress.phases.discovery');
+}
+
+export function getActiveScanStateLabel(scan: ScanProgress | null): string | null {
+  const state = scan?.operation?.state;
+  if (state === 'queued' || state === 'pausing' || state === 'paused' || state === 'cancelling') {
+    return t('scanActivity.state.' + state);
+  }
+  return null;
 }
 
 export function getScanSummary(scan: ScanProgress | null): string {
@@ -162,13 +183,13 @@ export function getScanBarState(scan: ScanProgress | null): ScanBarState {
 
   if (scan.phase === 'migration') {
     return {
-      indeterminate: false,
+      indeterminate: scan.migrationTotalRows <= 0,
       percent: calculateDeterminatePercent(scan.processedMigrationRows, scan.migrationTotalRows)
     };
   }
 
   return {
-    indeterminate: false,
+    indeterminate: scan.queuedDerivativeJobs <= 0,
     percent: calculateDeterminatePercent(scan.processedDerivativeJobs, scan.queuedDerivativeJobs)
   };
 }

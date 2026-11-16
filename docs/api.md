@@ -875,8 +875,9 @@ Notable fields:
 
 | Field | Notes |
 | --- | --- |
-| `isScanning` | Whether a scan or rebuild is currently running. |
+| `isScanning` | True for active local work, including pausing, paused, and cancelling. |
 | `phase` | `idle`, `migration`, `discovery`, or `derivatives`. |
+| `operation.state` | Lifecycle state for the active or most recent operation in this server process. |
 | `scanReason` | Current trigger such as startup, manual rescan, index rebuild, or thumbnail rebuild. |
 | `currentPhaseMessage` | Short phase summary for the UI. |
 | `currentOperation` | Current action label such as derivative repair, derivative move, metadata discovery, or derivative generation. |
@@ -887,7 +888,7 @@ Notable fields:
 | `queuedDerivativeJobs` / `processedDerivativeJobs` | Derivative job counters once the queue is known. |
 | `generatedThumbnails` / `generatedPreviews` | Completed derivative outputs in the current run. |
 | `currentFolder` / `currentFile` | Always `null` in this viewer-safe route. |
-| `lastCompletedScan` | Latest completed scan summary with `error_text` forced to `null`. Runs can be `completed`, `completed_with_errors`, or `failed`. |
+| `lastCompletedScan` | Latest completed scan summary with `error_text` forced to `null`. Runs can be `completed`, `completed_with_errors`, `failed`, `skipped_unavailable`, or `cancelled`. |
 
 Notes:
 
@@ -903,7 +904,9 @@ This route is read-only but `admin`-only.
 It uses the same overall shape as `GET /api/scan-progress`, with the following differences:
 
 - `currentFile` and `currentFolder` are populated when the active operation can identify a source path
-- `lastCompletedScan` is the full scan record, including `error_text`
+- `operation.id` identifies a local operation across its source runs, and `operation.controls` lists its currently available actions
+- `recentIssues` returns up to ten recent failed, unavailable, or error-bearing runs for acknowledgement
+- `lastCompletedScan` is the full terminal scan record, including `error_text`
 - when a run finishes as `completed_with_errors`, `error_text` contains a short sample plus the full report path under `<DATA_ROOT>/scan-errors/`
 
 ### `GET /api/admin/stats`
@@ -1780,6 +1783,12 @@ Errors:
 - `404` with `{"message":"Folder not found"}`
 - `403` for viewer sessions
 - `403` when trust requirements are missing
+
+### `POST /api/admin/scan-operations/:id/:action`
+
+Requires library-management access. Pass the current operation UUID and `pause`, `resume`, or `cancel`. The response acknowledges the request immediately with `{ ok: true, operation: { id, state, controls } }`. Poll scan progress for the resulting state and source run result.
+
+A stale ID or an action unavailable in the current state returns `409 Conflict`. Repeated pause while pausing or paused, resume while running, and cancellation while cancelling or cancelled are safe. Pause and cancellation are cooperative, so already admitted work can finish before the operation settles. The operation ID spans all sources in a manual library scan.
 
 ### `POST /api/admin/rescan`
 

@@ -2371,6 +2371,10 @@ export const postRepository = {
 };
 
 export const imageRepository = {
+  hasIndexedAssets(sourceId: number): boolean {
+    return Boolean(database.prepare('SELECT 1 FROM images WHERE source_id = ? AND is_deleted = 0 LIMIT 1').get(sourceId));
+  },
+
   getByRelativePath(relativePath: string, sourceId = primaryLocalSource().id): ImageRecord | undefined {
     return database.prepare('SELECT * FROM images WHERE source_id = ? AND relative_path = ?').get(sourceId, relativePath) as ImageRecord | undefined;
   },
@@ -4240,5 +4244,21 @@ export const scanRunRepository = {
     return database
       .prepare('SELECT * FROM scan_runs WHERE finished_at IS NOT NULL ORDER BY id DESC LIMIT 1')
       .get() as ScanRunRecord | undefined;
+  },
+
+  recoverInterrupted(): void {
+    database.prepare(`
+      UPDATE scan_runs
+      SET finished_at = ?, status = 'failed', error_text = 'Scan interrupted by server restart. Run a scan to continue.'
+      WHERE finished_at IS NULL AND status = 'running'
+    `).run(nowIso());
+  },
+
+  recentIssues(): ScanRunRecord[] {
+    return database.prepare(`
+      SELECT * FROM scan_runs
+      WHERE finished_at IS NOT NULL AND status IN ('failed', 'completed_with_errors', 'skipped_unavailable')
+      ORDER BY id DESC LIMIT 10
+    `).all() as unknown as ScanRunRecord[];
   }
 };

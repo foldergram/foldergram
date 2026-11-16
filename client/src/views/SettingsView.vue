@@ -1278,6 +1278,8 @@
               </p>
             </div>
 
+            <ScanActivityContent />
+
             <div class="flex flex-col md:flex-row items-center gap-4 max-sm:items-stretch mt-4">
               <p class="m-0 flex-1 text-muted">{{ scanActionNote }}</p>
               <div class="flex flex-col gap-2 sm:flex-row">
@@ -1409,13 +1411,14 @@
               </div>
               <div class="flex flex-col gap-1 py-3 border-b border-border md:border-b-0">
                 <dt class="m-0 text-muted text-[0.76rem] font-bold tracking-[0.08em] uppercase">{{ t('settings.status.lastScan.filesScanned') }}</dt>
-                <dd class="m-0 text-[1.45rem] font-medium tracking-tight">{{ formatCount(lastCompletedScan?.scanned_files ?? 0) }}</dd>
+                <dd class="m-0 text-[1.45rem] font-medium tracking-tight">{{ formatCount(statusScan?.scanned_files ?? 0) }}</dd>
               </div>
               <div class="flex flex-col gap-1 py-3 border-b-0">
                 <dt class="m-0 text-muted text-[0.76rem] font-bold tracking-[0.08em] uppercase">{{ t('settings.status.lastScan.changes') }}</dt>
                 <dd class="m-0 text-[1rem] font-medium leading-relaxed whitespace-pre-line">{{ lastScanChangeSummary }}</dd>
               </div>
             </dl>
+            <pre v-if="statusScan?.error_text" class="m-0 whitespace-pre-wrap break-all text-[0.8rem] text-muted">{{ statusScan.error_text }}</pre>
           </section>
         </template>
       </div>
@@ -1468,6 +1471,7 @@ import {
   updateCarouselsMode
 } from '../api/gallery';
 import { SUPPORTED_LOCALES, type SupportedLocale } from '../locales';
+import ScanActivityContent from '../components/ScanActivityContent.vue';
 import { useAppStore } from '../stores/app';
 import { useAuthStore } from '../stores/auth';
 import { useFeedStore } from '../stores/feed';
@@ -1661,9 +1665,6 @@ const dismissedStoriesAnnouncement = ref(loadDismissedStoriesNotice(STORIES_ANNO
 const dismissedCarouselsAnnouncement = ref(loadDismissedStoriesNotice(CAROUSELS_ANNOUNCEMENT_STORAGE_KEY));
 const dismissedPlacesOnboardingBanner = ref(loadDismissedStoriesNotice(PLACES_ONBOARDING_STORAGE_KEY));
 
-function wait(milliseconds: number) {
-  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
-}
 
 function formatCount(value: number) {
   return new Intl.NumberFormat(locale.value).format(value);
@@ -1813,7 +1814,12 @@ function syncExcludedFoldersFromSaved() {
 }
 
 const scan = computed(() => appStore.stats?.scan ?? null);
-const lastCompletedScan = computed(() => adminStats.value?.lastScan ?? scan.value?.lastCompletedScan ?? null);
+const lastCompletedScan = computed(() => {
+  const latest = scan.value?.lastCompletedScan;
+  const admin = adminStats.value?.lastScan;
+  if (admin && (!latest || (latest.id === admin.id && !latest.error_text && !latest.warning_text))) return admin;
+  return latest ?? null;
+});
 const activeScanReason = computed(() => scan.value?.scanReason ?? null);
 const supportedLocaleOptions = computed<Array<{ id: SupportedLocale; label: string }>>(() =>
   SUPPORTED_LOCALES.map((locale) => ({
@@ -2418,31 +2424,39 @@ const viewerAccessButtonLabel = computed(() => {
 const storageLabel = computed(() =>
   appStore.isLibraryUnavailable ? t('settings.status.storage.unavailable') : t('settings.status.storage.available')
 );
+const statusScan = computed(() => {
+  const id = route.query.scan;
+  return typeof id === 'string'
+    ? scan.value?.recentIssues?.find(result => String(result.id) === id) ?? lastCompletedScan.value
+    : lastCompletedScan.value;
+});
 const lastScanStatus = computed(() => {
-  if (!lastCompletedScan.value) {
+  if (!statusScan.value) {
     return t('settings.status.lastScan.statusValues.none');
   }
 
-  switch (lastCompletedScan.value.status) {
+  switch (statusScan.value.status) {
     case 'completed':
       return t('settings.status.lastScan.statusValues.completed');
     case 'completed_with_errors':
       return t('settings.status.lastScan.statusValues.completedWithErrors');
     case 'failed':
       return t('settings.status.lastScan.statusValues.failed');
+    case 'cancelled':
+      return t('scanActivity.cancelled');
     case 'running':
       return t('settings.status.lastScan.statusValues.running');
     default:
-      return lastCompletedScan.value.status.replaceAll('_', ' ');
+      return statusScan.value.status.replaceAll('_', ' ');
   }
 });
-const lastScanFinishedAt = computed(() => formatDateTime(lastCompletedScan.value?.finished_at));
+const lastScanFinishedAt = computed(() => formatDateTime(statusScan.value?.finished_at));
 const lastScanChangeSummary = computed(() => {
-  if (!lastCompletedScan.value) {
+  if (!statusScan.value) {
     return `${formatCount(0)} ${t('settings.status.lastScan.changeValues.new')}\n${formatCount(0)} ${t('settings.status.lastScan.changeValues.updated')}\n${formatCount(0)} ${t('settings.status.lastScan.changeValues.removed')}`;
   }
 
-  return `${formatCount(lastCompletedScan.value.new_files)} ${t('settings.status.lastScan.changeValues.new')}\n${formatCount(lastCompletedScan.value.updated_files)} ${t('settings.status.lastScan.changeValues.updated')}\n${formatCount(lastCompletedScan.value.removed_files)} ${t('settings.status.lastScan.changeValues.removed')}`;
+  return `${formatCount(statusScan.value.new_files)} ${t('settings.status.lastScan.changeValues.new')}\n${formatCount(statusScan.value.updated_files)} ${t('settings.status.lastScan.changeValues.updated')}\n${formatCount(statusScan.value.removed_files)} ${t('settings.status.lastScan.changeValues.removed')}`;
 });
 const showScanErrorNotice = computed(() => {
   if (appStore.isLibraryUnavailable || appStore.isScanning) {
@@ -3069,21 +3083,6 @@ async function saveGeneralSettings() {
   }
 }
 
-async function warmScanStatus() {
-  for (let attempt = 0; attempt < 12; attempt += 1) {
-    await wait(attempt === 0 ? 150 : 250);
-
-    try {
-      await appStore.fetchStats({ background: true });
-    } catch {
-      // The rescan request may win the race; keep polling until scan state flips or the request finishes.
-    }
-
-    if (appStore.stats?.scan.isScanning) {
-      return;
-    }
-  }
-}
 
 async function loadAdminStats() {
   adminStats.value = await fetchAdminStats();
@@ -3154,12 +3153,16 @@ async function runManualScan(mode: 'changes' | 'repair' = 'changes') {
   selectedScanMode.value = mode;
   scanError.value = null;
 
+  const surface = router.currentRoute.value.fullPath;
   try {
     const request = triggerManualScan({
       repairDerivatives: mode === 'repair'
     });
-    void warmScanStatus();
-    await request;
+    appStore.scanStatusPending();
+    const response = await request;
+    appStore.showScanCompletion(response?.lastScan ?? null,
+      router.currentRoute.value.fullPath === surface ? surface : null);
+    await appStore.refreshScanProgress();
     await appStore.fetchStats({ background: true });
     await loadAdminStats().catch(() => {});
     await Promise.all([foldersStore.fetchFolders(true), feedStore.loadInitial(true)]);
@@ -3186,10 +3189,14 @@ async function runLibraryRebuild() {
   momentsStore.resetForRebuild();
   viewerStore.reset();
 
+  const surface = router.currentRoute.value.fullPath;
   try {
     const request = triggerLibraryRebuild();
-    void warmScanStatus();
-    await request;
+    appStore.scanStatusPending();
+    const response = await request;
+    appStore.showScanCompletion(response?.lastScan ?? null,
+      router.currentRoute.value.fullPath === surface ? surface : null);
+    await appStore.refreshScanProgress();
     await appStore.fetchStats({ background: true });
     await loadAdminStats().catch(() => {});
     await Promise.all([
@@ -3216,10 +3223,14 @@ async function runThumbnailRebuild() {
   thumbnailRebuildError.value = null;
   confirmThumbnailRebuildOpen.value = false;
 
+  const surface = router.currentRoute.value.fullPath;
   try {
     const request = triggerThumbnailRebuild();
-    void warmScanStatus();
-    await request;
+    appStore.scanStatusPending();
+    const response = await request;
+    appStore.showScanCompletion(response?.lastScan ?? null,
+      router.currentRoute.value.fullPath === surface ? surface : null);
+    await appStore.refreshScanProgress();
     await appStore.fetchStats({ background: true });
     await loadAdminStats().catch(() => {});
     await Promise.all([

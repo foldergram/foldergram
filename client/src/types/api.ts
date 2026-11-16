@@ -540,6 +540,7 @@ export interface LikeMutationResult {
 
 export interface ScanRunSummary {
   id: number;
+  source_id?: number | null;
   started_at: string;
   finished_at: string | null;
   status: string;
@@ -550,6 +551,15 @@ export interface ScanRunSummary {
   error_text: string | null;
   warning_count: number;
   warning_text: string | null;
+}
+
+export type ScanControl = 'pause' | 'resume' | 'cancel';
+export type ScanOperationState = 'queued' | 'running' | 'pausing' | 'paused' | 'cancelling' | 'completed' | 'cancelled' | 'failed';
+
+export interface ScanOperationStatus {
+  id?: string;
+  state: ScanOperationState;
+  controls: ScanControl[];
 }
 
 export interface ScanProgress {
@@ -577,6 +587,8 @@ export interface ScanProgress {
   currentPhaseMessage: string | null;
   currentFolder: string | null;
   lastCompletedScan: ScanRunSummary | null;
+  recentIssues?: ScanRunSummary[];
+  operation?: ScanOperationStatus;
 }
 
 export interface ManualScanResult {

@@ -1396,6 +1396,16 @@ const requireNoScanInProgress = (_request: express.Request, response: express.Re
 };
 
 router.post(
+  '/admin/scan-operations/:id/:action',
+  requireCapability('canManageLibrary', 'Admin access is required.'),
+  (request, response) => {
+    const id = z.string().uuid().parse(request.params.id);
+    const action = z.enum(['pause', 'resume', 'cancel']).parse(request.params.action);
+    response.json({ ok: true, operation: scannerService.controlOperation(id, action) });
+  }
+);
+
+router.post(
   '/admin/rescan',
   requireCapability('canManageLibrary', 'Admin access is required.'),
   adminMutationRateLimiter,
@@ -1412,7 +1422,8 @@ router.post(
     }
 
     const lastScan = await scannerService.scanAll('manual', {
-      repairUnchangedDerivatives: body.repairDerivatives ?? true
+      repairUnchangedDerivatives: body.repairDerivatives ?? true,
+      rejectIfBusy: true
     });
     await watcherService.start();
     response.json({
@@ -1421,7 +1432,7 @@ router.post(
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to run a manual scan.';
-    const status = /rebuild required/i.test(message) ? 409 : 500;
+    const status = error instanceof Error && error.name === 'ScanBusyError' ? 429 : /rebuild required/i.test(message) ? 409 : 500;
     response.status(status).json({ message });
   }
 });
