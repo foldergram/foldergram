@@ -2,7 +2,7 @@ import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_LOCALE, i18n } from '../locales';
-import type { AppStatus } from '../types/api';
+import type { AppStatus, ScanRunSummary } from '../types/api';
 import { useAppStore } from './app';
 import { useAuthStore } from './auth';
 
@@ -241,6 +241,44 @@ describe('useAppStore locale preferences', () => {
   });
 });
 
+describe('scan issue acknowledgements', () => {
+  const issue: ScanRunSummary = {
+    id: 2, source_id: 1, started_at: '2026-09-03T14:06:46.139Z', finished_at: '2026-11-16T03:06:21.582Z',
+    status: 'failed', scanned_files: 0, new_files: 0, updated_files: 0, removed_files: 0,
+    error_text: 'Scan interrupted by server restart. Run a scan to continue.', warning_count: 0, warning_text: null
+  };
+  const older = { ...issue, id: 1, started_at: '2026-09-03T14:02:23.321Z' };
+
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    window.sessionStorage.clear();
+  });
+
+  it('groups matching failures without acknowledging another error or source', () => {
+    const store = useAppStore();
+    const status = createAppStatus();
+    store.stats = { ...status, scan: { ...status.scan, recentIssues: [issue, older,
+      { ...older, id: 3, error_text: 'A different failure' }, { ...older, id: 4, source_id: 3 }
+    ] } };
+    expect(store.unacknowledgedScanResults.map(result => result.id)).toEqual([2, 1]);
+    store.acknowledgeScanResults(store.unacknowledgedScanResults);
+    expect(store.unacknowledgedScanResult?.id).toBe(3);
+    store.acknowledgeScanResult(store.unacknowledgedScanResult!);
+    expect(store.unacknowledgedScanResult?.id).toBe(4);
+  });
+
+  it('keeps a newly arrived matching failure unacknowledged', () => {
+    const store = useAppStore();
+    const status = createAppStatus();
+    store.stats = { ...status, scan: { ...status.scan, recentIssues: [issue, older] } };
+    const displayed = store.unacknowledgedScanResults;
+    const newer = { ...issue, id: 3, started_at: '2026-11-16T14:00:00Z' };
+    store.updateScanProgress({ ...store.stats.scan, recentIssues: [newer, issue, older] });
+    store.acknowledgeScanResults(displayed);
+    expect(store.unacknowledgedScanResults.map(result => result.id)).toEqual([3]);
+  });
+});
+
 describe('useAppStore protected bootstrap status', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
@@ -412,6 +450,54 @@ describe('useAppStore protected bootstrap status', () => {
     expect(store.stats).not.toBeNull();
   });
 
+  it('clears a deferred completion when fresher status arrives and rejects a delayed older reply', async () => {
+    const completed = {
+      id: 1, started_at: '2026-11-16T07:00:00Z', finished_at: '2026-11-16T07:01:00Z',
+      status: 'completed', scanned_files: 1, new_files: 1, updated_files: 0, removed_files: 0,
+      error_text: null, warning_count: 0, warning_text: null
+    };
+    const status = createAppStatus();
+    fetchStatusMock.mockResolvedValue(status);
+    const store = useAppStore();
+    await store.fetchStats();
+    store.showScanCompletion(completed, null);
+
+    const sameRun = { ...status.scan, lastCompletedScan: completed };
+    fetchAdminScanProgressMock.mockResolvedValue(sameRun);
+    await store.refreshScanProgress();
+    expect(store.scanCompletion?.result.id).toBe(completed.id);
+
+    const cancelled = { ...completed, id: 2, finished_at: '2026-11-16T07:02:00Z', status: 'cancelled' };
+    const latest = { ...status, scan: { ...status.scan, lastCompletedScan: cancelled } };
+    fetchStatusMock.mockResolvedValue(latest);
+    fetchAdminScanProgressMock.mockResolvedValue(latest.scan);
+    await store.refreshScanProgress();
+    expect(store.scanCompletion).toBeNull();
+    expect(store.stats?.scan.lastCompletedScan).toEqual(cancelled);
+
+    store.showScanCompletion(completed, null);
+    expect(store.scanCompletion).toBeNull();
+  });
+
+  it('supersedes a deferred completion through the full status response too', async () => {
+    const completed = {
+      id: 1, started_at: '2026-11-16T07:00:00Z', finished_at: '2026-11-16T07:01:00Z',
+      status: 'completed', scanned_files: 1, new_files: 1, updated_files: 0, removed_files: 0,
+      error_text: null, warning_count: 0, warning_text: null
+    };
+    const status = createAppStatus();
+    const store = useAppStore();
+    store.stats = status;
+    store.showScanCompletion(completed, null);
+
+    fetchStatusMock.mockResolvedValue({
+      ...status,
+      scan: { ...status.scan, lastCompletedScan: { ...completed, id: 2, status: 'cancelled' } }
+    });
+    await store.fetchStats();
+    expect(store.scanCompletion).toBeNull();
+  });
+
   it('polls lightweight scan progress and refreshes status without fetching full admin stats', async () => {
     const scanningStatus = createAppStatus();
     scanningStatus.scan.isScanning = true;
@@ -437,6 +523,7 @@ describe('useAppStore protected bootstrap status', () => {
     expect(fetchScanProgressMock).not.toHaveBeenCalled();
     expect(fetchAdminStatsMock).not.toHaveBeenCalled();
     expect(fetchStatusMock).toHaveBeenCalledTimes(2);
-    expect(store.statsPollTimer).toBeNull();
+    expect(store.statsPollTimer).not.toBeNull();
+    store.stopStatsPolling();
   });
 });

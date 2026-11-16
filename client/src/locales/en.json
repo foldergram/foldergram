@@ -438,10 +438,10 @@
       "scanActionNote": {
         "loading": "Loading current library status...",
         "rebuildRequired": "Rebuild the library index first because the gallery location changed.",
-        "otherTaskActive": "Another library task is running. Live progress appears in the sticky status bar.",
-        "progress": "Live progress appears in the sticky status bar.",
-        "progressChanges": "Scanning for gallery changes. Live progress appears in the sticky status bar.",
-        "progressRepair": "Scanning for changes and repairing derivatives. Live progress appears in the sticky status bar.",
+        "otherTaskActive": "Another library task is running. Live progress appears in the Scan Library card.",
+        "progress": "Live progress appears in the Scan Library card.",
+        "progressChanges": "Scanning for gallery changes. Live progress appears in the Scan Library card.",
+        "progressRepair": "Scanning for changes and repairing derivatives. Live progress appears in the Scan Library card.",
         "legacyMigration": "Run a scan to move legacy mirrored thumbnails and previews into the asset-key storage layout.",
         "carouselReconciliation": "Run a scan to apply the saved Carousel folder mode to indexed folders and posts.",
         "idle": "Both actions discover gallery changes. Repair also checks generated media for unchanged files."
@@ -457,7 +457,7 @@
       "thumbnailActionNote": {
         "loading": "Loading current library status...",
         "rebuildRequired": "Unavailable until the library index is rebuilt for the new gallery location.",
-        "progress": "Live progress appears in the sticky status bar.",
+        "progress": "Live progress appears in the Scan Library card.",
         "rebuildActive": "Wait for the full rebuild to finish first.",
         "scanActive": "Wait for the current scan to finish first.",
         "legacyMigration": "This keeps the current thumbnail paths and does not migrate legacy mirrored derivatives. Run Scan Library instead to move them into asset-key storage.",
@@ -477,7 +477,7 @@
       },
       "rebuildActionNote": {
         "loading": "Loading current library status...",
-        "progress": "Live progress appears in the sticky status bar.",
+        "progress": "Live progress appears in the Scan Library card.",
         "thumbnailActive": "Wait for thumbnail regeneration to finish first.",
         "scanActive": "Wait for the current scan to finish first.",
         "rebuildRequired": "Recommended because the gallery location changed.",
@@ -1315,6 +1315,44 @@
     "resumePlayback": "Resume playback",
     "pausePlayback": "Pause playback",
     "closeViewer": "Close viewer"
+  },
+  "scanActivity": {
+    "state": {
+      "queued": "Scan queued",
+      "pausing": "Pausing scan…",
+      "paused": "Scan paused",
+      "cancelling": "Cancelling scan…"
+    },
+    "controls": {
+      "pause": "Pause",
+      "resume": "Resume",
+      "cancel": "Cancel scan",
+      "keepsWork": "Completed work will be kept.",
+      "error": "The scan changed or the request could not be sent. Check the current status and try again.",
+      "unavailable": "Pause and cancellation are unavailable during this stage."
+    },
+    "title": "Library activity",
+    "showDetails": "Show library activity",
+    "runningDetails": "Library scan in progress. Show details",
+    "syncDetails": "Source synchronization in progress. Show details",
+    "attentionDetails": "Library scan needs attention. Show details",
+    "unavailableDetails": "Scan status unavailable. Show details",
+    "unavailable": "Status unavailable",
+    "synchronizing": "Synchronizing sources",
+    "openSettings": "Open Settings",
+    "openSources": "Open Sources",
+    "openLibrary": "Open Library",
+    "openIssue": "View scan result in Status",
+    "openStatus": "View last scan in Status",
+    "acknowledge": "Acknowledge",
+    "acknowledgeResults": "Acknowledge {count} results",
+    "earlierIssue": "Earlier scan needs attention",
+    "similarResults": "{count} scans reported this issue.",
+    "details": "Details",
+    "completed": "Scan completed.",
+    "completedWithErrors": "Scan completed with errors.",
+    "failed": "Scan could not finish.",
+    "cancelled": "Scan cancelled. Completed work has been kept."
   },
   "scanProgress": {
     "titles": {

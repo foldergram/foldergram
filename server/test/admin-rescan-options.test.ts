@@ -78,7 +78,8 @@ describe.sequential('admin rescan options', () => {
 
       expect(response.status).toBe(200);
       expect(scanAllMock).toHaveBeenCalledWith('manual', {
-        repairUnchangedDerivatives: testCase.expected
+        repairUnchangedDerivatives: testCase.expected,
+        rejectIfBusy: true
       });
     }
   });
@@ -90,7 +91,8 @@ describe.sequential('admin rescan options', () => {
 
     expect(response.status).toBe(200);
     expect(scanAllMock).toHaveBeenCalledWith('manual', {
-      repairUnchangedDerivatives: false
+      repairUnchangedDerivatives: false,
+      rejectIfBusy: true
     });
   });
 

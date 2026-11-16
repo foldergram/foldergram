@@ -10,127 +10,162 @@
     }"
   >
     <!-- Sidebar: fixed on desktop, hidden on mobile -->
-    <SidebarNav class="hidden md:flex fixed top-0 left-0 h-screen z-30" />
+    <SidebarNav class="hidden md:flex fixed top-0 left-0 h-screen z-30" :panel-open="Boolean(activityAnchor)" @open-more="dismissActivity(false)">
+      <template #activity>
+        <ScanActivityTrigger v-if="showActivity" v-bind="activityTrigger" @activate="toggleActivity" />
+      </template>
+    </SidebarNav>
     <!-- Content: margin-left matches sidebar width on desktop -->
     <div class="app-shell__content flex flex-1 min-h-screen min-w-0 flex-col md:ml-[4.85rem]">
-      <TopNav />
+      <TopNav :has-activity="showActivity" :panel-open="Boolean(activityAnchor)" @open-more="dismissActivity(false)">
+        <template #activity>
+          <ScanActivityTrigger v-if="showActivity" v-bind="activityTrigger" mobile @activate="toggleActivity" />
+        </template>
+      </TopNav>
       <main
         class="app-shell__main flex-1 min-h-0"
         :class="[
           isImmersiveShell
             ? 'px-0 pt-0 pb-0 md:px-0 md:pt-0 md:pb-0'
-            : 'px-10 pt-7 pb-28 md:px-[0.9rem] md:pt-4 md:pb-10',
-          showStickyScanStatus && !isReelsShell ? 'pb-48 md:pb-40' : ''
+            : 'px-10 pt-7 pb-28 md:px-[0.9rem] md:pt-4 md:pb-10'
         ]"
       >
         <slot />
       </main>
     </div>
 
-    <div
-      v-if="showStickyScanStatus"
-      class="app-shell__scan-status pointer-events-none fixed inset-x-0 z-30 flex justify-center px-4"
-      role="status"
-      aria-live="polite"
-    >
-      <section
-        class="pointer-events-auto w-[min(100%,44rem)] rounded-[1.15rem] border border-white/12 px-4 py-[0.95rem] text-white shadow-[0_24px_60px_rgba(15,23,42,0.38)] backdrop-blur-[18px] md:px-5"
-        style="background: linear-gradient(135deg, rgba(15,23,42,0.95) 0%, rgba(17,24,39,0.98) 100%);"
+    <Teleport to="body">
+      <ScanActivityPanel
+        v-if="activityAnchor"
+        :mobile="mobile"
+        :anchor="activityAnchor"
+        @dismiss="dismissActivity"
       >
-        <div class="grid gap-[0.75rem]">
-          <div class="flex items-start justify-between gap-4 max-sm:flex-col max-sm:items-start">
-            <div class="grid gap-[0.2rem] min-w-0">
-              <strong class="text-[0.96rem] leading-tight tracking-[-0.02em]">{{ stickyScanTitle }}</strong>
-              <p class="m-0 text-[0.84rem] leading-[1.45] text-white/75">{{ stickyScanSummary }}</p>
-              <p v-if="stickyScanActionLine" class="m-0 min-w-0 truncate text-[0.77rem] font-semibold text-[#dbeafe]">
-                {{ stickyScanActionLine }}
-              </p>
-            </div>
-            <span
-              class="inline-flex items-center justify-center min-h-8 px-[0.72rem] py-[0.34rem] rounded-full text-[0.73rem] font-bold whitespace-nowrap text-[#dbeafe]"
-              style="background: rgba(78, 197, 255, 0.16);"
-            >
-              {{ stickyScanPhaseLabel }}
-            </span>
-          </div>
-
-          <div
-            class="relative h-[0.72rem] overflow-hidden rounded-full"
-            style="background: rgba(255, 255, 255, 0.12);"
-            aria-hidden="true"
-          >
-            <div
-              v-if="stickyScanBarState.indeterminate"
-              class="app-shell__scan-bar app-shell__scan-bar--indeterminate absolute inset-y-0 left-0 w-[38%] rounded-full shadow-[inset_0_0_0_1px_rgba(255,255,255,0.12)]"
-            />
-            <div
-              v-else
-              class="absolute inset-y-0 left-0 rounded-full shadow-[inset_0_0_0_1px_rgba(255,255,255,0.12)]"
-              style="background: linear-gradient(90deg, #38bdf8 0%, #4ec5ff 48%, #f8fafc 100%);"
-              :style="{ width: `${stickyScanBarState.percent}%` }"
-            />
-          </div>
-
-          <div class="flex flex-wrap items-center gap-x-4 gap-y-2 text-[0.82rem] text-white/72">
-            <span>{{ stickyScanMetricLine }}</span>
-          </div>
+        <div class="flex items-start justify-between gap-3">
+          <h2 id="scan-activity-heading" class="m-0 text-base">
+            {{ scan?.isScanning ? getScanTitle(scan) : t('scanActivity.title') }}
+          </h2>
+          <button
+            class="btn-ghost shrink-0"
+            type="button"
+            data-scan-close
+            autofocus
+            @click="dismissActivity()"
+          >{{ t('common.close') }}</button>
         </div>
-      </section>
-    </div>
+        <ScanActivityContent show-remote :held-result="heldResult" @navigate="dismissActivity(false)" />
+        <RouterLink
+          class="text-[0.85rem] font-semibold text-accent-strong"
+          :to="authStore.canAccessSettings ? { name: 'settings', hash: '#library' } : { name: 'library' }"
+          @click="dismissActivity(false)"
+        >{{ t(authStore.canAccessSettings ? 'scanActivity.openSettings' : 'scanActivity.openLibrary') }}</RouterLink>
+      </ScanActivityPanel>
+    </Teleport>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, provide, ref, shallowRef, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRoute } from 'vue-router';
 
 import SidebarNav from './SidebarNav.vue';
 import TopNav from './TopNav.vue';
 
+import ScanActivityContent from './ScanActivityContent.vue';
+import ScanActivityPanel from './ScanActivityPanel.vue';
+import ScanActivityTrigger from './ScanActivityTrigger.vue';
+import { openScanActivityKey } from './scan-activity';
+import type { ScanRunSummary } from '../types/api';
 import { useAppStore } from '../stores/app';
-import {
-  getScanActionLine,
-  getScanBarState,
-  getScanMetricLine,
-  getScanPhaseLabel,
-  getScanSummary
-} from '../utils/scan-progress';
+import { useAuthStore } from '../stores/auth';
+import { useSourcesStore } from '../stores/sources';
+import { getScanTitle } from '../utils/scan-progress';
 
 const { t } = useI18n();
 const appStore = useAppStore();
+const authStore = useAuthStore();
+const sourcesStore = useSourcesStore();
 const route = useRoute();
 const isStandaloneDisplay = ref(false);
 const isExploreShell = computed(() => route.meta.shell === 'explore');
 const isReelsShell = computed(() => route.meta.shell === 'reels');
 const isImmersiveShell = computed(() => isExploreShell.value || isReelsShell.value);
-const activeScan = computed(() => appStore.stats?.scan ?? null);
-const showStickyScanStatus = computed(() => Boolean(activeScan.value?.isScanning));
-
-const stickyScanTitle = computed(() => {
-  if (activeScan.value?.scanReason === 'rebuild') {
-    return t('scanProgress.titles.rebuild');
-  }
-
-  if (activeScan.value?.scanReason === 'rebuild-thumbnails') {
-    return t('scanProgress.titles.thumbnails');
-  }
-
-  return t('scanProgress.titles.scan');
+const scan = computed(() => appStore.stats?.scan ?? null);
+const remoteSync = computed(() => sourcesStore.items.some(source => source.kind === 'immich' && source.syncing));
+const issue = computed(() => authStore.canAccessSettings && Boolean(appStore.unacknowledgedScanResult));
+const awayCompletion = computed(() => authStore.canAccessSettings && appStore.scanCompletion?.surface === null);
+const activityAnchor = shallowRef<HTMLElement | null>(null);
+const heldResult = shallowRef<ScanRunSummary | null>(null);
+const media = window.matchMedia('(max-width: 767.98px)');
+const mobile = ref(media.matches);
+const showActivity = computed(() => Boolean(activityAnchor.value || scan.value?.isScanning ||
+  remoteSync.value || issue.value || awayCompletion.value || appStore.scanStatusUnavailable));
+const activityTrigger = computed(() => {
+  const state = scan.value?.operation?.state;
+  const paused = state === 'paused' || state === 'pausing';
+  const stopping = state === 'cancelling';
+  let status = 'showDetails';
+  if (remoteSync.value) status = 'syncDetails';
+  if (scan.value?.isScanning) status = 'runningDetails';
+  if (state === 'paused' || state === 'pausing' || state === 'cancelling' || state === 'queued') status = 'state.' + state;
+  if (issue.value && !scan.value?.isScanning) status = 'attentionDetails';
+  if (appStore.scanStatusUnavailable) status = 'unavailableDetails';
+  return {
+    label: t('scanActivity.' + status),
+    expanded: Boolean(activityAnchor.value),
+    paused,
+    stopping,
+    running: !paused && !stopping && !appStore.scanStatusUnavailable && Boolean(scan.value?.isScanning || remoteSync.value),
+    attention: issue.value || appStore.scanStatusUnavailable
+  };
 });
 
-const stickyScanPhaseLabel = computed(() => getScanPhaseLabel(activeScan.value));
-const stickyScanSummary = computed(() => getScanSummary(activeScan.value));
-const stickyScanActionLine = computed(() => getScanActionLine(activeScan.value));
-const stickyScanMetricLine = computed(() => getScanMetricLine(activeScan.value));
-const stickyScanBarState = computed(() => getScanBarState(activeScan.value));
+function dismissActivity(restoreFocus = true) {
+  const anchor = activityAnchor.value;
+  const completion = appStore.scanCompletion;
+  const reviewed = anchor && completion?.surface === null && !issue.value &&
+    (heldResult.value ? heldResult.value.id === completion.result.id : !scan.value?.isScanning);
+  if (reviewed) appStore.reviewDeferredScanCompletion();
+  activityAnchor.value = null;
+  heldResult.value = null;
+  if (restoreFocus) void nextTick(() => { if (anchor?.isConnected) anchor.focus(); });
+}
+
+function toggleActivity(event: MouseEvent) {
+  if (activityAnchor.value) {
+    dismissActivity();
+    return;
+  }
+  if (!(event.currentTarget instanceof HTMLElement)) return;
+  activityAnchor.value = event.currentTarget;
+  void appStore.refreshScanProgress();
+}
+
+function onLayoutChange(event: MediaQueryListEvent) {
+  dismissActivity(false);
+  mobile.value = event.matches;
+}
+
+provide(openScanActivityKey, toggleActivity);
+watch(() => authStore.canAccessSettings, () => dismissActivity(false));
+watch(() => scan.value?.lastCompletedScan, (result, previous) => {
+  if (activityAnchor.value && result && result.id !== previous?.id) heldResult.value = result;
+});
+watch(() => route.fullPath, (_path, previous) => {
+  dismissActivity(false);
+  appStore.leaveScanSurface(previous);
+});
 
 onMounted(() => {
+  media.addEventListener?.('change', onLayoutChange);
   const navigatorWithStandalone = navigator as Navigator & { standalone?: boolean };
   isStandaloneDisplay.value =
     window.matchMedia('(display-mode: standalone)').matches ||
     navigatorWithStandalone.standalone === true;
 });
+
+onUnmounted(() => media.removeEventListener?.('change', onLayoutChange));
 </script>
 
 <style scoped>
@@ -157,36 +192,10 @@ onMounted(() => {
   overflow: hidden;
 }
 
-.app-shell__scan-bar {
-  background: linear-gradient(90deg, #38bdf8 0%, #4ec5ff 48%, #f8fafc 100%);
-}
-
-.app-shell__scan-bar--indeterminate {
-  animation: app-shell-scan-indeterminate 1.15s ease-in-out infinite;
-}
-
-.app-shell__scan-status {
-  bottom: 1rem;
-}
-
 @media (max-width: 767.98px) {
   .app-shell--reels .app-shell__content {
     height: calc(100dvh - var(--mobile-bottom-nav-height));
     min-height: calc(100dvh - var(--mobile-bottom-nav-height));
-  }
-
-  .app-shell__scan-status {
-    bottom: calc(var(--mobile-bottom-nav-height) + 1.65rem);
-  }
-}
-
-@keyframes app-shell-scan-indeterminate {
-  0% {
-    transform: translateX(-110%);
-  }
-
-  100% {
-    transform: translateX(260%);
   }
 }
 </style>

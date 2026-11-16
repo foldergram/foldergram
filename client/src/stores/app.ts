@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 
 import {
+  controlScanOperation,
   fetchAdminScanProgress,
   fetchScanProgress,
   fetchStats as fetchStatus
@@ -13,7 +14,7 @@ import {
   syncDocumentLanguage,
   type SupportedLocale
 } from '../locales';
-import type { AppStatus, FeedMode, FolderImageOrder, ReelsFeedMode, ScanProgress } from '../types/api';
+import type { AppStatus, FeedMode, FolderImageOrder, ReelsFeedMode, ScanControl, ScanProgress, ScanRunSummary } from '../types/api';
 import { useAuthStore } from './auth';
 
 interface AppState {
@@ -28,7 +29,11 @@ interface AppState {
   imageModalBackgroundPath: string | null;
   statsPollFailures: number;
   statsPollTimer: number | null;
-  statsPollInFlight: boolean;
+  scanStatusUnavailable: boolean;
+  scanControlPending: boolean;
+  scanControlError: boolean;
+  acknowledgedScanResults: string[];
+  scanCompletion: { result: ScanRunSummary; surface: string | null } | null;
 }
 
 const THEME_STORAGE_KEY = 'foldergram-theme';
@@ -38,9 +43,34 @@ const LAST_OPENED_FOLDER_STORAGE_KEY = 'foldergram-last-opened-folder';
 const RECENT_OPENED_FOLDERS_STORAGE_KEY = 'foldergram-recent-opened-folders';
 const RECENT_OPENED_FOLDERS_LIMIT = 24;
 const SCAN_PROGRESS_POLL_INTERVAL_MS = 1000;
+const IDLE_SCAN_POLL_INTERVAL_MS = 5000;
+const SCAN_ACKNOWLEDGEMENTS_KEY = 'foldergram-scan-acknowledgements';
+const SCAN_COMPLETION_DURATION_MS = 6000;
+
+function readAcknowledgedScanResults(): string[] {
+  try {
+    const saved: unknown = JSON.parse(window.sessionStorage.getItem(SCAN_ACKNOWLEDGEMENTS_KEY) ?? '[]');
+    return Array.isArray(saved) ? saved.filter((value): value is string => typeof value === 'string').slice(-50) : [];
+  } catch {
+    return [];
+  }
+}
+
+function scanResultKey(result: ScanRunSummary): string {
+  return [result.id, result.started_at, result.finished_at].join('/');
+}
+
+function scanIssueGroupKey(result: ScanRunSummary): string {
+  return JSON.stringify([result.source_id ?? null, result.status, result.error_text, result.warning_text]);
+}
 
 let protectedStateGeneration = 0;
 let inFlightStatusRequest: Promise<AppStatus> | null = null;
+let inFlightScanRequest: Promise<void> | null = null;
+let scanSnapshotRevision = 0;
+let scanCapabilityGeneration = 0;
+let completionTimer: number | undefined;
+let discoverScanUntil = 0;
 
 function parseStoredRecentFolderSlugs(value: string | null): string[] {
   if (!value) {
@@ -96,7 +126,11 @@ export const useAppStore = defineStore('app', {
     imageModalBackgroundPath: null,
     statsPollFailures: 0,
     statsPollTimer: null,
-    statsPollInFlight: false
+    scanStatusUnavailable: false,
+    scanControlPending: false,
+    scanControlError: false,
+    acknowledgedScanResults: readAcknowledgedScanResults(),
+    scanCompletion: null
   }),
   getters: {
     isLibraryUnavailable: (state) => state.stats?.storage.available === false,
@@ -104,7 +138,18 @@ export const useAppStore = defineStore('app', {
     isLibraryRebuildRequired: (state) => state.stats?.libraryIndex.rebuildRequired === true,
     isScanning: (state) => state.stats?.scan.isScanning === true,
     isRebuilding: (state) => state.stats?.scan.isScanning === true && state.stats?.scan.scanReason === 'rebuild',
-    hasCompletedScan: (state) => state.stats?.scan.lastCompletedScan !== null,
+    hasCompletedScan: (state) => Boolean(state.stats?.scan.lastCompletedScan),
+    unacknowledgedScanResults(state): ScanRunSummary[] {
+      const issues = state.stats?.scan.recentIssues?.filter(result =>
+        !state.acknowledgedScanResults.includes(scanResultKey(result))
+      ) ?? [];
+      if (!issues.length) return [];
+      const groupKey = scanIssueGroupKey(issues[0]);
+      return issues.filter(result => scanIssueGroupKey(result) === groupKey);
+    },
+    unacknowledgedScanResult(): ScanRunSummary | null {
+      return this.unacknowledgedScanResults[0] ?? null;
+    },
     isInitialScan: (state) => state.stats?.scan.isScanning === true && state.stats?.scan.lastCompletedScan === null,
     defaultHomeFeedMode: (state): FeedMode => state.stats?.preferences.defaultHomeFeedMode ?? 'random',
     savedDefaultLocale: (state): SupportedLocale | null => resolveSupportedLocale(state.stats?.preferences.defaultLocale ?? null),
@@ -286,83 +331,118 @@ export const useAppStore = defineStore('app', {
       this.startStatsPolling();
     },
 
-    markScanStatusUnavailable() {
-      if (!this.stats) {
-        return;
-      }
+    acknowledgeScanResult(result: ScanRunSummary) {
+      this.acknowledgeScanResults([result]);
+    },
 
-      this.stats = {
-        ...this.stats,
-        scan: {
-          ...this.stats.scan,
-          isScanning: false,
-          scanReason: null,
-          phase: 'idle',
-          startedAt: null,
-          runId: null,
-          migrationTotalRows: 0,
-          processedMigrationRows: 0,
-          migratedDerivativeFiles: 0,
-          missingDerivativeFiles: 0,
-          repairedDerivativeFiles: 0,
-          backfilledAssetKeys: 0,
-          discoveredFolders: 0,
-          processedFolders: 0,
-          discoveredImages: 0,
-          processedImages: 0,
-          queuedDerivativeJobs: 0,
-          processedDerivativeJobs: 0,
-          generatedThumbnails: 0,
-          generatedPreviews: 0,
-          currentOperation: null,
-          currentFile: null,
-          currentPhaseMessage: null,
-          currentFolder: null
-        }
-      };
+    acknowledgeScanResults(results: readonly ScanRunSummary[]) {
+      const keys = results.map(scanResultKey);
+      if (keys.every(key => this.acknowledgedScanResults.includes(key))) return;
+
+      this.acknowledgedScanResults = [...new Set([...this.acknowledgedScanResults, ...keys])].slice(-50);
+      try {
+        window.sessionStorage.setItem(SCAN_ACKNOWLEDGEMENTS_KEY, JSON.stringify(this.acknowledgedScanResults));
+      } catch {
+        // The acknowledgement still applies for the current page lifetime.
+      }
+    },
+
+    showScanCompletion(result: ScanRunSummary | null, surface: string | null) {
+      if (!result || !this.shouldUseAdminScanProgress() ||
+          (this.stats?.scan.lastCompletedScan?.id ?? 0) > result.id ||
+          (this.scanCompletion?.result.id ?? 0) > result.id) return;
+      window.clearTimeout(completionTimer);
+      this.scanCompletion = { result: { ...result, error_text: null, warning_text: null }, surface };
+      if (surface !== null) {
+        completionTimer = window.setTimeout(() => {
+          if (this.scanCompletion?.surface === surface) this.scanCompletion = null;
+        }, SCAN_COMPLETION_DURATION_MS);
+      }
+    },
+
+    reviewDeferredScanCompletion() {
+      if (this.scanCompletion?.surface === null) this.scanCompletion = null;
+    },
+
+    discardSupersededScanCompletion(latest: ScanRunSummary | null) {
+      if (!latest || !this.scanCompletion || latest.id <= this.scanCompletion.result.id) return;
+      window.clearTimeout(completionTimer);
+      this.scanCompletion = null;
+    },
+
+    leaveScanSurface(fullPath: string) {
+      if (this.scanCompletion?.surface === fullPath) this.scanCompletion = null;
+    },
+
+    scanStatusPending() {
+      discoverScanUntil = Date.now() + 3000;
+      this.refreshVisibleScanStatus();
     },
 
     startStatsPolling() {
-      if (this.statsPollTimer) {
-        return;
-      }
+      if (this.statsPollTimer !== null || document.visibilityState === 'hidden') return;
 
-      this.statsPollTimer = window.setInterval(() => {
+      const running = this.stats?.scan.isScanning && this.stats.scan.operation?.state !== 'paused';
+      const delay = running || Date.now() < discoverScanUntil
+        ? SCAN_PROGRESS_POLL_INTERVAL_MS
+        : IDLE_SCAN_POLL_INTERVAL_MS;
+      this.statsPollTimer = window.setTimeout(() => {
         if (document.visibilityState === 'hidden') {
+          this.statsPollTimer = null;
           return;
         }
 
-        if (!this.stats?.scan.isScanning) {
-          this.stopStatsPolling();
-          return;
-        }
-
-        if (this.statsPollInFlight) {
-          return;
-        }
-
-        this.statsPollInFlight = true;
+        const timer = this.statsPollTimer;
         void this.refreshScanProgress().finally(() => {
-          this.statsPollInFlight = false;
+          if (this.statsPollTimer !== timer) return;
+          this.statsPollTimer = null;
+          this.startStatsPolling();
         });
-      }, SCAN_PROGRESS_POLL_INTERVAL_MS);
+      }, delay);
     },
 
     stopStatsPolling() {
-      if (this.statsPollTimer) {
-        clearInterval(this.statsPollTimer);
-        this.statsPollTimer = null;
-      }
+      if (this.statsPollTimer === null) return;
+      window.clearTimeout(this.statsPollTimer);
+      this.statsPollTimer = null;
+    },
 
-      this.statsPollFailures = 0;
-      this.statsPollInFlight = false;
+    refreshVisibleScanStatus() {
+      this.stopStatsPolling();
+      if (document.visibilityState === 'hidden') return;
+      void this.refreshScanProgress();
+      this.startStatsPolling();
+    },
+
+    resetScanCapability() {
+      scanCapabilityGeneration += 1;
+      inFlightScanRequest = null;
+      window.clearTimeout(completionTimer);
+      this.scanCompletion = null;
+      this.scanControlPending = false;
+      this.scanControlError = false;
+      if (this.stats && !this.shouldUseAdminScanProgress()) {
+        const { lastCompletedScan, operation } = this.stats.scan;
+        this.updateScanProgress({
+          ...this.stats.scan,
+          currentFile: null,
+          currentFolder: null,
+          recentIssues: [],
+          operation: operation && { state: operation.state, controls: [] },
+          lastCompletedScan: lastCompletedScan && { ...lastCompletedScan, error_text: null, warning_text: null }
+        });
+      }
     },
 
     resetProtectedState() {
       protectedStateGeneration += 1;
       inFlightStatusRequest = null;
       this.stopStatsPolling();
+      this.resetScanCapability();
+      discoverScanUntil = 0;
       this.stats = null;
+      this.statsPollFailures = 0;
+      this.scanStatusUnavailable = false;
       this.loadingStats = false;
       this.error = null;
       this.imageModalBackgroundPath = null;
@@ -377,6 +457,8 @@ export const useAppStore = defineStore('app', {
         return;
       }
 
+      scanSnapshotRevision += 1;
+      this.discardSupersededScanCompletion(progress.lastCompletedScan);
       this.stats = {
         ...this.stats,
         scan: progress
@@ -412,7 +494,9 @@ export const useAppStore = defineStore('app', {
         this.error = null;
       }
 
+      const revision = scanSnapshotRevision;
       const statusRequest = inFlightStatusRequest ?? fetchStatus();
+      const requestRevision = inFlightStatusRequest ? -1 : revision;
       inFlightStatusRequest = statusRequest;
 
       try {
@@ -422,19 +506,22 @@ export const useAppStore = defineStore('app', {
           return;
         }
 
-        this.stats = stats;
+        // Status carries a viewer-safe snapshot. Keep any newer lightweight response
+        // and preserve diagnostics if both snapshots describe the same operation.
+        const previous = this.stats?.scan;
+        const sameProgress = previous && previous.isScanning === stats.scan.isScanning &&
+          previous.runId === stats.scan.runId && previous.lastCompletedScan?.id === stats.scan.lastCompletedScan?.id;
+        const scan = previous && (requestRevision !== scanSnapshotRevision || sameProgress)
+          ? previous
+          : previous?.recentIssues ? { ...stats.scan, recentIssues: previous.recentIssues } : stats.scan;
+        this.discardSupersededScanCompletion(scan.lastCompletedScan);
+        this.stats = { ...stats, scan };
         this.syncLocaleFromStats(this.stats);
-        this.statsPollFailures = 0;
 
         if (options.background && this.error) {
           this.error = null;
         }
 
-        if (this.stats.scan.isScanning) {
-          this.startStatsPolling();
-        } else {
-          this.stopStatsPolling();
-        }
       } catch (error) {
         if (requestGeneration !== protectedStateGeneration) {
           return;
@@ -442,17 +529,7 @@ export const useAppStore = defineStore('app', {
 
         const message = error instanceof Error ? error.message : i18n.global.t('errors.loadAppStats');
 
-        if (options.background) {
-          this.statsPollFailures += 1;
-
-          if (this.statsPollFailures >= 3) {
-            this.stopStatsPolling();
-            this.markScanStatusUnavailable();
-            this.error = i18n.global.t('errors.scanStatusConnectionLost');
-          }
-        } else {
-          this.error = message;
-        }
+        if (!options.background) this.error = message;
       } finally {
         if (inFlightStatusRequest === statusRequest) {
           inFlightStatusRequest = null;
@@ -464,46 +541,72 @@ export const useAppStore = defineStore('app', {
       }
     },
 
-    async refreshScanProgress() {
-      const requestGeneration = protectedStateGeneration;
+    async sendScanControl(action: ScanControl) {
+      const operation = this.stats?.scan.operation;
+      if (!useAuthStore().canManageLibrary || !operation?.id || !operation.controls.includes(action) ||
+          this.scanControlPending || this.scanStatusUnavailable) return;
 
-      if (!this.stats) {
-        await this.fetchStats({ background: true });
-        return;
-      }
-
+      const requestGeneration = scanCapabilityGeneration;
+      this.scanControlPending = true;
+      this.scanControlError = false;
       try {
-        const progress = this.shouldUseAdminScanProgress()
-          ? await fetchAdminScanProgress()
-          : await fetchScanProgress();
-
-        if (requestGeneration !== protectedStateGeneration) {
-          return;
-        }
-
-        this.updateScanProgress(progress);
-        this.statsPollFailures = 0;
-
-        if (this.error) {
-          this.error = null;
-        }
-
-        if (!progress.isScanning) {
-          this.stopStatsPolling();
-          await this.fetchStats({ background: true });
+        const { operation: updated } = await controlScanOperation(operation.id, action);
+        const scan = this.stats?.scan;
+        if (requestGeneration === scanCapabilityGeneration && this.shouldUseAdminScanProgress() &&
+            scan?.operation?.id === updated.id && scan?.isScanning) {
+          this.updateScanProgress({ ...scan, operation: updated });
         }
       } catch {
-        if (requestGeneration !== protectedStateGeneration) {
-          return;
+        if (requestGeneration === scanCapabilityGeneration) this.scanControlError = true;
+      } finally {
+        if (requestGeneration === scanCapabilityGeneration) {
+          // Wait out an older read before requesting a fresh post-mutation snapshot.
+          await inFlightScanRequest;
+          if (requestGeneration === scanCapabilityGeneration) {
+            this.scanControlPending = false;
+            this.refreshVisibleScanStatus();
+          }
         }
+      }
+    },
 
-        this.statsPollFailures += 1;
+    async refreshScanProgress() {
+      if (inFlightScanRequest) return inFlightScanRequest;
 
-        if (this.statsPollFailures >= 3) {
-          this.stopStatsPolling();
-          this.markScanStatusUnavailable();
-          this.error = i18n.global.t('errors.scanStatusConnectionLost');
+      const requestGeneration = scanCapabilityGeneration;
+      const admin = this.shouldUseAdminScanProgress();
+      const request = (async () => {
+        try {
+          if (!this.stats) {
+            await this.fetchStats({ background: true });
+            if (!this.stats) throw new Error('Status unavailable');
+          }
+          if (requestGeneration !== scanCapabilityGeneration || admin !== this.shouldUseAdminScanProgress()) return;
+
+          const progress = admin ? await fetchAdminScanProgress() : await fetchScanProgress();
+          if (requestGeneration !== scanCapabilityGeneration || admin !== this.shouldUseAdminScanProgress()) return;
+
+          const previous = this.stats?.scan;
+          if (previous?.operation?.id !== progress.operation?.id) this.scanControlError = false;
+          this.updateScanProgress(progress);
+          this.statsPollFailures = 0;
+          this.scanStatusUnavailable = false;
+          if ((previous?.isScanning && !progress.isScanning) ||
+              previous?.lastCompletedScan?.id !== progress.lastCompletedScan?.id) {
+            await this.fetchStats({ background: true });
+          }
+        } catch {
+          if (requestGeneration !== scanCapabilityGeneration || admin !== this.shouldUseAdminScanProgress()) return;
+
+          this.statsPollFailures += 1;
+          if (this.statsPollFailures >= 2) this.scanStatusUnavailable = true;
         }
+      })();
+      inFlightScanRequest = request;
+      try {
+        await request;
+      } finally {
+        if (inFlightScanRequest === request) inFlightScanRequest = null;
       }
     }
   }

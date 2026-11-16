@@ -438,10 +438,10 @@
       "scanActionNote": {
         "loading": "正在加载当前图库状态...",
         "rebuildRequired": "由于图库位置已更改，请先重建图库索引。",
-        "otherTaskActive": "当前还有其他图库任务正在运行。实时进度会显示在置顶状态栏中。",
-        "progress": "实时进度会显示在置顶状态栏中。",
-        "progressChanges": "正在扫描图库更改。实时进度会显示在置顶状态栏中。",
-        "progressRepair": "正在扫描更改并修复派生文件。实时进度会显示在置顶状态栏中。",
+        "otherTaskActive": "当前还有其他图库任务正在运行。实时进度显示在扫描图库卡片中。",
+        "progress": "实时进度显示在扫描图库卡片中。",
+        "progressChanges": "正在扫描图库更改。实时进度显示在扫描图库卡片中。",
+        "progressRepair": "正在扫描更改并修复派生文件。实时进度显示在扫描图库卡片中。",
         "legacyMigration": "运行扫描可将旧的镜像缩略图和预览图迁移到资源键存储布局。",
         "carouselReconciliation": "运行扫描，将已保存的轮播文件夹模式应用到已索引的文件夹和帖子。",
         "idle": "两种操作都会发现图库更改。修复还会检查未更改媒体对应的已生成文件。"
@@ -457,7 +457,7 @@
       "thumbnailActionNote": {
         "loading": "正在加载当前图库状态...",
         "rebuildRequired": "在为新的图库位置重建索引之前，此操作不可用。",
-        "progress": "实时进度会显示在置顶状态栏中。",
+        "progress": "实时进度显示在扫描图库卡片中。",
         "rebuildActive": "请先等待完整重建完成。",
         "scanActive": "请先等待当前扫描完成。",
         "legacyMigration": "此操作会保留当前缩略图路径，不会迁移旧的镜像衍生资源。请改为运行“扫描图库”以将其迁移到资源键存储。",
@@ -477,7 +477,7 @@
       },
       "rebuildActionNote": {
         "loading": "正在加载当前图库状态...",
-        "progress": "实时进度会显示在置顶状态栏中。",
+        "progress": "实时进度显示在扫描图库卡片中。",
         "thumbnailActive": "请先等待缩略图重新生成完成。",
         "scanActive": "请先等待当前扫描完成。",
         "rebuildRequired": "由于图库位置已更改，建议执行此操作。",
@@ -1315,6 +1315,44 @@
     "resumePlayback": "继续播放",
     "pausePlayback": "暂停播放",
     "closeViewer": "关闭查看器"
+  },
+  "scanActivity": {
+    "state": {
+      "queued": "扫描已排队",
+      "pausing": "正在暂停扫描…",
+      "paused": "扫描已暂停",
+      "cancelling": "正在取消扫描…"
+    },
+    "controls": {
+      "pause": "暂停",
+      "resume": "继续",
+      "cancel": "取消扫描",
+      "keepsWork": "已完成的工作会保留。",
+      "error": "扫描状态已更改，或无法发送请求。请检查当前状态并重试。",
+      "unavailable": "此阶段无法暂停或取消。"
+    },
+    "title": "图库活动",
+    "showDetails": "显示图库活动",
+    "runningDetails": "图库正在扫描。查看详情",
+    "syncDetails": "来源正在同步。查看详情",
+    "attentionDetails": "图库扫描需要处理。查看详情",
+    "unavailableDetails": "无法获取扫描状态。查看详情",
+    "unavailable": "状态不可用",
+    "synchronizing": "正在同步来源",
+    "openSettings": "打开设置",
+    "openSources": "打开来源",
+    "openLibrary": "打开图库",
+    "openIssue": "在状态页查看扫描结果",
+    "openStatus": "在状态页查看上次扫描",
+    "acknowledge": "确认已查看",
+    "acknowledgeResults": "确认已查看 {count} 个结果",
+    "earlierIssue": "较早的扫描需要处理",
+    "similarResults": "{count} 次扫描报告了此问题。",
+    "details": "详情",
+    "completed": "扫描完成。",
+    "completedWithErrors": "扫描完成，但有错误。",
+    "failed": "未能完成扫描。",
+    "cancelled": "扫描已取消，已完成的工作已保留。"
   },
   "scanProgress": {
     "titles": {

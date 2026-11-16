@@ -48,6 +48,7 @@ import {
   maintenanceOperationLock,
   PERMANENT_DELETION_QUARANTINE_DIRECTORY_NAME
 } from './maintenance-operation-lock.js';
+import { LocalScanOperation, ScanCancelledError, ScanControlError, type ScanControl } from './scan-operation.js';
 import { log } from './log-service.js';
 import { permanentDeletionService } from './permanent-deletion-service.js';
 import { placeResolutionService } from './place-service.js';
@@ -305,6 +306,7 @@ export interface ScanProgressSnapshot {
   currentPhaseMessage: string | null;
   currentFolder: string | null;
   lastCompletedScan: ScanRunRecord | null;
+  operation?: LocalScanOperation['snapshot'];
 }
 
 const discoveryLimit = pLimit(appConfig.scanDiscoveryConcurrency);
@@ -632,6 +634,52 @@ class ScannerService {
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private pendingSources = new Map<number, Promise<ScanRunRecord | undefined>>();
   private runningSourceId: number | null = null;
+  private activeOperation: LocalScanOperation | null = null;
+  private terminalOperation: LocalScanOperation | null = null;
+
+  private scanTask<T>(task: () => Promise<T>): Promise<T> {
+    return this.activeOperation?.run(task) ?? task();
+  }
+
+  private async runDiscoveryTasks<T>(items: T[], task: (item: T) => Promise<void>): Promise<void> {
+    if (appConfig.scanMediaErrorMode === 'fail') {
+      for (const item of items) await this.scanTask(() => task(item));
+      return;
+    }
+    const iterator = items.values();
+    const workers = Array.from({ length: Math.min(items.length, appConfig.scanDiscoveryConcurrency) }, async () => {
+      let failure: unknown;
+      for (let item = iterator.next(); !item.done; item = iterator.next()) {
+        try {
+          await this.scanTask(() => discoveryLimit(() => task(item.value)));
+        } catch (error) {
+          if (error instanceof ScanCancelledError) throw error;
+          failure ??= error;
+        }
+      }
+      if (failure) throw failure;
+    });
+    const results = await Promise.allSettled(workers);
+    await this.activeOperation?.checkpoint();
+    const failure = results.find(result => result.status === 'rejected');
+    if (failure?.status === 'rejected') throw failure.reason;
+  }
+
+  controlOperation(id: string, action: ScanControl): LocalScanOperation['snapshot'] {
+    const operation = this.activeOperation ?? this.terminalOperation;
+    if (!operation || operation.id !== id) throw new ScanControlError('That scan operation is no longer current.');
+    operation.control(action);
+    return operation.snapshot;
+  }
+
+  stopActiveOperationForShutdown(): void {
+    const operation = this.activeOperation;
+    if (operation?.controls.includes('cancel')) operation.control('cancel');
+  }
+
+  private repairSettingKey(sourceId: number): string {
+    return 'scan-derivative-repair-pending:' + sourceId;
+  }
 
   getSourceProgress(id: number): { syncing: boolean; progress: number } {
     if (this.runningSourceId !== id) return { syncing: this.pendingSources.has(id), progress: 0 };
@@ -643,6 +691,7 @@ class ScannerService {
   }
 
   private updateLocalSourceAfterScan(source: LocalSource, summary: ScanSummary, status?: string): void {
+    const cancelled = summary.status === 'cancelled';
     const complete = summary.status === 'completed' || summary.status === 'completed_with_errors';
     const message = status === 'empty_review' ? 'This location appears empty. Check the mount, or confirm that it was intentionally emptied.'
       : status === 'unavailable' ? 'Foldergram cannot access this location. Check the folder or mount and try again.'
@@ -650,23 +699,44 @@ class ScannerService {
       : summary.status === 'completed_with_errors' ? 'Some media could not be indexed. Review the scan report.' : null;
     const db = databaseManager.connection;
     db.prepare(`
-      UPDATE media_sources SET status = ?, last_error = ?, progress = ?, updated_at = CURRENT_TIMESTAMP,
-        last_success = CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE last_success END,
-        asset_count = CASE WHEN ? THEN (SELECT count(*) FROM images WHERE source_id = ? AND is_deleted = 0) ELSE asset_count END,
-        folder_count = CASE WHEN ? THEN (SELECT count(DISTINCT folders.id) FROM folders
+      UPDATE media_sources SET
+        status = CASE WHEN $cancelled THEN status ELSE $status END,
+        last_error = CASE WHEN $cancelled THEN last_error ELSE $message END,
+        progress = CASE WHEN $cancelled THEN progress WHEN $complete THEN 100 ELSE 0 END,
+        updated_at = CURRENT_TIMESTAMP,
+        last_success = CASE WHEN $complete THEN CURRENT_TIMESTAMP ELSE last_success END,
+        asset_count = CASE WHEN $refreshCounts THEN (
+          SELECT count(*) FROM images WHERE source_id = $id AND is_deleted = 0
+        ) ELSE asset_count END,
+        folder_count = CASE WHEN $refreshCounts THEN (SELECT count(DISTINCT folders.id) FROM folders
           LEFT JOIN posts ON posts.folder_id = folders.id AND posts.is_deleted = 0
           LEFT JOIN images ON images.id = folders.avatar_image_id AND images.is_deleted = 0
-          WHERE folders.source_id = ? AND folders.role = 'normal' AND (posts.id IS NOT NULL OR images.id IS NOT NULL)) ELSE folder_count END,
-        generation = generation + ?
-      WHERE id = ?
-    `).run(status ?? (complete ? 'ready' : 'error'), message, complete ? 100 : 0, Number(complete),
-      Number(complete), source.id, Number(complete), source.id,
-      Number(summary.new_files + summary.updated_files + summary.removed_files > 0 || (complete && !source.last_success)), source.id);
+          WHERE folders.source_id = $id AND folders.role = 'normal' AND (posts.id IS NOT NULL OR images.id IS NOT NULL)) ELSE folder_count END,
+        generation = generation + $bumpGeneration
+      WHERE id = $id
+    `).run({
+      $id: source.id,
+      $cancelled: Number(cancelled),
+      $complete: Number(complete),
+      $status: status ?? (complete ? 'ready' : 'error'),
+      $message: message,
+      $refreshCounts: Number(complete || cancelled),
+      // A cancelled folder can commit media before its counts reach the scan summary.
+      $bumpGeneration: Number(cancelled || summary.new_files + summary.updated_files + summary.removed_files > 0 || (complete && !source.last_success))
+    });
   }
 
   getProgress(): ScanProgressSnapshot {
+    const operation = this.activeOperation ?? this.terminalOperation;
     return {
       ...this.progress,
+      ...(operation ? { operation: operation.snapshot } : {}),
+      ...(this.activeOperation ? {
+        isScanning: true,
+        scanReason: this.activeOperation.reason,
+        phase: this.progress.phase === 'idle' ? 'discovery' as const : this.progress.phase,
+        startedAt: this.activeOperation.startedAt
+      } : {}),
       lastCompletedScan: this.progress.lastCompletedScan ? { ...this.progress.lastCompletedScan } : null
     };
   }
@@ -791,12 +861,14 @@ class ScannerService {
       ...options
     });
 
-    const result = await this.enqueue(async () => {
+    const report: { latest?: ScanRunRecord } = {};
+    const result = await this.enqueue(reason, async () => {
       const sources = listLocalSources().filter(source => source.enabled);
-      if (sources.length === 1) return this.performFullScan(sources[0], reason, resolvedOptions);
       const aggregate = createEmptySummary();
       for (const source of sources) {
         const scan = await this.performFullScan(source, reason, resolvedOptions);
+        report.latest = scanRunRepository.latest();
+        if (sources.length === 1) return scan;
         aggregate.scanned_files += scan.scanned_files;
         aggregate.new_files += scan.new_files;
         aggregate.updated_files += scan.updated_files;
@@ -804,25 +876,31 @@ class ScannerService {
         aggregate.warning_count += scan.warning_count;
         if (scan.error_text) aggregate.error_text = [aggregate.error_text, scan.error_text].filter(Boolean).join('\n');
         if (scan.warning_text) aggregate.warning_text = [aggregate.warning_text, scan.warning_text].filter(Boolean).join('\n');
+        if (scan.status === 'cancelled') {
+          aggregate.status = 'cancelled';
+          break;
+        }
         if (scan.status !== 'completed') aggregate.status = 'completed_with_errors';
       }
       return aggregate;
     }, options);
-    const latest = scanRunRepository.latest();
-    return latest && listLocalSources().filter(source => source.enabled).length > 1 ? { ...latest, ...result } : latest;
+    return report.latest ? { ...report.latest, ...result } : undefined;
   }
 
   scanSource(id: number, reason = 'source', options: EnqueueScanOptions & { confirmEmpty?: boolean } = {}): Promise<ScanRunRecord | undefined> {
     const pending = this.pendingSources.get(id);
     if (pending) return pending;
-    const job = this.enqueue(async () => {
+    let lastRun: ScanRunRecord | undefined;
+    const job = this.enqueue(reason, async () => {
       const source = getLocalSource(id);
       if (!source?.enabled) throw new Error('Enable the source before syncing.');
-      return this.performFullScan(source, reason, resolveFullScanOptions({
+      const result = await this.performFullScan(source, reason, resolveFullScanOptions({
         allowDerivativeMigration: source.managed_by === 'environment' && reason !== 'startup' && !reason.startsWith('watcher'),
         ...options
       }), { confirmEmpty: options.confirmEmpty === true });
-    }, options).then(() => scanRunRepository.latest()).finally(() => this.pendingSources.delete(id));
+      lastRun = scanRunRepository.latest();
+      return result;
+    }, options).then(() => lastRun).finally(() => this.pendingSources.delete(id));
     this.pendingSources.set(id, job);
     return job;
   }
@@ -834,12 +912,12 @@ class ScannerService {
       allowDerivativeMigration: true
     });
 
-    await this.enqueue(async () => this.performLibraryRebuild(reason, resolvedOptions));
+    await this.enqueue(reason, async () => this.performLibraryRebuild(reason, resolvedOptions));
     return scanRunRepository.latest();
   }
 
   async rebuildThumbnails(reason = 'rebuild-thumbnails'): Promise<ScanRunRecord | undefined> {
-    await this.enqueue(async () => this.performThumbnailRebuild(reason));
+    await this.enqueue(reason, async () => this.performThumbnailRebuild(reason));
     return scanRunRepository.latest();
   }
 
@@ -848,7 +926,7 @@ class ScannerService {
       return scanRunRepository.latest();
     }
 
-    await this.enqueue(async () => {
+    await this.enqueue(reason, async () => {
       const source = sourceId === undefined ? primaryLocalSource() : getLocalSource(sourceId);
       if (!source?.enabled) return createEmptySummary();
       return this.performIncrementalScan(source, relativePaths, reason);
@@ -856,7 +934,7 @@ class ScannerService {
     return scanRunRepository.latest();
   }
 
-  private async enqueue(job: () => Promise<ScanSummary>, options: EnqueueScanOptions = {}): Promise<ScanSummary> {
+  private async enqueue(reason: string, job: () => Promise<ScanSummary>, options: EnqueueScanOptions = {}): Promise<ScanSummary> {
     if (options.rejectIfBusy && this.hasPendingLibraryWork()) {
       throw new ScanBusyError();
     }
@@ -866,14 +944,31 @@ class ScannerService {
       if (options.beforeEnqueue) {
         options.beforeEnqueue();
       }
+      const operation = new LocalScanOperation(reason,
+        () => maintenanceOperationLock.suspendConflictingRequests(),
+        () => maintenanceOperationLock.resumeConflictingRequests());
       const runWithMaintenanceLock = () => maintenanceOperationLock.runExclusive(async () => {
+        this.activeOperation = operation;
+        operation.state = 'running';
         try {
-          await permanentDeletionService.recoverPendingDeletionsWhileLocked();
+          try {
+            await permanentDeletionService.recoverPendingDeletionsWhileLocked();
+          } catch (error) {
+            log.error('Permanent deletion recovery failed; scan will continue', error);
+          }
+          const summary = await job();
+          operation.finish(summary.status === 'cancelled' ? 'cancelled'
+            : summary.status === 'failed' || summary.status === 'skipped_unavailable' ? 'failed' : 'completed');
+          return summary;
         } catch (error) {
-          log.error('Permanent deletion recovery failed; scan will continue', error);
+          operation.finish('failed');
+          throw error;
+        } finally {
+          this.activeOperation = null;
+          this.terminalOperation = operation;
+          this.finishProgress();
         }
-        return job();
-      });
+      }, { waitDuringPause: true });
       this.queue = this.queue.then(runWithMaintenanceLock, runWithMaintenanceLock);
       return await this.queue;
     } finally {
@@ -1019,7 +1114,7 @@ class ScannerService {
       return;
     }
 
-    if (summary.status !== 'failed') {
+    if (summary.status !== 'failed' && summary.status !== 'cancelled') {
       summary.status = 'completed_with_errors';
     }
 
@@ -1162,8 +1257,7 @@ class ScannerService {
       currentFolder: currentRelativePath ? normalizePath(currentRelativePath) : ROOT_DISCOVERY_LABEL
     });
 
-    const entries = await fs
-      .readdir(currentAbsolutePath, { withFileTypes: true });
+    const entries = await this.scanTask(() => fs.readdir(currentAbsolutePath, { withFileTypes: true }));
 
     if (currentRelativePath && hasExclusionMarker(entries)) {
       onIntentionalExclusion(currentRelativePath);
@@ -1271,8 +1365,7 @@ class ScannerService {
   ): Promise<SourceFolderScanResult> {
     const sourceFolderPath = normalizePath(sourceFolder.relativePath);
     const folderStartedAt = performance.now();
-    const entries = await fs
-      .readdir(sourceFolder.absolutePath, { withFileTypes: true });
+    const entries = await this.scanTask(() => fs.readdir(sourceFolder.absolutePath, { withFileTypes: true }));
 
     if (hasExclusionMarker(entries)) {
       return this.clearIndexedFolder(sourceFolderPath);
@@ -1371,13 +1464,7 @@ class ScannerService {
       }
     };
 
-    if (appConfig.scanMediaErrorMode === 'fail') {
-      for (const file of files) {
-        await statFile(file);
-      }
-    } else {
-      await Promise.all(files.map((file) => discoveryLimit(() => statFile(file))));
-    }
+    await this.runDiscoveryTasks(files, statFile);
 
     return {
       activeRelativePaths,
@@ -1396,8 +1483,7 @@ class ScannerService {
       return [];
     }
 
-    const entries = await fs
-      .readdir(currentAbsolutePath, { withFileTypes: true });
+    const entries = await this.scanTask(() => fs.readdir(currentAbsolutePath, { withFileTypes: true }));
 
     if (hasExclusionMarker(entries)) {
       return [];
@@ -1443,8 +1529,7 @@ class ScannerService {
     context: ImageProcessingContext,
     excludedFolderRules: string[]
   ): Promise<SourceFolderScanResult[]> {
-    const ownerEntries = await fs
-      .readdir(sourceFolder.absolutePath, { withFileTypes: true });
+    const ownerEntries = await this.scanTask(() => fs.readdir(sourceFolder.absolutePath, { withFileTypes: true }));
 
     if (hasExclusionMarker(ownerEntries)) {
       return [];
@@ -1470,8 +1555,7 @@ class ScannerService {
 
     const storiesAbsolutePath = path.join(sourceFolder.absolutePath, storiesDirectory.name);
     const storiesRelativePath = normalizePath(`${sourceFolder.relativePath}/${storiesDirectory.name}`);
-    const storiesEntries = await fs
-      .readdir(storiesAbsolutePath, { withFileTypes: true });
+    const storiesEntries = await this.scanTask(() => fs.readdir(storiesAbsolutePath, { withFileTypes: true }));
 
     if (hasExclusionMarker(storiesEntries)) {
       return [];
@@ -1607,8 +1691,7 @@ class ScannerService {
     discovery: CarouselDiscovery,
     excludedFolderRules: string[]
   ): Promise<ReservedCarouselScanResult> {
-    const ownerEntries = await fs
-      .readdir(sourceFolder.absolutePath, { withFileTypes: true });
+    const ownerEntries = await this.scanTask(() => fs.readdir(sourceFolder.absolutePath, { withFileTypes: true }));
 
     if (hasExclusionMarker(ownerEntries)) {
       return { ownerFolder: null, results: [] };
@@ -1634,8 +1717,7 @@ class ScannerService {
 
     const carouselsAbsolutePath = path.join(sourceFolder.absolutePath, carouselsDirectory.name);
     const carouselsRelativePath = normalizePath(`${sourceFolder.relativePath}/${carouselsDirectory.name}`);
-    const carouselsEntries = await fs
-      .readdir(carouselsAbsolutePath, { withFileTypes: true });
+    const carouselsEntries = await this.scanTask(() => fs.readdir(carouselsAbsolutePath, { withFileTypes: true }));
 
     if (hasExclusionMarker(carouselsEntries)) {
       const ownerFolder = existingFolders.find((folder) => (
@@ -1684,8 +1766,7 @@ class ScannerService {
       const postRelativePath = normalizePath(`${carouselsRelativePath}/${postEntry.name}`);
       const postAbsolutePath = path.join(carouselsAbsolutePath, postEntry.name);
 
-      const postDirEntries = await fs
-        .readdir(postAbsolutePath, { withFileTypes: true });
+      const postDirEntries = await this.scanTask(() => fs.readdir(postAbsolutePath, { withFileTypes: true }));
 
       if (hasExclusionMarker(postDirEntries)) continue;
 
@@ -1850,7 +1931,7 @@ class ScannerService {
           !sourceExists.has(owner.id)
         ) {
           // Access failures must abort validation; only confirmed absence permits a rename.
-          sourceExists.set(owner.id, await this.pathExists(resolveLocalPath(context.source, owner.source_path, { scanRoot: context.root, allowMissing: true })));
+          sourceExists.set(owner.id, await this.scanTask(() => this.pathExists(resolveLocalPath(context.source, owner.source_path, { scanRoot: context.root, allowMissing: true }))));
         }
       }
     }
@@ -1891,6 +1972,7 @@ class ScannerService {
       plans.push({ pending, existingPost });
     }
 
+    await this.activeOperation?.checkpoint();
     for (const { pending, existingPost } of plans) {
       const firstItem = pending.images[0];
       postRepository.upsertPostWithItems({
@@ -2071,15 +2153,7 @@ class ScannerService {
       }
     };
 
-    if (appConfig.scanMediaErrorMode === 'fail') {
-      for (const file of discoveredFiles) {
-        await scanFile(file);
-      }
-    } else {
-      const results = await Promise.allSettled(discoveredFiles.map((file) => discoveryLimit(() => scanFile(file))));
-      const failure = results.find((result) => result.status === 'rejected');
-      if (failure?.status === 'rejected') throw failure.reason;
-    }
+    await this.runDiscoveryTasks(discoveredFiles, scanFile);
 
     const removedFiles = 0;
     if (!folderHadErrors) context.removals.set(folder.id, activeRelativePaths);
@@ -2356,7 +2430,14 @@ class ScannerService {
     );
 
     let sourceStatus: string | undefined;
+    const operation = this.activeOperation;
+    const repairKey = this.repairSettingKey(source.id);
+    const eager = appConfig.derivativeMode !== 'lazy';
+    if (eager && appSettingsRepository.get(repairKey) === '1') {
+      options = { ...options, repairUnchangedDerivatives: true };
+    }
     try {
+      if (eager) appSettingsRepository.set(repairKey, '1');
       const migrationPending = !derivativeMigrationService.isMigrationComplete();
       const requiresDerivativeMigration = isPrimary && options.allowDerivativeMigration && migrationPending;
       if (requiresDerivativeMigration) {
@@ -2430,6 +2511,7 @@ class ScannerService {
         });
         this.logProgress('phase');
       }
+      if (operation && reason !== 'rebuild' && !requiresDerivativeMigration) operation.controllable = true;
       imageProcessingContext.moveReconciliationEnabled =
         !galleryRootChanged && migrationSummary.complete && derivativeMigrationService.isMigrationComplete();
 
@@ -2570,11 +2652,15 @@ class ScannerService {
         }
       });
 
+      await operation?.checkpoint();
       checkLocalSourceDirectory(source);
-      const emptyRequiresReview = summary.scanned_files === 0 && source.asset_count > 0 && !contextOptions.confirmEmpty && !imageProcessingContext.intentionalExclusion;
+      const emptyRequiresReview = summary.scanned_files === 0 && !contextOptions.confirmEmpty &&
+        !imageProcessingContext.intentionalExclusion &&
+        (source.asset_count > 0 || imageRepository.hasIndexedAssets(source.id));
       if (emptyRequiresReview) throw new LocalPathError('The indexed location appears empty. Confirm before applying the empty scan.', 'empty_review');
       if (treatCarouselsAsFolders) postRepository.softDeleteReservedCarouselsForLegacyMode(source.id);
       await this.reconcileCarouselPosts(carouselDiscovery, imageProcessingContext);
+      await operation?.checkpoint();
       summary.removed_files += this.applyPendingRemovals(imageProcessingContext);
 
       for (const folder of existingFolders) {
@@ -2605,6 +2691,8 @@ class ScannerService {
 
       derivativeSummary = await this.processDerivativeJobs([...derivativeJobs.values()], errors, sharedPreviewFolderIds, checkedRoot);
 
+      // Cleanup operates on a fully discovered source and runs to completion.
+      await operation?.sealControls();
       if (options.repairUnchangedDerivatives && summary.status !== 'failed' && derivativeMigrationService.isMigrationComplete()) {
         const reclaimedPreviews = await this.reclaimObsoleteVideoPreviews(errors, source.id);
         if (reclaimedPreviews > 0) {
@@ -2616,17 +2704,22 @@ class ScannerService {
         await derivativeMigrationService.cleanupStaleDerivatives();
       }
     } catch (error) {
-      summary.status = 'failed';
-      if (error instanceof LocalPathError && error.code === 'empty_review') sourceStatus = 'empty_review';
-      else if (error instanceof LocalPathError || ['ENOENT', 'ENOTDIR', 'EACCES', 'EPERM'].includes((error as NodeJS.ErrnoException).code ?? '')) sourceStatus = 'unavailable';
-      summary.error_text = error instanceof Error ? error.message : String(error);
-      log.error('Full scan failed', summary.error_text);
+      if (error instanceof ScanCancelledError || operation?.state === 'cancelling') {
+        summary.status = 'cancelled';
+      } else {
+        summary.status = 'failed';
+        if (error instanceof LocalPathError && error.code === 'empty_review') sourceStatus = 'empty_review';
+        else if (error instanceof LocalPathError || ['ENOENT', 'ENOTDIR', 'EACCES', 'EPERM'].includes((error as NodeJS.ErrnoException).code ?? '')) sourceStatus = 'unavailable';
+        summary.error_text = error instanceof Error ? error.message : String(error);
+        log.error('Full scan failed', summary.error_text);
+      }
     }
 
+    if (operation) operation.controllable = false;
     await this.applyScanErrors(summary, errors);
     await this.applyScanWarnings(summary, warnings);
 
-    if (isPrimary && summary.status !== 'failed') {
+    if (isPrimary && (summary.status === 'completed' || summary.status === 'completed_with_errors')) {
       appSettingsRepository.setMany([
         {
           key: LAST_SUCCESSFUL_GALLERY_ROOT_SETTING_KEY,
@@ -2643,6 +2736,7 @@ class ScannerService {
       this.markAvifMetadataRepairComplete();
     }
 
+    if (summary.status === 'completed' && eager) appSettingsRepository.remove(repairKey);
     this.updateLocalSourceAfterScan(source, summary, sourceStatus);
     this.finishRun(runId, summary);
     log.table(`Finished full scan (${reason})`, [
@@ -2672,7 +2766,10 @@ class ScannerService {
     }
 
     let root: string;
+    const repairKey = this.repairSettingKey(source.id);
+    const eager = appConfig.derivativeMode !== 'lazy';
     try { root = checkLocalSourceDirectory(source); } catch {
+      this.finishRun(runId, { ...summary, status: 'failed', error_text: 'Cannot access this location.' });
       return this.performFullScan(source, reason, resolveFullScanOptions({ allowDerivativeMigration: false }));
     }
     const discoveryContext = { source, heicImportEnabled: getHeicImportSetting().enabled };
@@ -2735,6 +2832,15 @@ class ScannerService {
       ])
     );
 
+    const operation = this.activeOperation;
+    const repairPending = eager && appSettingsRepository.get(repairKey) === '1';
+    if (repairPending) {
+      this.finishRun(runId, summary);
+      return this.performFullScan(source, reason, resolveFullScanOptions({ allowDerivativeMigration: false }));
+    }
+    if (eager) appSettingsRepository.set(repairKey, '1');
+    if (operation) operation.controllable = true;
+
     try {
       const existingFolders = folderRepository.getAll(source.id);
       const usedSlugs = new Set(folderRepository.listSlugs());
@@ -2757,7 +2863,7 @@ class ScannerService {
       });
 
       for (const sourceFolderPath of impactedSourceFolders) {
-        if (await hasAncestorExclusionMarker(root, sourceFolderPath) !== false) {
+        if (await this.scanTask(() => hasAncestorExclusionMarker(root, sourceFolderPath)) !== false) {
           fallbackReason = `${reason}:fallback`;
           break;
         }
@@ -2791,21 +2897,32 @@ class ScannerService {
         this.logProgress('folder');
       }
 
+      await operation?.checkpoint();
       if (fallbackReason === null) {
         checkLocalSourceDirectory(source);
         summary.removed_files += this.applyPendingRemovals(imageProcessingContext);
         postRepository.syncRepresentativePlaces(source.id);
         await this.processDerivativeJobs([...derivativeJobs.values()], errors, undefined, root);
       }
+      await operation?.sealControls();
     } catch (error) {
-      summary.status = 'failed';
-      summary.error_text = error instanceof Error ? error.message : String(error);
-      log.error('Incremental scan failed', summary.error_text);
+      if (error instanceof ScanCancelledError || operation?.state === 'cancelling') {
+        summary.status = 'cancelled';
+        fallbackReason = null;
+      } else {
+        summary.status = 'failed';
+        summary.error_text = error instanceof Error ? error.message : String(error);
+        log.error('Incremental scan failed', summary.error_text);
+      }
     }
 
+    if (operation) operation.controllable = false;
     await this.applyScanErrors(summary, errors);
 
-    if (!fallbackReason) this.updateLocalSourceAfterScan(source, summary);
+    if (!fallbackReason) {
+      if (summary.status === 'completed' && eager) appSettingsRepository.remove(repairKey);
+      this.updateLocalSourceAfterScan(source, summary);
+    }
     this.finishRun(runId, summary);
     log.table(`Finished incremental scan (${reason})`, [
       ['Status', summary.status],
@@ -3079,8 +3196,9 @@ class ScannerService {
 
     if (appConfig.scanMediaErrorMode === 'fail') {
       for (const job of jobs) {
-        if (isHeicFile(job.relativePath)) await processJob(job);
-        else await derivativeWorkLimit(() => processJob(job));
+        await this.scanTask(() => isHeicFile(job.relativePath)
+          ? processJob(job)
+          : derivativeWorkLimit(() => processJob(job)));
       }
     } else {
       const regularJobs: DerivativeJob[] = [];
@@ -3093,8 +3211,9 @@ class ScannerService {
       const drainJobs = async (queue: Iterator<DerivativeJob>, run: typeof processJob) => {
         for (let next = queue.next(); !next.done; next = queue.next()) {
           try {
-            await run(next.value);
+            await this.scanTask(() => run(next.value));
           } catch (error) {
+            if (error instanceof ScanCancelledError) return;
             failure ??= error;
           }
         }
@@ -3108,6 +3227,7 @@ class ScannerService {
           () => drainJobs(regularIterator, job => derivativeWorkLimit(() => processJob(job))))
       ];
       await Promise.all(workers);
+      await this.activeOperation?.checkpoint();
       if (failure) throw failure;
     }
 
@@ -3520,17 +3640,20 @@ class ScannerService {
         })
       : null;
 
-    // Invalidate before committing the replacement fingerprint so failures can
-    // be retried. Lazy scans also need this: a later share must never reuse the
-    // previous source's preview, even when normal playback now uses originals.
-    if (existing && !canReuseDerivativeFiles && localHeic) {
-      // Use fresh per-revision storage so a stale cache cannot masquerade as the
-      // replacement. The prior file stays intact until normal orphan cleanup.
-      thumbnailPath = getThumbnailPathForAssetKey(assetKey, undefined, fingerprint);
-      previewPath = getPreviewPathForAssetKey(assetKey, mediaType, undefined, fingerprint);
-    }
-    if (existing && !canReuseDerivativeFiles && mediaType === 'video') {
-      await fs.rm(safeJoin(appConfig.previewsDir, previewPath), { force: true });
+    // Invalidate outputs before committing the replacement fingerprint. A
+    // later repair can then reuse outputs that actually belong to this revision.
+    if (existing && !canReuseDerivativeFiles) {
+      if (localHeic) {
+        thumbnailPath = getThumbnailPathForAssetKey(assetKey, undefined, fingerprint);
+        previewPath = getPreviewPathForAssetKey(assetKey, mediaType, undefined, fingerprint);
+      } else if (appConfig.derivativeMode !== 'lazy') {
+        await Promise.all([
+          fs.rm(safeJoin(appConfig.thumbnailsDir, thumbnailPath), { force: true }),
+          fs.rm(safeJoin(appConfig.previewsDir, previewPath), { force: true })
+        ]);
+      } else if (mediaType === 'video') {
+        await fs.rm(safeJoin(appConfig.previewsDir, previewPath), { force: true });
+      }
     }
 
     if (moveCandidate) {

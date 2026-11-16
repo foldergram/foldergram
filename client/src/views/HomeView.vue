@@ -141,6 +141,10 @@
         </div>
         <h2 class="m-0">{{ t('home.initialScan.title') }}</h2>
         <p class="m-0 text-muted">{{ scanDescription }}</p>
+        <div v-if="appStore.scanStatusUnavailable" class="flex items-center gap-2" role="status">
+          {{ t('scanActivity.unavailable') }}
+          <button type="button" class="btn-ghost" @click="appStore.refreshScanProgress()">{{ t('common.retry') }}</button>
+        </div>
         <p v-if="scanActionLine" class="m-0 text-[0.86rem] font-semibold text-text">{{ scanActionLine }}</p>
         <dl class="grid grid-cols-4 gap-[0.8rem] m-0 max-sm:grid-cols-2">
           <div
@@ -214,6 +218,8 @@
           <InfiniteLoader v-if="feedStore.hasMore || feedStore.loading || !sourcesStore.unavailable.length" :loading="feedStore.loading" :has-more="feedStore.hasMore" @load-more="feedStore.loadMore" />
         </div>
       </template>
+
+      <p v-if="scanCompletion" class="mx-auto mt-4 max-w-[29.375rem] text-accent-strong" role="status">{{ getScanResultLabel(scanCompletion) }}</p>
 
       <StoriesModal
         v-if="activeRailViewerId && displayMomentItems.length"
@@ -289,11 +295,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, inject, onMounted, onUnmounted, ref, watch } from 'vue';
 import SourceUnavailable from '../components/SourceUnavailable.vue';
 import { useSourcesStore } from '../stores/sources';
 import { useI18n } from 'vue-i18n';
-import { RouterLink } from 'vue-router';
+import { routerKey, RouterLink } from 'vue-router';
 
 import { triggerManualScan } from '../api/gallery';
 import Avatar from '../components/Avatar.vue';
@@ -312,9 +318,11 @@ import { useMomentsStore } from '../stores/moments';
 import type { FeedMode } from '../types/api';
 import { formatFolderTitle } from '../utils/folder-titles';
 import { buildLikedCountByFolder, selectHomeRecommendations } from '../utils/home-recommendations';
-import { getInitialScanStats, getScanActionLine, getScanPhaseLabel, getScanSummary } from '../utils/scan-progress';
+import { getActiveScanStateLabel, getInitialScanStats, getScanActionLine, getScanPhaseLabel, getScanResultLabel, getScanSummary } from '../utils/scan-progress';
 
 const appStore = useAppStore();
+const router = inject(routerKey, null);
+let homeMounted = true;
 const authStore = useAuthStore();
 const feedStore = useFeedStore();
 const folderStoriesStore = useFolderStoriesStore();
@@ -362,6 +370,8 @@ const homeLayoutElement = ref<HTMLElement | null>(null);
 const isCompactHomeLayout = ref(false);
 const isSingleColumnLayout = computed(() => isCompactHomeLayout.value || showSourceOutageState.value);
 const requestingHomeScan = ref(false);
+const scanCompletion = computed(() => appStore.scanCompletion?.surface === (router?.currentRoute.value.fullPath ?? '/')
+  ? appStore.scanCompletion.result : null);
 const homeScanError = ref<string | null>(null);
 const feedStoryError = ref<string | null>(null);
 
@@ -486,7 +496,10 @@ const homeScanNote = computed(() => {
 
   return t('home.setup.noteIdle');
 });
-const initialScanPhaseLabel = computed(() => getScanPhaseLabel(appStore.stats?.scan ?? null));
+const initialScanPhaseLabel = computed(() => {
+  const scan = appStore.stats?.scan ?? null;
+  return getActiveScanStateLabel(scan) ?? getScanPhaseLabel(scan);
+});
 const initialScanStats = computed(() => getInitialScanStats(appStore.stats?.scan ?? null));
 const scanDescription = computed(() => {
   const scan = appStore.stats?.scan;
@@ -494,25 +507,7 @@ const scanDescription = computed(() => {
 });
 const scanActionLine = computed(() => getScanActionLine(appStore.stats?.scan ?? null));
 
-function wait(milliseconds: number) {
-  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
-}
 
-async function warmScanStatus() {
-  for (let attempt = 0; attempt < 12; attempt += 1) {
-    await wait(attempt === 0 ? 150 : 250);
-
-    try {
-      await appStore.fetchStats({ background: true });
-    } catch {
-      // The rescan request may win the race; keep polling until scan state flips or the request finishes.
-    }
-
-    if (appStore.stats?.scan.isScanning) {
-      return;
-    }
-  }
-}
 
 async function selectMode(mode: FeedMode) {
   await feedStore.setMode(mode);
@@ -585,10 +580,14 @@ async function runHomeScan() {
   requestingHomeScan.value = true;
   homeScanError.value = null;
 
+  const surface = (router?.currentRoute.value.fullPath ?? '/');
   try {
     const request = triggerManualScan();
-    void warmScanStatus();
-    await request;
+    appStore.scanStatusPending();
+    const response = await request;
+    appStore.showScanCompletion(response?.lastScan ?? null,
+      homeMounted && router?.currentRoute.value.fullPath === surface ? surface : null);
+    await appStore.refreshScanProgress();
     await appStore.fetchStats({ background: true });
     await Promise.all([foldersStore.fetchFolders(true), feedStore.loadInitial(true), momentsStore.fetchMoments(true)]);
   } catch (error) {
@@ -704,6 +703,7 @@ watch(
 );
 
 onUnmounted(() => {
+  homeMounted = false;
   homeLayoutResizeObserver?.disconnect();
   homeLayoutResizeObserver = null;
   window.removeEventListener('resize', updateHomeLayout);

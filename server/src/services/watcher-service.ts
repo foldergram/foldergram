@@ -12,12 +12,15 @@ import { storageService } from './storage-service.js';
 import { ensureWithinRoot, getRelativeGalleryPath, getSourceFolderPathFromRelativePath, isHiddenPath, matchesRelativeRoot } from '../utils/path-utils.js';
 import { isExclusionMarkerFilename, readExclusionMarkerState } from '../utils/exclusion-marker.js';
 
+const MAX_PENDING_PATHS_PER_SOURCE = 512;
+
 class WatcherService {
   private watcher: FSWatcher | null = null;
   private pendingPaths = new Map<number, Set<string>>();
   private debounceTimer: NodeJS.Timeout | null = null;
   private fullRescanRequested = new Set<number>();
   private watcherReady = false;
+  private batchRunning = false;
   private markerStates = new Map<string, boolean>();
   private markerChecks: Promise<void> = Promise.resolve();
 
@@ -115,10 +118,15 @@ class WatcherService {
 
       if (eventName === 'addDir' || eventName === 'unlinkDir') {
         this.fullRescanRequested.add(source.id);
-      } else {
+      } else if (!this.fullRescanRequested.has(source.id)) {
         const paths = this.pendingPaths.get(source.id) ?? new Set<string>();
         paths.add(relativePath);
-        this.pendingPaths.set(source.id, paths);
+        if (paths.size > MAX_PENDING_PATHS_PER_SOURCE) {
+          this.pendingPaths.delete(source.id);
+          this.fullRescanRequested.add(source.id);
+        } else {
+          this.pendingPaths.set(source.id, paths);
+        }
       }
 
       this.scheduleScan();
@@ -141,12 +149,14 @@ class WatcherService {
   }
 
   private scheduleScan(): void {
-    if (!this.watcher) return;
+    if (!this.watcher || this.batchRunning) return;
     if (this.debounceTimer) {
       clearTimeout(this.debounceTimer);
     }
 
     this.debounceTimer = setTimeout(async () => {
+      const watcher = this.watcher;
+      this.batchRunning = true;
       const queued = new Map(this.pendingPaths);
       const full = new Set(this.fullRescanRequested);
       this.pendingPaths.clear();
@@ -155,6 +165,7 @@ class WatcherService {
 
       try {
         for (const id of full) {
+          if (this.watcher !== watcher) return;
           const sources = listLocalSources().filter(source => source.enabled);
           if (sources.length === 1 && sources[0].managed_by === 'environment') {
             await scannerService.scanAll('watcher', { allowDerivativeMigration: false });
@@ -163,6 +174,7 @@ class WatcherService {
           }
         }
         for (const [id, paths] of queued) {
+          if (this.watcher !== watcher) return;
           if (!full.has(id)) {
             const primary = listLocalSources().find(source => source.managed_by === 'environment');
             if (id === primary?.id) await scannerService.scanChangedPaths([...paths], 'watcher');
@@ -171,6 +183,9 @@ class WatcherService {
         }
       } catch (error) {
         log.error('Gallery watcher scan failed', error instanceof Error ? error.message : String(error));
+      } finally {
+        this.batchRunning = false;
+        if (this.pendingPaths.size || this.fullRescanRequested.size) this.scheduleScan();
       }
     }, 700);
   }

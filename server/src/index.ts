@@ -22,7 +22,7 @@ import { createServer } from "node:http";
 import { appConfig } from "./config/env.js";
 import { createApp } from "./app.js";
 import { databaseManager } from "./db/database.js";
-import { collectionRepository } from "./db/repositories.js";
+import { collectionRepository, scanRunRepository } from "./db/repositories.js";
 import { log } from "./services/log-service.js";
 import { stopHeicProcessing } from "./services/heic/service.js";
 import { permanentDeletionService } from "./services/permanent-deletion-service.js";
@@ -60,6 +60,7 @@ async function bootstrap(): Promise<void> {
     // and is exposed through the admin status response.
     log.error("Permanent deletion recovery failed; server startup will continue", error);
   }
+  scanRunRepository.recoverInterrupted();
   const app = createApp();
   const server = createServer(app);
   const portVariableName = appConfig.nodeEnv === "production" ? "SERVER_PORT" : "DEV_SERVER_PORT";
@@ -101,6 +102,7 @@ async function bootstrap(): Promise<void> {
   async function shutdown(signal: string): Promise<void> {
     log.info(`Received ${signal}, shutting down`);
     stopSources();
+    scannerService.stopActiveOperationForShutdown();
     await Promise.all([watcherService.stop(), stopHeicProcessing()]);
     server.close(() => {
       databaseManager.close();

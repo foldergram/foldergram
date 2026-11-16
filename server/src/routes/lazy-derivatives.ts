@@ -13,7 +13,7 @@ import { galleryService } from '../services/gallery-service.js';
 import { indexedHeicSource } from '../services/heic/indexed-source.js';
 import { derivativeWorkLimit, HeicError } from '../services/heic/service.js';
 import { isHeicFile } from '../utils/image-utils.js';
-import { maintenanceOperationLock } from '../services/maintenance-operation-lock.js';
+import { MaintenancePausedError, maintenanceOperationLock } from '../services/maintenance-operation-lock.js';
 import { resolveOriginalPath } from '../utils/media-paths.js';
 import { isImmichSource, isLocalOriginalUnavailable, isSourceVisible } from '../sources/local-source.js';
 import {
@@ -308,6 +308,12 @@ async function serveOrGenerate(
     await queuedGeneration;
   } catch (error) {
     if (response.headersSent) {
+      return;
+    }
+    if (error instanceof MaintenancePausedError) {
+      applyDerivativeErrorHeaders(response);
+      response.setHeader('Retry-After', '2');
+      response.status(503).json({ message: 'Scan paused. Try again shortly.' });
       return;
     }
 

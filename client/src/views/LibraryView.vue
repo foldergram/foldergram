@@ -39,6 +39,14 @@
       </div>
     </header>
 
+    <div v-if="scan?.isScanning" class="flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-[0.9rem] border border-border bg-surface px-3 py-2" data-test="library-scan-progress">
+      <ScanProgressContent :scan="scan" compact announce />
+      <div class="flex flex-wrap items-center gap-2">
+        <ScanControls />
+        <button v-if="openScanActivity" type="button" class="btn-ghost" @click="openScanActivity">{{ t('scanActivity.details') }}</button>
+      </div>
+    </div>
+
     <EmptyState
       v-if="appStore.isLibraryUnavailable"
       :title="t('reels.view.libraryUnavailableTitle')"
@@ -48,7 +56,7 @@
       <div
         class="flex flex-wrap items-center gap-3 p-[0.85rem] pl-4 bg-surface border border-border rounded-[1.1rem] shadow-[var(--shadow)]"
       >
-        <div class="relative flex-1 min-w-[12rem]">
+        <div class="relative flex-1 min-w-[min(12rem,100%)]">
           <svg
             class="absolute left-3 top-1/2 -translate-y-1/2 w-[1rem] h-[1rem] text-muted pointer-events-none"
             viewBox="0 0 24 24"
@@ -334,7 +342,7 @@
 </template>
 
 <script setup lang="ts">
-  import { computed, onMounted, onUnmounted, ref, watch } from "vue"
+  import { computed, inject, onMounted, onUnmounted, ref, watch } from "vue"
   import SourceUnavailable from '../components/SourceUnavailable.vue';
   import { useSourcesStore } from '../stores/sources';
   import { useI18n } from "vue-i18n"
@@ -347,6 +355,9 @@
   import EmptyState from "../components/EmptyState.vue"
   import ErrorState from "../components/ErrorState.vue"
   import { deleteFolder, fetchFolderDirectory } from "../api/gallery"
+  import ScanControls from "../components/ScanControls.vue"
+  import ScanProgressContent from "../components/ScanProgressContent.vue"
+  import { openScanActivityKey } from "../components/scan-activity"
   import { useAppStore } from "../stores/app"
   import { useAuthStore } from "../stores/auth"
   import { useFeedStore } from "../stores/feed"
@@ -364,6 +375,8 @@
     | "path-asc"
 
   const appStore = useAppStore()
+  const scan = computed(() => appStore.stats?.scan ?? null)
+  const openScanActivity = inject(openScanActivityKey, null)
   const sourcesStore = useSourcesStore();
   const authStore = useAuthStore()
   const feedStore = useFeedStore()

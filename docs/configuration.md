@@ -433,7 +433,9 @@ mirroring the gallery tree. Existing libraries migrate on the next full scan:
 
 ## Live scan progress
 
-Foldergram exposes live scan state in three places:
+Use the Library activity button while work is active, or open the Scan Library card under **Settings → Scan & Library**. Closing activity details leaves the scan running. The Library page also shows an inline summary above the search controls.
+
+Foldergram exposes live scan state through these endpoints.
 
 - `GET /api/status` includes the current viewer-safe `scan` snapshot alongside broader shell status
 - `GET /api/scan-progress` returns the same viewer-safe scan payload on its own for lighter polling

@@ -174,6 +174,130 @@ describe.sequential('quick rescans and selective video previews', () => {
     return imageRepository.getByRelativePath('album/clip.mp4')!;
   }
 
+  it('drains discovery before pausing and preserves unvisited content when cancelled', async () => {
+    await fs.mkdir(path.join(appConfig.galleryRoot, 'later'));
+    await fs.writeFile(path.join(appConfig.galleryRoot, 'later/keep.jpg'), 'original');
+    await scan(false);
+    const unvisited = imageRepository.getByRelativePath('later/keep.jpg')!;
+    await fs.writeFile(path.join(appConfig.galleryRoot, 'album/new.jpg'), 'new');
+    await fs.rm(path.join(appConfig.galleryRoot, 'later/keep.jpg'));
+
+    const originalMetadata = readMediaMetadataMock.getMockImplementation()!;
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    readMediaMetadataMock.mockImplementation(async (sourcePath: string) => {
+      if (path.basename(sourcePath) === 'new.jpg') {
+        entered.resolve();
+        await release.promise;
+      }
+      return originalMetadata(sourcePath);
+    });
+
+    const pending = scannerService.scanAll('manual', { repairUnchangedDerivatives: false });
+    await entered.promise;
+    const operation = scannerService.getProgress().operation!;
+    const { maintenanceOperationLock } = await import('../src/services/maintenance-operation-lock.js');
+    const conflicting = maintenanceOperationLock.runExclusive(async () => 'mutation');
+    const conflictResult = expect(conflicting).rejects.toMatchObject({ status: 409 });
+    try {
+      expect(scannerService.controlOperation(operation.id, 'pause').state).toBe('pausing');
+      expect(scannerService.controlOperation(operation.id, 'pause').state).toBe('pausing');
+      await conflictResult;
+      expect(scannerService.getProgress().phase).toBe('discovery');
+      release.resolve();
+      await vi.waitFor(() => expect(scannerService.getProgress().operation?.state).toBe('paused'));
+      expect(scannerService.getProgress().isScanning).toBe(true);
+      expect(scannerService.controlOperation(operation.id, 'cancel').state).toBe('cancelling');
+      const result = await pending;
+      expect(result?.status).toBe('cancelled');
+      expect(scannerService.controlOperation(operation.id, 'cancel').state).toBe('cancelled');
+      expect(imageRepository.getByRelativePath(unvisited.relative_path)?.is_deleted).toBe(0);
+      await expect(maintenanceOperationLock.runExclusive(async () => 'ready')).resolves.toBe('ready');
+    } finally {
+      release.resolve();
+      if (scannerService.getProgress().operation?.controls.includes('cancel')) scannerService.controlOperation(operation.id, 'cancel');
+      await pending;
+    }
+  });
+
+  it('resumes the same derivative run and repairs unstarted outputs after cancellation', async () => {
+    // Establish the library layout so the gate is on ordinary derivative work.
+    await scan(false);
+    generateDerivativesMock.mockClear();
+    for (let index = 0; index < appConfig.scanDerivativeConcurrency + 3; index++) {
+      await fs.writeFile(path.join(appConfig.galleryRoot, `album/photo-${index}.jpg`), 'photo');
+    }
+
+    const generate = generateDerivativesMock.getMockImplementation()!;
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const resumed = Promise.withResolvers<void>();
+    const settleResumed = Promise.withResolvers<void>();
+    const admitted = appConfig.scanDerivativeConcurrency;
+    let calls = 0;
+
+    generateDerivativesMock.mockImplementation(async (...args: unknown[]) => {
+      calls++;
+      if (calls <= admitted) {
+        if (calls === admitted) entered.resolve();
+        await release.promise;
+      } else {
+        resumed.resolve();
+        await settleResumed.promise;
+      }
+      return generate(...args);
+    });
+    const pending = scannerService.scanAll('manual', { repairUnchangedDerivatives: false });
+    await entered.promise;
+    const { operation, runId } = scannerService.getProgress();
+    try {
+      expect(scannerService.getProgress().phase).toBe('derivatives');
+      expect(scannerService.controlOperation(operation!.id, 'pause').state).toBe('pausing');
+      release.resolve();
+      await vi.waitFor(() => expect(scannerService.getProgress().operation?.state).toBe('paused'));
+      expect(generateDerivativesMock).toHaveBeenCalledTimes(admitted);
+      expect(scannerService.controlOperation(operation!.id, 'resume').state).toBe('running');
+      await resumed.promise;
+      expect(scannerService.getProgress()).toMatchObject({ operation: { id: operation!.id }, runId });
+      expect(scannerService.controlOperation(operation!.id, 'cancel').state).toBe('cancelling');
+      settleResumed.resolve();
+      expect((await pending)?.status).toBe('cancelled');
+    } finally {
+      release.resolve();
+      settleResumed.resolve();
+      if (scannerService.getProgress().operation?.controls.includes('cancel')) scannerService.controlOperation(operation!.id, 'cancel');
+      await pending;
+    }
+
+    // Add a second wave with enough jobs that cancellation leaves a pending output.
+    for (let index = 0; index < admitted + 2; index++) {
+      await fs.writeFile(path.join(appConfig.galleryRoot, `album/extra-${index}.jpg`), 'extra');
+    }
+    const blocked = Promise.withResolvers<void>();
+    const unblock = Promise.withResolvers<void>();
+    generateDerivativesMock.mockImplementation(async (...args: unknown[]) => {
+      blocked.resolve();
+      await unblock.promise;
+      return generate(...args);
+    });
+    const interrupted = scannerService.scanAll('manual', { repairUnchangedDerivatives: false });
+    await blocked.promise;
+    const secondOperation = scannerService.getProgress().operation!;
+    try {
+      expect(() => scannerService.controlOperation(operation!.id, 'cancel')).toThrow(/no longer current/);
+      scannerService.controlOperation(secondOperation.id, 'cancel');
+      unblock.resolve();
+      expect((await interrupted)?.status).toBe('cancelled');
+    } finally {
+      unblock.resolve();
+      await interrupted;
+    }
+    generateDerivativesMock.mockImplementation(generate);
+    await scan(false);
+    const repaired = imageRepository.getByRelativePath(`album/extra-${admitted + 1}.jpg`)!;
+    await expect(fs.stat(path.join(appConfig.thumbnailsDir, repaired.thumbnail_path))).resolves.toBeDefined();
+  });
+
   it('generates a poster but skips a video preview for eligible media during an eager scan', async () => {
     const image = await scan(false);
 

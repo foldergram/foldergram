@@ -396,6 +396,64 @@ describe('local gallery sources', () => {
     expect(postRepository.findById(secondaryPost.id)?.place_id).toBeNull();
   });
 
+  it('keeps an initial import protected after cancellation and an empty mount', async () => {
+    await writePhoto(secondary, 'Family/photo.jpg', '#123456');
+    const { createLocalSource } = await import('../src/sources/source-service.js');
+    const sourceId = await createLocalSource({
+      kind: 'local', name: 'Interrupted import', rootPath: secondary, enabled: true, readOnlyOriginals: true
+    });
+    const sourceMetadata = db.connection.prepare(
+      'SELECT status, progress, last_error, last_success, asset_count, folder_count, generation FROM media_sources WHERE id = ?'
+    );
+    const before = sourceMetadata.get(sourceId);
+    const derivatives = await import('../src/services/derivative-service.js');
+    const readMetadata = derivatives.readMediaMetadata;
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const spy = vi.spyOn(derivatives, 'readMediaMetadata').mockImplementation(async (...args) => {
+      entered.resolve();
+      await release.promise;
+      return readMetadata(...args);
+    });
+
+    const pending = scanner.scanSource(sourceId);
+    try {
+      await Promise.race([entered.promise, pending]);
+      const progress = scanner.getProgress();
+      expect(progress.phase).toBe('discovery');
+      expect(scanner.controlOperation(progress.operation!.id, 'cancel').state).toBe('cancelling');
+    } finally {
+      release.resolve();
+      await pending;
+      spy.mockRestore();
+    }
+
+    expect(await pending).toMatchObject({ status: 'cancelled' });
+    const indexedImage = db.connection.prepare('SELECT is_deleted FROM images WHERE source_id = ?');
+    expect(indexedImage.get(sourceId)).toMatchObject({ is_deleted: 0 });
+
+    await fs.rm(path.join(secondary, 'Family'), { recursive: true });
+    const afterCancellation = sourceMetadata.get(sourceId);
+    await scanner.scanSource(sourceId);
+    expect(indexedImage.get(sourceId)).toMatchObject({ is_deleted: 0 });
+    expect(afterCancellation).toEqual({
+      ...before,
+      asset_count: 1,
+      folder_count: 1,
+      generation: Number(before?.generation) + 1
+    });
+    expect(sourceMetadata.get(sourceId)).toMatchObject({ status: 'empty_review', last_success: null });
+
+    // Older cancelled runs could leave indexed assets with a zero cached count.
+    db.connection.prepare('UPDATE media_sources SET asset_count = 0 WHERE id = ?').run(sourceId);
+    await scanner.scanSource(sourceId);
+    expect(sourceMetadata.get(sourceId)).toMatchObject({ status: 'empty_review' });
+    expect(indexedImage.get(sourceId)).toMatchObject({ is_deleted: 0 });
+
+    await scanner.scanSource(sourceId, 'source', { confirmEmpty: true });
+    expect(indexedImage.get(sourceId)).toMatchObject({ is_deleted: 1 });
+  });
+
   it('requires confirmation before applying an empty scan and keeps saved associations', async () => {
     await writePhoto(secondary, 'Family/photo.jpg', '#123456');
     const source = await addSource(secondary);

@@ -309,6 +309,7 @@
     />
 
     <div class="z-50 mt-auto pt-10 pb-2">
+      <slot name="activity" />
       <div class="relative">
         <div
           v-if="moreMenuOpen"
@@ -431,6 +432,8 @@
   import Avatar from "./Avatar.vue"
   import BrandMark from "./BrandMark.vue"
 
+  const props = defineProps<{ panelOpen?: boolean }>()
+  const emit = defineEmits<{ openMore: [] }>()
   const { t } = useI18n()
   const appVersion = __APP_VERSION__
   const appStore = useAppStore()
@@ -484,6 +487,7 @@
   }
 
   function toggleMoreMenu() {
+    if (!moreMenuOpen.value) emit('openMore')
     moreMenuOpen.value = !moreMenuOpen.value
   }
 
@@ -524,6 +528,8 @@
       closeMoreMenu()
     },
   )
+
+  watch(() => props.panelOpen, (open) => { if (open) closeMoreMenu() })
 
   onMounted(() => {
     void placesStore.fetchPlaces()

@@ -22,7 +22,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onUnmounted, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { RouterView, useRoute, useRouter, type RouteLocationNormalizedLoaded } from 'vue-router';
 
@@ -208,7 +208,18 @@ function unlockModalScroll() {
   modalScrollLocked = false;
 }
 
+function refreshVisibleScanStatus() {
+  if (authStore.accessGranted && !route.meta.publicShare) appStore.refreshVisibleScanStatus();
+}
+
+onMounted(() => {
+  window.addEventListener('focus', refreshVisibleScanStatus);
+  document.addEventListener('visibilitychange', refreshVisibleScanStatus);
+});
+
 onUnmounted(() => {
+  window.removeEventListener('focus', refreshVisibleScanStatus);
+  document.removeEventListener('visibilitychange', refreshVisibleScanStatus);
   unlockModalScroll();
   appStore.stopStatsPolling();
   sourcesStore.stop();
@@ -249,10 +260,24 @@ watch(
     if (!hadAccess || !appStore.stats || likesMode !== previousLikesMode) {
       sourcesStore.start();
       await loadProtectedState(Boolean(hadAccess));
+      if (authStore.accessGranted && !route.meta.publicShare) appStore.startStatsPolling();
     }
   },
   {
     immediate: true
+  }
+);
+
+watch(isPublicShareRoute, (publicShare) => {
+  if (publicShare) appStore.stopStatsPolling();
+  else refreshVisibleScanStatus();
+});
+
+watch(
+  () => authStore.canAccessSettings,
+  () => {
+    appStore.resetScanCapability();
+    refreshVisibleScanStatus();
   }
 );
 

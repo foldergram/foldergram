@@ -438,10 +438,10 @@
       "scanActionNote": {
         "loading": "Cargando el estado actual de la biblioteca...",
         "rebuildRequired": "Reconstruye primero el índice de la biblioteca porque cambió la ubicación de la galería.",
-        "otherTaskActive": "Hay otra tarea de biblioteca en ejecución. El progreso en vivo aparece en la barra de estado fija.",
-        "progress": "El progreso en vivo aparece en la barra de estado fija.",
-        "progressChanges": "Buscando cambios en la galería. El progreso en vivo aparece en la barra de estado fija.",
-        "progressRepair": "Buscando cambios y reparando derivados. El progreso en vivo aparece en la barra de estado fija.",
+        "otherTaskActive": "Hay otra tarea de biblioteca en ejecución. El progreso en directo aparece en la tarjeta Escanear biblioteca.",
+        "progress": "El progreso en directo aparece en la tarjeta Escanear biblioteca.",
+        "progressChanges": "Buscando cambios en la galería. El progreso en directo aparece en la tarjeta Escanear biblioteca.",
+        "progressRepair": "Buscando cambios y reparando derivados. El progreso en directo aparece en la tarjeta Escanear biblioteca.",
         "legacyMigration": "Ejecuta un escaneo para mover miniaturas y vistas previas reflejadas heredadas al diseño de almacenamiento con claves de recursos.",
         "carouselReconciliation": "Ejecuta un escaneo para aplicar el modo guardado de las carpetas de carrusel a las carpetas y publicaciones indexadas.",
         "idle": "Ambas acciones detectan cambios en la galería. Reparar también comprueba los medios generados de los archivos sin cambios."
@@ -457,7 +457,7 @@
       "thumbnailActionNote": {
         "loading": "Cargando el estado actual de la biblioteca...",
         "rebuildRequired": "No disponible hasta que se reconstruya el índice de la biblioteca para la nueva ubicación de la galería.",
-        "progress": "El progreso en vivo aparece en la barra de estado fija.",
+        "progress": "El progreso en directo aparece en la tarjeta Escanear biblioteca.",
         "rebuildActive": "Espera a que termine la reconstrucción completa primero.",
         "scanActive": "Espera a que termine el escaneo actual primero.",
         "legacyMigration": "Esto conserva las rutas actuales de las miniaturas y no migra los derivados reflejados heredados. Ejecuta Escanear biblioteca para moverlos al almacenamiento con claves de recursos.",
@@ -477,7 +477,7 @@
       },
       "rebuildActionNote": {
         "loading": "Cargando el estado actual de la biblioteca...",
-        "progress": "El progreso en vivo aparece en la barra de estado fija.",
+        "progress": "El progreso en directo aparece en la tarjeta Escanear biblioteca.",
         "thumbnailActive": "Espera a que termine primero la regeneración de miniaturas.",
         "scanActive": "Espera a que termine el escaneo actual primero.",
         "rebuildRequired": "Recomendado porque cambió la ubicación de la galería.",
@@ -1315,6 +1315,44 @@
     "resumePlayback": "Reanudar reproducción",
     "pausePlayback": "Pausar reproducción",
     "closeViewer": "Cerrar visor"
+  },
+  "scanActivity": {
+    "state": {
+      "queued": "Escaneo en cola",
+      "pausing": "Pausando escaneo…",
+      "paused": "Escaneo en pausa",
+      "cancelling": "Cancelando escaneo…"
+    },
+    "controls": {
+      "pause": "Pausar",
+      "resume": "Reanudar",
+      "cancel": "Cancelar escaneo",
+      "keepsWork": "Se conservará el trabajo completado.",
+      "error": "El escaneo cambió o no se pudo enviar la solicitud. Comprueba el estado e inténtalo de nuevo.",
+      "unavailable": "Esta etapa no se puede pausar ni cancelar."
+    },
+    "title": "Actividad de la biblioteca",
+    "showDetails": "Mostrar actividad de la biblioteca",
+    "runningDetails": "Escaneo de la biblioteca en curso. Ver detalles",
+    "syncDetails": "Sincronización de fuentes en curso. Ver detalles",
+    "attentionDetails": "El escaneo de la biblioteca requiere atención. Ver detalles",
+    "unavailableDetails": "Estado del escaneo no disponible. Ver detalles",
+    "unavailable": "Estado no disponible",
+    "synchronizing": "Sincronizando fuentes",
+    "openSettings": "Abrir ajustes",
+    "openSources": "Abrir fuentes",
+    "openLibrary": "Abrir biblioteca",
+    "openIssue": "Ver el resultado del escaneo en Estado",
+    "openStatus": "Ver el último escaneo en Estado",
+    "acknowledge": "Marcar como revisado",
+    "acknowledgeResults": "Marcar {count} resultados como revisados",
+    "earlierIssue": "Un escaneo anterior requiere atención",
+    "similarResults": "{count} escaneos notificaron este problema.",
+    "details": "Detalles",
+    "completed": "Escaneo completado.",
+    "completedWithErrors": "Escaneo completado con errores.",
+    "failed": "No se pudo completar el escaneo.",
+    "cancelled": "Escaneo cancelado. Se conservó el trabajo completado."
   },
   "scanProgress": {
     "titles": {

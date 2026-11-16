@@ -438,10 +438,10 @@
       "scanActionNote": {
         "loading": "Aktueller Bibliotheksstatus wird geladen...",
         "rebuildRequired": "Baue zuerst den Bibliotheksindex neu auf, da sich der Galerie-Speicherort geändert hat.",
-        "otherTaskActive": "Eine andere Bibliotheksaufgabe läuft. Der Fortschritt wird live in der fixierten Statusleiste angezeigt.",
-        "progress": "Der Fortschritt wird live in der fixierten Statusleiste angezeigt.",
-        "progressChanges": "Die Galerie wird nach Änderungen durchsucht. Der Fortschritt wird live in der fixierten Statusleiste angezeigt.",
-        "progressRepair": "Änderungen werden gesucht und Derivate repariert. Der Fortschritt wird live in der fixierten Statusleiste angezeigt.",
+        "otherTaskActive": "Eine andere Bibliotheksaufgabe läuft. Der Live-Fortschritt steht im Bereich Bibliothek scannen.",
+        "progress": "Der Live-Fortschritt steht im Bereich Bibliothek scannen.",
+        "progressChanges": "Die Galerie wird nach Änderungen durchsucht. Der Live-Fortschritt steht im Bereich Bibliothek scannen.",
+        "progressRepair": "Änderungen werden gesucht und Derivate repariert. Der Live-Fortschritt steht im Bereich Bibliothek scannen.",
         "legacyMigration": "Führe einen Scan aus, um alte gespiegelte Miniaturansichten und Vorschauen in die Asset-Key-Speicherstruktur zu verschieben.",
         "carouselReconciliation": "Führe einen Scan aus, um den gespeicherten Karussell-Ordnermodus auf indizierte Ordner und Beiträge anzuwenden.",
         "idle": "Beide Aktionen erkennen Änderungen in der Galerie. Die Reparatur prüft zusätzlich generierte Medien unveränderter Dateien."
@@ -457,7 +457,7 @@
       "thumbnailActionNote": {
         "loading": "Aktueller Bibliotheksstatus wird geladen...",
         "rebuildRequired": "Nicht verfügbar, bis der Bibliotheksindex für den neuen Galerie-Speicherort neu aufgebaut wurde.",
-        "progress": "Der Fortschritt wird live in der fixierten Statusleiste angezeigt.",
+        "progress": "Der Live-Fortschritt steht im Bereich Bibliothek scannen.",
         "rebuildActive": "Warte zuerst, bis der vollständige Neuaufbau abgeschlossen ist.",
         "scanActive": "Warte zuerst, bis der aktuelle Scan abgeschlossen ist.",
         "legacyMigration": "Hierbei bleiben die aktuellen Pfade der Miniaturansichten erhalten, alte gespiegelte abgeleitete Dateien werden nicht migriert. Führe stattdessen „Bibliothek scannen“ aus, um sie in den Asset-Key-Speicher zu verschieben.",
@@ -477,7 +477,7 @@
       },
       "rebuildActionNote": {
         "loading": "Aktueller Bibliotheksstatus wird geladen...",
-        "progress": "Der Fortschritt wird live in der fixierten Statusleiste angezeigt.",
+        "progress": "Der Live-Fortschritt steht im Bereich Bibliothek scannen.",
         "thumbnailActive": "Warte zuerst, bis die Neuerzeugung der Miniaturansichten abgeschlossen ist.",
         "scanActive": "Warte zuerst, bis der aktuelle Scan abgeschlossen ist.",
         "rebuildRequired": "Empfohlen, da sich der Galerie-Speicherort geändert hat.",
@@ -1315,6 +1315,44 @@
     "resumePlayback": "Wiedergabe fortsetzen",
     "pausePlayback": "Wiedergabe pausieren",
     "closeViewer": "Ansicht schließen"
+  },
+  "scanActivity": {
+    "state": {
+      "queued": "Scan in der Warteschlange",
+      "pausing": "Scan wird pausiert…",
+      "paused": "Scan pausiert",
+      "cancelling": "Scan wird abgebrochen…"
+    },
+    "controls": {
+      "pause": "Pause",
+      "resume": "Fortsetzen",
+      "cancel": "Scan abbrechen",
+      "keepsWork": "Abgeschlossene Arbeit bleibt erhalten.",
+      "error": "Der Scanstatus hat sich geändert oder die Anfrage konnte nicht gesendet werden. Prüfe den Status und versuche es erneut.",
+      "unavailable": "Dieser Arbeitsschritt kann nicht pausiert oder abgebrochen werden."
+    },
+    "title": "Bibliotheksaktivität",
+    "showDetails": "Bibliotheksaktivität anzeigen",
+    "runningDetails": "Bibliotheksscan läuft. Details anzeigen",
+    "syncDetails": "Quellensynchronisierung läuft. Details anzeigen",
+    "attentionDetails": "Bibliotheksscan erfordert Aufmerksamkeit. Details anzeigen",
+    "unavailableDetails": "Scanstatus nicht verfügbar. Details anzeigen",
+    "unavailable": "Status nicht verfügbar",
+    "synchronizing": "Quellen werden synchronisiert",
+    "openSettings": "Einstellungen öffnen",
+    "openSources": "Quellen öffnen",
+    "openLibrary": "Bibliothek öffnen",
+    "openIssue": "Scanergebnis unter Status anzeigen",
+    "openStatus": "Letzten Scan unter Status anzeigen",
+    "acknowledge": "Zur Kenntnis nehmen",
+    "acknowledgeResults": "{count} Ergebnisse zur Kenntnis nehmen",
+    "earlierIssue": "Ein früherer Scan erfordert Aufmerksamkeit",
+    "similarResults": "Bei {count} Scans trat dieses Problem auf.",
+    "details": "Details",
+    "completed": "Scan abgeschlossen.",
+    "completedWithErrors": "Scan mit Fehlern abgeschlossen.",
+    "failed": "Scan konnte nicht abgeschlossen werden.",
+    "cancelled": "Scan abgebrochen. Abgeschlossene Arbeit bleibt erhalten."
   },
   "scanProgress": {
     "titles": {

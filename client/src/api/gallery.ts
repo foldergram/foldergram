@@ -55,6 +55,8 @@ import type {
   RebuildLibraryResult,
   RebuildThumbnailsResult,
   ScanProgress,
+  ScanControl,
+  ScanOperationStatus,
   FolderSummary,
   FolderDirectoryQuery,
   FolderDirectoryPayload,
@@ -521,6 +523,13 @@ export function updateViewerAccess(mode: ViewerAccessMode, viewerPassword?: stri
 
 export interface ManualScanOptions {
   repairDerivatives: boolean;
+}
+
+export function controlScanOperation(id: string, action: ScanControl) {
+  return requestJson<{ ok: boolean; operation: ScanOperationStatus }>(
+    '/api/admin/scan-operations/' + encodeURIComponent(id) + '/' + action,
+    { method: 'POST' }
+  );
 }
 
 export function triggerManualScan(options?: ManualScanOptions) {

@@ -61,7 +61,7 @@ export function createApp() {
     }
 
     const message = error instanceof Error ? error.message : 'Unexpected server error';
-    response.status(400).json({ message });
+    response.status(error instanceof Error && 'status' in error && error.status === 409 ? 409 : 400).json({ message });
   });
 
   return app;
