@@ -9,16 +9,21 @@ export const SUPPORTED_VIDEO_EXTENSIONS = new Set(['.mp4', '.mov', '.m4v', '.web
 export const THUMBNAIL_SIZE = 640;
 export const PREVIEW_MAX_WIDTH = 1500;
 
-export function isSupportedImageFile(filename: string): boolean {
-  return SUPPORTED_IMAGE_EXTENSIONS.has(path.extname(filename).toLowerCase());
+export function isHeicFile(filename: string): boolean {
+  const extension = path.extname(filename).toLowerCase();
+  return extension === '.heic' || extension === '.heif';
+}
+
+export function isSupportedImageFile(filename: string, includeHeic = false): boolean {
+  return SUPPORTED_IMAGE_EXTENSIONS.has(path.extname(filename).toLowerCase()) || (includeHeic && isHeicFile(filename));
 }
 
 export function isSupportedVideoFile(filename: string): boolean {
   return SUPPORTED_VIDEO_EXTENSIONS.has(path.extname(filename).toLowerCase());
 }
 
-export function isSupportedMediaFile(filename: string): boolean {
-  return isSupportedImageFile(filename) || isSupportedVideoFile(filename);
+export function isSupportedMediaFile(filename: string, includeHeic = false): boolean {
+  return isSupportedImageFile(filename, includeHeic) || isSupportedVideoFile(filename);
 }
 
 export function createFingerprint(relativePath: string, fileSize: number, mtimeMs: number): string {
@@ -60,6 +65,10 @@ export function getMimeTypeFromExtension(extension: string): string {
       return 'image/gif';
     case '.avif':
       return 'image/avif';
+    case '.heic':
+      return 'image/heic';
+    case '.heif':
+      return 'image/heif';
     case '.mp4':
       return 'video/mp4';
     case '.mov':

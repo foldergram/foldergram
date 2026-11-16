@@ -408,6 +408,18 @@
         "scanDescription": "Der gespeicherte Karussell-Ordnermodus wurde noch nicht auf den Index angewendet. Führe einen Scan aus, um Ordner und Beiträge zu aktualisieren.",
         "rebuildDescription": "Der gespeicherte Karussell-Ordnermodus wurde noch nicht auf den Index angewendet. Verwende unten „Bibliotheksindex neu aufbauen“, um ihn auf den aktuellen Galerie-Speicherort anzuwenden."
       },
+      "heicImport": {
+        "label": "HEIC/HEIF-Fotos importieren",
+        "experimental": "Experimentell",
+        "description": "Unterstützte HEIC/HEIF-Fotos aus lokalen Quellen einbeziehen. Starte nach dem Aktivieren einen Scan.",
+        "managed": "Über die Umgebung verwaltet.",
+        "loading": "HEIC-Importeinstellungen werden geladen…",
+        "saving": "HEIC-Importeinstellungen werden gespeichert…",
+        "saved": "HEIC-Importeinstellung gespeichert.",
+        "busy": "Warte, bis der aktuelle Scan oder Neuaufbau abgeschlossen ist.",
+        "loadError": "Die HEIC-Importeinstellung konnte nicht geladen werden.",
+        "saveError": "Die HEIC-Importeinstellung konnte nicht gespeichert werden."
+      },
       "scanCard": {
         "title": "Bibliothek scannen",
         "description": "Erkennt Ergänzungen, Änderungen und Entfernungen. Wähle die Derivatreparatur, um zusätzlich generierte Medien unveränderter Dateien zu prüfen."

@@ -142,6 +142,15 @@ optional `HD` original source in the detail player.
 Folder-share playback keeps using scoped preview media instead of granting
 ordinary original access.
 
+## Can I import iPhone HEIC photos?
+
+Turn on **Import HEIC/HEIF photos** in **Settings → Scan & Library**, then run
+a scan to import [supported still photos](./media-processing.md#experimental-local-heic-and-heif)
+from local galleries. Foldergram shows the WebP version and keeps the original
+available for authorized download.
+Some HDR, 10-bit, and other HEIF variants are outside this preview. Immich
+continues to handle the remote originals and derivatives for its own assets.
+
 ## Why are thumbnails or previews being created while I browse?
 
 That is expected when `DERIVATIVE_MODE=lazy`.

@@ -1,6 +1,8 @@
 import { authorizedImage, imageFolderIds, serveRemoteMedia } from '../immich/media.js';
 import { isImmichSource, isSourceVisible, isLocalOriginalUnavailable } from '../sources/local-source.js';
-import { imageRepository, folderRepository, postRepository } from '../db/repositories.js';
+import { appSettingsRepository, imageRepository, folderRepository, postRepository } from '../db/repositories.js';
+import { HEIC_IMPORT_ENABLED_SETTING_KEY } from '../constants/app-setting-keys.js';
+import { getHeicImportSetting } from '../services/heic/import-setting.js';
 import express from 'express';
 import { z } from 'zod';
 
@@ -88,6 +90,7 @@ const mediaSearchQuerySchema = paginationQuerySchema.extend({
 const homeFeedDefaultBodySchema = z.object({
   defaultMode: z.enum(['recent', 'rediscover', 'random'])
 });
+const heicImportBodySchema = z.object({ enabled: z.boolean() }).strict();
 const appLocaleBodySchema = z.object({
   defaultLocale: z.enum(['en', 'es', 'zh', 'de'])
 });
@@ -244,6 +247,7 @@ export const authRequestBodySchemas = {
 };
 
 export const settingsRequestBodySchemas = {
+  heicImport: heicImportBodySchema,
   homeFeedDefault: homeFeedDefaultBodySchema,
   appLocale: appLocaleBodySchema,
   reelsFeedDefault: reelsFeedDefaultBodySchema,
@@ -1330,6 +1334,9 @@ router.get('/originals/:id', async (request, response) => {
   }
 
   applyOriginalMediaHeaders(response);
+  if (remote?.mime_type === 'image/heic' || remote?.mime_type === 'image/heif') {
+    response.setHeader('Content-Type', remote.mime_type);
+  }
 
   if (query.download) {
     response.download(originalMedia.path, originalMedia.filename);
@@ -1344,6 +1351,39 @@ const adminMutationRateLimiter = createRateLimiter({
   max: 10,
   message: 'Too many administrative requests. Please try again in a minute.'
 });
+
+router.get(
+  '/admin/settings/heic-import',
+  requireCapability('canAccessSettings', 'Admin access is required.'),
+  (_request, response) => {
+    response.json({
+      ...getHeicImportSetting(),
+      libraryWorkPending: scannerService.hasPendingLibraryWork()
+    });
+  }
+);
+
+router.put(
+  '/admin/settings/heic-import',
+  requireCapability('canAccessSettings', 'Admin access is required.'),
+  adminMutationRateLimiter,
+  (request, response) => {
+    const { enabled } = heicImportBodySchema.parse(request.body);
+
+    if (getHeicImportSetting().managedByEnvironment) {
+      response.status(409).json({ message: 'HEIC imports are managed by environment configuration.' });
+      return;
+    }
+
+    if (scannerService.hasPendingLibraryWork()) {
+      response.status(409).json({ message: 'Wait for the current scan or rebuild to finish.' });
+      return;
+    }
+
+    appSettingsRepository.set(HEIC_IMPORT_ENABLED_SETTING_KEY, enabled ? '1' : '0');
+    response.json({ ...getHeicImportSetting(), libraryWorkPending: false });
+  }
+);
 
 const requireNoScanInProgress = (_request: express.Request, response: express.Response, next: express.NextFunction) => {
   if (scannerService.getProgress().isScanning) {

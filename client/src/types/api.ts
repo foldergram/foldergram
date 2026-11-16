@@ -631,6 +631,12 @@ export interface AppStatus {
   };
 }
 
+export interface HeicImportSetting {
+  enabled: boolean;
+  managedByEnvironment: boolean;
+  libraryWorkPending: boolean;
+}
+
 export interface AppStats extends AppStatus {
   deletedImages: number;
   thumbnailCount: number;

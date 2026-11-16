@@ -117,6 +117,40 @@ Most images are processed with Sharp. Static AVIF files also stay on the Sharp p
 - resized to width `1500` without enlargement
 - encoded as WebP with `quality: 86`
 
+## Experimental local HEIC and HEIF
+
+Enable **Import HEIC/HEIF photos** in **Settings → Scan & Library**, then run
+**Scan for changes** to import supported `.heic` and `.heif` files from the
+primary gallery and any additional local sources. The preference applies from
+the next scan. Turning it off keeps previously indexed photos and their
+derivatives available and continues to reconcile changes to their originals.
+Immich uses its own metadata and media endpoints.
+
+If Settings shows **Managed by environment**, see the
+[HEIC environment override](./configuration.md#local-heic-and-heif-imports).
+
+The prototype accepts 8-bit SDR HEVC stills, including grid-composed stills
+and files with recognized thumbnail or auxiliary items. It renders the primary
+image to sRGB WebP. The worker handles container orientation first and uses
+EXIF orientation when there is no container rotation or mirror transform.
+Supported colors include sRGB-like SDR and the Display P3 cases covered by
+the prototype. Sequences, independent image collections, non-HEVC codecs,
+unrecognized ICC profiles, 10-bit originals, and HDR rendering are outside
+this preview. An SDR primary may be used when its auxiliary gain map is ignored.
+
+A worker inspects the container and reads EXIF from the original during a scan.
+Eager processing decodes the full image once for both WebP outputs. Lazy
+processing waits for a derivative request before decoding pixels. Normal viewing
+uses WebP even with `IMAGE_DETAIL_SOURCE=original`. Authorized original
+downloads retain the source file bytes, name, and MIME type.
+
+Decoding takes CPU and temporary memory. Browsing reuses saved WebP outputs.
+Replacing a file or rebuilding its derivatives can trigger another decode. See
+[configuration](./configuration.md#optional-heic-tuning) for worker limits. A
+busy worker queue can return a temporary error. Invalid or unsupported media is
+reported in scan diagnostics. See the [prototype validation record](./heic-prototype-validation.md)
+for fixture results, the native comparison, and pending release checks.
+
 ## Animated AVIF handling
 
 Animated AVIF image sequences are treated as images in the UI, not videos.

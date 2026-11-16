@@ -124,6 +124,10 @@ index. Existing libraries keep using the current index on startup; run
 **Scan for changes** from Settings whenever you want to refresh the library after
 changes.
 
+To include supported local HEIC and HEIF photos, turn on **Import HEIC/HEIF photos**
+in **Settings → Scan & Library**, then choose **Scan for changes**.
+See [supported inputs](./media-processing.md#experimental-local-heic-and-heif).
+
 On later upgrades, startup automatically applies pending SQLite migrations
 before the app reuses the existing database.
 See [Upgrading an existing installation](/installation#upgrading-an-existing-installation)
@@ -153,7 +157,7 @@ Inside Settings:
 
 - `General Settings` contains stories and carousel folder modes, nested folder title format, excluded folders, Home/Reels defaults, and the default folder photo order
 - `Places` contains offline place-data preparation and place-assignment rebuilds for GPS-tagged photos
-- `Scan & Library` contains manual scan plus rebuild actions
+- `Scan & Library` contains the experimental HEIC/HEIF import setting, manual scans, and rebuild actions
 
 If a scan finishes with skipped corrupt or unreadable supported media, the
 admin scan panel shows the full report path for that run. Foldergram writes

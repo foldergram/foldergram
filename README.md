@@ -87,6 +87,7 @@ Runtime reads come from SQLite and generated derivatives, not from live filesyst
 ### Supported Formats
 
 - **Images:** `.jpg`, `.jpeg`, `.png`, `.webp`, `.gif`, `.avif`
+- **Opt-in preview:** [local still HEIC and HEIF](docs/media-processing.md#experimental-local-heic-and-heif).
 - **Videos:** `.mp4`, `.mov`, `.m4v`, `.webm`, `.mkv`
 
 Animated image files keep animation in the post viewer preview and home feed cards. Folder/profile grids and other thumbnail surfaces remain static. Static AVIF files stay on the normal image pipeline; animated AVIF image sequences generate static WebP thumbnails and animated WebP previews.

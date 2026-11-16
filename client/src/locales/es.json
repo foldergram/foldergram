@@ -408,6 +408,18 @@
         "scanDescription": "El modo guardado de las carpetas de carrusel aún no se ha aplicado al índice. Ejecuta un escaneo para actualizar las carpetas y publicaciones.",
         "rebuildDescription": "El modo guardado de las carpetas de carrusel aún no se ha aplicado al índice. Usa Reconstruir índice de la biblioteca abajo para aplicarlo a la ubicación actual de la galería."
       },
+      "heicImport": {
+        "label": "Importar fotos HEIC/HEIF",
+        "experimental": "Experimental",
+        "description": "Incluye fotos HEIC/HEIF compatibles de fuentes locales. Ejecuta un escaneo después de activar esta opción.",
+        "managed": "Gestionado por el entorno.",
+        "loading": "Cargando la configuración de importación HEIC…",
+        "saving": "Guardando la configuración de importación HEIC…",
+        "saved": "Se guardó la configuración de importación HEIC.",
+        "busy": "Espera a que termine el escaneo o la reconstrucción en curso.",
+        "loadError": "No se pudo cargar la configuración de importación HEIC.",
+        "saveError": "No se pudo guardar la configuración de importación HEIC."
+      },
       "scanCard": {
         "title": "Escanear biblioteca",
         "description": "Busca adiciones, actualizaciones y eliminaciones. Elige reparar derivados para comprobar también los medios generados de los archivos sin cambios."

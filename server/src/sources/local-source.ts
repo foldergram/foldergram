@@ -6,6 +6,7 @@ import { appConfig } from '../config/env.js';
 import { LAST_SUCCESSFUL_GALLERY_ROOT_SETTING_KEY } from '../constants/app-setting-keys.js';
 import { databaseManager } from '../db/database.js';
 import { isSupportedMediaFile } from '../utils/image-utils.js';
+import { getHeicImportSetting } from '../services/heic/import-setting.js';
 import { ensureWithinRoot, matchesRelativeRoot, safeJoin } from '../utils/path-utils.js';
 import { PERMANENT_DELETION_QUARANTINE_DIRECTORY_NAME } from '../services/maintenance-operation-lock.js';
 
@@ -174,12 +175,13 @@ export function validateLocalPath(input: string, excludeId?: number, primary = f
 
 export function inspectLocalPath(input: string, excludeId?: number) {
   const result = validateLocalPath(input, excludeId);
+  const { enabled: heicImportEnabled } = getHeicImportSetting();
   let ignoredRootMediaCount = 0;
   let entriesChecked = 0;
   const directory = fs.opendirSync(result.canonicalRootPath);
   try {
     for (let entry = directory.readSync(); entry; entry = directory.readSync()) {
-      if (entry.isFile() && isSupportedMediaFile(entry.name)) ignoredRootMediaCount++;
+      if (entry.isFile() && isSupportedMediaFile(entry.name, heicImportEnabled)) ignoredRootMediaCount++;
       if (++entriesChecked === 1000) break;
     }
   } finally {

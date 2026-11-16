@@ -33,7 +33,8 @@
         v-else-if="index === activeIndex"
         class="h-full w-full object-contain"
         :src="item.isAnimated ? item.previewUrl : (preferPreview ? item.previewUrl : item.thumbnailUrl)"
-        :fallback-src="item.originalUrl"
+        :fallback-src="getImageViewingFallback(item)"
+        :show-retry="needsWebpViewing(item)"
         :alt="item.filename"
         :width="item.width"
         :height="item.height"
@@ -92,6 +93,7 @@ import { useI18n } from 'vue-i18n';
 
 import type { PostMediaItem } from '../types/api';
 import { useAppStore } from '../stores/app';
+import { getImageViewingFallback, needsWebpViewing } from '../utils/original-media';
 import ResilientImage from './ResilientImage.vue';
 import VideoMediaPlayer from './VideoMediaPlayer.vue';
 

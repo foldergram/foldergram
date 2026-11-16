@@ -6,6 +6,9 @@ import { promisify } from 'node:util';
 
 import sharp from 'sharp';
 
+import { processHeicSource, type HeicSource } from './heic/service.js';
+import type { HeicMetadata } from './heic/protocol.js';
+
 import type { ImageExifData, MediaType, PlaybackStrategy } from '../types/models.js';
 import { appConfig } from '../config/env.js';
 import { extractImageExif, normalizeTakenAtValue } from '../utils/exif-utils.js';
@@ -14,7 +17,8 @@ import {
   THUMBNAIL_SIZE,
   getMediaTypeFromExtension,
   getPreviewRelativePath,
-  getThumbnailRelativePath
+  getThumbnailRelativePath,
+  isHeicFile
 } from '../utils/image-utils.js';
 import { isNonemptyDerivative } from '../utils/derivative-cache.js';
 import { safeJoin } from '../utils/path-utils.js';
@@ -100,10 +104,14 @@ export type VideoPreviewPolicy = 'auto' | 'required' | 'skip';
 
 export interface DerivativeGenerationOptions extends DerivativePathOverrides {
   videoPreviewPolicy?: VideoPreviewPolicy;
+  heicSource?: HeicSource;
+  heicForeground?: boolean;
+  inspectedHeicMetadata?: MediaMetadata;
 }
 
 interface ReadMediaMetadataOptions {
   fileSize?: number;
+  heicSource?: HeicSource;
 }
 
 async function ensureParentDirectory(filePath: string): Promise<void> {
@@ -423,6 +431,20 @@ async function readVideoMetadata(sourcePath: string, options: ReadMediaMetadataO
   };
 }
 
+function toHeicMediaMetadata(metadata: HeicMetadata): MediaMetadata {
+  return {
+    width: metadata.width,
+    height: metadata.height,
+    displayOrientation: metadata.displayOrientation,
+    takenAt: metadata.takenAt,
+    exif: metadata.exif,
+    durationMs: null,
+    mediaType: 'image',
+    playbackStrategy: 'preview',
+    isAnimated: false
+  };
+}
+
 export async function readMediaMetadata(
   sourcePath: string,
   mediaType: MediaType,
@@ -430,6 +452,10 @@ export async function readMediaMetadata(
 ): Promise<MediaMetadata> {
   if (mediaType === 'video') {
     return readVideoMetadata(sourcePath, options);
+  }
+
+  if (isHeicFile(sourcePath)) {
+    return toHeicMediaMetadata(await processHeicSource(sourcePath, [], options.heicSource));
   }
 
   return path.extname(sourcePath).toLowerCase() === '.avif'
@@ -776,7 +802,9 @@ export async function generateThumbnailDerivative(
   const shouldWriteThumbnail = force || !(await isNonemptyDerivative(thumbnailAbsolutePath));
 
   if (shouldWriteThumbnail) {
-    if (mediaType === 'video') {
+    if (isHeicFile(relativePath)) {
+      await processHeicSource(sourcePath, [{ kind: 'thumbnail', path: thumbnailAbsolutePath }], overrides.heicSource, overrides.heicForeground);
+    } else if (mediaType === 'video') {
       await writeVideoThumbnail(sourcePath, thumbnailAbsolutePath);
     } else if (isAvif) {
       const avifSource = await inspectAvifSource(sourcePath, {
@@ -816,7 +844,9 @@ export async function generatePreviewDerivative(
   const shouldWritePreview = force || !(await isNonemptyDerivative(previewAbsolutePath));
 
   if (shouldWritePreview) {
-    if (mediaType === 'video') {
+    if (isHeicFile(relativePath)) {
+      await processHeicSource(sourcePath, [{ kind: 'preview', path: previewAbsolutePath }], overrides.heicSource, overrides.heicForeground);
+    } else if (mediaType === 'video') {
       const policy = overrides.videoPreviewPolicy ?? 'required';
       if (policy === 'skip') {
         return {
@@ -876,7 +906,18 @@ export async function generateDerivatives(
   let metadata: MediaMetadata;
   let generated: Pick<DerivativeResult, 'generatedThumbnail' | 'generatedPreview'>;
 
-  if (mediaType === 'video') {
+  if (isHeicFile(relativePath)) {
+    const generatedThumbnail = force || !(await isNonemptyDerivative(thumbnailAbsolutePath));
+    const generatedPreview = force || !(await isNonemptyDerivative(previewAbsolutePath));
+    const outputs = [];
+    if (generatedThumbnail) outputs.push({ kind: 'thumbnail' as const, path: thumbnailAbsolutePath });
+    if (generatedPreview) outputs.push({ kind: 'preview' as const, path: previewAbsolutePath });
+    const inspectedMetadata = outputs.length === 0 ? overrides.inspectedHeicMetadata : undefined;
+    metadata = inspectedMetadata ?? toHeicMediaMetadata(
+      await processHeicSource(sourcePath, outputs, overrides.heicSource, overrides.heicForeground)
+    );
+    generated = { generatedThumbnail, generatedPreview };
+  } else if (mediaType === 'video') {
     metadata = await readVideoMetadata(sourcePath);
     const shouldGeneratePreview = await resolveVideoPreviewRequirement(
       sourcePath,

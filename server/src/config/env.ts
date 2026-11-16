@@ -30,6 +30,12 @@ const envSchema = z.object({
   CSRF_TRUSTED_ORIGINS: z.string().optional(),
   GALLERY_EXCLUDED_FOLDERS: z.string().optional(),
   IMAGE_DETAIL_SOURCE: z.enum(['preview', 'original']).default('preview'),
+  HEIC_ENABLED: z.enum(['true', 'false']).optional(),
+  HEIC_DECODE_CONCURRENCY: z.coerce.number().int().min(1).max(4).default(1),
+  HEIC_DECODE_QUEUE_LIMIT: z.coerce.number().int().min(1).max(128).default(32),
+  HEIC_MAX_INPUT_BYTES: z.coerce.number().int().min(1).max(67_108_864).default(67_108_864),
+  HEIC_MAX_PIXELS: z.coerce.number().int().min(1).max(64_000_000).default(64_000_000),
+  HEIC_JOB_TIMEOUT_MS: z.coerce.number().int().min(100).max(120_000).default(60_000),
   DERIVATIVE_MODE: z.enum(['eager', 'lazy']).default('eager'),
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development')
 });
@@ -161,5 +167,11 @@ export const appConfig = {
   geodataPath: path.join(geodataDir, 'geonames-cities500.sqlite'),
   geodataMetadataPath: path.join(geodataDir, 'geonames-cities500.meta.json'),
   imageDetailSource: parsed.IMAGE_DETAIL_SOURCE,
-  derivativeMode: parsed.DERIVATIVE_MODE
+  derivativeMode: parsed.DERIVATIVE_MODE,
+  heicEnabledOverride: parsed.HEIC_ENABLED === undefined ? undefined : parsed.HEIC_ENABLED === 'true',
+  heicDecodeConcurrency: Math.min(parsed.HEIC_DECODE_CONCURRENCY, parsed.SCAN_DERIVATIVE_CONCURRENCY),
+  heicDecodeQueueLimit: parsed.HEIC_DECODE_QUEUE_LIMIT,
+  heicMaxInputBytes: parsed.HEIC_MAX_INPUT_BYTES,
+  heicMaxPixels: parsed.HEIC_MAX_PIXELS,
+  heicJobTimeoutMs: parsed.HEIC_JOB_TIMEOUT_MS
 };

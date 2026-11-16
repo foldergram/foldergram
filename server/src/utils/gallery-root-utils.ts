@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import { isSupportedMediaFile } from './image-utils.js';
 import { isHiddenPath } from './path-utils.js';
 
-export function countSupportedRootMediaFiles(galleryRoot: string): number {
+export function countSupportedRootMediaFiles(galleryRoot: string, includeHeic = false): number {
   try {
     const entries = fs.readdirSync(galleryRoot, { withFileTypes: true });
 
@@ -16,7 +16,7 @@ export function countSupportedRootMediaFiles(galleryRoot: string): number {
         return count;
       }
 
-      return isSupportedMediaFile(entry.name) ? count + 1 : count;
+      return isSupportedMediaFile(entry.name, includeHeic) ? count + 1 : count;
     }, 0);
   } catch {
     return 0;
