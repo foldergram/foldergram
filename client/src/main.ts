@@ -1,4 +1,4 @@
-import { createApp } from 'vue';
+import { createApp, watch } from 'vue';
 
 import App from './App.vue';
 import { AUTH_REQUIRED_EVENT } from './api/http';
@@ -58,6 +58,10 @@ async function bootstrap() {
   appStore.initializeLocale();
   const appearance = useAppearanceStore(pinia);
   appearance.initialize();
+  watch(() => authStore.canWriteAppearance, (writable) => {
+    appearance.render();
+    if (writable) void appearance.load();
+  });
   void appearance.load();
   const systemAppearance = window.matchMedia('(prefers-color-scheme: dark)');
   systemAppearance.addEventListener('change', () => appearance.render());

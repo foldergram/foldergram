@@ -18,6 +18,7 @@ interface AuthState {
   loading: boolean;
   unlockDialogOpen: boolean;
   enabled: boolean;
+  publicDemoMode: boolean | null;
   authenticated: boolean;
   role: AuthRole;
   accessMode: ViewerAccessMode;
@@ -66,10 +67,12 @@ function createCapabilities(role: AuthRole): AuthCapabilities {
 function createAnonymousStatus(
   enabled: boolean,
   accessMode: ViewerAccessMode,
-  defaultLocale: AuthStatus['defaultLocale']
+  defaultLocale: AuthStatus['defaultLocale'],
+  publicDemoMode: AuthState['publicDemoMode']
 ): AuthStatus {
   return {
     enabled,
+    publicDemoMode: publicDemoMode ?? undefined,
     authenticated: false,
     role: 'anonymous',
     accessMode,
@@ -94,6 +97,7 @@ export const useAuthStore = defineStore('auth', {
     loading: false,
     unlockDialogOpen: false,
     enabled: false,
+    publicDemoMode: null,
     authenticated: true,
     role: 'admin',
     accessMode: 'off',
@@ -110,6 +114,7 @@ export const useAuthStore = defineStore('auth', {
     canManageLibrary: (state) => state.capabilities.canManageLibrary,
     canDeleteMedia: (state) => state.capabilities.canDeleteMedia,
     canAccessSettings: (state) => state.capabilities.canAccessSettings,
+    canWriteAppearance: (state) => state.capabilities.canAccessSettings && state.publicDemoMode === false,
     canUseSharedLikes: (state) => state.capabilities.canUseSharedLikes,
     canUseLocalFavorites: (state) => state.capabilities.canUseLocalFavorites,
     canUseSharedCollections: (state) => state.capabilities.canUseSharedCollections === true,
@@ -124,6 +129,7 @@ export const useAuthStore = defineStore('auth', {
   actions: {
     applyStatus(status: AuthStatus) {
       this.enabled = status.enabled;
+      this.publicDemoMode = status.publicDemoMode ?? null;
       this.authenticated = status.authenticated;
       this.role = status.role;
       this.accessMode = status.accessMode;
@@ -157,7 +163,7 @@ export const useAuthStore = defineStore('auth', {
 
       this.ready = true;
       this.loading = false;
-      this.applyStatus(createAnonymousStatus(this.enabled, this.accessMode, this.defaultLocale));
+      this.applyStatus(createAnonymousStatus(this.enabled, this.accessMode, this.defaultLocale, this.publicDemoMode));
       this.unlockDialogOpen = false;
       this.error = this.accessMode === 'public' ? null : message;
     },

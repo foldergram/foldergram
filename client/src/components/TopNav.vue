@@ -183,7 +183,7 @@
               <span>{{ t('nav.unlockAdmin') }}</span>
             </button>
 
-            <BrowserAppearanceSelect class="mobile-nav__menu-item" />
+            <AppearanceToggle mobile @switched="closeMoreMenu" />
             <button
               v-if="authStore.canSignOut"
               class="mobile-nav__menu-item"
@@ -211,7 +211,7 @@ import { useCollectionsStore } from '../stores/collections';
 import { useLikesStore } from '../stores/likes';
 import { usePlacesStore } from '../stores/places';
 import BrandMark from './BrandMark.vue';
-import BrowserAppearanceSelect from './BrowserAppearanceSelect.vue';
+import AppearanceToggle from './BrowserAppearanceSelect.vue';
 
 const { t } = useI18n();
 const authStore = useAuthStore();

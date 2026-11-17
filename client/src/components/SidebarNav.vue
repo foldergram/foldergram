@@ -248,58 +248,6 @@
           >
         </a>
       </RouterLink>
-
-      <span
-        class="sidebar__section-label sidebar__meta inline-flex min-h-[1rem] items-center self-start mt-7 max-w-0 overflow-hidden whitespace-nowrap px-[0.75rem] text-[0.68rem] leading-[1.2] font-semibold uppercase tracking-[0.12em] text-muted opacity-0 group-hover:max-w-[12rem] group-hover:opacity-100"
-        style="
-          transition:
-            opacity 0.18s ease,
-            max-width 0.22s ease;
-        "
-        >{{ t('nav.foldersSpotlight') }}</span
-      >
-      <div
-        class="flex min-h-0 shrink-0 flex-col gap-[0.2rem] max-h-[22.5rem] overflow-y-auto [scrollbar-width:none]"
-      >
-        <RouterLink
-          v-for="folder in featuredFolders"
-          :key="folder.id"
-          custom
-          :to="{ name: 'folder', params: { slug: folder.slug } }"
-          v-slot="{ href, navigate, isActive }"
-        >
-          <a
-            :href="href"
-            class="sidebar__folder sidebar-item"
-            :class="isActive ? sidebarActiveClass : ''"
-            :title="
-              folder.breadcrumb
-                ? `${folder.breadcrumb} / ${folder.name}`
-                : folder.name
-            "
-            @click="navigate"
-          >
-            <Avatar
-              :name="formatFeaturedFolderTitle(folder)"
-              :src="folder.avatarUrl"
-              class="h-[1.75rem] w-[1.75rem]"
-            />
-            <span
-              class="sidebar__folder-copy sidebar__meta flex min-w-0 max-w-0 flex-col gap-[0.05rem] overflow-hidden whitespace-nowrap opacity-0 group-hover:max-w-[12rem] group-hover:opacity-100"
-              style="
-                transition:
-                  opacity 0.18s ease,
-                  max-width 0.22s ease;
-              "
-            >
-              <strong class="truncate text-[0.82rem]">{{ formatFeaturedFolderTitle(folder) }}</strong>
-              <small class="truncate text-[0.68rem] text-muted">{{
-                folder.breadcrumb ?? t('nav.folderPosts', { count: folder.imageCount })
-              }}</small>
-            </span>
-          </a>
-        </RouterLink>
-      </div>
     </nav>
 
     <div
@@ -354,7 +302,7 @@
             <span>{{ t('nav.unlockAdmin') }}</span>
           </button>
 
-          <BrowserAppearanceSelect class="flex w-full items-center gap-[0.95rem] px-[1.2rem] py-[1rem] text-[0.98rem] text-text hover:bg-surface-hover" />
+          <AppearanceToggle @switched="closeMoreMenu" />
           <button
             v-if="authStore.canSignOut"
             class="flex items-center gap-[0.95rem] w-full px-[1.2rem] py-[1rem] border-0 bg-transparent text-[0.98rem] text-text cursor-pointer text-left transition-colors duration-150 hover:bg-surface-hover disabled:opacity-60 disabled:cursor-wait"
@@ -403,53 +351,25 @@
   import { useI18n } from "vue-i18n"
   import { RouterLink, useRoute } from "vue-router"
 
-  import { useAppStore } from "../stores/app"
   import { useAuthStore } from "../stores/auth"
   import { useLikesStore } from "../stores/likes"
-  import { useFoldersStore } from "../stores/folders"
   import { usePlacesStore } from "../stores/places"
-  import { formatFolderTitle } from "../utils/folder-titles"
-  import { buildLikedCountByFolder } from "../utils/home-recommendations"
-  import { selectSidebarFolders } from "../utils/sidebar-folders"
-  import Avatar from "./Avatar.vue"
   import BrandMark from "./BrandMark.vue"
-  import BrowserAppearanceSelect from "./BrowserAppearanceSelect.vue"
+  import AppearanceToggle from "./BrowserAppearanceSelect.vue"
 
   const props = defineProps<{ panelOpen?: boolean }>()
   const emit = defineEmits<{ openMore: [] }>()
   const { t } = useI18n()
   const appVersion = __APP_VERSION__
-  const appStore = useAppStore()
   const authStore = useAuthStore()
   const likesStore = useLikesStore()
-  const foldersStore = useFoldersStore()
   const placesStore = usePlacesStore()
   const route = useRoute()
   const moreMenuOpen = ref(false)
 
-  const likedCountByFolder = computed(() =>
-    buildLikedCountByFolder(likesStore.items),
-  )
-  const featuredFolders = computed(() =>
-    selectSidebarFolders(
-      [...foldersStore.items, ...Object.values(foldersStore.summaryBySlug)],
-      likedCountByFolder.value,
-      appStore.recentOpenedFolderSlugs,
-    ),
-  )
-  watch(
-    () => appStore.recentOpenedFolderSlugs.slice(0, 4),
-    (slugs) => {
-      for (const slug of slugs) void foldersStore.ensureSummary(slug).catch(() => {})
-    },
-    { immediate: true },
-  )
   const showPlacesNav = computed(() =>
     placesStore.items.length > 0 && placesStore.listError === null,
   )
-  function formatFeaturedFolderTitle(folder: (typeof featuredFolders.value)[number]) {
-    return formatFolderTitle(folder, appStore.nestedFolderTitleFormat)
-  }
   const isPlacesRoute = computed(() =>
     route.name === "places" || route.name === "place",
   )

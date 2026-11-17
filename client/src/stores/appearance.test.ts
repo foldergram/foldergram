@@ -2,16 +2,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { useAppearanceStore } from './appearance';
 
-const mocks = vi.hoisted(() => ({ request: vi.fn(), setTheme: vi.fn(), admin: true }));
+const mocks = vi.hoisted(() => ({ request: vi.fn(), setTheme: vi.fn(), canWrite: true }));
 vi.mock('../api/http', () => ({ requestJson: mocks.request }));
 vi.mock('./app', () => ({ useAppStore: () => ({ setTheme: mocks.setTheme }) }));
-vi.mock('./auth', () => ({ useAuthStore: () => ({ canAccessSettings: mocks.admin }) }));
+vi.mock('./auth', () => ({ useAuthStore: () => ({ canWriteAppearance: mocks.canWrite }) }));
 
 describe('appearance', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.resetAllMocks();
-    mocks.admin = true;
+    mocks.canWrite = true;
     localStorage.clear();
     vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false })));
   });
@@ -21,7 +21,8 @@ describe('appearance', () => {
     vi.unstubAllGlobals();
   });
 
-  it('keeps a legacy browser preference while applying the instance accent', async () => {
+  it('uses the instance theme in admin mode and restores the legacy browser preference as a visitor', async () => {
+    mocks.canWrite = false;
     localStorage.setItem('foldergram-theme', 'dark');
     mocks.request.mockResolvedValue({ theme: 'light', accent: 'purple' });
     const store = useAppearanceStore();
@@ -31,9 +32,20 @@ describe('appearance', () => {
     expect(store.theme).toBe('light');
     expect(mocks.setTheme).toHaveBeenLastCalledWith('dark');
     expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#b794ff');
+
+    mocks.canWrite = true;
+    store.render();
+    expect(mocks.setTheme).toHaveBeenLastCalledWith('light');
+    expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#7c3aed');
+
+    mocks.canWrite = false;
+    store.render();
+    expect(mocks.setTheme).toHaveBeenLastCalledWith('dark');
+    expect(localStorage.getItem('foldergram-theme')).toBe('dark');
   });
 
   it('follows the system only when the effective preference is System', () => {
+    mocks.canWrite = false;
     const store = useAppearanceStore();
     store.apply({ theme: 'system', accent: 'green' });
     vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: true })));
@@ -49,7 +61,7 @@ describe('appearance', () => {
   });
 
   it('persists a viewer selection in the browser and clears it for Instance default', () => {
-    mocks.admin = false;
+    mocks.canWrite = false;
     const store = useAppearanceStore();
     store.apply({ theme: 'dark', accent: 'rose' });
     store.setBrowserTheme('light');
@@ -91,10 +103,32 @@ describe('appearance', () => {
     }));
     expect(store.theme).toBe('light');
     expect(store.error).toBe('appearance.saveError');
-    mocks.admin = false;
+    mocks.canWrite = false;
     mocks.request.mockClear();
     expect(await store.save(update)).toBe(false);
     expect(mocks.request).not.toHaveBeenCalled();
+  });
+
+  it('releases a stalled theme save so it can be retried before the first successful read', async () => {
+    vi.useFakeTimers();
+    const store = useAppearanceStore();
+    mocks.request.mockImplementationOnce((_url, { signal }: RequestInit) => new Promise((_, reject) => {
+      signal?.addEventListener('abort', () => reject(signal.reason));
+    }));
+    const pending = store.save({ theme: 'dark' });
+    expect(store.saving).toBe(true);
+    expect(await store.save({ theme: 'light' })).toBe(false);
+    expect(mocks.request).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(await pending).toBe(false);
+    expect(store.saving).toBe(false);
+    expect(store.ready).toBe(false);
+    expect(store.error).toBe('appearance.saveError');
+
+    mocks.request.mockResolvedValueOnce({ theme: 'dark', accent: 'rose' });
+    expect(await store.save({ theme: 'dark' })).toBe(true);
+    expect(store.theme).toBe('dark');
+    expect(store.accent).toBe('rose');
   });
 
   it('does not let an older read overwrite a successful save', async () => {

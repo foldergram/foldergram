@@ -1,34 +1,43 @@
 <template>
-  <label>
+  <button
+    class="flex w-full items-center gap-[0.95rem] border-0 bg-transparent text-text cursor-pointer text-left transition-colors duration-150 hover:bg-surface-hover disabled:opacity-60 disabled:cursor-wait"
+    :class="mobile ? 'min-h-[3.35rem] px-[1.05rem] py-[0.9rem] text-[0.96rem]' : 'px-[1.2rem] py-[1rem] text-[0.98rem]'"
+    type="button"
+    :title="t(app.theme === 'light' ? 'nav.switchToDarkMode' : 'nav.switchToLightMode')"
+    :disabled="auth.canWriteAppearance && appearance.saving"
+    @click="toggle"
+  >
     <span
-      class="h-[1.18rem] w-[1.18rem] shrink-0"
-      :class="app.theme === 'light' ? 'i-fluent-weather-sunny-20-regular' : 'i-fluent-weather-moon-20-regular'"
+      class="w-[1.18rem] h-[1.18rem] shrink-0"
+      :class="app.theme === 'light' ? 'i-fluent-weather-moon-20-regular' : 'i-fluent-weather-sunny-20-regular'"
       aria-hidden="true"
     />
-    <span class="min-w-0">{{ t('nav.switchAppearance') }}</span>
-    <select
-      v-model="browserTheme"
-      class="ml-auto min-w-0 max-w-[55%] cursor-pointer rounded-md border border-border bg-surface px-2 py-1 text-sm text-text"
-    >
-      <option value="instance">{{ t('appearance.instanceDefault') }}</option>
-      <option value="system">{{ t('appearance.system') }}</option>
-      <option value="light">{{ t('appearance.light') }}</option>
-      <option value="dark">{{ t('appearance.dark') }}</option>
-    </select>
-  </label>
+    <span>{{ t('nav.switchAppearance') }}</span>
+  </button>
+  <p v-if="failed && auth.canWriteAppearance" class="m-0 px-4 pb-2 text-sm text-muted" role="alert">{{ t('appearance.saveError') }}</p>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useAppStore } from '../stores/app';
-import { useAppearanceStore, type BrowserTheme } from '../stores/appearance';
+import { useAppearanceStore } from '../stores/appearance';
+import { useAuthStore } from '../stores/auth';
 
+defineProps<{ mobile?: boolean }>();
+const emit = defineEmits<{ switched: [] }>();
 const { t } = useI18n();
 const app = useAppStore();
 const appearance = useAppearanceStore();
-const browserTheme = computed({
-  get: () => appearance.browserTheme,
-  set: (theme: BrowserTheme) => appearance.setBrowserTheme(theme)
-});
+const auth = useAuthStore();
+const failed = ref(false);
+
+async function toggle() {
+  failed.value = false;
+  if (await appearance.toggleTheme()) {
+    emit('switched');
+  } else {
+    failed.value = true;
+  }
+}
 </script>

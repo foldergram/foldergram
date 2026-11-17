@@ -4,7 +4,7 @@ import { appSettingsRepository, imageRepository, folderRepository, postRepositor
 import { HEIC_IMPORT_ENABLED_SETTING_KEY } from '../constants/app-setting-keys.js';
 import { getHeicImportSetting } from '../services/heic/import-setting.js';
 import express from 'express';
-import { getAppearance, saveAppearance } from '../services/appearance-service.js';
+import { getAppearance, saveAppearance, saveAppearanceTheme } from '../services/appearance-service.js';
 import { z } from 'zod';
 
 import { AUTH_PASSWORD_MAX_LENGTH, AUTH_PASSWORD_MIN_LENGTH, authService } from '../services/auth-service.js';
@@ -31,6 +31,9 @@ router.get('/appearance', (_request, response) => {
 });
 router.put('/admin/settings/appearance', requireCapability('canAccessSettings', 'Admin access is required.'), (request, response) => {
   response.json(saveAppearance(request.body));
+});
+router.patch('/admin/settings/appearance', requireCapability('canAccessSettings', 'Admin access is required.'), (request, response) => {
+  response.json(saveAppearanceTheme(request.body));
 });
 
 const paginationQuerySchema = z.object({

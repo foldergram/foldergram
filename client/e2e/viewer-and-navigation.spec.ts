@@ -37,7 +37,7 @@ async function mockGallery(page: Page, theme?: 'light' | 'dark') {
     const scan = { isScanning: false, lastCompletedScan: { id: 1 } };
     const responses: Record<string, unknown> = {
       '/api/auth/status': {
-        enabled: false, authenticated: false, role: 'anonymous', accessMode: 'public',
+        enabled: true, publicDemoMode: false, authenticated: false, role: 'anonymous', accessMode: 'public',
         likesMode: 'local', defaultLocale: 'en',
         capabilities: {
           canManageLibrary: false, canDeleteMedia: false, canAccessSettings: false,
@@ -122,6 +122,41 @@ async function expectReadableControl(control: Locator) {
   expect(contrast, 'Control text and icons need at least 4.5:1 contrast').toBeGreaterThanOrEqual(4.5);
 }
 
+const adminAuthStatus = {
+  enabled: true, publicDemoMode: false, authenticated: true, role: 'admin', accessMode: 'public',
+  likesMode: 'local', defaultLocale: 'en', capabilities: {
+    canManageLibrary: true, canDeleteMedia: true, canAccessSettings: true,
+    canUseSharedLikes: false, canUseLocalFavorites: true,
+    canUseSharedCollections: false, canUseLocalCollections: true
+  }
+};
+
+async function expectAppearanceRow(toggle: Locator, mobile: boolean) {
+  await expect(toggle).toHaveCSS('display', 'flex');
+  const dimensions = await toggle.evaluate(button => {
+    const icon = button.querySelector('span[aria-hidden="true"]')!;
+    const row = button.getBoundingClientRect();
+    const iconBox = icon.getBoundingClientRect();
+    const style = getComputedStyle(button);
+    return {
+      width: row.width, available: button.parentElement!.clientWidth, height: row.height,
+      gap: parseFloat(style.columnGap), padding: parseFloat(style.paddingLeft),
+      iconWidth: iconBox.width, iconHeight: iconBox.height, mask: getComputedStyle(icon).maskImage,
+      background: style.backgroundColor
+    };
+  });
+  expect(dimensions.width).toBeCloseTo(dimensions.available, 0);
+  expect(dimensions.height).toBeGreaterThanOrEqual(mobile ? 53 : 48);
+  expect(dimensions.gap).toBeCloseTo(15.2);
+  expect(dimensions.padding).toBeCloseTo(mobile ? 16.8 : 19.2);
+  expect(dimensions.iconWidth).toBeCloseTo(18.875);
+  expect(dimensions.iconHeight).toBeCloseTo(18.875);
+  expect(dimensions.mask).not.toBe('none');
+  await toggle.hover();
+  await expect.poll(() => toggle.evaluate(button => getComputedStyle(button).backgroundColor))
+    .not.toBe(dimensions.background);
+}
+
 for (const width of [1280, 390]) {
   test(`public appearance works while the instance request is pending at ${width}px`, async ({ page }) => {
     await mockGallery(page);
@@ -141,13 +176,17 @@ for (const width of [1280, 390]) {
     try {
       await page.goto('/explore?q=Panoramas', { waitUntil: 'domcontentloaded' });
       await expect(page.locator('#fg-splash')).toHaveCount(0);
-      await page.getByRole('button', { name: 'More', exact: true }).click();
-      const select = page.getByRole('combobox', { name: 'Switch Appearance' });
+      const more = page.getByRole('button', { name: 'More', exact: true });
+      const toggle = page.getByRole('button', { name: 'Switch appearance', exact: true });
       const root = page.locator('html');
-      await expect(select).toHaveValue('instance');
-      await select.selectOption('dark');
+      await more.click();
+      await expect(more).toHaveAttribute('aria-expanded', 'true');
+      await expect(page.getByRole('combobox', { name: /Switch appearance/i })).toHaveCount(0);
+      await toggle.click();
       await expect(root).toHaveAttribute('data-theme', 'dark');
-      await select.selectOption('system');
+      await expect(more).toHaveAttribute('aria-expanded', 'false');
+      await more.click();
+      await toggle.click();
       await expect(root).toHaveAttribute('data-theme', 'light');
 
       sendAppearance();
@@ -156,13 +195,12 @@ for (const width of [1280, 390]) {
       await expectReadableControl(selectedTab);
 
       await page.reload();
-      await page.getByRole('button', { name: 'More', exact: true }).click();
-      await expect(select).toHaveValue('system');
-      await select.selectOption('instance');
+      await expect(root).toHaveAttribute('data-theme', 'light');
+      await more.click();
+      await toggle.click();
       await expect(root).toHaveAttribute('data-theme', 'dark');
       await expect(selectedTab).toHaveCSS('background-color', 'rgb(251, 191, 36)');
       await expectReadableControl(selectedTab);
-      await page.getByRole('button', { name: 'More', exact: true }).click();
       await page.mouse.move(width - 1, 0);
       await selectedTab.hover({ timeout: 5000 });
       await expectReadableControl(selectedTab);
@@ -171,7 +209,175 @@ for (const width of [1280, 390]) {
       sendAppearance();
     }
   });
+
+  test(`admin appearance uses the database for More and Settings at ${width}px`, async ({ page }) => {
+    await mockGallery(page, 'light');
+    await page.setViewportSize({ width, height: 844 });
+    await page.emulateMedia({ colorScheme: 'light' });
+    await page.route('**/api/auth/status', route => route.fulfill({ json: adminAuthStatus }));
+
+    let theme = 'dark';
+    let accent = 'orange';
+    let releaseFailedSave!: () => void;
+    const failedSave = new Promise<void>(resolve => { releaseFailedSave = resolve; });
+    const writes: unknown[] = [];
+    await page.route('**/api/appearance', route => route.fulfill({ json: { theme, accent } }));
+    await page.route('**/api/admin/settings/appearance', async route => {
+      const method = route.request().method();
+      const payload = route.request().postDataJSON();
+      writes.push({ method, payload });
+      if (writes.length === 1) {
+        await failedSave;
+        await route.fulfill({ status: 500, json: { message: 'Appearance save failed' } });
+        return;
+      }
+      theme = payload.theme;
+      if (method === 'PUT') accent = payload.accent;
+      await route.fulfill({ json: { theme, accent } });
+    });
+
+    const root = page.locator('html');
+    const more = page.getByRole('button', { name: 'More', exact: true });
+    const toggle = page.getByRole('button', { name: 'Switch appearance', exact: true });
+    const themeSelect = page.getByRole('combobox', { name: 'Default appearance' });
+    const save = page.getByRole('button', { name: 'Save appearance', exact: true });
+    try {
+      await page.goto('/settings#general');
+      await expect(themeSelect).toHaveValue('dark');
+      await expect(root).toHaveAttribute('data-theme', 'dark');
+      await more.click();
+      await expectAppearanceRow(toggle, width === 390);
+      await expect(toggle.locator('span[aria-hidden="true"]')).toHaveClass(/i-fluent-weather-sunny/);
+      await toggle.click();
+      await expect(toggle).toBeDisabled();
+      await expect(toggle).toHaveCSS('cursor', 'wait');
+      await expect(toggle).toHaveCSS('opacity', '0.6');
+      await expect(root).toHaveAttribute('data-theme', 'dark');
+      releaseFailedSave();
+      const error = toggle.locator('+ [role="alert"]');
+      await expect(error).toBeVisible();
+      await expect(error).toContainText('Could not save appearance');
+      await expect(toggle).toBeEnabled();
+      await expect(root).toHaveAttribute('data-theme', 'dark');
+      await expect(themeSelect).toHaveValue('dark');
+
+      await toggle.click();
+      await expect(more).toHaveAttribute('aria-expanded', 'false');
+      await expect(root).toHaveAttribute('data-theme', 'light');
+      await expect(themeSelect).toHaveValue('light');
+      expect(theme).toBe('light');
+      await expect(page.getByRole('radio', { name: 'Orange' })).toBeChecked();
+      await expect(root).toHaveCSS('--accent', '#b45309');
+      await more.click();
+      await expect(toggle.locator('span[aria-hidden="true"]')).toHaveClass(/i-fluent-weather-moon/);
+      await more.click();
+
+      await expect(themeSelect.locator('option[value="system"]')).toHaveText('System');
+      await themeSelect.selectOption('dark');
+      await save.click();
+      await expect(root).toHaveAttribute('data-theme', 'dark');
+      await expect(root).toHaveCSS('--accent', '#fbbf24');
+      expect(theme).toBe('dark');
+      expect(await page.evaluate(() => localStorage.getItem('foldergram-theme'))).toBe('light');
+      await page.reload();
+      await expect(themeSelect).toHaveValue('dark');
+      await expect(root).toHaveAttribute('data-theme', 'dark');
+
+      expect(writes).toEqual([
+        { method: 'PATCH', payload: { theme: 'light' } },
+        { method: 'PATCH', payload: { theme: 'light' } },
+        { method: 'PUT', payload: { theme: 'dark', accent: 'orange' } }
+      ]);
+    } finally {
+      releaseFailedSave();
+    }
+  });
 }
+
+test('public demo appearance is local and the Settings card is read-only', async ({ page }) => {
+  await mockGallery(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.route('**/api/auth/status', route => route.fulfill({
+    json: { ...adminAuthStatus, enabled: false, publicDemoMode: true }
+  }));
+  let appearanceAvailable = false;
+  await page.route('**/api/appearance', route => appearanceAvailable
+    ? route.fulfill({ json: { theme: 'system', accent: 'orange' } })
+    : route.fulfill({ status: 404, json: { message: 'Appearance unavailable' } }));
+  const writes: string[] = [];
+  page.on('request', request => {
+    if (request.url().includes('/api/admin/') && request.method() !== 'GET') writes.push(request.method());
+  });
+  const root = page.locator('html');
+  const more = page.getByRole('button', { name: 'More', exact: true });
+  const toggle = page.getByRole('button', { name: 'Switch appearance', exact: true });
+  const themeSelect = page.getByRole('combobox', { name: 'Default appearance' });
+
+  await page.goto('/settings#general');
+  await expect(page.getByText(/Appearance settings are read-only in the public demo/)).toBeVisible();
+  await expect(root).toHaveAttribute('data-theme', 'dark');
+  await more.click();
+  await toggle.click();
+  await expect(root).toHaveAttribute('data-theme', 'light');
+  expect(await page.evaluate(() => localStorage.getItem('foldergram-theme'))).toBe('light');
+
+  appearanceAvailable = true;
+  await page.reload();
+  await expect(root).toHaveAttribute('data-theme', 'light');
+  await expect(root).toHaveCSS('--accent', '#b45309');
+  await expect(themeSelect).toHaveValue('system');
+  await expect(themeSelect).toBeDisabled();
+  await expect(page.getByRole('radio', { name: 'Orange' })).toBeChecked();
+  await expect(page.getByRole('radio', { name: 'Orange' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Save appearance', exact: true })).toBeDisabled();
+  await themeSelect.locator('xpath=ancestor::form').dispatchEvent('submit');
+  await more.click();
+  await toggle.click();
+  await expect(root).toHaveAttribute('data-theme', 'dark');
+  await expect(root).toHaveCSS('--accent', '#fbbf24');
+  expect(writes).toEqual([]);
+});
+
+test('viewer appearance survives a reload and resumes when leaving admin mode', async ({ page }) => {
+  await mockGallery(page);
+  await page.setViewportSize({ width: 1280, height: 844 });
+  await page.emulateMedia({ colorScheme: 'light' });
+  const viewer = {
+    ...adminAuthStatus,
+    role: 'viewer',
+    capabilities: { ...adminAuthStatus.capabilities, canAccessSettings: false }
+  };
+  await page.route('**/api/auth/status', route => route.fulfill({ json: viewer }));
+  await page.route('**/api/appearance', route => route.fulfill({ json: { theme: 'light', accent: 'orange' } }));
+  await page.route('**/api/auth/unlock-admin', route => route.fulfill({ json: { ok: true, auth: adminAuthStatus } }));
+  await page.route('**/api/auth/logout', route => route.fulfill({ json: { ok: true, auth: viewer } }));
+  const writes: string[] = [];
+  page.on('request', request => {
+    if (request.url().endsWith('/api/admin/settings/appearance')) writes.push(request.method());
+  });
+
+  const root = page.locator('html');
+  const more = page.getByRole('button', { name: 'More', exact: true });
+  await page.goto('/');
+  await more.click();
+  await page.getByRole('button', { name: 'Switch appearance', exact: true }).click();
+  await expect(root).toHaveAttribute('data-theme', 'dark');
+  await page.reload();
+  await expect(root).toHaveAttribute('data-theme', 'dark');
+
+  await more.click();
+  await page.getByRole('button', { name: 'Unlock admin', exact: true }).click();
+  await page.locator('input[autocomplete="current-password"]').fill('fixture-admin-password');
+  await page.locator('form button[type="submit"]').click();
+  await expect(root).toHaveAttribute('data-theme', 'light');
+  expect(await page.evaluate(() => localStorage.getItem('foldergram-theme'))).toBe('dark');
+
+  await more.click();
+  await page.getByRole('button', { name: 'Return to public view', exact: true }).click();
+  await expect(root).toHaveAttribute('data-theme', 'dark');
+  expect(writes).toEqual([]);
+});
 
 test('home videos stop playing off screen after leaving fullscreen', async ({ page }) => {
   await mockGallery(page, 'light');
@@ -245,7 +451,7 @@ for (const theme of ['light', 'dark'] as const) {
       });
     }
 
-    test('active main navigation and folder shortcuts are readable', async ({ page }) => {
+    test('active main navigation is readable without Folders Spotlight', async ({ page }) => {
       await page.setViewportSize({ width: 1280, height: 720 });
       await page.goto('/');
       const sidebar = page.locator('.sidebar');
@@ -254,12 +460,8 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(activeMain).toBeVisible();
       await expect(activeMain.locator('.sidebar__label')).toHaveCSS('opacity', '1');
       await expectReadableControl(activeMain);
-      await page.goto('/f/panoramas');
-      await sidebar.hover();
-      const activeFolder = sidebar.locator('.sidebar__folder.router-link-active');
-      await expect(activeFolder).toBeVisible();
-      await expect(activeFolder.locator('.sidebar__folder-copy')).toHaveCSS('opacity', '1');
-      await expectReadableControl(activeFolder);
+      await expect(sidebar.getByText('Folders Spotlight')).toHaveCount(0);
+      await expect(sidebar.locator('a[href^="/f/"]')).toHaveCount(0);
     });
   });
 }

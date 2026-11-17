@@ -694,6 +694,7 @@ export interface AuthCapabilities {
 
 export interface AuthStatus {
   enabled: boolean;
+  publicDemoMode?: boolean;
   authenticated: boolean;
   role: AuthRole;
   accessMode: ViewerAccessMode;

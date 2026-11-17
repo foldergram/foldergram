@@ -17,7 +17,8 @@
   "save": "Save appearance",
   "saving": "Saving…",
   "saved": "Appearance saved.",
-  "saveError": "Could not save appearance. Please try again."
+  "saveError": "Could not save appearance. Please try again.",
+  "demoReadOnly": "Appearance settings are read-only in the public demo. Use More → Switch appearance to change your browser theme."
 },
   "sources": {
     "title": "Sources",

@@ -17,7 +17,8 @@
   "save": "Guardar apariencia",
   "saving": "Guardando…",
   "saved": "Apariencia guardada.",
-  "saveError": "No se pudo guardar la apariencia. Inténtalo de nuevo."
+  "saveError": "No se pudo guardar la apariencia. Inténtalo de nuevo.",
+  "demoReadOnly": "Los ajustes de apariencia son de solo lectura en la demo pública. Usa Más → Cambiar apariencia para cambiar el tema de tu navegador."
 },
   "sources": {
     "title": "Fuentes",

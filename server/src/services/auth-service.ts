@@ -12,6 +12,7 @@ import {
   AUTH_VIEWER_PASSWORD_HASH_SETTING_KEY,
   AUTH_VIEWER_PASSWORD_SALT_SETTING_KEY
 } from '../constants/app-setting-keys.js';
+import { appConfig } from '../config/env.js';
 import { appSettingsRepository } from '../db/repositories.js';
 
 export type AuthRole = 'admin' | 'viewer' | 'anonymous';
@@ -49,6 +50,7 @@ interface SessionPayload {
 
 export interface AuthStatus {
   enabled: boolean;
+  publicDemoMode: boolean;
   authenticated: boolean;
   role: AuthRole;
   accessMode: ViewerAccessMode;
@@ -147,6 +149,7 @@ function createStatus(role: AuthRole, authenticated: boolean, enabled: boolean, 
 
   return {
     enabled,
+    publicDemoMode: appConfig.publicDemoMode,
     authenticated,
     role,
     accessMode,
