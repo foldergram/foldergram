@@ -2,7 +2,7 @@
   <section
     v-if="showAuthLoading"
     class="min-h-screen px-6 py-10 flex items-center justify-center"
-    style="background: radial-gradient(circle at top, rgba(0,149,246,0.1), transparent 34%), linear-gradient(180deg, color-mix(in srgb, var(--bg) 90%, #ffffff 10%) 0%, var(--bg) 100%);"
+    style="background: radial-gradient(circle at top, rgba(var(--accent-rgb),0.1), transparent 34%), linear-gradient(180deg, color-mix(in srgb, var(--bg) 90%, #ffffff 10%) 0%, var(--bg) 100%);"
   >
     <div class="card w-full max-w-[24rem] p-8 text-center">
       <p class="m-0 text-[0.78rem] font-bold uppercase tracking-[0.08em] text-accent-strong">{{ t('app.authLoading.eyebrow') }}</p>

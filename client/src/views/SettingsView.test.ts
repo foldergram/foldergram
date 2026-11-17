@@ -436,7 +436,7 @@ describe('SettingsView', () => {
     await flushPromises();
     await openGeneralSettingsSidebarTab(wrapper);
 
-    const languageSelect = wrapper.get('select');
+    const languageSelect = wrapper.get('select[id]');
     expect((languageSelect.element as HTMLSelectElement).value).toBe('en');
 
     await languageSelect.setValue('es');
@@ -463,7 +463,7 @@ describe('SettingsView', () => {
     await flushPromises();
     await openGeneralSettingsSidebarTab(wrapper);
 
-    await wrapper.get('select').setValue('zh');
+    await wrapper.get('select[id]').setValue('zh');
     await flushPromises();
 
     const saveButton = wrapper
@@ -498,7 +498,7 @@ describe('SettingsView', () => {
 
     const localeOverrideNotice = wrapper.get('[data-testid="locale-override-notice"]');
     expect(localeOverrideNotice.attributes('role')).toBe('status');
-    expect(localeOverrideNotice.attributes('class')).toContain('bg-[rgba(24,119,242,0.08)]');
+    expect(localeOverrideNotice.attributes('class')).toContain('bg-[rgba(var(--accent-rgb),0.08)]');
     expect(localeOverrideNotice.text()).toContain('El valor predeterminado de la app es Chino.');
     expect(localeOverrideNotice.text()).toContain('Este navegador está usando temporalmente Español');
     expect(localeOverrideNotice.text()).toContain('configuración solo de este navegador');
@@ -809,7 +809,7 @@ describe('SettingsView', () => {
 
     const saveButton = wrapper
       .findAll('button')
-      .find((button) => button.text().includes('Guardar'));
+      .find((button) => button.text() === 'Guardar cambios');
 
     expect(saveButton).toBeDefined();
 

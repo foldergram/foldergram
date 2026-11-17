@@ -1,4 +1,24 @@
 {
+  "appearance": {
+  "title": "外观",
+    "description": "设置此实例的默认主题和强调色。",
+    "theme": "默认外观",
+    "instanceDefault": "实例默认",
+  "system": "跟随系统",
+  "light": "浅色",
+  "dark": "深色",
+  "accent": "强调色",
+  "accentHelp": "用于此实例的按钮、链接和突出显示。",
+  "blue": "蓝色",
+  "purple": "紫色",
+  "green": "绿色",
+  "orange": "橙色",
+  "rose": "玫瑰色",
+  "save": "保存外观",
+  "saving": "正在保存…",
+  "saved": "外观已保存。",
+  "saveError": "无法保存外观，请重试。"
+},
   "sources": {
     "title": "来源",
     "description": "管理 Foldergram 中显示的本地文件夹和 Immich 媒体库。",

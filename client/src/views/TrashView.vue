@@ -67,7 +67,7 @@
             :class="[
               'group overflow-hidden rounded-[0.9rem] border bg-surface transition-[border-color,box-shadow,transform,background-color] duration-180',
               isSelected(item.id)
-                ? 'border-[color-mix(in_srgb,var(--accent)_40%,var(--border)_60%)] bg-[color-mix(in_srgb,var(--surface)_90%,var(--accent)_10%)] shadow-[0_16px_36px_rgba(0,149,246,0.14)]'
+                ? 'border-[color-mix(in_srgb,var(--accent)_40%,var(--border)_60%)] bg-[color-mix(in_srgb,var(--surface)_90%,var(--accent)_10%)] shadow-[0_16px_36px_rgba(var(--accent-rgb),0.14)]'
                 : 'border-border'
             ]"
           >
@@ -109,14 +109,14 @@
               <div
                 :class="[
                   'absolute inset-0 pointer-events-none transition-colors duration-180',
-                  isSelected(item.id) ? 'bg-[rgba(0,149,246,0.16)]' : 'bg-transparent'
+                  isSelected(item.id) ? 'bg-[rgba(var(--accent-rgb),0.16)]' : 'bg-transparent'
                 ]"
               />
               <div
                 :class="[
                   'absolute right-3 bottom-3 flex h-9 w-9 items-center justify-center rounded-full border shadow-[0_10px_28px_rgba(15,20,25,0.18)] transition-all duration-180',
                   isSelected(item.id)
-                    ? 'border-transparent bg-accent text-white'
+                    ? 'border-transparent bg-accent text-on-accent'
                     : 'border-[rgba(255,255,255,0.45)] bg-[rgba(10,14,24,0.46)] text-white/92'
                 ]"
               >

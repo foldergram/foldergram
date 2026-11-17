@@ -106,7 +106,7 @@
           <p class="m-0 text-muted">{{ t('settings.places.banner.helper') }}</p>
           </div>
           <button
-            class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-0 bg-[rgba(24,119,242,0.08)] text-accent-strong cursor-pointer transition-colors duration-180 hover:bg-[rgba(24,119,242,0.14)]"
+            class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-0 bg-[rgba(var(--accent-rgb),0.08)] text-accent-strong cursor-pointer transition-colors duration-180 hover:bg-[rgba(var(--accent-rgb),0.14)]"
             type="button"
             :aria-label="t('settings.places.banner.dismissAria')"
             @click.stop="dismissPlacesOnboardingBanner"
@@ -293,7 +293,7 @@
               {{ authProtectionDescription }}
             </p>
 
-            <div v-if="authFeedback" class="rounded-[0.95rem] px-4 py-3 text-[0.9rem]" :class="authFeedback.tone === 'error' ? 'border border-[rgba(214,48,49,0.24)] text-[#c0392b] bg-[rgba(214,48,49,0.08)]' : 'border border-[rgba(24,119,242,0.2)] text-accent-strong bg-[rgba(24,119,242,0.08)]'">
+            <div v-if="authFeedback" class="rounded-[0.95rem] px-4 py-3 text-[0.9rem]" :class="authFeedback.tone === 'error' ? 'border border-[rgba(214,48,49,0.24)] text-[#c0392b] bg-[rgba(214,48,49,0.08)]' : 'border border-[rgba(var(--accent-rgb),0.2)] text-accent-strong bg-[rgba(var(--accent-rgb),0.08)]'">
               {{ authFeedback.message }}
             </div>
 
@@ -340,7 +340,7 @@
                     <p class="m-0 mt-[0.25rem] text-muted">{{ t('settings.access.change.description') }}</p>
                   </div>
                   <button
-                    class="inline-flex min-h-11 items-center justify-center rounded-[0.95rem] border border-[rgba(24,119,242,0.2)] bg-[rgba(24,119,242,0.08)] px-4 text-[0.9rem] font-semibold text-accent-strong transition-colors duration-180 hover:bg-[rgba(24,119,242,0.16)] disabled:cursor-wait disabled:opacity-60 max-sm:w-full"
+                    class="inline-flex min-h-11 items-center justify-center rounded-[0.95rem] border border-[rgba(var(--accent-rgb),0.2)] bg-[rgba(var(--accent-rgb),0.08)] px-4 text-[0.9rem] font-semibold text-accent-strong transition-colors duration-180 hover:bg-[rgba(var(--accent-rgb),0.16)] disabled:cursor-wait disabled:opacity-60 max-sm:w-full"
                     type="button"
                     :aria-expanded="showChangePasswordForm"
                     :disabled="authStore.loading"
@@ -410,7 +410,7 @@
 
                 <div
                   class="rounded-[0.95rem] border px-4 py-3"
-                  :class="viewerAccessActive ? 'border-[rgba(24,119,242,0.18)] bg-[rgba(24,119,242,0.06)]' : 'border-border bg-[color-mix(in_srgb,var(--surface-alt)_82%,transparent_18%)]'"
+                  :class="viewerAccessActive ? 'border-[rgba(var(--accent-rgb),0.18)] bg-[rgba(var(--accent-rgb),0.06)]' : 'border-border bg-[color-mix(in_srgb,var(--surface-alt)_82%,transparent_18%)]'"
                 >
                   <p class="m-0 text-[0.92rem] font-semibold text-text">{{ viewerAccessSummaryTitle }}</p>
                   <p class="m-0 mt-[0.3rem] text-[0.88rem] text-muted">{{ viewerAccessSummary }}</p>
@@ -472,7 +472,7 @@
                   </button>
                 </div>
 
-                <div v-if="viewerFeedback" class="rounded-[0.95rem] px-4 py-3 text-[0.9rem] mt-2" :class="viewerFeedback.tone === 'error' ? 'border border-[rgba(214,48,49,0.24)] text-[#c0392b] bg-[rgba(214,48,49,0.08)]' : 'border border-[rgba(24,119,242,0.2)] text-accent-strong bg-[rgba(24,119,242,0.08)]'">
+                <div v-if="viewerFeedback" class="rounded-[0.95rem] px-4 py-3 text-[0.9rem] mt-2" :class="viewerFeedback.tone === 'error' ? 'border border-[rgba(214,48,49,0.24)] text-[#c0392b] bg-[rgba(214,48,49,0.08)]' : 'border border-[rgba(var(--accent-rgb),0.2)] text-accent-strong bg-[rgba(var(--accent-rgb),0.08)]'">
                   {{ viewerFeedback.message }}
                 </div>
               </div>
@@ -574,7 +574,7 @@
                 </p>
               </div>
               <button
-                class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-0 bg-[rgba(24,119,242,0.08)] text-accent-strong cursor-pointer transition-colors duration-180 hover:bg-[rgba(24,119,242,0.14)]"
+                class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-0 bg-[rgba(var(--accent-rgb),0.08)] text-accent-strong cursor-pointer transition-colors duration-180 hover:bg-[rgba(var(--accent-rgb),0.14)]"
                 type="button"
                 :aria-label="t('settings.general.carouselsAnnouncement.dismissAria')"
                 @click="dismissCarouselsAnnouncement"
@@ -664,7 +664,7 @@
                 </p>
               </div>
               <button
-                class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-0 bg-[rgba(24,119,242,0.08)] text-accent-strong cursor-pointer transition-colors duration-180 hover:bg-[rgba(24,119,242,0.14)]"
+                class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-0 bg-[rgba(var(--accent-rgb),0.08)] text-accent-strong cursor-pointer transition-colors duration-180 hover:bg-[rgba(var(--accent-rgb),0.14)]"
                 type="button"
                 :aria-label="t('settings.general.announcement.dismissAria')"
                 @click="dismissStoriesAnnouncement"
@@ -699,7 +699,7 @@
             <div
               v-if="generalSettingsFeedback"
               class="mx-6 mt-5 rounded-[0.95rem] px-4 py-3 text-[0.9rem]"
-              :class="generalSettingsFeedback.tone === 'error' ? 'border border-[rgba(214,48,49,0.24)] text-[#c0392b] bg-[rgba(214,48,49,0.08)]' : 'border border-[rgba(24,119,242,0.2)] text-accent-strong bg-[rgba(24,119,242,0.08)]'"
+              :class="generalSettingsFeedback.tone === 'error' ? 'border border-[rgba(214,48,49,0.24)] text-[#c0392b] bg-[rgba(214,48,49,0.08)]' : 'border border-[rgba(var(--accent-rgb),0.2)] text-accent-strong bg-[rgba(var(--accent-rgb),0.08)]'"
             >
               {{ generalSettingsFeedback.message }}
             </div>
@@ -739,7 +739,7 @@
                   v-if="showSavedDefaultLocaleNotice"
                   data-testid="locale-override-notice"
                   role="status"
-                  class="mt-3 rounded-[0.95rem] border border-[rgba(24,119,242,0.2)] bg-[rgba(24,119,242,0.08)] px-4 py-3 text-[0.82rem] leading-[1.5] text-accent-strong"
+                  class="mt-3 rounded-[0.95rem] border border-[rgba(var(--accent-rgb),0.2)] bg-[rgba(var(--accent-rgb),0.08)] px-4 py-3 text-[0.82rem] leading-[1.5] text-accent-strong"
                 >
                   {{ t('settings.general.language.overrideNotice', { savedLabel: savedLocaleOptionLabel, currentLabel: selectedLocaleOptionLabel }) }}
                 </div>
@@ -1026,8 +1026,8 @@
                     :class="storiesMode ? 'bg-accent' : 'bg-[color-mix(in_srgb,var(--border)_88%,var(--surface-alt)_12%)]'"
                   >
                     <span
-                      class="h-[1.35rem] w-[1.35rem] rounded-full bg-white shadow-[0_2px_8px_rgba(0,0,0,0.18)] transition-transform duration-180"
-                      :class="storiesMode ? 'translate-x-[1.2rem]' : 'translate-x-0'"
+                      class="h-[1.35rem] w-[1.35rem] rounded-full shadow-[0_2px_8px_rgba(0,0,0,0.18)] transition-[background-color,transform] duration-180"
+                      :class="storiesMode ? 'translate-x-[1.2rem] bg-on-accent' : 'translate-x-0 bg-white'"
                     />
                   </span>
                 </button>
@@ -1053,7 +1053,7 @@
                 >
                   <span class="sr-only">{{ t('settings.general.carouselsMode.toggleLabel') }}</span>
                   <span class="inline-flex h-7 w-12 items-center rounded-full p-[0.15rem] transition-colors duration-180" :class="carouselsMode ? 'bg-accent' : 'bg-[color-mix(in_srgb,var(--border)_88%,var(--surface-alt)_12%)]'">
-                    <span class="h-[1.35rem] w-[1.35rem] rounded-full bg-white shadow-[0_2px_8px_rgba(0,0,0,0.18)] transition-transform duration-180" :class="carouselsMode ? 'translate-x-[1.2rem]' : 'translate-x-0'" />
+                    <span class="h-[1.35rem] w-[1.35rem] rounded-full shadow-[0_2px_8px_rgba(0,0,0,0.18)] transition-[background-color,transform] duration-180" :class="carouselsMode ? 'translate-x-[1.2rem] bg-on-accent' : 'translate-x-0 bg-white'" />
                   </span>
                 </button>
               </div>
@@ -1091,7 +1091,7 @@
                       <span
                         v-for="rule in envExcludedFolders"
                         :key="`env-${rule}`"
-                        class="inline-flex items-center rounded-full bg-[rgba(24,119,242,0.08)] px-3 py-[0.35rem] text-[0.78rem] font-medium text-accent-strong"
+                        class="inline-flex items-center rounded-full bg-[rgba(var(--accent-rgb),0.08)] px-3 py-[0.35rem] text-[0.78rem] font-medium text-accent-strong"
                       >
                         {{ rule }}
                       </span>
@@ -1141,6 +1141,7 @@
             </div>
           </section>
 
+          <AppearanceSettings />
         </template>
 
         <!-- CATEGORY: PLACES -->
@@ -1269,7 +1270,7 @@
                   class="inline-flex h-7 w-12 items-center rounded-full p-[0.15rem] transition-colors duration-180"
                   :class="heicImportSetting?.enabled ? 'bg-accent' : 'bg-[color-mix(in_srgb,var(--border)_88%,var(--surface-alt)_12%)]'"
                 >
-                  <span class="h-[1.35rem] w-[1.35rem] rounded-full bg-white shadow-[0_2px_8px_rgba(0,0,0,0.18)] transition-transform duration-180" :class="heicImportSetting?.enabled ? 'translate-x-[1.2rem]' : 'translate-x-0'" />
+                  <span class="h-[1.35rem] w-[1.35rem] rounded-full shadow-[0_2px_8px_rgba(0,0,0,0.18)] transition-[background-color,transform] duration-180" :class="heicImportSetting?.enabled ? 'translate-x-[1.2rem] bg-on-accent' : 'translate-x-0 bg-white'" />
                 </span>
               </button>
               <p id="heic-import-status" role="status" class="col-span-2 m-0 empty:hidden text-[0.84rem] text-muted">{{ heicImportStatusMessage }}</p>
@@ -1453,6 +1454,7 @@ import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
 
 import SourceSettings from '../components/SourceSettings.vue';
+import AppearanceSettings from '../components/AppearanceSettings.vue';
 import ConfirmDialog from '../components/ConfirmDialog.vue';
 import {
   fetchAdminStats,

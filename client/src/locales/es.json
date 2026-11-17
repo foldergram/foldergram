@@ -1,4 +1,24 @@
 {
+  "appearance": {
+  "title": "Apariencia",
+    "description": "Configura el tema predeterminado y el color de acento de esta instancia.",
+    "theme": "Apariencia predeterminada",
+    "instanceDefault": "Predeterminado de la instancia",
+  "system": "Sistema",
+  "light": "Claro",
+  "dark": "Oscuro",
+  "accent": "Color de acento",
+  "accentHelp": "Para botones, enlaces y elementos destacados.",
+  "blue": "Azul",
+  "purple": "Morado",
+  "green": "Verde",
+  "orange": "Naranja",
+  "rose": "Rosa",
+  "save": "Guardar apariencia",
+  "saving": "Guardando…",
+  "saved": "Apariencia guardada.",
+  "saveError": "No se pudo guardar la apariencia. Inténtalo de nuevo."
+},
   "sources": {
     "title": "Fuentes",
     "description": "Administra las carpetas locales y las bibliotecas de Immich que aparecen en Foldergram.",

@@ -23,9 +23,9 @@ const panorama = {
   }
 };
 
-async function mockGallery(page: Page, theme: 'light' | 'dark') {
+async function mockGallery(page: Page, theme?: 'light' | 'dark') {
   await page.addInitScript(value => {
-    localStorage.setItem('foldergram-theme', value);
+    if (value) localStorage.setItem('foldergram-theme', value);
     localStorage.setItem('foldergram-locale', 'en');
   }, theme);
   await page.route('https://fonts.googleapis.com/**', route => route.abort());
@@ -63,6 +63,7 @@ async function mockGallery(page: Page, theme: 'light' | 'dark') {
         hasAvatarStory: false, avatarStoryId: null, items: [], highlights: []
       },
       '/api/feed': paginated,
+      '/api/feed/search': paginated,
       '/api/feed/moments': {
         railKind: 'moments', railTitle: 'Moments', railDescription: '', railSingularLabel: 'Moment', items: []
       },
@@ -97,8 +98,8 @@ async function expectReadableBetweenStickyBars(target: Locator) {
   expect(result.unobscured, 'Sticky controls must not cover the text').toBe(true);
 }
 
-async function expectReadableActiveNavigation(link: Locator) {
-  const contrast = await link.evaluate(element => {
+async function expectReadableControl(control: Locator) {
+  const contrast = await control.evaluate(element => {
     const canvas = document.createElement('canvas');
     canvas.width = canvas.height = 1;
     const context = canvas.getContext('2d', { willReadFrequently: true })!;
@@ -118,7 +119,58 @@ async function expectReadableActiveNavigation(link: Locator) {
     const background = luminance(styles.backgroundColor);
     return (Math.max(foreground, background) + 0.05) / (Math.min(foreground, background) + 0.05);
   });
-  expect(contrast, 'Active navigation text and icons need at least 4.5:1 contrast').toBeGreaterThanOrEqual(4.5);
+  expect(contrast, 'Control text and icons need at least 4.5:1 contrast').toBeGreaterThanOrEqual(4.5);
+}
+
+for (const width of [1280, 390]) {
+  test(`public appearance works while the instance request is pending at ${width}px`, async ({ page }) => {
+    await mockGallery(page);
+    await page.setViewportSize({ width, height: 844 });
+    await page.emulateMedia({ colorScheme: 'light' });
+    let sendAppearance!: () => void;
+    const pending = new Promise<void>(resolve => { sendAppearance = resolve; });
+    await page.route('**/api/appearance', async route => {
+      await pending;
+      await route.fulfill({ json: { theme: 'dark', accent: 'orange' } });
+    });
+    const writes: string[] = [];
+    page.on('request', request => {
+      if (request.url().endsWith('/api/admin/settings/appearance')) writes.push(request.method());
+    });
+
+    try {
+      await page.goto('/explore?q=Panoramas', { waitUntil: 'domcontentloaded' });
+      await expect(page.locator('#fg-splash')).toHaveCount(0);
+      await page.getByRole('button', { name: 'More', exact: true }).click();
+      const select = page.getByRole('combobox', { name: 'Switch Appearance' });
+      const root = page.locator('html');
+      await expect(select).toHaveValue('instance');
+      await select.selectOption('dark');
+      await expect(root).toHaveAttribute('data-theme', 'dark');
+      await select.selectOption('system');
+      await expect(root).toHaveAttribute('data-theme', 'light');
+
+      sendAppearance();
+      const selectedTab = page.getByRole('tab', { selected: true });
+      await expect(selectedTab).toHaveCSS('background-color', 'rgb(180, 83, 9)');
+      await expectReadableControl(selectedTab);
+
+      await page.reload();
+      await page.getByRole('button', { name: 'More', exact: true }).click();
+      await expect(select).toHaveValue('system');
+      await select.selectOption('instance');
+      await expect(root).toHaveAttribute('data-theme', 'dark');
+      await expect(selectedTab).toHaveCSS('background-color', 'rgb(251, 191, 36)');
+      await expectReadableControl(selectedTab);
+      await page.getByRole('button', { name: 'More', exact: true }).click();
+      await page.mouse.move(width - 1, 0);
+      await selectedTab.hover({ timeout: 5000 });
+      await expectReadableControl(selectedTab);
+      expect(writes).toEqual([]);
+    } finally {
+      sendAppearance();
+    }
+  });
 }
 
 test('home videos stop playing off screen after leaving fullscreen', async ({ page }) => {
@@ -201,13 +253,13 @@ for (const theme of ['light', 'dark'] as const) {
       const activeMain = sidebar.locator('.sidebar__link.router-link-active');
       await expect(activeMain).toBeVisible();
       await expect(activeMain.locator('.sidebar__label')).toHaveCSS('opacity', '1');
-      await expectReadableActiveNavigation(activeMain);
+      await expectReadableControl(activeMain);
       await page.goto('/f/panoramas');
       await sidebar.hover();
       const activeFolder = sidebar.locator('.sidebar__folder.router-link-active');
       await expect(activeFolder).toBeVisible();
       await expect(activeFolder.locator('.sidebar__folder-copy')).toHaveCSS('opacity', '1');
-      await expectReadableActiveNavigation(activeFolder);
+      await expectReadableControl(activeFolder);
     });
   });
 }

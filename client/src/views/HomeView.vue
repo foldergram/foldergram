@@ -128,7 +128,7 @@
       </div>
 
       <!-- Initial scan state (no feed yet) -->
-      <section v-else-if="showInitialScanState" class="grid gap-[0.85rem] px-5 py-5 mb-[1.1rem] border border-border rounded-[1rem] shadow-[var(--shadow)]" style="background: radial-gradient(circle at top right, rgba(0,149,246,0.12), transparent 38%), linear-gradient(180deg, var(--surface) 0%, color-mix(in srgb, var(--surface) 90%, var(--accent) 10%) 100%);">
+      <section v-else-if="showInitialScanState" class="grid gap-[0.85rem] px-5 py-5 mb-[1.1rem] border border-border rounded-[1rem] shadow-[var(--shadow)]" style="background: radial-gradient(circle at top right, rgba(var(--accent-rgb),0.12), transparent 38%), linear-gradient(180deg, var(--surface) 0%, color-mix(in srgb, var(--surface) 90%, var(--accent) 10%) 100%);">
         <div class="flex items-start justify-between gap-3 max-sm:flex-col max-sm:items-start">
           <span class="text-accent-strong text-[0.75rem] font-bold tracking-[0.08em] uppercase">{{ t('home.initialScan.eyebrow') }}</span>
           <span
@@ -458,7 +458,7 @@ const homeSetupNoticeDescription = computed(() => {
 const homeSetupNoticeStyle = computed(() =>
   ignoredRootMediaCount.value > 0
     ? 'background: radial-gradient(circle at top right, rgba(210,161,51,0.16), transparent 38%), linear-gradient(180deg, color-mix(in srgb, var(--surface) 92%, #fff4d1 8%) 0%, color-mix(in srgb, var(--surface) 88%, #ffeab1 12%) 100%); border-color: color-mix(in srgb, var(--border) 70%, #d2a133 30%);'
-    : 'background: radial-gradient(circle at top right, rgba(0,149,246,0.12), transparent 38%), linear-gradient(180deg, var(--surface) 0%, color-mix(in srgb, var(--surface) 92%, var(--accent) 8%) 100%); border-color: color-mix(in srgb, var(--border) 78%, var(--accent) 22%);'
+    : 'background: radial-gradient(circle at top right, rgba(var(--accent-rgb),0.12), transparent 38%), linear-gradient(180deg, var(--surface) 0%, color-mix(in srgb, var(--surface) 92%, var(--accent) 8%) 100%); border-color: color-mix(in srgb, var(--border) 78%, var(--accent) 22%);'
 );
 const homeScanDisabled = computed(
   () =>

@@ -697,15 +697,13 @@ function parseSearchTab(value: unknown): SearchTab {
   transform: translateY(-1px);
 }
 
-.explore-view__tab--active {
+.explore-view__tab--active,
+.explore-view__tab--active:hover {
   border-color: transparent;
-  background: linear-gradient(
-    135deg,
-    color-mix(in srgb, var(--accent) 88%, white 12%),
-    color-mix(in srgb, var(--accent-strong) 84%, white 16%)
-  );
-  color: #ffffff;
-  box-shadow: 0 14px 28px rgba(0, 149, 246, 0.18);
+  background: var(--accent);
+  color: var(--on-accent);
+  box-shadow: 0 14px 28px rgba(var(--accent-rgb), 0.18);
+  transition: transform 0.15s ease;
 }
 
 .explore-view__recent-clear {
