@@ -28,6 +28,7 @@ export default defineConfig({
       accent: "var(--accent)",
       "accent-strong": "var(--accent-strong)",
       "accent-soft": "var(--accent-soft)",
+      "on-accent": "var(--on-accent)",
       bg: "var(--bg)",
       surface: "var(--surface)",
       "surface-alt": "var(--surface-alt)",
@@ -52,7 +53,7 @@ export default defineConfig({
     // Primary button
     [
       "btn-primary",
-      "inline-flex items-center justify-center gap-[0.45rem] px-[0.8rem] py-[0.5rem] min-h-[2.2rem] rounded-[0.6rem] bg-accent text-white text-[0.8rem] font-semibold cursor-pointer border border-transparent transition-all duration-150 hover:opacity-92 hover:-translate-y-px disabled:opacity-70 disabled:cursor-wait",
+      "inline-flex items-center justify-center gap-[0.45rem] px-[0.8rem] py-[0.5rem] min-h-[2.2rem] rounded-[0.6rem] bg-accent text-on-accent text-[0.8rem] font-semibold cursor-pointer border border-transparent transition-all duration-150 hover:opacity-92 hover:-translate-y-px disabled:opacity-70 disabled:cursor-wait",
     ],
     // Secondary/ghost button
     [

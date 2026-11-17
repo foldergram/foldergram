@@ -354,25 +354,7 @@
             <span>{{ t('nav.unlockAdmin') }}</span>
           </button>
 
-          <button
-            class="flex items-center gap-[0.95rem] w-full px-[1.2rem] py-[1rem] border-0 bg-transparent text-[0.98rem] text-text cursor-pointer text-left transition-colors duration-150 hover:bg-surface-hover"
-            type="button"
-            :aria-label="appearanceLabel"
-            @click="handleAppearanceToggle"
-          >
-            <span
-              v-if="appStore.theme === 'light'"
-              class="i-fluent-weather-moon-20-regular w-[1.18rem] h-[1.18rem] shrink-0"
-              aria-hidden="true"
-            />
-            <span
-              v-else
-              class="i-fluent-weather-sunny-20-regular w-[1.18rem] h-[1.18rem] shrink-0"
-              aria-hidden="true"
-            />
-            <span>{{ t('nav.switchAppearance') }}</span>
-          </button>
-
+          <BrowserAppearanceSelect class="flex w-full items-center gap-[0.95rem] px-[1.2rem] py-[1rem] text-[0.98rem] text-text hover:bg-surface-hover" />
           <button
             v-if="authStore.canSignOut"
             class="flex items-center gap-[0.95rem] w-full px-[1.2rem] py-[1rem] border-0 bg-transparent text-[0.98rem] text-text cursor-pointer text-left transition-colors duration-150 hover:bg-surface-hover disabled:opacity-60 disabled:cursor-wait"
@@ -431,6 +413,7 @@
   import { selectSidebarFolders } from "../utils/sidebar-folders"
   import Avatar from "./Avatar.vue"
   import BrandMark from "./BrandMark.vue"
+  import BrowserAppearanceSelect from "./BrowserAppearanceSelect.vue"
 
   const props = defineProps<{ panelOpen?: boolean }>()
   const emit = defineEmits<{ openMore: [] }>()
@@ -461,9 +444,6 @@
     },
     { immediate: true },
   )
-  const appearanceLabel = computed(() =>
-    appStore.theme === "light" ? t("nav.switchToDarkMode") : t("nav.switchToLightMode"),
-  )
   const showPlacesNav = computed(() =>
     placesStore.items.length > 0 && placesStore.listError === null,
   )
@@ -489,11 +469,6 @@
   function toggleMoreMenu() {
     if (!moreMenuOpen.value) emit('openMore')
     moreMenuOpen.value = !moreMenuOpen.value
-  }
-
-  function handleAppearanceToggle() {
-    appStore.toggleTheme()
-    closeMoreMenu()
   }
 
   function handleUnlockAdmin() {

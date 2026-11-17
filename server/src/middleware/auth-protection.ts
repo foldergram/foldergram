@@ -16,7 +16,7 @@ function isPublicApiRoute(request: express.Request): boolean {
     (path.endsWith('/unlock-link') || path.endsWith('/unlock-password'));
 
   return (
-    (method === 'GET' && (path === '/health' || path === '/auth/status')) ||
+    (method === 'GET' && (path === '/health' || path === '/auth/status' || path === '/appearance')) ||
     (method === 'POST' && (path === '/auth/login' || path === '/auth/logout' || path === '/auth/unlock-admin')) ||
     isShareReadRoute ||
     isShareUnlockRoute

@@ -1,4 +1,24 @@
 {
+  "appearance": {
+  "title": "Appearance",
+    "description": "Set the default theme and accent color for this instance.",
+    "theme": "Default appearance",
+    "instanceDefault": "Instance default",
+  "system": "System",
+  "light": "Light",
+  "dark": "Dark",
+  "accent": "Accent color",
+  "accentHelp": "Used for buttons, links, and highlights across this instance.",
+  "blue": "Blue",
+  "purple": "Purple",
+  "green": "Green",
+  "orange": "Orange",
+  "rose": "Rose",
+  "save": "Save appearance",
+  "saving": "Saving…",
+  "saved": "Appearance saved.",
+  "saveError": "Could not save appearance. Please try again."
+},
   "sources": {
     "title": "Sources",
     "description": "Manage the local folders and Immich libraries shown in Foldergram.",

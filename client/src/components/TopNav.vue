@@ -183,25 +183,7 @@
               <span>{{ t('nav.unlockAdmin') }}</span>
             </button>
 
-            <button
-              class="mobile-nav__menu-item"
-              type="button"
-              :aria-label="themeLabel"
-              @click="handleAppearanceToggle"
-            >
-              <span
-                v-if="appStore.theme === 'light'"
-                class="mobile-nav__menu-icon i-fluent-weather-moon-20-regular"
-                aria-hidden="true"
-              />
-              <span
-                v-else
-                class="mobile-nav__menu-icon i-fluent-weather-sunny-20-regular"
-                aria-hidden="true"
-              />
-              <span>{{ t('nav.switchAppearance') }}</span>
-            </button>
-
+            <BrowserAppearanceSelect class="mobile-nav__menu-item" />
             <button
               v-if="authStore.canSignOut"
               class="mobile-nav__menu-item"
@@ -224,15 +206,14 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { RouterLink, useRoute } from 'vue-router';
 
-import { useAppStore } from '../stores/app';
 import { useAuthStore } from '../stores/auth';
 import { useCollectionsStore } from '../stores/collections';
 import { useLikesStore } from '../stores/likes';
 import { usePlacesStore } from '../stores/places';
 import BrandMark from './BrandMark.vue';
+import BrowserAppearanceSelect from './BrowserAppearanceSelect.vue';
 
 const { t } = useI18n();
-const appStore = useAppStore();
 const authStore = useAuthStore();
 const collectionsStore = useCollectionsStore();
 const likesStore = useLikesStore();
@@ -241,7 +222,6 @@ const route = useRoute();
 const props = defineProps<{ panelOpen?: boolean; hasActivity?: boolean }>();
 const emit = defineEmits<{ openMore: [] }>();
 const moreMenuOpen = ref(false);
-const themeLabel = computed(() => (appStore.theme === 'light' ? t('nav.switchToDarkMode') : t('nav.switchToLightMode')));
 const signOutLabel = computed(() => (authStore.accessMode === 'public' ? t('nav.returnToPublicView') : t('nav.signOut')));
 const showPlacesNav = computed(() => placesStore.items.length > 0 && placesStore.listError === null);
 const isPlacesRoute = computed(() => route.name === 'places' || route.name === 'place');
@@ -263,11 +243,6 @@ function closeMoreMenu() {
 function toggleMoreMenu() {
   if (!moreMenuOpen.value) emit('openMore');
   moreMenuOpen.value = !moreMenuOpen.value;
-}
-
-function handleAppearanceToggle() {
-  appStore.toggleTheme();
-  closeMoreMenu();
 }
 
 function handleUnlockAdmin() {

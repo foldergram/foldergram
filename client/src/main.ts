@@ -5,6 +5,7 @@ import { AUTH_REQUIRED_EVENT } from './api/http';
 import { i18n } from './locales';
 import { canAccessRoute, router } from './router';
 import { useAppStore } from './stores/app';
+import { useAppearanceStore } from './stores/appearance';
 import { useAuthStore } from './stores/auth';
 import { pinia } from './stores/pinia';
 import './styles/base.css';
@@ -55,7 +56,18 @@ async function bootstrap() {
   const authStore = useAuthStore(pinia);
 
   appStore.initializeLocale();
-  appStore.initializeTheme();
+  const appearance = useAppearanceStore(pinia);
+  appearance.initialize();
+  void appearance.load();
+  const systemAppearance = window.matchMedia('(prefers-color-scheme: dark)');
+  systemAppearance.addEventListener('change', () => appearance.render());
+  window.addEventListener('focus', () => { void appearance.load(); });
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) void appearance.load();
+  });
+  window.setInterval(() => {
+    if (!document.hidden) void appearance.load();
+  }, 15000);
 
   if (typeof appStore.initializeVideoMuted === 'function') {
     appStore.initializeVideoMuted();

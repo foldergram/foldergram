@@ -4,6 +4,7 @@ import { appSettingsRepository, imageRepository, folderRepository, postRepositor
 import { HEIC_IMPORT_ENABLED_SETTING_KEY } from '../constants/app-setting-keys.js';
 import { getHeicImportSetting } from '../services/heic/import-setting.js';
 import express from 'express';
+import { getAppearance, saveAppearance } from '../services/appearance-service.js';
 import { z } from 'zod';
 
 import { AUTH_PASSWORD_MAX_LENGTH, AUTH_PASSWORD_MIN_LENGTH, authService } from '../services/auth-service.js';
@@ -23,6 +24,14 @@ import { REEL_CURSOR_MAX_LENGTH } from '../utils/reels-utils.js';
 import { serveDerivativeForImage } from './lazy-derivatives.js';
 
 const router = express.Router();
+
+router.get('/appearance', (_request, response) => {
+  response.setHeader('Cache-Control', 'no-store');
+  response.json(getAppearance());
+});
+router.put('/admin/settings/appearance', requireCapability('canAccessSettings', 'Admin access is required.'), (request, response) => {
+  response.json(saveAppearance(request.body));
+});
 
 const paginationQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),

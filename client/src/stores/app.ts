@@ -36,7 +36,6 @@ interface AppState {
   scanCompletion: { result: ScanRunSummary; surface: string | null } | null;
 }
 
-const THEME_STORAGE_KEY = 'foldergram-theme';
 const LOCALE_STORAGE_KEY = 'foldergram-locale';
 const VIDEO_MUTED_STORAGE_KEY = 'foldergram-video-muted';
 const LAST_OPENED_FOLDER_STORAGE_KEY = 'foldergram-last-opened-folder';
@@ -174,18 +173,6 @@ export const useAppStore = defineStore('app', {
       );
     },
 
-    initializeTheme() {
-      const savedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
-      const preferredTheme =
-        savedTheme === 'light' || savedTheme === 'dark'
-          ? savedTheme
-          : window.matchMedia('(prefers-color-scheme: dark)').matches
-            ? 'dark'
-            : 'light';
-
-      this.setTheme(preferredTheme);
-    },
-
     initializeLocale() {
       const rawStoredLocale = typeof window === 'undefined' ? null : window.localStorage.getItem(LOCALE_STORAGE_KEY);
       const storedLocale = resolveSupportedLocale(rawStoredLocale);
@@ -223,7 +210,7 @@ export const useAppStore = defineStore('app', {
     setTheme(theme: 'light' | 'dark') {
       this.theme = theme;
       document.documentElement.dataset.theme = theme;
-      window.localStorage.setItem(THEME_STORAGE_KEY, theme);
+      document.documentElement.style.colorScheme = theme;
     },
 
     setLocale(locale: string | SupportedLocale, options: { persist?: boolean } = {}) {
@@ -257,10 +244,6 @@ export const useAppStore = defineStore('app', {
 
     syncLocaleFromAuthStatus(defaultLocale: string | null | undefined) {
       this.syncLocaleFromSavedDefault(defaultLocale);
-    },
-
-    toggleTheme() {
-      this.setTheme(this.theme === 'light' ? 'dark' : 'light');
     },
 
     initializeVideoMuted() {
