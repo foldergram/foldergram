@@ -286,6 +286,10 @@
           }
         }
       },
+      "suggestedFolders": {
+        "label": "在桌面端显示推荐文件夹",
+        "description": "在宽屏上于首页动态流旁显示推荐文件夹面板。此设置保存在当前浏览器中。"
+      },
       "reelsFeed": {
         "label": "短片动态流排序",
         "description": "选择打开短片时使用的默认队列样式。",

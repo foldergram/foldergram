@@ -286,6 +286,10 @@
           }
         }
       },
+      "suggestedFolders": {
+        "label": "Mostrar carpetas sugeridas en escritorio",
+        "description": "Muestra el panel de carpetas sugeridas junto al feed de Inicio en pantallas anchas. Esta opción se guarda en este navegador."
+      },
       "reelsFeed": {
         "label": "Orden del feed de Reels",
         "description": "Elige el estilo de cola predeterminado cuando se abre Reels.",

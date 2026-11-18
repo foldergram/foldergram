@@ -4,6 +4,7 @@
     :class="[
       'home-layout grid gap-[4rem] items-start justify-center mx-auto',
       { 'home-layout--compact': isSingleColumnLayout },
+      { 'home-layout--wide-feed': isWideHomeFeed },
       isSingleColumnLayout
         ? 'grid-cols-1 w-full'
         : 'grid-cols-[minmax(0,39.375rem)_19.9375rem] w-[min(100%,63.3125rem)] md:relative',
@@ -22,7 +23,7 @@
         :name="source.name"
         :kind="source.kind"
         :variant="showSourceOutageState ? 'panel' : 'banner'"
-        class="mx-auto mb-5 w-full max-w-[29.375rem]"
+        class="home-layout__feed-width mx-auto mb-5 w-full max-w-[29.375rem]"
         :class="{ 'mt-[clamp(1rem,6vh,4rem)]': showSourceOutageState }"
       />
       <section
@@ -48,7 +49,7 @@
         </div>
       </section>
 
-      <section v-if="!appStore.isLibraryUnavailable && !showSourceOutageState" class="home-layout__header grid min-w-0 gap-[0.6875rem] mb-5 mx-auto w-full max-w-[39.375rem]">
+      <section v-if="!appStore.isLibraryUnavailable && !showSourceOutageState" class="home-layout__header home-layout__feed-width grid min-w-0 gap-[0.6875rem] mb-5 mx-auto w-full max-w-[39.375rem]">
         <section v-if="displayMomentItems.length" class="home-layout__stories mb-2 min-w-0">
           <div class="story-rail-shell">
             <div class="stories-bar story-rail pb-5 pt-[0.12rem]" :aria-label="momentsStore.displayRailTitle">
@@ -123,7 +124,7 @@
       <EmptyState v-if="appStore.isLibraryUnavailable" :title="t('common.libraryUnavailableTitle')" :description="appStore.libraryUnavailableReason" />
       <ErrorState v-else-if="feedStore.error && !showSourceOutageState" :title="t('home.feed.loadErrorTitle')" :message="feedStore.error" />
       <template v-else-if="showSourceOutageState" />
-      <div v-else-if="showFeedSkeleton && !showInitialScanState" class="mx-auto w-full max-w-[29.375rem]" data-test="home-feed-skeleton">
+      <div v-else-if="showFeedSkeleton && !showInitialScanState" class="home-layout__feed-width mx-auto w-full max-w-[29.375rem]" data-test="home-feed-skeleton">
         <FeedList :items="[]" context="home" show-skeleton />
       </div>
 
@@ -190,7 +191,7 @@
       <template v-else>
         <div
           v-if="feedStoryError"
-          class="mx-auto mb-[1.1rem] grid w-full max-w-[29.375rem] gap-[0.75rem] rounded-[1rem] border border-[rgba(214,48,49,0.24)] bg-[rgba(214,48,49,0.08)] px-4 py-[0.95rem] text-[#c0392b]"
+          class="home-layout__feed-width mx-auto mb-[1.1rem] grid w-full max-w-[29.375rem] gap-[0.75rem] rounded-[1rem] border border-[rgba(214,48,49,0.24)] bg-[rgba(214,48,49,0.08)] px-4 py-[0.95rem] text-[#c0392b]"
           role="alert"
         >
           <p class="m-0 text-[0.92rem]">{{ feedStoryError }}</p>
@@ -207,19 +208,20 @@
         </div>
 
         <!-- Feed cards in home-layout context: transparent card, no shadow -->
-        <div class="w-full max-w-[29.375rem] mx-auto flex flex-col gap-[1.2rem]">
+        <div class="home-layout__feed-width w-full max-w-[29.375rem] mx-auto flex flex-col gap-[1.2rem]">
           <FeedList
             :items="visibleFeedItems"
             context="home"
+            :wide-home-layout="isWideHomeFeed"
             @open-folder-story="openFeedFolderStory"
           />
         </div>
-        <div class="w-full max-w-[29.375rem] mx-auto">
+        <div class="home-layout__feed-width w-full max-w-[29.375rem] mx-auto">
           <InfiniteLoader v-if="feedStore.hasMore || feedStore.loading || !sourcesStore.unavailable.length" :loading="feedStore.loading" :has-more="feedStore.hasMore" @load-more="feedStore.loadMore" />
         </div>
       </template>
 
-      <p v-if="scanCompletion" class="mx-auto mt-4 max-w-[29.375rem] text-accent-strong" role="status">{{ getScanResultLabel(scanCompletion) }}</p>
+      <p v-if="scanCompletion" class="home-layout__feed-width mx-auto mt-4 max-w-[29.375rem] text-accent-strong" role="status">{{ getScanResultLabel(scanCompletion) }}</p>
 
       <StoriesModal
         v-if="activeRailViewerId && displayMomentItems.length"
@@ -315,6 +317,7 @@ import { useFolderStoriesStore } from '../stores/folder-stories';
 import { useLikesStore } from '../stores/likes';
 import { useFoldersStore } from '../stores/folders';
 import { useMomentsStore } from '../stores/moments';
+import { useSuggestedFoldersPreference } from '../composables/useSuggestedFoldersPreference';
 import type { FeedMode } from '../types/api';
 import { formatFolderTitle } from '../utils/folder-titles';
 import { buildLikedCountByFolder, selectHomeRecommendations } from '../utils/home-recommendations';
@@ -330,6 +333,7 @@ const likesStore = useLikesStore();
 const foldersStore = useFoldersStore();
 const momentsStore = useMomentsStore();
 const sourcesStore = useSourcesStore();
+const suggestedFoldersPreference = useSuggestedFoldersPreference();
 const visibleFeedItems = computed(() => feedStore.items.filter(item =>
   item.sourceKind === 'local' ? sourcesStore.canBrowse(item.sourceId) : !item.sourceId || (sourcesStore.initialized && sourcesStore.canBrowse(item.sourceId))
 ));
@@ -368,7 +372,8 @@ const activeFeedStoryId = ref<string | null>(null);
 const feedStoryRetrySlug = ref<string | null>(null);
 const homeLayoutElement = ref<HTMLElement | null>(null);
 const isCompactHomeLayout = ref(false);
-const isSingleColumnLayout = computed(() => isCompactHomeLayout.value || showSourceOutageState.value);
+const isWideHomeFeed = computed(() => !isCompactHomeLayout.value && !suggestedFoldersPreference.enabled.value && !showSourceOutageState.value);
+const isSingleColumnLayout = computed(() => isCompactHomeLayout.value || !suggestedFoldersPreference.enabled.value || showSourceOutageState.value);
 const requestingHomeScan = ref(false);
 const scanCompletion = computed(() => appStore.scanCompletion?.surface === (router?.currentRoute.value.fullPath ?? '/')
   ? appStore.scanCompletion.result : null);

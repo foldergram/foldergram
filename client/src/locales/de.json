@@ -286,6 +286,10 @@
           }
         }
       },
+      "suggestedFolders": {
+        "label": "Vorgeschlagene Ordner auf dem Desktop anzeigen",
+        "description": "Zeigt den Bereich mit vorgeschlagenen Ordnern neben dem Start-Feed auf breiten Bildschirmen. Diese Einstellung wird in diesem Browser gespeichert."
+      },
       "reelsFeed": {
         "label": "Sortierung des Reels-Feeds",
         "description": "Wähle die Standard-Reihenfolge, wenn Reels geöffnet wird.",

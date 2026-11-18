@@ -806,6 +806,21 @@
                 </div>
               </div>
 
+              <label class="flex items-start justify-between gap-4 px-6 py-4 cursor-pointer">
+                <span class="min-w-0">
+                  <span class="block text-[0.96rem] font-semibold text-text">{{ t('settings.general.suggestedFolders.label') }}</span>
+                  <span class="mt-[0.25rem] block text-[0.84rem] text-muted">{{ t('settings.general.suggestedFolders.description') }}</span>
+                </span>
+                <input
+                  v-model="suggestedFoldersEnabled"
+                  class="mt-1 h-5 w-5 shrink-0 accent-[var(--accent)]"
+                  type="checkbox"
+                  :aria-label="t('settings.general.suggestedFolders.label')"
+                  data-testid="suggested-folders-setting"
+                  @change="setSuggestedFoldersEnabled(suggestedFoldersEnabled)"
+                />
+              </label>
+
               <div class="grid gap-3 px-6 py-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
                 <div class="min-w-0">
                   <p class="m-0 text-[0.96rem] font-semibold text-text">{{ t('settings.general.reelsFeed.label') }}</p>
@@ -1475,6 +1490,7 @@ import {
 import { SUPPORTED_LOCALES, type SupportedLocale } from '../locales';
 import ScanActivityContent from '../components/ScanActivityContent.vue';
 import { useAppStore } from '../stores/app';
+import { useSuggestedFoldersPreference } from '../composables/useSuggestedFoldersPreference';
 import { useAuthStore } from '../stores/auth';
 import { useFeedStore } from '../stores/feed';
 import { useFoldersStore } from '../stores/folders';
@@ -1486,6 +1502,7 @@ import type { AppStats, FeedMode, FolderImageOrder, HeicImportSetting, NestedFol
 
 const { t, locale } = useI18n();
 const appStore = useAppStore();
+const { enabled: suggestedFoldersEnabled, setEnabled: setSuggestedFoldersEnabled } = useSuggestedFoldersPreference();
 const authStore = useAuthStore();
 const feedStore = useFeedStore();
 const foldersStore = useFoldersStore();

@@ -6,6 +6,7 @@
       :key="item.id"
       :item="item"
       :context="context"
+      :wide-home-layout="wideHomeLayout"
       :has-avatar-story="folderLookup.get(item.folderSlug)?.hasAvatarStory ?? item.folderHasAvatarStory ?? false"
       :avatar-url="folderAvatar(item)"
       :is-active-video="context === 'home' && item.id === activeVideoId"
@@ -37,9 +38,11 @@ const props = withDefaults(
     items: FeedItem[];
     showSkeleton?: boolean;
     context?: 'default' | 'home';
+    wideHomeLayout?: boolean;
   }>(),
   {
-    context: 'default'
+    context: 'default',
+    wideHomeLayout: false
   }
 );
 

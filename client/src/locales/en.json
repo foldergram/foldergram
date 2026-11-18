@@ -286,6 +286,10 @@
           }
         }
       },
+      "suggestedFolders": {
+        "label": "Show suggested folders on desktop",
+        "description": "Show the suggested folders panel beside the Home feed on wide screens. This setting is saved in this browser."
+      },
       "reelsFeed": {
         "label": "Reels feed sort order",
         "description": "Choose the default queue style when Reels opens.",

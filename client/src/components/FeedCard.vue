@@ -59,6 +59,7 @@
       v-if="isCarousel"
       v-model="carouselIndex"
       class="rounded-[0.5rem] border border-border"
+      :style="mediaFrameStyle(mediaAspectRatio)"
       :items="item.mediaItems!"
       :prefer-preview="isHomeContext"
       :retry-while="appStore.isScanning"
@@ -95,7 +96,7 @@
     <div
       v-else-if="item.mediaType === 'image'"
       class="relative block overflow-hidden rounded-[0.5rem] border border-border bg-surface-alt select-none"
-      :style="{ aspectRatio: mediaAspectRatio, touchAction: 'manipulation' }"
+      :style="{ ...mediaFrameStyle(mediaAspectRatio), touchAction: 'manipulation' }"
       @click="handleHomeImageClick"
     >
       <ResilientImage
@@ -116,7 +117,7 @@
       ref="homeVideoTarget"
       class="feed-card__video-shell relative block overflow-hidden rounded-[0.5rem] border border-border bg-surface-alt"
       :class="{ 'feed-card__video-shell--interactive': showHomeVideoSurfaceControls }"
-      :style="{ aspectRatio: homeVideoAspectRatio }"
+      :style="mediaFrameStyle(homeVideoAspectRatio)"
       :aria-label="showHomeVideoSurfaceControls ? t('post.viewer.togglePlayback') : undefined"
       :role="showHomeVideoSurfaceControls ? 'button' : undefined"
       :tabindex="showHomeVideoSurfaceControls ? 0 : -1"
@@ -481,11 +482,13 @@ const props = withDefaults(
     hasAvatarStory?: boolean;
     context?: 'default' | 'home';
     isActiveVideo?: boolean;
+    wideHomeLayout?: boolean;
   }>(),
   {
     hasAvatarStory: false,
     context: 'default',
-    isActiveVideo: false
+    isActiveVideo: false,
+    wideHomeLayout: false
   }
 );
 
@@ -560,6 +563,28 @@ const formattedDate = computed(() =>
 const formattedDuration = computed(() => formatMediaDuration(props.item.durationMs));
 const mediaAspectRatio = computed(() => resolveFeedAspectRatio(props.item.width, props.item.height));
 const homeVideoAspectRatio = computed(() => loadedHomeVideoAspectRatio.value ?? mediaAspectRatio.value);
+const viewportHeight = ref(typeof window === 'undefined' ? 800 : window.innerHeight);
+
+function mediaFrameStyle(aspectRatio: string) {
+  if (!props.wideHomeLayout || !isHomeContext.value) {
+    return { aspectRatio };
+  }
+
+  const [widthRatio, heightRatio] = aspectRatio.split('/').map(value => Number(value.trim()));
+  const ratio = widthRatio > 0 && heightRatio > 0 ? widthRatio / heightRatio : 1;
+  const usableHeight = Math.max(96, viewportHeight.value - 220);
+  const width = Math.min(600, usableHeight * ratio);
+  return {
+    aspectRatio,
+    width: `${width}px`,
+    maxWidth: '100%',
+    marginInline: 'auto'
+  };
+}
+
+function updateViewportHeight() {
+  viewportHeight.value = window.innerHeight;
+}
 const homeImageSrc = computed(() => (props.item.isAnimated ? props.item.previewUrl : props.item.thumbnailUrl));
 const activeMediaImageId = computed(() =>
   isCarousel.value
@@ -1104,6 +1129,7 @@ watch(
 );
 
 onMounted(() => {
+  window.addEventListener('resize', updateViewportHeight);
   if (!isHomeVideoFullscreen.value) {
     startHomeVideoObserver();
   }
@@ -1111,6 +1137,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  window.removeEventListener('resize', updateViewportHeight);
   clearHomeImageTapResetTimer();
   stopHomeVideoObserver();
   isHomeVideoPaused.value = false;

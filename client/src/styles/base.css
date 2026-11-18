@@ -160,6 +160,10 @@ img[data-loaded="true"] {
   }
 }
 
+.home-layout--wide-feed .home-layout__feed-width {
+  max-width: min(37.5rem, 100%);
+}
+
 .story-rail-shell {
   position: relative;
   min-width: 0;
