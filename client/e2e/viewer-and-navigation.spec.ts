@@ -103,10 +103,12 @@ async function expectReadableControl(control: Locator) {
     const canvas = document.createElement('canvas');
     canvas.width = canvas.height = 1;
     const context = canvas.getContext('2d', { willReadFrequently: true })!;
-    const luminance = (color: string) => {
+    const luminance = (colors: string[]) => {
       context.clearRect(0, 0, 1, 1);
-      context.fillStyle = color;
-      context.fillRect(0, 0, 1, 1);
+      for (const color of colors) {
+        context.fillStyle = color;
+        context.fillRect(0, 0, 1, 1);
+      }
       const rgba = context.getImageData(0, 0, 1, 1).data;
       const linear = Array.from(rgba).slice(0, 3).map(value => {
         const srgb = value / 255;
@@ -114,9 +116,12 @@ async function expectReadableControl(control: Locator) {
       });
       return linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722;
     };
-    const styles = getComputedStyle(element);
-    const foreground = luminance(styles.color);
-    const background = luminance(styles.backgroundColor);
+    const backgroundLayers: string[] = [];
+    for (let layer: Element | null = element; layer; layer = layer.parentElement) {
+      backgroundLayers.unshift(getComputedStyle(layer).backgroundColor);
+    }
+    const background = luminance(backgroundLayers);
+    const foreground = luminance([...backgroundLayers, getComputedStyle(element).color]);
     return (Math.max(foreground, background) + 0.05) / (Math.min(foreground, background) + 0.05);
   });
   expect(contrast, 'Control text and icons need at least 4.5:1 contrast').toBeGreaterThanOrEqual(4.5);
@@ -426,6 +431,185 @@ test('home videos stop playing off screen after leaving fullscreen', async ({ pa
   }
 });
 
+test('very tall home videos play at their original aspect ratio', async ({ page }) => {
+  await mockGallery(page, 'light');
+  await page.setViewportSize({ width: 1280, height: 720 });
+  const encodedClip = await readFile(new URL('./fixtures/tall-feed-video.mp4.base64', import.meta.url), 'utf8');
+  const clip = Buffer.from(encodedClip, 'base64');
+  await page.route('**/previews/tall-feed-video.mp4', route => route.fulfill({ contentType: 'video/mp4', body: clip }));
+  const video = {
+    ...panorama, filename: 'tall-clip.mp4', mediaType: 'video',
+    width: 32, height: 160, durationMs: 3000, previewUrl: '/previews/tall-feed-video.mp4'
+  };
+  await page.route('**/api/feed?*', route => route.fulfill({
+    json: { items: [video], page: 1, limit: 24, total: 1, hasMore: false }
+  }));
+  await page.goto('/');
+
+  const shell = page.locator('.feed-card__video-shell');
+  const media = shell.locator('video');
+  await shell.scrollIntoViewIfNeeded();
+  const bounds = (await shell.boundingBox())!;
+  expect(bounds.width / bounds.height).toBeCloseTo(0.2, 2);
+  const viewportHeight = page.viewportSize()!.height;
+  expect(viewportHeight / bounds.height).toBeLessThan(0.55);
+  const player = shell.locator('media-player');
+  await expect(player).toHaveAttribute('data-playing', '');
+
+  const x = bounds.x + bounds.width / 2;
+  const y = viewportHeight / 2;
+  await page.mouse.click(x, y);
+  await expect(media).toHaveJSProperty('paused', true);
+  await page.mouse.click(x, y);
+  await expect(player).toHaveAttribute('data-playing', '');
+});
+
+async function mockReels(page: Page) {
+  await mockGallery(page, 'light');
+  const clip = await readFile(new URL('./fixtures/feed-video.mp4', import.meta.url));
+  await page.route('**/previews/feed-video.mp4', route => route.fulfill({ contentType: 'video/mp4', body: clip }));
+  const items = [1, 2, 3].map(id => ({
+    ...panorama, id, filename: `reel-${id}.mp4`, mediaType: 'video',
+    width: 1080, height: 1920, durationMs: 1000, previewUrl: '/previews/feed-video.mp4'
+  }));
+  await page.route('**/api/reels?*', route => route.fulfill({
+    json: { items, page: 1, limit: 24, total: items.length, hasMore: false }
+  }));
+}
+
+test('portrait Reels keep the next card in view and separate the two control columns', async ({ page }) => {
+  await mockReels(page);
+  const viewport = { width: 1080, height: 1778 };
+  await page.setViewportSize(viewport);
+  await page.goto('/reels');
+
+  const stages = page.locator('.reel-player-card__stage');
+  const actions = page.locator('.reels-view__action-rail--desktop');
+  const next = page.getByRole('button', { name: 'Next reel' });
+  await expect(stages).toHaveCount(3);
+  await expect(next).toBeEnabled();
+
+  const first = (await stages.nth(0).boundingBox())!;
+  const second = (await stages.nth(1).boundingBox())!;
+  const actionBounds = (await actions.boundingBox())!;
+  const arrowBounds = (await next.boundingBox())!;
+  expect(first.y).toBeCloseTo(16, 0);
+  expect(first.width / first.height).toBeCloseTo(9 / 16, 2);
+  expect(second.y - (first.y + first.height)).toBeCloseTo(32, 0);
+  expect(second.y).toBeLessThan(viewport.height - 100);
+  expect(actionBounds.x).toBeGreaterThan(first.x + first.width);
+  expect(actionBounds.x - (first.x + first.width)).toBeLessThan(22);
+  expect(arrowBounds.x).toBeGreaterThan(actionBounds.x + actionBounds.width);
+
+  await actions.locator('.reel-action-rail__info-wrap button').click({ trial: true });
+  await next.click();
+  await expect(stages.nth(1).locator('.reel-player-card__overlay--visible')).toHaveCount(1);
+  await expect.poll(async () => (await stages.nth(1).boundingBox())?.y).toBeCloseTo(16, 0);
+
+  await page.locator('.reel-deck').evaluate(deck => { deck.scrollTop = deck.scrollHeight; });
+  await expect(next).toBeDisabled();
+  await expect.poll(async () => (await stages.nth(2).boundingBox())?.y).toBeCloseTo(16, 0);
+});
+
+test('Reels bookmark saves the active reel and opens a scrollable collection picker on hover', async ({ page }) => {
+  await mockReels(page);
+  await page.setViewportSize({ width: 1080, height: 1778 });
+  await page.addInitScript(() => {
+    const timestamp = '2026-11-17T00:00:00.000Z';
+    const collections = Array.from({ length: 12 }, (_, index) => ({
+      slug: `reel-collection-${index + 1}`,
+      name: `Reel collection ${index + 1}`,
+      isDefault: false,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      items: []
+    }));
+    localStorage.setItem('foldergram-local-collections-v1', JSON.stringify({ collections }));
+  });
+  await page.goto('/reels');
+
+  const actions = page.locator('.reels-view__action-rail--desktop');
+  const bookmark = actions.locator('.collection-bookmark__button');
+  const picker = page.locator('.collection-bookmark__popover');
+  const next = page.getByRole('button', { name: 'Next reel' });
+
+  await expect(bookmark).toHaveAccessibleName('Save post');
+  await bookmark.click();
+  await expect(bookmark).toHaveAccessibleName('Remove saved post');
+  await expect(picker).toHaveCount(0);
+
+  await next.hover();
+  await bookmark.hover();
+  await expect(picker).toHaveAttribute('data-placement', 'left');
+  const pickerBounds = (await picker.boundingBox())!;
+  const bookmarkBounds = (await bookmark.boundingBox())!;
+  expect(pickerBounds.x + pickerBounds.width).toBeLessThan(bookmarkBounds.x);
+
+  const rows = picker.locator('.collection-bookmark__rows');
+  await rows.hover();
+  await page.mouse.wheel(0, 440);
+  await expect.poll(() => rows.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+  await expect(page.getByRole('button', { name: 'Previous reel' })).toBeDisabled();
+  await picker.getByRole('button', { name: 'Reel collection 12', exact: true }).click();
+  await expect(picker).toHaveCount(0);
+
+  const storedItems = await page.evaluate(() => {
+    const { collections } = JSON.parse(localStorage.getItem('foldergram-local-collections-v1') ?? '{}');
+    return collections.find((collection: { slug: string }) => collection.slug === 'reel-collection-12')?.items;
+  });
+  expect(storedItems).toEqual([expect.objectContaining({ id: 1, mediaType: 'video' })]);
+
+  await bookmark.hover();
+  await expect(picker).toBeVisible();
+  await next.click();
+  await expect(picker).toHaveCount(0);
+  await expect(bookmark).toHaveAccessibleName('Save post');
+});
+
+for (const viewport of [{ width: 1280, height: 720 }, { width: 1152, height: 900 }, { width: 1080, height: 1778 }]) {
+  test(`reel details leave both navigation arrows clickable at ${viewport.width}×${viewport.height}`, async ({ page }) => {
+    await mockReels(page);
+    await page.setViewportSize(viewport);
+    await page.goto('/reels');
+
+    const details = page.locator('.reels-view__action-rail--desktop .reel-action-rail__info-wrap button');
+    const panel = page.locator('.reels-info-sidebar');
+    const previous = page.getByRole('button', { name: 'Previous reel' });
+    const next = page.getByRole('button', { name: 'Next reel' });
+
+    await next.click();
+    await expect(previous).toBeEnabled();
+    await details.click();
+    await expect(panel).toBeVisible();
+    await previous.click({ trial: true });
+    await next.click();
+    await expect(next).toBeDisabled();
+  });
+}
+
+test('reel metadata clears the expanded sidebar and moves on-video in a narrow gutter', async ({ page }) => {
+  await mockReels(page);
+  await page.setViewportSize({ width: 1440, height: 786 });
+  await page.goto('/reels');
+
+  const sidebar = page.locator('aside.sidebar');
+  const external = page.locator('.reels-view__metadata');
+  const onVideo = page.locator('.reel-player-card__overlay--visible .reel-player-card__folder-link');
+
+  await sidebar.hover();
+  await expect(sidebar).toHaveCSS('width', '240px');
+  await expect(external).toBeVisible();
+  const sidebarBounds = (await sidebar.boundingBox())!;
+  expect((await external.boundingBox())!.x).toBeGreaterThan(sidebarBounds.x + sidebarBounds.width);
+  await external.click({ trial: true });
+
+  await page.setViewportSize({ width: 1152, height: 900 });
+  await sidebar.hover();
+  await expect(external).toHaveCount(0);
+  await onVideo.click();
+  await expect(page).toHaveURL(/\/f\/panoramas$/);
+});
+
 for (const theme of ['light', 'dark'] as const) {
   test.describe(`${theme} theme`, () => {
     test.beforeEach(async ({ page }) => {
@@ -451,6 +635,26 @@ for (const theme of ['light', 'dark'] as const) {
       });
     }
 
+    test('expanded desktop navigation paints a full panel only in portrait', async ({ page }) => {
+      await page.setViewportSize({ width: 1040, height: 1500 });
+      await page.goto('/');
+
+      const sidebar = page.locator('aside.sidebar');
+      const post = page.locator('main article').first();
+      await expect(post).toBeVisible();
+      const beforeHover = await post.boundingBox();
+
+      await sidebar.getByRole('link', { name: 'Reels' }).hover();
+      await expect(sidebar).toHaveCSS('width', '240px');
+      await expect(sidebar).toHaveCSS('background-size', '100% 100%');
+      expect(await post.boundingBox()).toEqual(beforeHover);
+
+      await page.setViewportSize({ width: 1040, height: 720 });
+      await sidebar.getByRole('link', { name: 'Reels' }).hover();
+      await expect(sidebar).toHaveCSS('width', '240px');
+      await expect(sidebar).toHaveCSS('background-size', '77.6px 100%');
+    });
+
     test('active main navigation is readable without Folders Spotlight', async ({ page }) => {
       await page.setViewportSize({ width: 1280, height: 720 });
       await page.goto('/');
@@ -466,6 +670,36 @@ for (const theme of ['light', 'dark'] as const) {
   });
 }
 
+
+for (const [name, path] of [['Library', '/library'], ['Places', '/places']]) {
+  test(`${name} stays centered clear of the expanded desktop navigation`, async ({ page }) => {
+    await mockGallery(page, 'light');
+    await page.setViewportSize({ width: 1440, height: 744 });
+    await page.goto(path);
+
+    const content = page.locator('main .centered-page');
+    const sidebar = page.locator('aside.sidebar');
+    const margins = () => content.evaluate(element => {
+      const { left, right } = element.getBoundingClientRect();
+      return { left, right: document.documentElement.clientWidth - right };
+    });
+
+    for (const width of [1440, 1024]) {
+      await page.setViewportSize({ width, height: 744 });
+      await page.mouse.move(width - 20, 20);
+      const collapsed = await margins();
+
+      await sidebar.hover();
+      await expect(sidebar).toHaveCSS('width', '240px');
+      const expanded = await margins();
+      const sidebarBounds = await sidebar.boundingBox();
+
+      expect(expanded).toEqual(collapsed);
+      expect(expanded.left).toBeCloseTo(expanded.right, 1);
+      expect(expanded.left - (sidebarBounds!.x + sidebarBounds!.width)).toBeGreaterThanOrEqual(12);
+    }
+  });
+}
 
 for (const folderCount of [1500, 5000, 10000]) {
   test(`folder bootstrap, Library pagination, and Explore search with ${folderCount} folders`, async ({ page }) => {

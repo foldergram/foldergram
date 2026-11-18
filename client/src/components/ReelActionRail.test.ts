@@ -40,7 +40,9 @@ describe('ReelActionRail', () => {
         canDeleteMedia: false,
         canAccessSettings: false,
         canUseSharedLikes: false,
-        canUseLocalFavorites: true
+        canUseLocalFavorites: true,
+        canUseSharedCollections: false,
+        canUseLocalCollections: true
       }
     });
 
@@ -88,7 +90,7 @@ describe('ReelActionRail', () => {
     expect(likesStore.isLiked(item.id)).toBe(true);
   });
 
-  it('renders the download control between the info toggle and folder link', () => {
+  it('renders Bookmark below Like and Download between Details and Folder', () => {
     const item = createFeedItem(22);
 
     const wrapper = mount(ReelActionRail, {
@@ -107,14 +109,16 @@ describe('ReelActionRail', () => {
 
     const controls = wrapper.findAll('.reel-action-rail > *');
 
-    expect(controls).toHaveLength(4);
-    expect(controls[1]?.find('button[aria-label="Show reel details"]').exists()).toBe(true);
+    expect(controls).toHaveLength(5);
+    expect(controls[0]?.attributes('aria-label')).toBe('Like post');
+    expect(controls[1]?.find('button[aria-label="Save post"]').exists()).toBe(true);
+    expect(controls[2]?.find('button[aria-label="Show reel details"]').exists()).toBe(true);
 
-    const downloadLink = controls[2];
+    const downloadLink = controls[3];
 
     expect(downloadLink?.attributes('aria-label')).toBe('Download original file');
     expect(downloadLink?.attributes('href')).toBe('/api/originals/22?download=1');
     expect(downloadLink?.attributes('title')).toBe('Download original file');
-    expect(controls[3]?.attributes('data-test')).toBe('folder-link');
+    expect(controls[4]?.attributes('data-test')).toBe('folder-link');
   });
 });

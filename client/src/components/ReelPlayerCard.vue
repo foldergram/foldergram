@@ -1,5 +1,5 @@
 <template>
-  <article class="reel-player-card">
+  <article class="reel-player-card" :class="{ 'reel-player-card--external-metadata': externalMetadata }">
     <div class="reel-player-card__stage">
       <div
         class="reel-player-card__surface"
@@ -61,7 +61,7 @@
           class="reel-player-card__overlay"
           :class="{ 'reel-player-card__overlay--visible': active }"
         >
-          <div class="reel-player-card__copy">
+          <div v-if="!externalMetadata" class="reel-player-card__copy">
             <RouterLink
               class="reel-player-card__folder-row reel-player-card__folder-link"
               :to="{ name: 'folder', params: { slug: item.folderSlug } }"
@@ -136,6 +136,7 @@ const props = defineProps<{
   item: FeedItem;
   folder: FolderSummary | null;
   active: boolean;
+  externalMetadata?: boolean;
 }>();
 
 const { t } = useI18n();
@@ -402,8 +403,6 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .reel-player-card {
-  --reel-stage-gap: 0.75rem;
-  --reel-stage-inline-gap: 1.25rem;
   --reel-stage-max-width: 24.4rem;
   --reel-stage-max-height: calc(var(--reel-stage-max-width) * 16 / 9);
   display: grid;
@@ -411,7 +410,7 @@ onBeforeUnmount(() => {
   box-sizing: border-box;
   width: 100%;
   height: 100%;
-  padding: calc(var(--reel-stage-gap) / 2) 0;
+  padding: calc(var(--reel-stage-gap, 0.75rem) / 2) 0;
 }
 
 .reel-player-card__stage {
@@ -420,11 +419,11 @@ onBeforeUnmount(() => {
   align-self: center;
   width: min(100%, var(--reels-desktop-stage-width, var(--reel-stage-max-width)));
   height: min(
-    calc(100% - var(--reel-stage-gap)),
+    calc(100% - var(--reel-stage-gap, 0.75rem)),
     var(--reels-desktop-stage-height, var(--reel-stage-max-height))
   );
   max-height: 100%;
-  max-width: calc(100% - var(--reel-stage-inline-gap));
+  max-width: calc(100% - var(--reel-stage-inline-gap, 1.25rem));
   aspect-ratio: 9 / 16;
   overflow: hidden;
   border-radius: 0.6rem;
@@ -497,6 +496,11 @@ onBeforeUnmount(() => {
   pointer-events: none;
 }
 
+.reel-player-card--external-metadata .reel-player-card__bottom-fade {
+  height: 14%;
+  background: linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.38));
+}
+
 .reel-player-card__overlay {
   position: absolute;
   inset-inline: 0;
@@ -523,6 +527,7 @@ onBeforeUnmount(() => {
 
 .reel-player-card__controls {
   position: relative;
+  margin-inline-start: auto;
   z-index: 2;
   display: inline-flex;
   align-items: flex-end;

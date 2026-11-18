@@ -16,6 +16,12 @@
       />
     </button>
 
+    <CollectionBookmark
+      :key="item.id"
+      :item="item"
+      placement="reels"
+    />
+
     <div class="reel-action-rail__info-wrap">
       <button
         class="reel-action-rail__button"
@@ -67,6 +73,7 @@ import { useAuthStore } from '../stores/auth';
 import { useLikesStore } from '../stores/likes';
 import type { FeedItem } from '../types/api';
 import { getOriginalMediaDownloadUrl } from '../utils/original-media';
+import CollectionBookmark from './CollectionBookmark.vue';
 
 const props = defineProps<{
   item: FeedItem;

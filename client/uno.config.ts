@@ -45,6 +45,10 @@ export default defineConfig({
     },
   },
   shortcuts: [
+    [
+      "centered-page",
+      "mx-auto w-full max-w-[64rem] md:relative md:left-[calc(var(--desktop-content-compensation)*-1)] md:w-[calc(100%_+_var(--desktop-sidebar-width)_-_2_*_var(--desktop-sidebar-expanded-width))]",
+    ],
     // Card / panel surface
     [
       "card",

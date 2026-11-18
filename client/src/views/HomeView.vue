@@ -49,7 +49,7 @@
       </section>
 
       <section v-if="!appStore.isLibraryUnavailable && !showSourceOutageState" class="home-layout__header grid min-w-0 gap-[0.6875rem] mb-5 mx-auto w-full max-w-[39.375rem]">
-        <section v-if="displayMomentItems.length" class="mb-2 min-w-0">
+        <section v-if="displayMomentItems.length" class="home-layout__stories mb-2 min-w-0">
           <div class="story-rail-shell">
             <div class="stories-bar story-rail pb-5 pt-[0.12rem]" :aria-label="momentsStore.displayRailTitle">
               <div class="story-rail__track">
@@ -246,7 +246,7 @@
         homeSummaryFolder &&
         !isSingleColumnLayout
       "
-      class="grid gap-[1.15rem] w-[19rem] text-muted mt-5"
+      class="grid gap-[1.15rem] w-full min-w-0 px-4 text-muted mt-5"
       :aria-label="t('home.sidebar.ariaLabel')"
     >
       <div class="flex items-center gap-[0.8rem]">
@@ -709,3 +709,40 @@ onUnmounted(() => {
   window.removeEventListener('resize', updateHomeLayout);
 });
 </script>
+
+<style scoped>
+@media (width > 768px) {
+  .home-layout__header {
+    row-gap: 1.5rem;
+  }
+
+  .home-layout__stories {
+    margin-bottom: 0;
+  }
+
+  .home-layout__stories .story-rail {
+    padding-block: 0.28125rem 0.875rem;
+  }
+
+  .home-layout__stories .story-rail__track {
+    gap: 0.875rem;
+    padding-inline: 0.5625rem;
+  }
+
+  .home-layout__stories .story-rail__button {
+    width: 5.625rem;
+    min-width: 0;
+    gap: 0.03125rem;
+  }
+
+  .home-layout__stories .story-rail__ring,
+  .home-layout__stories .story-rail__ring-inner {
+    padding: 0.234375rem;
+  }
+
+  .home-layout__stories .story-rail__label {
+    max-width: 100%;
+    line-height: 1rem;
+  }
+}
+</style>

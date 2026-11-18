@@ -523,6 +523,8 @@ const carouselIndex = ref(0);
 
 let homeImageTapResetTimer: ReturnType<typeof setTimeout> | null = null;
 let homeVideoObserver: IntersectionObserver | null = null;
+let homeVideoResizeObserver: ResizeObserver | null = null;
+let homeVideoMaximumRatio = 1;
 let removeHomePlayerEventListeners: (() => void) | null = null;
 const {
   saving: captionSaving,
@@ -717,14 +719,55 @@ function syncHomeVideoTimelineState(player: MediaPlayerElement | null = homePlay
 }
 
 function stopHomeVideoObserver(options: { clearVisibility?: boolean } = {}) {
-  if (homeVideoObserver) {
-    homeVideoObserver.disconnect();
-    homeVideoObserver = null;
-  }
+  homeVideoObserver?.disconnect();
+  homeVideoObserver = null;
+  homeVideoResizeObserver?.disconnect();
+  homeVideoResizeObserver = null;
+  window.removeEventListener('resize', updateHomeVideoObserver);
 
   if (options.clearVisibility ?? true) {
     emitHomeVideoVisibility(0);
   }
+}
+
+function updateHomeVideoObserver() {
+  const target = homeVideoTarget.value;
+  if (!target) {
+    return;
+  }
+
+  const { width, height } = target.getBoundingClientRect();
+  const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
+  const viewportHeight = document.documentElement.clientHeight || window.innerHeight;
+  // Oversized videos can fill the viewport while showing very little of their total area.
+  const maximumRatio = width > 0 && height > 0
+    ? Math.min(width, viewportWidth) / width * (Math.min(height, viewportHeight) / height)
+    : 1;
+
+  if (homeVideoObserver && homeVideoMaximumRatio === maximumRatio) {
+    return;
+  }
+
+  homeVideoObserver?.disconnect();
+  homeVideoMaximumRatio = maximumRatio;
+  const observer = new IntersectionObserver(
+    (entries) => {
+      const entry = entries[0];
+      if (!entry || homeVideoObserver !== observer) {
+        return;
+      }
+
+      const centerOffset = Math.abs(entry.boundingClientRect.top + entry.boundingClientRect.height / 2 - window.innerHeight / 2);
+      const visibleRatio = entry.isIntersecting ? Math.min(1, entry.intersectionRatio / maximumRatio) : 0;
+      emitHomeVideoVisibility(visibleRatio, centerOffset);
+    },
+    {
+      threshold: HOME_VIDEO_OBSERVER_THRESHOLDS.map((threshold) => threshold * maximumRatio)
+    }
+  );
+
+  homeVideoObserver = observer;
+  observer.observe(target);
 }
 
 function startHomeVideoObserver() {
@@ -732,22 +775,12 @@ function startHomeVideoObserver() {
     return;
   }
 
-  homeVideoObserver = new IntersectionObserver(
-    (entries) => {
-      const entry = entries[0];
-      if (!entry) {
-        return;
-      }
-
-      const centerOffset = Math.abs(entry.boundingClientRect.top + entry.boundingClientRect.height / 2 - window.innerHeight / 2);
-      emitHomeVideoVisibility(entry.isIntersecting ? entry.intersectionRatio : 0, centerOffset);
-    },
-    {
-      threshold: HOME_VIDEO_OBSERVER_THRESHOLDS
-    }
-  );
-
-  homeVideoObserver.observe(homeVideoTarget.value);
+  updateHomeVideoObserver();
+  window.addEventListener('resize', updateHomeVideoObserver);
+  if (typeof ResizeObserver !== 'undefined') {
+    homeVideoResizeObserver = new ResizeObserver(updateHomeVideoObserver);
+    homeVideoResizeObserver.observe(homeVideoTarget.value);
+  }
 }
 
 function syncHomeVideoMuted(player: MediaPlayerElement, muted: boolean) {

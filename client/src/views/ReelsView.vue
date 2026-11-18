@@ -32,6 +32,7 @@
           :folders="knownFolders"
           :active-reel-id="reelsStore.activeReelId"
           :loading="reelsStore.loading"
+          :external-metadata="showExternalMetadata"
           @active-change="handleActiveChange"
           @prefetch="handlePrefetch"
         >
@@ -59,48 +60,85 @@
             </ReelActionRail>
           </template>
         </ReelDeck>
+        <div v-if="!isMobileViewport" ref="metadataGutter" class="reels-view__metadata-gutter">
+          <RouterLink
+            v-if="showExternalMetadata && activeItem"
+            class="reels-view__metadata"
+            :to="{ name: 'folder', params: { slug: activeItem.folderSlug } }"
+          >
+            <Avatar
+              class="reels-view__metadata-avatar"
+              :name="activeFolderTitle"
+              :src="activeFolder ? activeFolder.avatarUrl : activeItem.folderAvatarUrl ?? null"
+            />
+            <div class="reels-view__metadata-copy">
+              <strong class="reels-view__metadata-title">{{ activeFolderTitle }}</strong>
+              <p
+                v-if="activeItem.caption?.trim()"
+                class="reels-view__metadata-caption"
+                :title="activeItem.caption"
+              >
+                {{ activeItem.caption }}
+              </p>
+              <div class="reels-view__source-line" :title="activeItem.filename">
+                <span class="i-fluent-video-20-regular reels-view__source-icon" aria-hidden="true" />
+                <span
+                  ref="sourceViewport"
+                  class="reels-view__source-viewport"
+                  :class="{ 'reels-view__source-viewport--scrolling': sourceOverflows }"
+                >
+                  <span :key="activeItem.id" class="reels-view__source-track">
+                    <span ref="sourceLabel" class="reels-view__source-label">{{ activeItem.filename }}</span>
+                    <span v-if="sourceOverflows" aria-hidden="true">{{ activeItem.filename }}</span>
+                  </span>
+                </span>
+              </div>
+            </div>
+          </RouterLink>
+        </div>
+      </div>
+
+      <div v-if="!isMobileViewport" class="reels-view__nav-controls" :aria-label="t('reels.view.navigationAria')">
+        <button
+          class="reels-view__nav-button"
+          type="button"
+          :aria-label="t('reels.view.previous')"
+          :disabled="!canGoPrevious"
+          @click="goToPrevious"
+        >
+          <svg class="reels-view__nav-icon" viewBox="0 0 24 24" role="presentation">
+            <path
+              d="m4 15 8-8 8 8"
+              fill="none"
+              stroke="currentColor"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="1.9"
+            />
+          </svg>
+        </button>
+        <button
+          class="reels-view__nav-button"
+          type="button"
+          :aria-label="t('reels.view.next')"
+          :disabled="!canGoNext"
+          @click="goToNext"
+        >
+          <svg class="reels-view__nav-icon" viewBox="0 0 24 24" role="presentation">
+            <path
+              d="m4 9 8 8 8-8"
+              fill="none"
+              stroke="currentColor"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="1.9"
+            />
+          </svg>
+        </button>
       </div>
 
       <div v-if="!isMobileViewport" class="reels-view__right-column">
-        <div class="reels-view__nav-controls" :aria-label="t('reels.view.navigationAria')">
-          <button
-            class="reels-view__nav-button"
-            type="button"
-            :aria-label="t('reels.view.previous')"
-            :disabled="!canGoPrevious"
-            @click="goToPrevious"
-          >
-            <svg class="reels-view__nav-icon" viewBox="0 0 24 24" role="presentation">
-              <path
-                d="m6.75 14.75 5.25-5.25 5.25 5.25"
-                fill="none"
-                stroke="currentColor"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="1.9"
-              />
-            </svg>
-          </button>
-          <button
-            class="reels-view__nav-button"
-            type="button"
-            :aria-label="t('reels.view.next')"
-            :disabled="!canGoNext"
-            @click="goToNext"
-          >
-            <svg class="reels-view__nav-icon" viewBox="0 0 24 24" role="presentation">
-              <path
-                d="m6.75 9.25 5.25 5.25 5.25-5.25"
-                fill="none"
-                stroke="currentColor"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="1.9"
-              />
-            </svg>
-          </button>
-        </div>
-
+        <div ref="detailsGutter" class="reels-view__details-gutter" aria-hidden="true" />
         <ReelActionRail
           v-if="activeItem"
           class="reels-view__action-rail reels-view__action-rail--desktop"
@@ -131,13 +169,16 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { RouterLink } from 'vue-router';
 
+import Avatar from '../components/Avatar.vue';
 import ReelActionRail from '../components/ReelActionRail.vue';
 import ReelDeck from '../components/ReelDeck.vue';
 import ReelInfoSidebar from '../components/ReelInfoSidebar.vue';
 import { useAppStore } from '../stores/app';
 import { useFoldersStore } from '../stores/folders';
 import { useReelsStore } from '../stores/reels';
+import { formatFolderTitle } from '../utils/folder-titles';
 
 const appStore = useAppStore();
 const foldersStore = useFoldersStore();
@@ -148,8 +189,18 @@ const isInfoSidebarOpen = ref(false);
 const viewportWidth = ref(typeof window !== 'undefined' ? window.innerWidth : 0);
 const viewportHeight = ref(typeof window !== 'undefined' ? window.innerHeight : 0);
 const isMobileViewport = computed(() => viewportWidth.value <= 768);
+const metadataGutter = ref<HTMLElement | null>(null);
+const detailsGutter = ref<HTMLElement | null>(null);
+const metadataFits = ref(false);
+const detailsFit = ref(false);
+const showExternalMetadata = computed(() =>
+  viewportWidth.value >= 1152 && viewportWidth.value > viewportHeight.value && metadataFits.value
+);
+const sourceViewport = ref<HTMLElement | null>(null);
+const sourceLabel = ref<HTMLElement | null>(null);
+const sourceOverflows = ref(false);
 const desktopInfoPanelSide = computed<'left' | 'right'>(() =>
-  !isMobileViewport.value && viewportWidth.value > viewportHeight.value ? 'right' : 'left'
+  viewportWidth.value > viewportHeight.value && detailsFit.value ? 'right' : 'left'
 );
 const desktopInfoPanelSideClass = computed(() =>
   desktopInfoPanelSide.value === 'right'
@@ -165,6 +216,10 @@ const knownFolders = computed(() => [...foldersStore.items, ...Object.values(fol
 const activeFolder = computed(() =>
   activeItem.value ? knownFolders.value.find((folder) => folder.slug === activeItem.value?.folderSlug) ?? null : null
 );
+const activeFolderTitle = computed(() => {
+  const item = activeItem.value;
+  return item ? formatFolderTitle(activeFolder.value ?? item, appStore.nestedFolderTitleFormat) : '';
+});
 const activeIndex = computed(() => reelsStore.items.findIndex((item) => item.id === reelsStore.activeReelId));
 const canGoPrevious = computed(() => activeIndex.value > 0);
 const canGoNext = computed(() => activeIndex.value >= 0 && activeIndex.value < reelsStore.items.length - 1);
@@ -205,11 +260,11 @@ function shouldCaptureGlobalWheel(event: WheelEvent) {
   }
 
   const target = event.target;
-  if (!(target instanceof HTMLElement)) {
+  if (!(target instanceof Element)) {
     return true;
   }
 
-  if (target.closest('.sidebar')) {
+  if (target.closest('.sidebar, .collection-bookmark__popover')) {
     return false;
   }
 
@@ -241,6 +296,40 @@ onBeforeUnmount(() => {
   window.removeEventListener('wheel', handleGlobalWheel);
 });
 
+watch([metadataGutter, detailsGutter, viewportWidth, viewportHeight], ([metadata, details], _previous, onCleanup) => {
+  const updateGutters = () => {
+    const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+    metadataFits.value = !!metadata && metadata.clientWidth >= 9 * rem;
+    detailsFit.value = !!details && details.clientWidth >= 16 * rem;
+  };
+
+  updateGutters();
+  if (typeof ResizeObserver !== 'undefined') {
+    const observer = new ResizeObserver(updateGutters);
+    if (metadata) observer.observe(metadata);
+    if (details) observer.observe(details);
+    onCleanup(() => observer.disconnect());
+  }
+}, { flush: 'post' });
+
+watch([sourceViewport, sourceLabel], ([viewport, label], _previous, onCleanup) => {
+  sourceOverflows.value = false;
+  if (!viewport || !label) {
+    return;
+  }
+
+  const measureOverflow = () => {
+    sourceOverflows.value = label.scrollWidth > viewport.clientWidth;
+  };
+  measureOverflow();
+  if (typeof ResizeObserver !== 'undefined') {
+    const observer = new ResizeObserver(measureOverflow);
+    observer.observe(viewport);
+    observer.observe(label);
+    onCleanup(() => observer.disconnect());
+  }
+}, { flush: 'post' });
+
 watch(activeItem, (item) => {
   if (!item) {
     isInfoSidebarOpen.value = false;
@@ -258,9 +347,16 @@ watch(activeItem, (item) => {
 
 .reels-view__layout {
   --reels-desktop-rail-width: 3.8rem;
-  --reels-desktop-column-gap: 0.85rem;
+  --reels-desktop-column-gap: 0.5rem;
   --reel-stage-block-gap: 0.75rem;
   --reel-stage-inline-gap: 1.25rem;
+  --reels-nav-clearance: 7rem;
+  --reels-nav-inset: 1.5rem;
+  --reels-nav-button-size: 2.75rem;
+  --reels-details-offset: 2.05rem;
+  --reels-details-width: 0px;
+  --reels-metadata-gap: 3.5rem;
+  --reels-metadata-width: 0px;
   --reels-desktop-stage-width: 24.4rem;
   --reels-desktop-stage-height: calc(var(--reels-desktop-stage-width) * 16 / 9);
   position: relative;
@@ -280,43 +376,211 @@ watch(activeItem, (item) => {
   .reels-view__layout {
     --reels-desktop-stage-width: min(
       calc((100cqh - var(--reel-stage-block-gap)) * 9 / 16),
-      calc(100cqw - var(--reels-desktop-rail-width) - var(--reels-desktop-column-gap) - var(--reel-stage-inline-gap))
+      calc(100cqw - var(--reels-desktop-rail-width) - var(--reels-desktop-column-gap) - var(--reels-nav-clearance))
     );
     --reels-desktop-stage-height: calc(var(--reels-desktop-stage-width) * 16 / 9);
+    --reels-metadata-width: clamp(
+      0px,
+      calc(
+        (100cqw - var(--reels-desktop-stage-width) - var(--reels-desktop-rail-width) - var(--reels-desktop-column-gap)) / 2
+        - var(--reels-metadata-gap) - (var(--desktop-sidebar-expanded-width) - var(--desktop-sidebar-width))
+      ),
+      15.5rem
+    );
+    --reels-details-width: max(
+      0px,
+      calc(
+        (100cqw - var(--reels-desktop-stage-width) - var(--reels-desktop-column-gap)) / 2
+        - var(--reels-details-offset) - var(--reels-nav-inset) - var(--reels-nav-button-size)
+      )
+    );
+  }
+}
+
+@supports (width: 1cqw) {
+  @media (width > 768px) and (orientation: portrait) {
+    .reels-view {
+      container-type: size;
+    }
+
+    .reels-view__layout {
+      --reel-deck-top-inset: 1rem;
+      --reel-deck-panel-gap: 2rem;
+      --reel-stage-gap: 0px;
+      --reel-stage-inline-gap: 0px;
+      --reels-action-rail-align: start;
+      --reels-action-rail-start: 0.62;
+      --reels-portrait-left-inset: 0.5rem;
+      --reels-portrait-arrow-gutter: calc(var(--reels-nav-inset) + var(--reels-nav-button-size) + 0.5rem);
+      --reels-desktop-stage-width: min(
+        calc((88cqh - var(--reel-deck-top-inset) - var(--reel-deck-panel-gap)) * 9 / 16),
+        calc(
+          100cqw - var(--reels-portrait-left-inset) - var(--reels-portrait-arrow-gutter)
+          - var(--reels-desktop-rail-width) - var(--reels-desktop-column-gap)
+        )
+      );
+      --reel-deck-panel-height: var(--reels-desktop-stage-height);
+      --reel-deck-bottom-inset: calc(100cqh - var(--reel-deck-top-inset) - var(--reel-deck-panel-height));
+      container-type: normal;
+      padding-inline: var(--reels-portrait-left-inset) var(--reels-portrait-arrow-gutter);
+    }
   }
 }
 
 .reels-view__deck-shell {
+  position: relative;
   height: 100%;
   min-height: 0;
   min-width: 0;
 }
 
-/* ── Right column: nav arrows centered + action rail bottom-aligned ── */
+.reels-view__metadata-gutter {
+  position: absolute;
+  right: calc(100% + var(--reels-metadata-gap));
+  bottom: calc((100% - var(--reels-desktop-stage-height)) / 2 + 1.625rem);
+  width: var(--reels-metadata-width);
+}
+
+.reels-view__metadata {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.875rem;
+  color: var(--text);
+  border-radius: 0.5rem;
+}
+
+.reels-view__metadata:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 4px;
+}
+
+.reels-view__metadata-avatar {
+  flex: none;
+  width: 2rem;
+  height: 2rem;
+}
+
+.reels-view__metadata-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.reels-view__metadata-title,
+.reels-view__metadata-caption {
+  display: block;
+  overflow: hidden;
+  margin: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reels-view__metadata-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.reels-view__metadata:hover .reels-view__metadata-title {
+  text-decoration: underline;
+}
+
+.reels-view__metadata-caption,
+.reels-view__source-line {
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.reels-view__source-line {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin-top: 0.2rem;
+}
+
+.reels-view__source-icon {
+  flex: none;
+  width: 0.875rem;
+  height: 0.875rem;
+}
+
+.reels-view__source-viewport {
+  display: block;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.reels-view__source-track {
+  display: flex;
+  gap: 1rem;
+  width: max-content;
+}
+
+.reels-view__source-viewport--scrolling {
+  mask-image: linear-gradient(to right, transparent, #000 0.5rem, #000 calc(100% - 0.5rem), transparent);
+}
+
+.reels-view__source-viewport--scrolling .reels-view__source-track {
+  animation: reels-source-scroll 16s linear infinite;
+}
+
+.reels-view__metadata:hover .reels-view__source-track,
+.reels-view__metadata:focus-visible .reels-view__source-track {
+  animation-play-state: paused;
+}
+
+@keyframes reels-source-scroll {
+  from { transform: translateX(0); }
+  to { transform: translateX(calc(-50% - 0.5rem)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reels-view__source-viewport--scrolling {
+    mask-image: none;
+  }
+
+  .reels-view__source-viewport--scrolling .reels-view__source-track {
+    display: block;
+    width: auto;
+    animation: none;
+  }
+
+  .reels-view__source-label {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .reels-view__source-track > [aria-hidden] {
+    display: none;
+  }
+}
 
 .reels-view__right-column {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  align-self: var(--reels-action-rail-align, center);
   width: var(--reels-desktop-rail-width);
   height: var(--reels-desktop-stage-height);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  position: relative;
-  align-self: center;
+  margin-top: var(--reel-deck-top-inset, 0px);
+  padding-top: clamp(
+    0px,
+    calc(var(--reels-desktop-stage-height) * var(--reels-action-rail-start, 0.43)),
+    calc(var(--reels-desktop-stage-height) - 17.5rem)
+  );
+  padding-bottom: 1rem;
 }
 
 .reels-view__action-rail--desktop {
-  position: absolute;
-  bottom: 1rem;
-  left: 50%;
-  transform: translateX(-50%);
+  --collection-bookmark-icon-size: 1.6rem;
+  align-self: start;
+  gap: 1.25rem;
 }
 
-.reels-view__action-rail--desktop :deep(.reel-action-rail__button) {
-  color: color-mix(in srgb, var(--text) 82%, transparent);
-}
-
-.reels-view__action-rail--desktop :deep(.reel-action-rail__button:hover:not(:disabled)) {
+.reels-view__action-rail--desktop :deep(.reel-action-rail__button:not(.reel-action-rail__button--liked)) {
   color: var(--text);
 }
 
@@ -325,18 +589,35 @@ watch(activeItem, (item) => {
   height: 1.6rem;
 }
 
+.reels-view__action-rail--desktop :deep(.reel-action-rail__info-wrap) {
+  position: static;
+}
+
 .reels-view__action-rail--desktop :deep(.reel-action-rail__info-panel) {
-  bottom: 0;
+  top: 50%;
+  bottom: auto;
+  transform: translateY(-50%);
 }
 
 .reels-view__action-rail--desktop-info-left :deep(.reel-action-rail__info-panel) {
-  right: calc(100% + 0.9rem);
+  right: calc(50% + var(--reels-details-offset));
   left: auto;
 }
 
 .reels-view__action-rail--desktop-info-right :deep(.reel-action-rail__info-panel) {
-  left: calc(100% + 0.9rem);
+  left: calc(50% + var(--reels-details-offset));
   right: auto;
+}
+
+.reels-view__details-gutter {
+  position: absolute;
+  width: var(--reels-details-width);
+  height: 0;
+  pointer-events: none;
+}
+
+.reels-view__action-rail--desktop-info-right :deep(.reels-info-sidebar) {
+  max-width: var(--reels-details-width);
 }
 
 .reels-view__action-rail--mobile {
@@ -347,12 +628,14 @@ watch(activeItem, (item) => {
   display: block;
 }
 
-.reels-view__action-rail--mobile :deep(.reel-action-rail__button) {
+.reels-view__action-rail--mobile :deep(.reel-action-rail__button),
+.reels-view__action-rail--mobile :deep(.collection-bookmark__button) {
   color: rgba(255, 255, 255, 0.96);
   filter: drop-shadow(0 6px 16px rgba(0, 0, 0, 0.28));
 }
 
-.reels-view__action-rail--mobile :deep(.reel-action-rail__button:hover:not(:disabled)) {
+.reels-view__action-rail--mobile :deep(.reel-action-rail__button:hover:not(:disabled)),
+.reels-view__action-rail--mobile :deep(.collection-bookmark__button:hover:not(:disabled)) {
   color: #fff;
 }
 
@@ -362,23 +645,25 @@ watch(activeItem, (item) => {
   left: auto;
 }
 
-/* ── Nav controls: centered in the right column ── */
-
 .reels-view__nav-controls {
+  position: absolute;
+  top: 50%;
+  right: var(--reels-nav-inset);
   display: grid;
-  gap: 0.75rem;
+  gap: 1rem;
+  transform: translateY(-50%);
 }
 
 .reels-view__nav-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 2.8rem;
-  height: 2.8rem;
+  width: var(--reels-nav-button-size);
+  height: var(--reels-nav-button-size);
   padding: 0;
   border: 0;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--surface) 78%, var(--text) 22%);
+  background: color-mix(in srgb, var(--text) 9%, var(--bg));
   color: var(--text);
   cursor: pointer;
   box-shadow: 0 8px 20px rgba(15, 20, 25, 0.14);
@@ -390,7 +675,7 @@ watch(activeItem, (item) => {
 
 .reels-view__nav-button:hover:not(:disabled) {
   transform: translateY(-1px);
-  background: color-mix(in srgb, var(--surface) 64%, var(--text) 36%);
+  background: color-mix(in srgb, var(--text) 17%, var(--bg));
 }
 
 .reels-view__nav-button:disabled {
@@ -399,8 +684,8 @@ watch(activeItem, (item) => {
 }
 
 .reels-view__nav-icon {
-  width: 1.15rem;
-  height: 1.15rem;
+  width: 1.5rem;
+  height: 1.5rem;
 }
 
 .reels-view__message-card {

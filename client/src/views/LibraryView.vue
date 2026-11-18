@@ -1,5 +1,5 @@
 <template>
-  <section class="w-[min(100%,72rem)] mx-auto flex flex-col gap-[1.4rem]">
+  <section class="centered-page flex flex-col gap-[1.4rem]">
     <SourceUnavailable v-for="source in sourcesStore.unavailable" :key="source.id" :name="source.name" variant="banner" />
     <!-- Page header -->
     <header

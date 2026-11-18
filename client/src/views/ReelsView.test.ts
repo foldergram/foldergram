@@ -1,6 +1,6 @@
 import { defineComponent, h } from 'vue';
 import { flushPromises, mount } from '@vue/test-utils';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 
 import type { AppStatus, FeedItem, FolderSummary } from '../types/api';
@@ -8,6 +8,11 @@ import { useAppStore } from '../stores/app';
 import { useFoldersStore } from '../stores/folders';
 import { useReelsStore } from '../stores/reels';
 import ReelsView from './ReelsView.vue';
+
+vi.mock('vue-router', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('vue-router')>()),
+  RouterLink: (await import('@vue/test-utils')).RouterLinkStub
+}));
 
 const deckControls = vi.hoisted(() => ({
   goToPrevious: vi.fn(),
@@ -212,6 +217,13 @@ function createFolder(id: number, slug: string, name: string): FolderSummary {
 
 describe('ReelsView', () => {
   beforeEach(() => {
+    const clientWidth = Object.getOwnPropertyDescriptor(Element.prototype, 'clientWidth')!.get!;
+    vi.spyOn(Element.prototype, 'clientWidth', 'get').mockImplementation(function (this: Element) {
+      if (this.matches('.reels-view__metadata-gutter, .reels-view__details-gutter')) {
+        return 280;
+      }
+      return clientWidth.call(this);
+    });
     setActivePinia(createPinia());
     Object.defineProperty(window, 'innerWidth', {
       configurable: true,
@@ -249,6 +261,10 @@ describe('ReelsView', () => {
     });
   });
 
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('loads the route view and shows the right rail for the active reel', async () => {
     const reelsStore = useReelsStore();
     const loadInitialSpy = vi.spyOn(reelsStore, 'loadInitial').mockResolvedValue(undefined);
@@ -258,6 +274,8 @@ describe('ReelsView', () => {
 
     expect(loadInitialSpy).toHaveBeenCalledTimes(1);
     expect(wrapper.find('[data-test="reel-deck"]').exists()).toBe(true);
+    expect(wrapper.get('.reels-view__metadata-title').text()).toBe('Alpha');
+    expect(wrapper.get('.reels-view__source-label').text()).toBe('reel-101.mp4');
     expect(wrapper.get('.reels-view__action-rail--desktop').text()).toContain('101');
     expect(wrapper.get('.reels-view__action-rail--desktop').attributes('data-open')).toBe('false');
     expect(wrapper.find('.reels-view__action-rail--mobile').exists()).toBe(false);
@@ -275,6 +293,8 @@ describe('ReelsView', () => {
     await flushPromises();
 
     expect(reelsStore.activeReelId).toBe(202);
+    expect(wrapper.get('.reels-view__metadata-title').text()).toBe('Beta');
+    expect(wrapper.get('.reels-view__source-label').text()).toBe('reel-202.mp4');
     expect(wrapper.get('.reels-view__action-rail--desktop').text()).toContain('202');
   });
 
@@ -339,6 +359,7 @@ describe('ReelsView', () => {
     await flushPromises();
 
     expect(wrapper.find('.reels-view__action-rail--desktop').exists()).toBe(false);
+    expect(wrapper.find('.reels-view__metadata').exists()).toBe(false);
     expect(wrapper.get('.reels-view__action-rail--mobile').text()).toContain('101');
 
     await wrapper.get('.reels-view__action-rail--mobile [data-test="toggle-info"]').trigger('click');

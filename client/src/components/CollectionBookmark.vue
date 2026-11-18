@@ -120,7 +120,7 @@ import ResilientImage from './ResilientImage.vue';
 
 const props = defineProps<{
   item: FeedItem | ImageDetail;
-  placement: 'feed' | 'viewer';
+  placement: 'feed' | 'viewer' | 'reels';
 }>();
 
 const { t } = useI18n();
@@ -131,7 +131,7 @@ const buttonElement = ref<HTMLButtonElement | null>(null);
 const popoverElement = ref<HTMLElement | null>(null);
 const createInputElement = ref<HTMLInputElement | null>(null);
 const popoverOpen = ref(false);
-const popoverPlacement = ref<'top' | 'bottom'>('top');
+const popoverPlacement = ref<'top' | 'bottom' | 'left'>('top');
 const popoverStyle = ref<Record<string, string>>({});
 const creating = ref(false);
 const creatingCollection = ref(false);
@@ -247,6 +247,26 @@ function updatePopoverPosition() {
   const popoverRect = popover.getBoundingClientRect();
   const measuredWidth = popoverRect.width || popover.offsetWidth;
   const measuredHeight = popoverRect.height || popover.offsetHeight || popoverPreferredMaxHeightPx;
+
+  const leftOfButton = buttonRect.left - measuredWidth - popoverGap;
+  if (props.placement === 'reels' && window.innerWidth > 768 && leftOfButton >= popoverViewportMargin) {
+    const maxHeight = Math.min(window.innerHeight - 2 * popoverViewportMargin, popoverPreferredMaxHeightPx);
+    const height = Math.min(measuredHeight, maxHeight);
+    const buttonCenter = buttonRect.top + buttonRect.height / 2;
+    const top = clamp(buttonCenter - height / 2, popoverViewportMargin, window.innerHeight - height - popoverViewportMargin);
+    const arrowTop = clamp(buttonCenter - top, popoverArrowEdgePaddingPx, height - popoverArrowEdgePaddingPx);
+
+    popoverPlacement.value = 'left';
+    popoverStyle.value = {
+      '--collection-bookmark-arrow-top': `${Math.round(arrowTop)}px`,
+      left: `${Math.round(leftOfButton)}px`,
+      top: `${Math.round(top)}px`,
+      minHeight: `${Math.min(popoverMinHeightPx, Math.round(maxHeight))}px`,
+      maxHeight: `${Math.round(maxHeight)}px`
+    };
+    return;
+  }
+
   const availableAbove = Math.max(buttonRect.top - popoverViewportMargin - popoverGap, 0);
   const availableBelow = Math.max(window.innerHeight - buttonRect.bottom - popoverViewportMargin - popoverGap, 0);
   const nextPlacement = availableAbove >= measuredHeight || availableAbove >= availableBelow ? 'top' : 'bottom';
