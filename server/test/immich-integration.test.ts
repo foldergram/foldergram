@@ -10,7 +10,7 @@ const photo = (id: string, parent = '/photos/Trips', libraryId: string | null = 
 describe.sequential('optional Immich sources', () => {
     let temp: string, base: string, server: http.Server;
     let data: any[], albums: any[], members: Record<string, string[]>, failCursor: boolean, librariesForbidden: boolean, permissionDenied: boolean, mediaFailure: number, searchCalls: number, mediaCalls: number, retryFailures: number;
-    let slowVideo: boolean, mediaSize: number, version: string, unavailable: boolean;
+    let slowVideo: boolean, mediaSize: number, version: string, unavailable: boolean, omitNextCursor: boolean;
     let sources: typeof import('../src/immich/source-service.js');
     let repos: typeof import('../src/db/repositories.js');
     let manager: typeof import('../src/db/database.js');
@@ -83,7 +83,8 @@ describe.sequential('optional Immich sources', () => {
                 if (query.filter.albumIds)
                     found = found.filter(a => query.filter.albumIds.any.some((id: string) => (members[id] || []).includes(a.id)));
                 const offset = Number(query.cursor || 0), items = found.slice(offset, offset + 2);
-                res.end(JSON.stringify({ assets: { items, total: items.length, nextCursor: offset + 2 < found.length ? String(offset + 2) : null } }));
+                const nextCursor = omitNextCursor && query.cursor ? undefined : offset + 2 < found.length ? String(offset + 2) : null;
+                res.end(JSON.stringify({ assets: { items, total: items.length, nextCursor } }));
                 return;
             }
             const assetId = /^\/api\/assets\/([\w-]+)$/.exec(req.url ?? '')?.[1];
@@ -153,6 +154,7 @@ describe.sequential('optional Immich sources', () => {
         mediaSize = 0;
         version = '3.3.5';
         unavailable = false;
+        omitNextCursor = false;
         manager = await import('../src/db/database.js');
         sources = await import('../src/immich/source-service.js');
         repos = await import('../src/db/repositories.js');
@@ -538,9 +540,40 @@ describe.sequential('optional Immich sources', () => {
         expect((await requestTestApp(app, 'GET', `/api/originals/${item.id}`)).status).toBe(403);
         expect(feed().total).toBe(3);
     });
-    it('reports incompatible versions and blocks metadata-service URL requests', async () => {
-        version = '4.0.0';
-        await expect(sources.detectContent(base, 'fixture-secret')).rejects.toThrow('Unsupported');
+    it('connects to the minimum Immich version', async () => {
+        version = 'v3.2.0';
+        await expect(sources.detectContent(base, 'fixture-secret')).resolves.toMatchObject({ version, assetCount: 5 });
+    });
+    it.each(['3.1.9', 'v3.2.0-rc.1'])('rejects Immich %s below the minimum before searching', async (reportedVersion) => {
+        version = reportedVersion;
+        await expect(sources.detectContent(base, 'fixture-secret')).rejects.toThrow('Immich v3.2.0 or later');
+        expect(searchCalls).toBe(0);
+    });
+    it('reports an invalid Immich server version before searching', async () => {
+        version = 'unavailable';
+        await expect(sources.detectContent(base, 'fixture-secret')).rejects.toThrow('valid server version');
+        expect(searchCalls).toBe(0);
+    });
+    it('syncs an existing source after minor and major Immich upgrades and preserves the index on incompatible pagination', async () => {
+        const id = add();
+        await sources.syncSource(id);
+        const assetIds = rows().map(asset => asset.id);
+
+        for (const upgradedVersion of ['3.4.1', 'v4.0.0-rc.1', 'v4.0.0']) {
+            version = upgradedVersion;
+            await sources.syncSource(id);
+            expect(sources.getSource(id)?.status).toBe('ready');
+            expect(rows().map(asset => asset.id)).toEqual(assetIds);
+            expect(feed().total).toBe(4);
+        }
+
+        omitNextCursor = true;
+        await expect(sources.syncSource(id)).rejects.toThrow('assets.nextCursor');
+        expect(sources.getSource(id)).toMatchObject({ status: 'error', generation: 4 });
+        expect(rows().map(asset => asset.id)).toEqual(assetIds);
+        expect(feed().total).toBe(4);
+    });
+    it('blocks metadata-service URL requests', async () => {
         const { ImmichClient } = await import('../src/immich/client.js');
         await expect(new ImmichClient('http://169.254.169.254', 'fixture-secret').json('/api/server/about')).rejects.toThrow('reserved');
     });
