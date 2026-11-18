@@ -10,6 +10,7 @@ const guideItems = [
   { text: 'Quick Start', link: '/quick-start' },
   { text: 'Installation', link: '/installation' },
   { text: 'Configuration', link: '/configuration' },
+  { text: 'Local Galleries', link: '/local-galleries' },
   { text: 'Immich Integration', link: '/immich' }
 ];
 
