@@ -2,6 +2,8 @@
 
 Foldergram accepts contributions, but it is an opinionated project with clear product and architecture boundaries. Not every technically correct change fits the direction of the project.
 
+Read [AGENTS.md](AGENTS.md) for repository-specific coding conventions, verification requirements, commit messages, and guidance for LLM-assisted contributions.
+
 ## What You Can Usually Submit Directly
 
 Small, clearly aligned pull requests are welcome without prior approval:
