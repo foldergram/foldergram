@@ -1,4 +1,24 @@
 {
+  "displayPreferences": {
+    "appearance": {
+      "label": "Appearance",
+      "description": "Choose a theme for this browser. App default follows the theme set in Settings.",
+      "appDefault": "App default"
+    },
+    "done": "Done",
+    "title": "Display preferences",
+    "description": "Changes apply immediately and are saved in this browser.",
+    "suggestedFolders": {
+      "label": "Show suggested folders on desktop",
+      "description": "Show suggested folders beside Home on wider screens. Turning this off gives the feed more room."
+    },
+    "fitTallMedia": {
+      "label": "Fit tall media to screen",
+      "description": "Shrink only media taller than the desktop window. Works with or without suggested folders."
+    },
+    "saved": "Saved in this browser.",
+    "sessionOnly": "Some preferences could not be saved in this browser. Unsaved changes apply only for this session."
+  },
   "appearance": {
   "title": "Appearance",
     "description": "Set the default theme and accent color for this instance.",
@@ -18,7 +38,7 @@
   "saving": "Saving…",
   "saved": "Appearance saved.",
   "saveError": "Could not save appearance. Please try again.",
-  "demoReadOnly": "Appearance settings are read-only in the public demo. Use More → Switch appearance to change your browser theme."
+  "demoReadOnly": "Appearance settings are read-only in the public demo. Use More → Display preferences to change your browser theme."
 },
   "sources": {
     "title": "Sources",
@@ -141,9 +161,6 @@
     "trash": "Trash",
     "settings": "Settings",
     "unlockAdmin": "Unlock admin",
-    "switchAppearance": "Switch appearance",
-    "switchToDarkMode": "Switch to dark mode",
-    "switchToLightMode": "Switch to light mode",
     "signOut": "Sign out",
     "returnToPublicView": "Return to public view",
     "foldersSpotlight": "Folders Spotlight",
@@ -285,10 +302,6 @@
             "description": "Bring older picks back."
           }
         }
-      },
-      "suggestedFolders": {
-        "label": "Show suggested folders on desktop",
-        "description": "Show the suggested folders panel beside the Home feed on wide screens. This setting is saved in this browser."
       },
       "reelsFeed": {
         "label": "Reels feed sort order",

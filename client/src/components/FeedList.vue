@@ -6,7 +6,7 @@
       :key="item.id"
       :item="item"
       :context="context"
-      :wide-home-layout="wideHomeLayout"
+      :fit-tall-media="fitTallMedia"
       :has-avatar-story="folderLookup.get(item.folderSlug)?.hasAvatarStory ?? item.folderHasAvatarStory ?? false"
       :avatar-url="folderAvatar(item)"
       :is-active-video="context === 'home' && item.id === activeVideoId"
@@ -38,11 +38,11 @@ const props = withDefaults(
     items: FeedItem[];
     showSkeleton?: boolean;
     context?: 'default' | 'home';
-    wideHomeLayout?: boolean;
+    fitTallMedia?: boolean;
   }>(),
   {
     context: 'default',
-    wideHomeLayout: false
+    fitTallMedia: false
   }
 );
 

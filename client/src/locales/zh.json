@@ -1,4 +1,24 @@
 {
+  "displayPreferences": {
+    "appearance": {
+      "label": "外观",
+      "description": "为当前浏览器选择主题。应用默认会跟随设置中指定的主题。",
+      "appDefault": "应用默认"
+    },
+    "done": "完成",
+    "title": "显示偏好设置",
+    "description": "更改会立即生效，并保存在当前浏览器中。",
+    "suggestedFolders": {
+      "label": "在桌面端显示推荐文件夹",
+      "description": "在宽屏上于首页旁显示推荐文件夹。关闭后，动态流将获得更多空间。"
+    },
+    "fitTallMedia": {
+      "label": "将竖向媒体适配屏幕",
+      "description": "仅缩小高度超出桌面窗口的媒体。无论是否显示推荐文件夹均可使用。"
+    },
+    "saved": "已保存在当前浏览器中。",
+    "sessionOnly": "部分偏好设置无法保存在当前浏览器中。未保存的更改仅在本次会话中生效。"
+  },
   "appearance": {
   "title": "外观",
     "description": "设置此实例的默认主题和强调色。",
@@ -18,7 +38,7 @@
   "saving": "正在保存…",
   "saved": "外观已保存。",
   "saveError": "无法保存外观，请重试。",
-  "demoReadOnly": "公开演示中的外观设置为只读。可通过“更多 → 切换外观”更改当前浏览器的主题。"
+  "demoReadOnly": "公开演示中的外观设置为只读。使用更多 → 显示偏好设置来更改当前浏览器的主题。"
 },
   "sources": {
     "title": "来源",
@@ -141,9 +161,6 @@
     "trash": "回收站",
     "settings": "设置",
     "unlockAdmin": "解锁管理员",
-    "switchAppearance": "切换外观",
-    "switchToDarkMode": "切换到深色模式",
-    "switchToLightMode": "切换到浅色模式",
     "signOut": "退出登录",
     "returnToPublicView": "返回公开视图",
     "foldersSpotlight": "精选文件夹",
@@ -285,10 +302,6 @@
             "description": "让较早的精选内容再次出现。"
           }
         }
-      },
-      "suggestedFolders": {
-        "label": "在桌面端显示推荐文件夹",
-        "description": "在宽屏上于首页动态流旁显示推荐文件夹面板。此设置保存在当前浏览器中。"
       },
       "reelsFeed": {
         "label": "短片动态流排序",

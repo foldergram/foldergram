@@ -17,11 +17,12 @@ describe('appearance', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 
-  it('uses the instance theme in admin mode and restores the legacy browser preference as a visitor', async () => {
+  it('keeps the browser preference through instance refreshes and admin role changes', async () => {
     mocks.canWrite = false;
     localStorage.setItem('foldergram-theme', 'dark');
     mocks.request.mockResolvedValue({ theme: 'light', accent: 'purple' });
@@ -35,8 +36,8 @@ describe('appearance', () => {
 
     mocks.canWrite = true;
     store.render();
-    expect(mocks.setTheme).toHaveBeenLastCalledWith('light');
-    expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#7c3aed');
+    expect(mocks.setTheme).toHaveBeenLastCalledWith('dark');
+    expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#b794ff');
 
     mocks.canWrite = false;
     store.render();
@@ -60,18 +61,65 @@ describe('appearance', () => {
     expect(mocks.setTheme).toHaveBeenLastCalledWith('light');
   });
 
-  it('persists a viewer selection in the browser and clears it for Instance default', () => {
-    mocks.canWrite = false;
+  it.each([false, true])('persists personal themes and clears them for App default (admin: %s)', (isAdmin) => {
+    mocks.canWrite = isAdmin;
     const store = useAppearanceStore();
     store.apply({ theme: 'dark', accent: 'rose' });
-    store.setBrowserTheme('light');
+    expect(store.setBrowserTheme('light')).toBe(true);
     expect(localStorage.getItem('foldergram-theme')).toBe('light');
     expect(mocks.setTheme).toHaveBeenLastCalledWith('light');
-    store.setBrowserTheme('instance');
+    expect(store.setBrowserTheme('instance')).toBe(true);
     expect(localStorage.getItem('foldergram-theme')).toBeNull();
     expect(mocks.setTheme).toHaveBeenLastCalledWith('dark');
     expect(store.accent).toBe('rose');
     expect(mocks.request).not.toHaveBeenCalled();
+  });
+
+  it('follows instance updates only when App default is selected', () => {
+    const store = useAppearanceStore();
+    store.apply({ theme: 'dark', accent: 'blue' });
+    expect(mocks.setTheme).toHaveBeenLastCalledWith('dark');
+    store.apply({ theme: 'light', accent: 'blue' });
+    expect(mocks.setTheme).toHaveBeenLastCalledWith('light');
+    store.setBrowserTheme('system');
+    store.apply({ theme: 'dark', accent: 'blue' });
+    expect(mocks.setTheme).toHaveBeenLastCalledWith('light');
+    store.setBrowserTheme('instance');
+    expect(mocks.setTheme).toHaveBeenLastCalledWith('dark');
+  });
+
+  it('keeps session themes usable when storage writes or removal fail and reports recovery', () => {
+    const store = useAppearanceStore();
+    store.apply({ theme: 'dark', accent: 'blue' });
+    const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('Storage blocked'); });
+    expect(store.setBrowserTheme('light')).toBe(false);
+    expect(store.browserSaveFailed).toBe(true);
+    expect(mocks.setTheme).toHaveBeenLastCalledWith('light');
+    write.mockRestore();
+    expect(store.setBrowserTheme('dark')).toBe(true);
+    expect(store.browserSaveFailed).toBe(false);
+    const remove = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => { throw new Error('Storage blocked'); });
+    expect(store.setBrowserTheme('instance')).toBe(false);
+    expect(store.browserTheme).toBe('instance');
+    expect(store.browserSaveFailed).toBe(true);
+    remove.mockRestore();
+    expect(store.setBrowserTheme('instance')).toBe(true);
+    expect(store.browserSaveFailed).toBe(false);
+    expect(localStorage.getItem('foldergram-theme')).toBeNull();
+    expect(mocks.request).not.toHaveBeenCalled();
+  });
+
+  it('saves instance defaults without overwriting an admin browser override', async () => {
+    const store = useAppearanceStore();
+    store.apply({ theme: 'light', accent: 'blue' });
+    store.setBrowserTheme('dark');
+    mocks.request.mockResolvedValue({ theme: 'system', accent: 'green' });
+    expect(await store.save({ theme: 'system', accent: 'green' })).toBe(true);
+    expect(store.theme).toBe('system');
+    expect(store.accent).toBe('green');
+    expect(store.browserTheme).toBe('dark');
+    expect(localStorage.getItem('foldergram-theme')).toBe('dark');
+    expect(mocks.setTheme).toHaveBeenLastCalledWith('dark');
   });
 
   it('bounds a stalled read, skips duplicate reads, and can retry', async () => {

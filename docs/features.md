@@ -34,6 +34,32 @@ The Moments or Highlights rail shares the feed's center line. Desktop navigation
 and folder shortcuts are vertically centered between the logo and the More menu.
 Portrait windows use the centered feed layout without the recommendations sidebar.
 
+**More → Display preferences** lets admins and viewers turn **Show suggested folders
+on desktop** on or off. It is enabled by default. Changes apply immediately and
+are saved in the current browser; the dialog confirms the save or explains when
+browser storage is unavailable and the change applies only for the session.
+
+The same dialog includes **Appearance** with App default, System, Light, and Dark.
+All four choices apply only to the current browser, including for admins. App
+default follows the instance theme; System follows the device's light/dark mode.
+Browser overrides survive refreshes and entering or leaving admin mode.
+**Settings → Appearance** keeps its separate Save button for changing the
+instance's default theme and accent color. Saving those defaults preserves any
+personal browser theme choice.
+
+With suggested folders off, the desktop Home feed stays centered and can grow to
+600 px wide. Hiding suggested folders does not shrink tall media to fit the screen.
+
+**Fit tall media to screen** is a separate browser preference, off by default.
+When enabled, it scales tall photos, videos, and carousels down to fit the desktop
+window while preserving their media aspect ratios. Media that already fits the
+viewport keeps its normal size; captions and post actions do not reduce the media's
+height allowance. It works both with suggested
+folders visible and with the wider centered feed. Changing either switch leaves
+the other switch unchanged. With fitting off, tall posts can require scrolling.
+Mobile feed sizing stays the same. These browser preferences are separate from
+General Settings and its Save Changes button.
+
 ### Feed mode behavior
 
 | Mode | What it does |
@@ -367,7 +393,7 @@ browser preferences interact with the app-wide default.
 The client also persists a few local browser preferences:
 
 - selected language override
-- light or dark theme
+- System, Light, or Dark theme overrides (App default clears the override)
 - whether videos start muted
 - last opened folder
 - recently opened folders

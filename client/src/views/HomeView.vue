@@ -212,7 +212,7 @@
           <FeedList
             :items="visibleFeedItems"
             context="home"
-            :wide-home-layout="isWideHomeFeed"
+            :fit-tall-media="fitTallMediaOnDesktop"
             @open-folder-story="openFeedFolderStory"
           />
         </div>
@@ -318,6 +318,7 @@ import { useLikesStore } from '../stores/likes';
 import { useFoldersStore } from '../stores/folders';
 import { useMomentsStore } from '../stores/moments';
 import { useSuggestedFoldersPreference } from '../composables/useSuggestedFoldersPreference';
+import { useFitTallMediaPreference } from '../composables/useFitTallMediaPreference';
 import type { FeedMode } from '../types/api';
 import { formatFolderTitle } from '../utils/folder-titles';
 import { buildLikedCountByFolder, selectHomeRecommendations } from '../utils/home-recommendations';
@@ -334,6 +335,7 @@ const foldersStore = useFoldersStore();
 const momentsStore = useMomentsStore();
 const sourcesStore = useSourcesStore();
 const suggestedFoldersPreference = useSuggestedFoldersPreference();
+const fitTallMediaPreference = useFitTallMediaPreference();
 const visibleFeedItems = computed(() => feedStore.items.filter(item =>
   item.sourceKind === 'local' ? sourcesStore.canBrowse(item.sourceId) : !item.sourceId || (sourcesStore.initialized && sourcesStore.canBrowse(item.sourceId))
 ));
@@ -372,7 +374,9 @@ const activeFeedStoryId = ref<string | null>(null);
 const feedStoryRetrySlug = ref<string | null>(null);
 const homeLayoutElement = ref<HTMLElement | null>(null);
 const isCompactHomeLayout = ref(false);
-const isWideHomeFeed = computed(() => !isCompactHomeLayout.value && !suggestedFoldersPreference.enabled.value && !showSourceOutageState.value);
+const isDesktopHomeLayout = ref(window.innerWidth >= 768);
+const fitTallMediaOnDesktop = computed(() => isDesktopHomeLayout.value && fitTallMediaPreference.enabled.value);
+const isWideHomeFeed = computed(() => isDesktopHomeLayout.value && !suggestedFoldersPreference.enabled.value && !showSourceOutageState.value);
 const isSingleColumnLayout = computed(() => isCompactHomeLayout.value || !suggestedFoldersPreference.enabled.value || showSourceOutageState.value);
 const requestingHomeScan = ref(false);
 const scanCompletion = computed(() => appStore.scanCompletion?.surface === (router?.currentRoute.value.fullPath ?? '/')
@@ -573,6 +577,7 @@ async function retryFeedFolderStory() {
 }
 
 function updateHomeLayout() {
+  isDesktopHomeLayout.value = window.innerWidth >= 768;
   const layoutWidth = homeLayoutElement.value?.clientWidth ?? window.innerWidth;
   isCompactHomeLayout.value = layoutWidth <= HOME_RIGHT_RAIL_BREAKPOINT || window.innerHeight > window.innerWidth;
 }

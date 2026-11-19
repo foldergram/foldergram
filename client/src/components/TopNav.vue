@@ -97,6 +97,7 @@
         <slot name="activity" />
         <div class="mobile-nav__more">
           <button
+            ref="moreButton"
             class="mobile-nav__item mobile-nav__more-button"
             :class="moreButtonClasses"
             type="button"
@@ -183,7 +184,10 @@
               <span>{{ t('nav.unlockAdmin') }}</span>
             </button>
 
-            <AppearanceToggle mobile @switched="closeMoreMenu" />
+            <button class="mobile-nav__menu-item" type="button" aria-haspopup="dialog" @click="openDisplayPreferences">
+              <span class="mobile-nav__menu-icon i-fluent-desktop-20-regular" aria-hidden="true" />
+              <span>{{ t('displayPreferences.title') }}</span>
+            </button>
             <button
               v-if="authStore.canSignOut"
               class="mobile-nav__menu-item"
@@ -211,7 +215,6 @@ import { useCollectionsStore } from '../stores/collections';
 import { useLikesStore } from '../stores/likes';
 import { usePlacesStore } from '../stores/places';
 import BrandMark from './BrandMark.vue';
-import AppearanceToggle from './BrowserAppearanceSelect.vue';
 
 const { t } = useI18n();
 const authStore = useAuthStore();
@@ -220,8 +223,9 @@ const likesStore = useLikesStore();
 const placesStore = usePlacesStore();
 const route = useRoute();
 const props = defineProps<{ panelOpen?: boolean; hasActivity?: boolean }>();
-const emit = defineEmits<{ openMore: [] }>();
+const emit = defineEmits<{ openMore: []; openDisplayPreferences: [anchor: HTMLButtonElement] }>();
 const moreMenuOpen = ref(false);
+const moreButton = ref<HTMLButtonElement | null>(null);
 const signOutLabel = computed(() => (authStore.accessMode === 'public' ? t('nav.returnToPublicView') : t('nav.signOut')));
 const showPlacesNav = computed(() => placesStore.items.length > 0 && placesStore.listError === null);
 const isPlacesRoute = computed(() => route.name === 'places' || route.name === 'place');
@@ -238,6 +242,11 @@ const moreButtonClasses = computed(() => ({
 
 function closeMoreMenu() {
   moreMenuOpen.value = false;
+}
+
+function openDisplayPreferences() {
+  closeMoreMenu();
+  if (moreButton.value) emit('openDisplayPreferences', moreButton.value);
 }
 
 function toggleMoreMenu() {

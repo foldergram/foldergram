@@ -134,10 +134,13 @@ Use `pnpm migrate` to apply pending migrations without starting the app.
 
 ## Client behavior worth knowing
 
-- theme selection is stored in `localStorage`
+- More → Display preferences applies browser theme choices immediately for admins and viewers, storing explicit System/Light/Dark overrides in `localStorage`; App default clears the override and follows the instance theme
+- Settings → Appearance saves the instance default theme and accent color to the database; those saves preserve any current browser theme override
 - explicit locale selection is stored in `localStorage`
 - the saved app-language default is stored in the database and applies when no local browser override exists
 - video mute preference is stored in `localStorage`
+- Home's suggested-folders preference is stored in `localStorage` and can be changed immediately from More → Display preferences, including by viewers
+- Home's independent fit-tall-media preference is also stored in `localStorage`, defaults to off, and applies to either desktop layout when enabled; hiding suggested folders only changes the feed width
 - the client disables previously registered service workers in development
 - the client registers `/sw.js` in production when the browser supports service workers
 

@@ -10,14 +10,14 @@
     }"
   >
     <!-- Sidebar: fixed on desktop, hidden on mobile -->
-    <SidebarNav class="hidden md:flex fixed top-0 left-0 h-screen z-30" :panel-open="Boolean(activityAnchor)" @open-more="dismissActivity(false)">
+    <SidebarNav class="hidden md:flex fixed top-0 left-0 h-screen z-30" :panel-open="Boolean(activityAnchor)" @open-more="dismissActivity(false)" @open-display-preferences="openDisplayPreferences">
       <template #activity>
         <ScanActivityTrigger v-if="showActivity" v-bind="activityTrigger" @activate="toggleActivity" />
       </template>
     </SidebarNav>
     <!-- Content: margin-left matches sidebar width on desktop -->
     <div class="app-shell__content flex flex-1 min-h-screen min-w-0 flex-col md:ml-[4.85rem]">
-      <TopNav :has-activity="showActivity" :panel-open="Boolean(activityAnchor)" @open-more="dismissActivity(false)">
+      <TopNav :has-activity="showActivity" :panel-open="Boolean(activityAnchor)" @open-more="dismissActivity(false)" @open-display-preferences="openDisplayPreferences">
         <template #activity>
           <ScanActivityTrigger v-if="showActivity" v-bind="activityTrigger" mobile @activate="toggleActivity" />
         </template>
@@ -35,6 +35,7 @@
     </div>
 
     <Teleport to="body">
+      <DisplayPreferencesDialog v-if="displayPreferencesAnchor" @close="closeDisplayPreferences()" />
       <ScanActivityPanel
         v-if="activityAnchor"
         :mobile="mobile"
@@ -71,6 +72,7 @@ import { useRoute } from 'vue-router';
 
 import SidebarNav from './SidebarNav.vue';
 import TopNav from './TopNav.vue';
+import DisplayPreferencesDialog from './DisplayPreferencesDialog.vue';
 
 import ScanActivityContent from './ScanActivityContent.vue';
 import ScanActivityPanel from './ScanActivityPanel.vue';
@@ -96,6 +98,7 @@ const remoteSync = computed(() => sourcesStore.items.some(source => source.kind 
 const issue = computed(() => authStore.canAccessSettings && Boolean(appStore.unacknowledgedScanResult));
 const awayCompletion = computed(() => authStore.canAccessSettings && appStore.scanCompletion?.surface === null);
 const activityAnchor = shallowRef<HTMLElement | null>(null);
+const displayPreferencesAnchor = shallowRef<HTMLButtonElement | null>(null);
 const heldResult = shallowRef<ScanRunSummary | null>(null);
 const media = window.matchMedia('(max-width: 767.98px)');
 const mobile = ref(media.matches);
@@ -120,6 +123,22 @@ const activityTrigger = computed(() => {
     attention: issue.value || appStore.scanStatusUnavailable
   };
 });
+
+function openDisplayPreferences(anchor: HTMLButtonElement) {
+  dismissActivity(false);
+  displayPreferencesAnchor.value = anchor;
+}
+
+async function closeDisplayPreferences(restoreFocus = true) {
+  const anchor = displayPreferencesAnchor.value;
+  displayPreferencesAnchor.value = null;
+  if (!restoreFocus || !anchor) return;
+  await nextTick();
+  const target = anchor.getClientRects().length ? anchor : document.querySelector<HTMLButtonElement>(
+    mobile.value ? '.mobile-nav__more-button' : '.sidebar__more'
+  );
+  target?.focus();
+}
 
 function dismissActivity(restoreFocus = true) {
   const anchor = activityAnchor.value;
@@ -153,6 +172,7 @@ watch(() => scan.value?.lastCompletedScan, (result, previous) => {
   if (activityAnchor.value && result && result.id !== previous?.id) heldResult.value = result;
 });
 watch(() => route.fullPath, (_path, previous) => {
+  void closeDisplayPreferences(false);
   dismissActivity(false);
   appStore.leaveScanSurface(previous);
 });

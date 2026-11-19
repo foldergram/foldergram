@@ -1,7 +1,8 @@
-import { ref } from 'vue';
+import { readonly, ref } from 'vue';
 
 const STORAGE_KEY = 'foldergram-show-suggested-folders-on-desktop';
 const enabled = ref(readPreference());
+const saveFailed = ref(false);
 
 function readPreference(): boolean {
   if (typeof window === 'undefined') return true;
@@ -14,14 +15,17 @@ function readPreference(): boolean {
 }
 
 export function useSuggestedFoldersPreference() {
-  function setEnabled(value: boolean) {
+  function setEnabled(value: boolean): boolean {
     enabled.value = value;
     try {
       window.localStorage.setItem(STORAGE_KEY, String(value));
+      saveFailed.value = false;
+      return true;
     } catch {
-      // Keep the setting usable for this session when storage is unavailable.
+      saveFailed.value = true;
+      return false;
     }
   }
 
-  return { enabled, setEnabled };
+  return { enabled: readonly(enabled), saveFailed: readonly(saveFailed), setEnabled };
 }

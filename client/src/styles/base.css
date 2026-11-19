@@ -1190,6 +1190,11 @@ img[data-loaded="true"] {
   object-fit: cover;
 }
 
+.feed-card__video-shell--fit .feed-card__player video,
+.feed-card__video-shell--fit .feed-card__player img {
+  object-fit: contain;
+}
+
 .feed-card__player[data-fullscreen] {
   background: #000;
 }

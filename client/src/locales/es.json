@@ -1,4 +1,24 @@
 {
+  "displayPreferences": {
+    "appearance": {
+      "label": "Apariencia",
+      "description": "Elige un tema para este navegador. La opción predeterminada de la app sigue el tema establecido en Ajustes.",
+      "appDefault": "Predeterminado de la app"
+    },
+    "done": "Listo",
+    "title": "Preferencias de visualización",
+    "description": "Los cambios se aplican de inmediato y se guardan en este navegador.",
+    "suggestedFolders": {
+      "label": "Mostrar carpetas sugeridas en escritorio",
+      "description": "Muestra carpetas sugeridas junto a Inicio en pantallas anchas. Desactivar esta opción da más espacio al feed."
+    },
+    "fitTallMedia": {
+      "label": "Ajustar contenido vertical a la pantalla",
+      "description": "Reduce solo el contenido que supera la altura de la ventana de escritorio. Funciona con o sin carpetas sugeridas."
+    },
+    "saved": "Guardado en este navegador.",
+    "sessionOnly": "No se pudieron guardar algunas preferencias en este navegador. Los cambios sin guardar solo se aplican durante esta sesión."
+  },
   "appearance": {
   "title": "Apariencia",
     "description": "Configura el tema predeterminado y el color de acento de esta instancia.",
@@ -18,7 +38,7 @@
   "saving": "Guardando…",
   "saved": "Apariencia guardada.",
   "saveError": "No se pudo guardar la apariencia. Inténtalo de nuevo.",
-  "demoReadOnly": "Los ajustes de apariencia son de solo lectura en la demo pública. Usa Más → Cambiar apariencia para cambiar el tema de tu navegador."
+  "demoReadOnly": "Los ajustes de apariencia son de solo lectura en la demo pública. Usa Más → Preferencias de visualización para cambiar el tema de tu navegador."
 },
   "sources": {
     "title": "Fuentes",
@@ -141,9 +161,6 @@
     "trash": "Papelera",
     "settings": "Ajustes",
     "unlockAdmin": "Desbloquear admin",
-    "switchAppearance": "Cambiar apariencia",
-    "switchToDarkMode": "Cambiar al modo oscuro",
-    "switchToLightMode": "Cambiar al modo claro",
     "signOut": "Cerrar sesión",
     "returnToPublicView": "Volver a la vista pública",
     "foldersSpotlight": "Carpetas destacadas",
@@ -285,10 +302,6 @@
             "description": "Recupera selecciones más antiguas."
           }
         }
-      },
-      "suggestedFolders": {
-        "label": "Mostrar carpetas sugeridas en escritorio",
-        "description": "Muestra el panel de carpetas sugeridas junto al feed de Inicio en pantallas anchas. Esta opción se guarda en este navegador."
       },
       "reelsFeed": {
         "label": "Orden del feed de Reels",
