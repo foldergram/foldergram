@@ -1,5 +1,5 @@
 <template>
-  <article class="bg-transparent">
+  <article ref="feedCardElement" class="bg-transparent">
     <div class="feed-card__header flex items-center justify-between gap-4 px-4 py-[0.8rem]">
       <div class="feed-card__folder flex items-center gap-[0.72rem] min-w-0">
         <button
@@ -59,6 +59,7 @@
       v-if="isCarousel"
       v-model="carouselIndex"
       class="rounded-[0.5rem] border border-border"
+      :style="mediaFrameStyle(mediaAspectRatio, true)"
       :items="item.mediaItems!"
       :prefer-preview="isHomeContext"
       :retry-while="appStore.isScanning"
@@ -95,7 +96,7 @@
     <div
       v-else-if="item.mediaType === 'image'"
       class="relative block overflow-hidden rounded-[0.5rem] border border-border bg-surface-alt select-none"
-      :style="{ aspectRatio: mediaAspectRatio, touchAction: 'manipulation' }"
+      :style="{ ...mediaFrameStyle(mediaAspectRatio), touchAction: 'manipulation' }"
       @click="handleHomeImageClick"
     >
       <ResilientImage
@@ -115,8 +116,8 @@
       v-else
       ref="homeVideoTarget"
       class="feed-card__video-shell relative block overflow-hidden rounded-[0.5rem] border border-border bg-surface-alt"
-      :class="{ 'feed-card__video-shell--interactive': showHomeVideoSurfaceControls }"
-      :style="{ aspectRatio: homeVideoAspectRatio }"
+      :class="{ 'feed-card__video-shell--interactive': showHomeVideoSurfaceControls, 'feed-card__video-shell--fit': fitTallMedia }"
+      :style="mediaFrameStyle(homeVideoAspectRatio, true)"
       :aria-label="showHomeVideoSurfaceControls ? t('post.viewer.togglePlayback') : undefined"
       :role="showHomeVideoSurfaceControls ? 'button' : undefined"
       :tabindex="showHomeVideoSurfaceControls ? 0 : -1"
@@ -481,11 +482,13 @@ const props = withDefaults(
     hasAvatarStory?: boolean;
     context?: 'default' | 'home';
     isActiveVideo?: boolean;
+    fitTallMedia?: boolean;
   }>(),
   {
     hasAvatarStory: false,
     context: 'default',
-    isActiveVideo: false
+    isActiveVideo: false,
+    fitTallMedia: false
   }
 );
 
@@ -509,6 +512,8 @@ const confirmDeleteOpen = ref(false);
 const deleteOriginalFromDisk = ref(false);
 const deleteError = ref<string | null>(null);
 const isEditingCaption = ref(false);
+const feedCardElement = ref<HTMLElement | null>(null);
+const availableMediaWidth = ref(0);
 const homeVideoTarget = ref<HTMLElement | null>(null);
 const homePlayerElement = ref<MediaPlayerElement | null>(null);
 useNativeVideoMuteSync(homePlayerElement, () => appStore.videoMuted, (muted) => appStore.setVideoMuted(muted));
@@ -522,6 +527,7 @@ const heartBurstEl = ref<HTMLElement | null>(null);
 const carouselIndex = ref(0);
 
 let homeImageTapResetTimer: ReturnType<typeof setTimeout> | null = null;
+let mediaFrameResizeObserver: ResizeObserver | null = null;
 let homeVideoObserver: IntersectionObserver | null = null;
 let homeVideoResizeObserver: ResizeObserver | null = null;
 let homeVideoMaximumRatio = 1;
@@ -560,6 +566,58 @@ const formattedDate = computed(() =>
 const formattedDuration = computed(() => formatMediaDuration(props.item.durationMs));
 const mediaAspectRatio = computed(() => resolveFeedAspectRatio(props.item.width, props.item.height));
 const homeVideoAspectRatio = computed(() => loadedHomeVideoAspectRatio.value ?? mediaAspectRatio.value);
+const viewportHeight = ref(typeof window === 'undefined' ? 800 : window.innerHeight);
+
+function mediaFrameStyle(aspectRatio: string, keepControlsWidth = false) {
+  if (!props.fitTallMedia || !isHomeContext.value || availableMediaWidth.value <= 0) {
+    return { aspectRatio };
+  }
+
+  const [widthRatio, heightRatio] = aspectRatio.split('/').map(value => Number(value.trim()));
+  const ratio = widthRatio > 0 && heightRatio > 0 ? widthRatio / heightRatio : 1;
+  const naturalHeight = availableMediaWidth.value / ratio;
+  const fitsViewport = naturalHeight <= viewportHeight.value;
+  // Fit the media itself. Leave images that already fit alone, regardless of caption height.
+  const mediaHeight = fitsViewport ? naturalHeight : Math.max(96, viewportHeight.value - 32);
+  if (keepControlsWidth) {
+    // Keep the controls full-width and give percentage-height media a definite frame.
+    return { aspectRatio, width: '100%', height: `${mediaHeight}px` };
+  }
+  if (fitsViewport) return { aspectRatio };
+  const width = Math.min(availableMediaWidth.value, mediaHeight * ratio);
+  return {
+    aspectRatio,
+    width: `${width}px`,
+    maxWidth: '100%',
+    marginInline: 'auto'
+  };
+}
+
+function updateViewportHeight() {
+  viewportHeight.value = window.innerHeight;
+  if (props.fitTallMedia && isHomeContext.value) {
+    availableMediaWidth.value = feedCardElement.value?.getBoundingClientRect().width ?? 0;
+  }
+}
+
+function observeMediaFrameWidth() {
+  mediaFrameResizeObserver?.disconnect();
+  mediaFrameResizeObserver = null;
+  const card = feedCardElement.value;
+  if (!card || !props.fitTallMedia || !isHomeContext.value) return;
+
+  // Measure the full card, so shrinking a photo never changes the available width.
+  availableMediaWidth.value = card.getBoundingClientRect().width;
+  if (typeof ResizeObserver !== 'undefined') {
+    mediaFrameResizeObserver = new ResizeObserver(([entry]) => {
+      if (entry) availableMediaWidth.value = entry.contentRect.width;
+    });
+    mediaFrameResizeObserver.observe(card);
+  }
+}
+
+watch([feedCardElement, isHomeContext, () => props.fitTallMedia], observeMediaFrameWidth, { flush: 'post' });
+
 const homeImageSrc = computed(() => (props.item.isAnimated ? props.item.previewUrl : props.item.thumbnailUrl));
 const activeMediaImageId = computed(() =>
   isCarousel.value
@@ -1104,6 +1162,7 @@ watch(
 );
 
 onMounted(() => {
+  window.addEventListener('resize', updateViewportHeight);
   if (!isHomeVideoFullscreen.value) {
     startHomeVideoObserver();
   }
@@ -1111,6 +1170,9 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  window.removeEventListener('resize', updateViewportHeight);
+  mediaFrameResizeObserver?.disconnect();
+  mediaFrameResizeObserver = null;
   clearHomeImageTapResetTimer();
   stopHomeVideoObserver();
   isHomeVideoPaused.value = false;

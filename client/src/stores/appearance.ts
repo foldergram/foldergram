@@ -21,6 +21,7 @@ export const useAppearanceStore = defineStore('appearance', {
   state: () => ({
     theme: 'system' as InstanceTheme, accent: 'blue' as Accent,
     browserTheme: 'instance' as BrowserTheme,
+    browserSaveFailed: false,
     ready: false, loading: false, saving: false, error: '', revision: 0
   }),
   actions: {
@@ -39,8 +40,12 @@ export const useAppearanceStore = defineStore('appearance', {
         } else {
           window.localStorage.setItem(THEME_STORAGE_KEY, theme);
         }
-      } catch { /* Keep the selection for this page when storage is unavailable. */ }
+        this.browserSaveFailed = false;
+      } catch {
+        this.browserSaveFailed = true;
+      }
       this.render();
+      return !this.browserSaveFailed;
     },
     apply(value: Appearance) {
       this.revision += 1;
@@ -50,7 +55,7 @@ export const useAppearanceStore = defineStore('appearance', {
       this.render();
     },
     render() {
-      const theme = useAuthStore().canWriteAppearance || this.browserTheme === 'instance' ? this.theme : this.browserTheme;
+      const theme = this.browserTheme === 'instance' ? this.theme : this.browserTheme;
       const dark = theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
       useAppStore().setTheme(dark ? 'dark' : 'light');
       const root = document.documentElement;
@@ -76,15 +81,6 @@ export const useAppearanceStore = defineStore('appearance', {
         window.clearTimeout(timeout);
         this.loading = false;
       }
-    },
-    async toggleTheme() {
-      const theme = useAppStore().theme === 'dark' ? 'light' : 'dark';
-      if (!useAuthStore().canWriteAppearance) {
-        this.setBrowserTheme(theme);
-        return true;
-      }
-
-      return this.save({ theme });
     },
     async save(value: Appearance | { theme: 'light' | 'dark' }) {
       const replacesAppearance = 'accent' in value;

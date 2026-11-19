@@ -1,4 +1,24 @@
 {
+  "displayPreferences": {
+    "appearance": {
+      "label": "Darstellung",
+      "description": "Wähle ein Design für diesen Browser. Der App-Standard folgt dem in den Einstellungen festgelegten Design.",
+      "appDefault": "App-Standard"
+    },
+    "done": "Fertig",
+    "title": "Anzeigeeinstellungen",
+    "description": "Änderungen werden sofort angewendet und in diesem Browser gespeichert.",
+    "suggestedFolders": {
+      "label": "Vorgeschlagene Ordner auf dem Desktop anzeigen",
+      "description": "Zeigt vorgeschlagene Ordner neben dem Start-Feed auf breiten Bildschirmen. Wenn du dies ausschaltest, erhält der Feed mehr Platz."
+    },
+    "fitTallMedia": {
+      "label": "Hohe Medien an den Bildschirm anpassen",
+      "description": "Verkleinert nur Medien, die höher als das Desktop-Fenster sind. Funktioniert mit und ohne vorgeschlagene Ordner."
+    },
+    "saved": "In diesem Browser gespeichert.",
+    "sessionOnly": "Einige Einstellungen konnten nicht in diesem Browser gespeichert werden. Ungespeicherte Änderungen gelten nur für diese Sitzung."
+  },
   "appearance": {
   "title": "Darstellung",
     "description": "Lege die Standarddarstellung und Akzentfarbe für diese Instanz fest.",
@@ -18,7 +38,7 @@
   "saving": "Wird gespeichert…",
   "saved": "Darstellung gespeichert.",
   "saveError": "Speichern fehlgeschlagen. Bitte erneut versuchen.",
-  "demoReadOnly": "Die Darstellungseinstellungen sind in der öffentlichen Demo schreibgeschützt. Unter „Mehr → Darstellung wechseln“ kannst du das Design für deinen Browser ändern."
+  "demoReadOnly": "Die Darstellungseinstellungen sind in der öffentlichen Demo schreibgeschützt. Unter Mehr → Anzeigeeinstellungen kannst du das Design deines Browsers ändern."
 },
   "sources": {
     "title": "Quellen",
@@ -141,9 +161,6 @@
     "trash": "Papierkorb",
     "settings": "Einstellungen",
     "unlockAdmin": "Admin entsperren",
-    "switchAppearance": "Darstellung wechseln",
-    "switchToDarkMode": "Zum dunklen Modus wechseln",
-    "switchToLightMode": "Zum hellen Modus wechseln",
     "signOut": "Abmelden",
     "returnToPublicView": "Zur öffentlichen Ansicht zurückkehren",
     "foldersSpotlight": "Ordner im Fokus",

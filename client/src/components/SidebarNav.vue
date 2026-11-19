@@ -280,7 +280,15 @@
             <span>{{ t('nav.unlockAdmin') }}</span>
           </button>
 
-          <AppearanceToggle @switched="closeMoreMenu" />
+          <button
+            class="flex items-center gap-[0.95rem] w-full px-[1.2rem] py-[1rem] border-0 bg-transparent text-[0.98rem] text-text cursor-pointer text-left transition-colors duration-150 hover:bg-surface-hover"
+            type="button"
+            aria-haspopup="dialog"
+            @click="openDisplayPreferences"
+          >
+            <span class="i-fluent-desktop-20-regular w-[1.18rem] h-[1.18rem] shrink-0" aria-hidden="true" />
+            <span>{{ t('displayPreferences.title') }}</span>
+          </button>
           <button
             v-if="authStore.canSignOut"
             class="flex items-center gap-[0.95rem] w-full px-[1.2rem] py-[1rem] border-0 bg-transparent text-[0.98rem] text-text cursor-pointer text-left transition-colors duration-150 hover:bg-surface-hover disabled:opacity-60 disabled:cursor-wait"
@@ -297,6 +305,7 @@
         </div>
 
         <button
+          ref="moreButton"
           class="sidebar__row sidebar__more sidebar-item w-full"
           :class="{ 'font-semibold': moreMenuOpen }"
           type="button"
@@ -327,10 +336,9 @@
   import { useLikesStore } from "../stores/likes"
   import { usePlacesStore } from "../stores/places"
   import BrandMark from "./BrandMark.vue"
-  import AppearanceToggle from "./BrowserAppearanceSelect.vue"
 
   const props = defineProps<{ panelOpen?: boolean }>()
-  const emit = defineEmits<{ openMore: [] }>()
+  const emit = defineEmits<{ openMore: []; openDisplayPreferences: [anchor: HTMLButtonElement] }>()
   const { t } = useI18n()
   const appVersion = __APP_VERSION__
   const authStore = useAuthStore()
@@ -338,6 +346,7 @@
   const placesStore = usePlacesStore()
   const route = useRoute()
   const moreMenuOpen = ref(false)
+  const moreButton = ref<HTMLButtonElement | null>(null)
 
   const showPlacesNav = computed(() =>
     placesStore.items.length > 0 && placesStore.listError === null,
@@ -355,6 +364,11 @@
 
   function closeMoreMenu() {
     moreMenuOpen.value = false
+  }
+
+  function openDisplayPreferences() {
+    closeMoreMenu()
+    if (moreButton.value) emit('openDisplayPreferences', moreButton.value)
   }
 
   function toggleMoreMenu() {

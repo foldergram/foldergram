@@ -136,34 +136,383 @@ const adminAuthStatus = {
   }
 };
 
-async function expectAppearanceRow(toggle: Locator, mobile: boolean) {
-  await expect(toggle).toHaveCSS('display', 'flex');
-  const dimensions = await toggle.evaluate(button => {
-    const icon = button.querySelector('span[aria-hidden="true"]')!;
-    const row = button.getBoundingClientRect();
-    const iconBox = icon.getBoundingClientRect();
-    const style = getComputedStyle(button);
-    return {
-      width: row.width, available: button.parentElement!.clientWidth, height: row.height,
-      gap: parseFloat(style.columnGap), padding: parseFloat(style.paddingLeft),
-      iconWidth: iconBox.width, iconHeight: iconBox.height, mask: getComputedStyle(icon).maskImage,
-      background: style.backgroundColor
-    };
-  });
-  expect(dimensions.width).toBeCloseTo(dimensions.available, 0);
-  expect(dimensions.height).toBeGreaterThanOrEqual(mobile ? 53 : 48);
-  expect(dimensions.gap).toBeCloseTo(15.2);
-  expect(dimensions.padding).toBeCloseTo(mobile ? 16.8 : 19.2);
-  expect(dimensions.iconWidth).toBeCloseTo(18.875);
-  expect(dimensions.iconHeight).toBeCloseTo(18.875);
-  expect(dimensions.mask).not.toBe('none');
-  await toggle.hover();
-  await expect.poll(() => toggle.evaluate(button => getComputedStyle(button).backgroundColor))
-    .not.toBe(dimensions.background);
+async function openDisplayPreferences(page: Page) {
+  await page.getByRole('button', { name: 'More', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Switch appearance', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Display preferences', exact: true }).click();
+  return page.getByRole('dialog', { name: 'Display preferences', exact: true });
 }
 
+for (const theme of ['light', 'dark'] as const) {
+  for (const width of [1280, 390]) {
+    test(`display preferences apply immediately for visitors at ${width}px in ${theme} mode`, async ({ page }) => {
+      await mockGallery(page, theme);
+      await page.setViewportSize({ width, height: 720 });
+      await page.route('**/api/appearance', route => route.fulfill({ json: { theme, accent: 'blue' } }));
+      const writes: string[] = [];
+      page.on('request', request => {
+        if (request.url().includes('/api/') && request.method() !== 'GET') writes.push(request.url());
+      });
+      await page.goto('/');
+      if (width === 1280) {
+        await expect(page.locator('.home-layout > aside')).toBeVisible();
+        expect((await page.locator('main article').first().boundingBox())!.width).toBeCloseTo(470);
+      }
+      let dialog = await openDisplayPreferences(page);
+      const dialogBox = (await dialog.boundingBox())!;
+      expect(dialogBox.x + dialogBox.width / 2).toBeCloseTo(width / 2, 0);
+      expect(dialogBox.y + dialogBox.height / 2).toBeCloseTo(360, 0);
+      const toggle = dialog.getByRole('switch', { name: 'Show suggested folders on desktop' });
+      await expect(toggle).toHaveAttribute('aria-checked', 'true');
+      await expect(dialog.getByRole('switch', { name: 'Fit tall media to screen', exact: true })).toHaveAttribute('aria-checked', 'false');
+      await expect(dialog.getByRole('combobox', { name: 'Appearance', exact: true })).toBeFocused();
+      await toggle.press('Space');
+      await expect(toggle).toHaveAttribute('aria-checked', 'false');
+      await expect(dialog.getByRole('status')).toHaveText('Saved in this browser.');
+      expect(await page.evaluate(() => localStorage.getItem('foldergram-show-suggested-folders-on-desktop'))).toBe('false');
+      await expect(page).toHaveURL('/');
+      await page.keyboard.press('Escape');
+      await expect(dialog).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'More', exact: true })).toBeFocused();
+      await expect(page.locator('.home-layout > aside')).toHaveCount(0);
+
+      await page.reload();
+      await page.setViewportSize({ width: 1280, height: 720 });
+      await expect(page.locator('.home-layout')).toHaveClass(/home-layout--wide-feed/);
+      expect((await page.locator('main article').first().boundingBox())!.width).toBeCloseTo(600);
+      dialog = await openDisplayPreferences(page);
+      await expect(dialog.getByRole('switch', { name: 'Show suggested folders on desktop', exact: true })).toHaveAttribute('aria-checked', 'false');
+      await dialog.getByRole('switch', { name: 'Show suggested folders on desktop', exact: true }).click();
+      await dialog.getByRole('button', { name: 'Done', exact: true }).click();
+      await expect(page.locator('.home-layout > aside')).toBeVisible();
+      expect((await page.locator('main article').first().boundingBox())!.width).toBeCloseTo(470);
+      expect(writes).toEqual([]);
+    });
+  }
+}
+
+for (const preference of [
+  { key: 'foldergram-show-suggested-folders-on-desktop', label: 'Show suggested folders on desktop', initial: true },
+  { key: 'foldergram-fit-tall-media-to-screen', label: 'Fit tall media to screen', initial: false }
+]) {
+  test(`display preferences explain blocked storage and recover for ${preference.label}`, async ({ page }) => {
+    await mockGallery(page);
+    await page.addInitScript(keyToBlock => {
+      const original = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (key, value) {
+        if (key === keyToBlock && document.documentElement.dataset.allowDisplaySave !== 'true') {
+          throw new DOMException('Storage blocked', 'SecurityError');
+        }
+        original.call(this, key, value);
+      };
+    }, preference.key);
+    await page.goto('/');
+    let dialog = await openDisplayPreferences(page);
+    await dialog.getByRole('switch', { name: preference.label, exact: true }).click();
+    await expect(dialog.getByRole('alert')).toHaveText('Some preferences could not be saved in this browser. Unsaved changes apply only for this session.');
+    await expect(dialog.getByRole('switch', { name: preference.label, exact: true })).toHaveAttribute('aria-checked', String(!preference.initial));
+    expect(await page.evaluate(key => localStorage.getItem(key), preference.key)).toBeNull();
+    await dialog.getByRole('button', { name: 'Done', exact: true }).click();
+    dialog = await openDisplayPreferences(page);
+    await expect(dialog.getByRole('alert')).toBeVisible();
+    await page.evaluate(() => { document.documentElement.dataset.allowDisplaySave = 'true'; });
+    await dialog.getByRole('switch', { name: preference.label, exact: true }).click();
+    await expect(dialog.getByRole('alert')).toHaveCount(0);
+    await expect(dialog.getByRole('status')).toHaveText('Saved in this browser.');
+  });
+}
+
+test('browser themes explain failed writes and failed resets without changing instance settings', async ({ page }) => {
+  await mockGallery(page);
+  await page.route('**/api/appearance', route => route.fulfill({ json: { theme: 'dark', accent: 'blue' } }));
+  await page.addInitScript(() => {
+    const setItem = Storage.prototype.setItem;
+    const removeItem = Storage.prototype.removeItem;
+    const check = (key: string) => {
+      if (key === 'foldergram-theme' && document.documentElement.dataset.allowThemeSave !== 'true') {
+        throw new DOMException('Storage blocked', 'SecurityError');
+      }
+    };
+    Storage.prototype.setItem = function (key, value) { check(key); setItem.call(this, key, value); };
+    Storage.prototype.removeItem = function (key) { check(key); removeItem.call(this, key); };
+  });
+  const writes: string[] = [];
+  page.on('request', request => {
+    if (request.url().includes('/api/') && request.method() !== 'GET') writes.push(request.url());
+  });
+  await page.goto('/');
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  let dialog = await openDisplayPreferences(page);
+  await dialog.getByRole('combobox', { name: 'Appearance', exact: true }).selectOption('light');
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+  await expect(dialog.getByRole('alert')).toContainText('Unsaved changes apply only for this session.');
+  expect(await page.evaluate(() => localStorage.getItem('foldergram-theme'))).toBeNull();
+  await dialog.getByRole('button', { name: 'Done', exact: true }).click();
+  dialog = await openDisplayPreferences(page);
+  await expect(dialog.getByRole('combobox', { name: 'Appearance', exact: true })).toHaveValue('light');
+  await expect(dialog.getByRole('alert')).toBeVisible();
+  await dialog.getByRole('combobox', { name: 'Appearance', exact: true }).selectOption('instance');
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await expect(dialog.getByRole('alert')).toBeVisible();
+  await page.evaluate(() => { document.documentElement.dataset.allowThemeSave = 'true'; });
+  await dialog.getByRole('combobox', { name: 'Appearance', exact: true }).selectOption('dark');
+  await expect(dialog.getByRole('alert')).toHaveCount(0);
+  await expect(dialog.getByRole('status')).toHaveText('Saved in this browser.');
+  expect(await page.evaluate(() => localStorage.getItem('foldergram-theme'))).toBe('dark');
+  await dialog.getByRole('combobox', { name: 'Appearance', exact: true }).selectOption('instance');
+  expect(await page.evaluate(() => localStorage.getItem('foldergram-theme'))).toBeNull();
+  expect(writes).toEqual([]);
+});
+
+test('suggested folders is absent from General Settings and available in More for admins', async ({ page }) => {
+  await mockGallery(page);
+  await page.route('**/api/auth/status', route => route.fulfill({ json: adminAuthStatus }));
+  await page.goto('/settings#general');
+  await expect(page.getByRole('heading', { name: 'General Settings', exact: true })).toBeVisible();
+  await expect(page.getByText('Show suggested folders on desktop', { exact: true })).toHaveCount(0);
+  const dialog = await openDisplayPreferences(page);
+  await expect(dialog.getByRole('switch', { name: 'Show suggested folders on desktop', exact: true })).toBeVisible();
+  await dialog.getByRole('button', { name: 'Done', exact: true }).click();
+  await expect(page).toHaveURL('/settings#general');
+});
+
+async function mockPortraitFeed(page: Page, width = 600, height = 3000) {
+  const clip = Buffer.from(await readFile(new URL('./fixtures/tall-feed-video.mp4.base64', import.meta.url), 'utf8'), 'base64');
+  await page.route('**/previews/tall-feed-video.mp4', route => {
+    const range = /^bytes=(\d+)-(\d*)$/.exec(route.request().headers().range ?? '');
+    const start = Number(range?.[1] ?? 0);
+    const end = Math.min(Number(range?.[2] || clip.length - 1), clip.length - 1);
+    // The fragmented MP4 needs a seekable response for actual playback, beyond metadata loading.
+    return route.fulfill({
+      status: range ? 206 : 200,
+      contentType: 'video/mp4',
+      headers: {
+        'Accept-Ranges': 'bytes',
+        'Content-Length': String(end - start + 1),
+        ...(range ? { 'Content-Range': `bytes ${start}-${end}/${clip.length}` } : {})
+      },
+      body: clip.subarray(start, end + 1)
+    });
+  });
+  await page.route('**/thumbnails/portrait.svg', route => route.fulfill({
+    contentType: 'image/svg+xml',
+    body: `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><rect width="${width}" height="${height}" fill="#527d93"/></svg>`
+  }));
+  const photo = { ...panorama, id: 1, width, height, thumbnailUrl: '/thumbnails/portrait.svg', previewUrl: '/thumbnails/portrait.svg' };
+  const video = { ...photo, id: 2, filename: 'tall.mp4', mediaType: 'video', width: 32, height: 160, durationMs: 3000, previewUrl: '/previews/tall-feed-video.mp4' };
+  const carousel = { ...photo, id: 3, postType: 'carousel', itemCount: 3, mediaItems: [1, 2, 3].map(imageId => ({ ...photo, imageId, position: imageId - 1 })) };
+  await page.route('**/api/feed?*', route => route.fulfill({ json: { items: [photo, video, carousel], page: 1, limit: 24, total: 3, hasMore: false } }));
+}
+
+for (const showSuggestedFolders of [true, false]) {
+  for (const viewport of [{ width: 1280, height: 720 }, { width: 1024, height: 600 }, { width: 900, height: 1200 }]) {
+    test(`Home fits portrait media at ${viewport.width}×${viewport.height} with suggested folders ${showSuggestedFolders ? 'on' : 'off'}`, async ({ page }) => {
+      await mockGallery(page);
+      await page.addInitScript(showFolders => {
+        localStorage.setItem('foldergram-show-suggested-folders-on-desktop', String(showFolders));
+        localStorage.setItem('foldergram-fit-tall-media-to-screen', 'true');
+      }, showSuggestedFolders);
+      await page.setViewportSize(viewport);
+      await mockPortraitFeed(page);
+      await page.goto('/');
+      const expectedWidth = showSuggestedFolders ? 470 : 600;
+      const cards = page.locator('main article');
+      await expect(cards).toHaveCount(3);
+      expect((await cards.first().boundingBox())!.width).toBeCloseTo(expectedWidth);
+      await expect(page.locator('.home-layout > aside')).toHaveCount(showSuggestedFolders && viewport.width === 1280 ? 1 : 0);
+      for (const card of await cards.all()) {
+        const bounds = await card.locator(':scope > :nth-child(2)').boundingBox();
+        expect(bounds!.height).toBeLessThanOrEqual(viewport.height - 32 + 1);
+      }
+      const imageBox = (await cards.first().locator(':scope > :nth-child(2)').boundingBox())!;
+      expect(imageBox.width / imageBox.height).toBeCloseTo(0.2, 2);
+      const shell = page.locator('.feed-card__video-shell');
+      expect((await shell.boundingBox())!.width).toBeCloseTo(expectedWidth);
+      await shell.scrollIntoViewIfNeeded();
+      const media = shell.locator('video');
+      await expect(media).toHaveCSS('object-fit', 'contain');
+      expect((await media.boundingBox())!.height).toBeCloseTo((await shell.boundingBox())!.height - 2, 0);
+      await expect(shell.locator('media-player')).toHaveAttribute('data-playing', '');
+      await expect.poll(() => media.evaluate(video => (video as HTMLVideoElement).currentTime)).toBeGreaterThan(0.25);
+      await shell.locator('media-play-button').click();
+      await expect(media).toHaveJSProperty('paused', true);
+      await shell.locator('media-play-button').click();
+      await expect(media).toHaveJSProperty('paused', false);
+      const stage = cards.nth(2).getByRole('group');
+      expect((await stage.boundingBox())!.width).toBeCloseTo(expectedWidth);
+      expect((await stage.locator('img').boundingBox())!.height).toBeLessThanOrEqual(viewport.height - 32 + 1);
+      await stage.getByRole('button', { name: 'Next carousel item', exact: true }).click();
+      await stage.getByRole('button', { name: 'Previous carousel item', exact: true }).click();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width);
+    });
+  }
+}
+
+test('hiding suggested folders grows portraits and fitting remains an independent opt-in', async ({ page }) => {
+  await mockGallery(page);
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await mockPortraitFeed(page, 640, 800);
+  const writes: string[] = [];
+  page.on('request', request => {
+    if (request.url().includes('/api/') && request.method() !== 'GET') writes.push(request.url());
+  });
+  await page.goto('/');
+  const cards = page.locator('main article');
+  await expect(cards).toHaveCount(3);
+  async function expectFrame(index: number, width: number, height: number) {
+    const bounds = (await cards.nth(index).locator(':scope > :nth-child(2)').boundingBox())!;
+    expect(bounds.width).toBeCloseTo(width, 0);
+    expect(bounds.height).toBeCloseTo(height, 0);
+  }
+  await expectFrame(0, 470, 587.5);
+  await expectFrame(1, 470, 2350);
+  await expectFrame(2, 470, 587.5);
+  let dialog = await openDisplayPreferences(page);
+  await expect(dialog.getByRole('switch', { name: 'Fit tall media to screen', exact: true })).toHaveAttribute('aria-checked', 'false');
+  await dialog.getByRole('switch', { name: 'Show suggested folders on desktop', exact: true }).click();
+  await expect(dialog.getByRole('switch', { name: 'Fit tall media to screen', exact: true })).toHaveAttribute('aria-checked', 'false');
+  await dialog.getByRole('button', { name: 'Done', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await expectFrame(0, 600, 750);
+  await expectFrame(1, 600, 3000);
+  await expectFrame(2, 600, 750);
+  await page.setViewportSize({ width: 1280, height: 600 });
+  await expectFrame(0, 600, 750);
+  await page.setViewportSize({ width: 1280, height: 720 });
+
+  dialog = await openDisplayPreferences(page);
+  await dialog.getByRole('switch', { name: 'Fit tall media to screen', exact: true }).click();
+  await expect(dialog.getByRole('switch', { name: 'Show suggested folders on desktop', exact: true })).toHaveAttribute('aria-checked', 'false');
+  await dialog.getByRole('button', { name: 'Done', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await expectFrame(0, 550.4, 688);
+  await expectFrame(1, 600, 688);
+  await expectFrame(2, 600, 688);
+  await page.reload();
+  await expect(cards).toHaveCount(3);
+  await expectFrame(0, 550.4, 688);
+  expect(await page.evaluate(() => localStorage.getItem('foldergram-fit-tall-media-to-screen'))).toBe('true');
+
+  dialog = await openDisplayPreferences(page);
+  await dialog.getByRole('switch', { name: 'Show suggested folders on desktop', exact: true }).click();
+  await expect(dialog.getByRole('switch', { name: 'Fit tall media to screen', exact: true })).toHaveAttribute('aria-checked', 'true');
+  await dialog.getByRole('button', { name: 'Done', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await expectFrame(0, 470, 587.5);
+  await expectFrame(1, 470, 688);
+  await expectFrame(2, 470, 587.5);
+
+  dialog = await openDisplayPreferences(page);
+  await dialog.getByRole('switch', { name: 'Fit tall media to screen', exact: true }).click();
+  await expect(dialog.getByRole('switch', { name: 'Show suggested folders on desktop', exact: true })).toHaveAttribute('aria-checked', 'true');
+  await dialog.getByRole('button', { name: 'Done', exact: true }).click();
+  await page.reload();
+  await expect(cards).toHaveCount(3);
+  await expectFrame(0, 470, 587.5);
+  await expectFrame(1, 470, 2350);
+  await expectFrame(2, 470, 587.5);
+  expect(await page.evaluate(() => localStorage.getItem('foldergram-fit-tall-media-to-screen'))).toBe('false');
+  expect(writes).toEqual([]);
+});
+
+for (const height of [640, 720]) {
+  test(`fitting preserves media already fitting a 720px viewport at ${height}px tall`, async ({ page }) => {
+    await mockGallery(page);
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await mockPortraitFeed(page, 470, height);
+    await page.goto('/');
+    const cards = page.locator('main article');
+    await expect(cards).toHaveCount(3);
+    const before = (await cards.first().locator(':scope > :nth-child(2)').boundingBox())!;
+    expect(before.width).toBeCloseTo(470);
+    expect(before.height).toBeCloseTo(height);
+    const dialog = await openDisplayPreferences(page);
+    await dialog.getByRole('switch', { name: 'Fit tall media to screen', exact: true }).click();
+    await expect(dialog.getByRole('switch', { name: 'Show suggested folders on desktop', exact: true })).toHaveAttribute('aria-checked', 'true');
+    await dialog.getByRole('button', { name: 'Done', exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+    for (const index of [0, 2]) {
+      const frame = (await cards.nth(index).locator(':scope > :nth-child(2)').boundingBox())!;
+      expect(frame.width).toBeCloseTo(before.width);
+      expect(frame.height).toBeCloseTo(before.height);
+    }
+    // The oversized video still shrinks, even though the photo and carousel need no change.
+    expect((await page.locator('.feed-card__video-shell').boundingBox())!.height).toBeCloseTo(688);
+  });
+}
+
+for (const scenario of [
+  { fontSize: 20, showSuggestedFolders: true, width: 470, height: 640 },
+  { fontSize: 14, showSuggestedFolders: false, width: 600, height: 750 }
+]) {
+  test(`media fitting uses the rendered feed width at a ${scenario.fontSize}px root font`, async ({ page }) => {
+    await mockGallery(page);
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await page.addInitScript(showFolders => {
+      localStorage.setItem('foldergram-show-suggested-folders-on-desktop', String(showFolders));
+    }, scenario.showSuggestedFolders);
+    await mockPortraitFeed(page, scenario.width, scenario.height);
+    await page.goto('/');
+    await page.evaluate(fontSize => { document.documentElement.style.fontSize = `${fontSize}px`; }, scenario.fontSize);
+    const cards = page.locator('main article');
+    await expect(cards).toHaveCount(3);
+    const frames = [0, 1, 2].map(index => cards.nth(index).locator(':scope > :nth-child(2)'));
+    const feedWidth = scenario.width * scenario.fontSize / 16;
+    const naturalHeight = feedWidth * scenario.height / scenario.width;
+    await expect.poll(async () => (await frames[0].boundingBox())!.height).toBeCloseTo(naturalHeight);
+    const before = await Promise.all(frames.map(frame => frame.boundingBox()));
+    const dialog = await openDisplayPreferences(page);
+    await dialog.getByRole('switch', { name: 'Fit tall media to screen', exact: true }).click();
+    await dialog.getByRole('button', { name: 'Done', exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+
+    async function expectFittedFrames(fontSize: number) {
+      const width = scenario.width * fontSize / 16;
+      const height = width * scenario.height / scenario.width;
+      const fittedHeight = height <= 720 ? height : 688;
+      await expect.poll(async () => (await frames[0].boundingBox())!.height).toBeCloseTo(fittedHeight, 1);
+      await expect.poll(async () => (await frames[0].boundingBox())!.width).toBeCloseTo(fittedHeight * scenario.width / scenario.height, 1);
+      await expect.poll(async () => (await frames[1].boundingBox())!.height).toBeCloseTo(688);
+      await expect.poll(async () => (await frames[1].boundingBox())!.width).toBeCloseTo(width);
+      await expect.poll(async () => (await frames[2].boundingBox())!.height).toBeCloseTo(fittedHeight);
+      await expect.poll(async () => (await frames[2].boundingBox())!.width).toBeCloseTo(width);
+    }
+
+    await expectFittedFrames(scenario.fontSize);
+    if (naturalHeight <= 720) {
+      for (const index of [0, 2]) {
+        const after = (await frames[index].boundingBox())!;
+        expect(after.width).toBeCloseTo(before[index]!.width);
+        expect(after.height).toBeCloseTo(before[index]!.height);
+      }
+    }
+    // Root font changes resize the feed without emitting a window resize event.
+    const otherFontSize = scenario.fontSize === 20 ? 14 : 20;
+    await page.evaluate(fontSize => { document.documentElement.style.fontSize = `${fontSize}px`; }, otherFontSize);
+    await expectFittedFrames(otherFontSize);
+    await page.evaluate(fontSize => { document.documentElement.style.fontSize = `${fontSize}px`; }, scenario.fontSize);
+    await expectFittedFrames(scenario.fontSize);
+  });
+}
+
+test('desktop media fitting leaves mobile feed sizing unchanged', async ({ page }) => {
+  await mockGallery(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.addInitScript(() => {
+    localStorage.setItem('foldergram-show-suggested-folders-on-desktop', 'false');
+    localStorage.setItem('foldergram-fit-tall-media-to-screen', 'true');
+  });
+  await mockPortraitFeed(page);
+  await page.goto('/');
+  const photo = page.locator('main article').first();
+  await expect(photo).toBeVisible();
+  const frame = (await photo.locator(':scope > :nth-child(2)').boundingBox())!;
+  expect(frame.width).toBeCloseTo(310);
+  expect(frame.height).toBeCloseTo(1550);
+});
+
 for (const width of [1280, 390]) {
-  test(`public appearance works while the instance request is pending at ${width}px`, async ({ page }) => {
+  test(`browser appearance works while the instance request is pending at ${width}px`, async ({ page }) => {
     await mockGallery(page);
     await page.setViewportSize({ width, height: 844 });
     await page.emulateMedia({ colorScheme: 'light' });
@@ -177,50 +526,59 @@ for (const width of [1280, 390]) {
     page.on('request', request => {
       if (request.url().endsWith('/api/admin/settings/appearance')) writes.push(request.method());
     });
-
+    const root = page.locator('html');
     try {
       await page.goto('/explore?q=Panoramas', { waitUntil: 'domcontentloaded' });
       await expect(page.locator('#fg-splash')).toHaveCount(0);
-      const more = page.getByRole('button', { name: 'More', exact: true });
-      const toggle = page.getByRole('button', { name: 'Switch appearance', exact: true });
-      const root = page.locator('html');
-      await more.click();
-      await expect(more).toHaveAttribute('aria-expanded', 'true');
-      await expect(page.getByRole('combobox', { name: /Switch appearance/i })).toHaveCount(0);
-      await toggle.click();
+      let dialog = await openDisplayPreferences(page);
+      let themeSelect = dialog.getByRole('combobox', { name: 'Appearance', exact: true });
+      await expect(themeSelect).toHaveValue('instance');
+      await themeSelect.selectOption('dark');
       await expect(root).toHaveAttribute('data-theme', 'dark');
-      await expect(more).toHaveAttribute('aria-expanded', 'false');
-      await more.click();
-      await toggle.click();
+      await themeSelect.selectOption('light');
       await expect(root).toHaveAttribute('data-theme', 'light');
+      await expect(dialog.getByRole('status')).toHaveText('Saved in this browser.');
+      await dialog.getByRole('button', { name: 'Done', exact: true }).click();
 
       sendAppearance();
       const selectedTab = page.getByRole('tab', { selected: true });
       await expect(selectedTab).toHaveCSS('background-color', 'rgb(180, 83, 9)');
       await expectReadableControl(selectedTab);
-
       await page.reload();
       await expect(root).toHaveAttribute('data-theme', 'light');
-      await more.click();
-      await toggle.click();
+      dialog = await openDisplayPreferences(page);
+      themeSelect = dialog.getByRole('combobox', { name: 'Appearance', exact: true });
+      await expect(themeSelect).toHaveValue('light');
+      await themeSelect.selectOption('dark');
       await expect(root).toHaveAttribute('data-theme', 'dark');
+      await dialog.getByRole('button', { name: 'Done', exact: true }).click();
       await expect(selectedTab).toHaveCSS('background-color', 'rgb(251, 191, 36)');
       await expectReadableControl(selectedTab);
       await page.mouse.move(width - 1, 0);
       await selectedTab.hover({ timeout: 5000 });
       await expectReadableControl(selectedTab);
+
+      dialog = await openDisplayPreferences(page);
+      themeSelect = dialog.getByRole('combobox', { name: 'Appearance', exact: true });
+      await themeSelect.selectOption('system');
+      await expect(root).toHaveAttribute('data-theme', 'light');
+      await page.emulateMedia({ colorScheme: 'dark' });
+      await expect(root).toHaveAttribute('data-theme', 'dark');
+      await themeSelect.selectOption('instance');
+      expect(await page.evaluate(() => localStorage.getItem('foldergram-theme'))).toBeNull();
+      await page.emulateMedia({ colorScheme: 'light' });
+      await expect(root).toHaveAttribute('data-theme', 'dark');
       expect(writes).toEqual([]);
     } finally {
       sendAppearance();
     }
   });
 
-  test(`admin appearance uses the database for More and Settings at ${width}px`, async ({ page }) => {
-    await mockGallery(page, 'light');
+  test(`admin browser appearance stays personal while Settings saves instance defaults at ${width}px`, async ({ page }) => {
+    await mockGallery(page);
     await page.setViewportSize({ width, height: 844 });
     await page.emulateMedia({ colorScheme: 'light' });
     await page.route('**/api/auth/status', route => route.fulfill({ json: adminAuthStatus }));
-
     let theme = 'dark';
     let accent = 'orange';
     let releaseFailedSave!: () => void;
@@ -237,61 +595,59 @@ for (const width of [1280, 390]) {
         return;
       }
       theme = payload.theme;
-      if (method === 'PUT') accent = payload.accent;
+      accent = payload.accent;
       await route.fulfill({ json: { theme, accent } });
     });
-
     const root = page.locator('html');
-    const more = page.getByRole('button', { name: 'More', exact: true });
-    const toggle = page.getByRole('button', { name: 'Switch appearance', exact: true });
-    const themeSelect = page.getByRole('combobox', { name: 'Default appearance' });
-    const save = page.getByRole('button', { name: 'Save appearance', exact: true });
+    const instanceTheme = page.getByRole('combobox', { name: 'Default appearance', exact: true });
+    const save = instanceTheme.locator('xpath=ancestor::form').locator('button[type="submit"]');
     try {
       await page.goto('/settings#general');
-      await expect(themeSelect).toHaveValue('dark');
+      await expect(instanceTheme).toHaveValue('dark');
       await expect(root).toHaveAttribute('data-theme', 'dark');
-      await more.click();
-      await expectAppearanceRow(toggle, width === 390);
-      await expect(toggle.locator('span[aria-hidden="true"]')).toHaveClass(/i-fluent-weather-sunny/);
-      await toggle.click();
-      await expect(toggle).toBeDisabled();
-      await expect(toggle).toHaveCSS('cursor', 'wait');
-      await expect(toggle).toHaveCSS('opacity', '0.6');
-      await expect(root).toHaveAttribute('data-theme', 'dark');
-      releaseFailedSave();
-      const error = toggle.locator('+ [role="alert"]');
-      await expect(error).toBeVisible();
-      await expect(error).toContainText('Could not save appearance');
-      await expect(toggle).toBeEnabled();
-      await expect(root).toHaveAttribute('data-theme', 'dark');
-      await expect(themeSelect).toHaveValue('dark');
-
-      await toggle.click();
-      await expect(more).toHaveAttribute('aria-expanded', 'false');
+      let dialog = await openDisplayPreferences(page);
+      await dialog.getByRole('combobox', { name: 'Appearance', exact: true }).selectOption('light');
       await expect(root).toHaveAttribute('data-theme', 'light');
-      await expect(themeSelect).toHaveValue('light');
-      expect(theme).toBe('light');
-      await expect(page.getByRole('radio', { name: 'Orange' })).toBeChecked();
-      await expect(root).toHaveCSS('--accent', '#b45309');
-      await more.click();
-      await expect(toggle.locator('span[aria-hidden="true"]')).toHaveClass(/i-fluent-weather-moon/);
-      await more.click();
-
-      await expect(themeSelect.locator('option[value="system"]')).toHaveText('System');
-      await themeSelect.selectOption('dark');
-      await save.click();
-      await expect(root).toHaveAttribute('data-theme', 'dark');
-      await expect(root).toHaveCSS('--accent', '#fbbf24');
+      await expect(dialog.getByRole('status')).toHaveText('Saved in this browser.');
+      await dialog.getByRole('button', { name: 'Done', exact: true }).click();
+      await expect(instanceTheme).toHaveValue('dark');
       expect(theme).toBe('dark');
+      expect(writes).toEqual([]);
+
+      await expect(instanceTheme.locator('option[value="system"]')).toHaveText('System');
+      await instanceTheme.selectOption('system');
+      await page.getByRole('radio', { name: 'Green', exact: true }).check();
+      await save.click();
+      await expect(save).toBeDisabled();
+      await expect(save).toHaveText('Saving…');
+      await expect(root).toHaveAttribute('data-theme', 'light');
+      releaseFailedSave();
+      const form = instanceTheme.locator('xpath=ancestor::form');
+      await expect(form.getByRole('alert')).toContainText('Could not save appearance');
+      await expect(save).toBeEnabled();
+      expect(theme).toBe('dark');
+      await save.click();
+      await expect(form.getByRole('status')).toHaveText('Appearance saved.');
+      expect(theme).toBe('system');
+      expect(accent).toBe('green');
+      await expect(root).toHaveAttribute('data-theme', 'light');
+      await expect(root).toHaveCSS('--accent', '#15803d');
       expect(await page.evaluate(() => localStorage.getItem('foldergram-theme'))).toBe('light');
       await page.reload();
-      await expect(themeSelect).toHaveValue('dark');
-      await expect(root).toHaveAttribute('data-theme', 'dark');
+      await expect(instanceTheme).toHaveValue('system');
+      await expect(page.getByRole('radio', { name: 'Green', exact: true })).toBeChecked();
+      await expect(root).toHaveAttribute('data-theme', 'light');
 
+      dialog = await openDisplayPreferences(page);
+      const browserTheme = dialog.getByRole('combobox', { name: 'Appearance', exact: true });
+      await expect(browserTheme).toHaveValue('light');
+      await browserTheme.selectOption('instance');
+      expect(await page.evaluate(() => localStorage.getItem('foldergram-theme'))).toBeNull();
+      await page.emulateMedia({ colorScheme: 'dark' });
+      await expect(root).toHaveAttribute('data-theme', 'dark');
       expect(writes).toEqual([
-        { method: 'PATCH', payload: { theme: 'light' } },
-        { method: 'PATCH', payload: { theme: 'light' } },
-        { method: 'PUT', payload: { theme: 'dark', accent: 'orange' } }
+        { method: 'PUT', payload: { theme: 'system', accent: 'green' } },
+        { method: 'PUT', payload: { theme: 'system', accent: 'green' } }
       ]);
     } finally {
       releaseFailedSave();
@@ -303,9 +659,7 @@ test('public demo appearance is local and the Settings card is read-only', async
   await mockGallery(page);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.emulateMedia({ colorScheme: 'dark' });
-  await page.route('**/api/auth/status', route => route.fulfill({
-    json: { ...adminAuthStatus, enabled: false, publicDemoMode: true }
-  }));
+  await page.route('**/api/auth/status', route => route.fulfill({ json: { ...adminAuthStatus, enabled: false, publicDemoMode: true } }));
   let appearanceAvailable = false;
   await page.route('**/api/appearance', route => appearanceAvailable
     ? route.fulfill({ json: { theme: 'system', accent: 'orange' } })
@@ -315,44 +669,38 @@ test('public demo appearance is local and the Settings card is read-only', async
     if (request.url().includes('/api/admin/') && request.method() !== 'GET') writes.push(request.method());
   });
   const root = page.locator('html');
-  const more = page.getByRole('button', { name: 'More', exact: true });
-  const toggle = page.getByRole('button', { name: 'Switch appearance', exact: true });
-  const themeSelect = page.getByRole('combobox', { name: 'Default appearance' });
-
+  const instanceTheme = page.getByRole('combobox', { name: 'Default appearance', exact: true });
   await page.goto('/settings#general');
   await expect(page.getByText(/Appearance settings are read-only in the public demo/)).toBeVisible();
   await expect(root).toHaveAttribute('data-theme', 'dark');
-  await more.click();
-  await toggle.click();
+  let dialog = await openDisplayPreferences(page);
+  await dialog.getByRole('combobox', { name: 'Appearance', exact: true }).selectOption('light');
   await expect(root).toHaveAttribute('data-theme', 'light');
   expect(await page.evaluate(() => localStorage.getItem('foldergram-theme'))).toBe('light');
+  await dialog.getByRole('button', { name: 'Done', exact: true }).click();
 
   appearanceAvailable = true;
   await page.reload();
   await expect(root).toHaveAttribute('data-theme', 'light');
   await expect(root).toHaveCSS('--accent', '#b45309');
-  await expect(themeSelect).toHaveValue('system');
-  await expect(themeSelect).toBeDisabled();
+  await expect(instanceTheme).toHaveValue('system');
+  await expect(instanceTheme).toBeDisabled();
   await expect(page.getByRole('radio', { name: 'Orange' })).toBeChecked();
   await expect(page.getByRole('radio', { name: 'Orange' })).toBeDisabled();
   await expect(page.getByRole('button', { name: 'Save appearance', exact: true })).toBeDisabled();
-  await themeSelect.locator('xpath=ancestor::form').dispatchEvent('submit');
-  await more.click();
-  await toggle.click();
+  await instanceTheme.locator('xpath=ancestor::form').dispatchEvent('submit');
+  dialog = await openDisplayPreferences(page);
+  await dialog.getByRole('combobox', { name: 'Appearance', exact: true }).selectOption('dark');
   await expect(root).toHaveAttribute('data-theme', 'dark');
   await expect(root).toHaveCSS('--accent', '#fbbf24');
   expect(writes).toEqual([]);
 });
 
-test('viewer appearance survives a reload and resumes when leaving admin mode', async ({ page }) => {
+test('browser appearance survives reloads and entering or leaving admin mode', async ({ page }) => {
   await mockGallery(page);
   await page.setViewportSize({ width: 1280, height: 844 });
   await page.emulateMedia({ colorScheme: 'light' });
-  const viewer = {
-    ...adminAuthStatus,
-    role: 'viewer',
-    capabilities: { ...adminAuthStatus.capabilities, canAccessSettings: false }
-  };
+  const viewer = { ...adminAuthStatus, role: 'viewer', capabilities: { ...adminAuthStatus.capabilities, canAccessSettings: false } };
   await page.route('**/api/auth/status', route => route.fulfill({ json: viewer }));
   await page.route('**/api/appearance', route => route.fulfill({ json: { theme: 'light', accent: 'orange' } }));
   await page.route('**/api/auth/unlock-admin', route => route.fulfill({ json: { ok: true, auth: adminAuthStatus } }));
@@ -361,12 +709,12 @@ test('viewer appearance survives a reload and resumes when leaving admin mode', 
   page.on('request', request => {
     if (request.url().endsWith('/api/admin/settings/appearance')) writes.push(request.method());
   });
-
   const root = page.locator('html');
   const more = page.getByRole('button', { name: 'More', exact: true });
   await page.goto('/');
-  await more.click();
-  await page.getByRole('button', { name: 'Switch appearance', exact: true }).click();
+  const dialog = await openDisplayPreferences(page);
+  await dialog.getByRole('combobox', { name: 'Appearance', exact: true }).selectOption('dark');
+  await dialog.getByRole('button', { name: 'Done', exact: true }).click();
   await expect(root).toHaveAttribute('data-theme', 'dark');
   await page.reload();
   await expect(root).toHaveAttribute('data-theme', 'dark');
@@ -375,7 +723,7 @@ test('viewer appearance survives a reload and resumes when leaving admin mode', 
   await page.getByRole('button', { name: 'Unlock admin', exact: true }).click();
   await page.locator('input[autocomplete="current-password"]').fill('fixture-admin-password');
   await page.locator('form button[type="submit"]').click();
-  await expect(root).toHaveAttribute('data-theme', 'light');
+  await expect(root).toHaveAttribute('data-theme', 'dark');
   expect(await page.evaluate(() => localStorage.getItem('foldergram-theme'))).toBe('dark');
 
   await more.click();
