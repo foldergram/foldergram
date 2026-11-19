@@ -1,7 +1,7 @@
 export type MediaType = 'image' | 'video';
 export type FolderImageOrder = 'newest' | 'oldest';
 export type NestedFolderTitleFormat = 'folder' | 'parent-plus-folder';
-export type TakenAtSource = 'exif' | 'mtime' | 'first_seen' | 'sort_timestamp';
+export type TakenAtSource = 'exif' | 'mtime' | 'first_seen' | 'sort_timestamp' | 'metadata';
 export type PlaybackStrategy = 'preview' | 'original';
 export type FolderAvatarSource = 'auto' | 'manual' | 'cover';
 export type FolderRole = 'normal' | 'story_root' | 'story_capsule' | 'carousel_source';

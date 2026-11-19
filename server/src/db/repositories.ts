@@ -618,6 +618,7 @@ export interface UpsertImageInput {
   mtimeMs: number;
   firstSeenAt: string;
   sortTimestamp: number;
+  caption?: string | null;
   takenAt: number;
   takenAtSource: TakenAtSource;
   exifJson: string | null;
@@ -644,6 +645,8 @@ export interface RefreshIndexedImageInput {
   isAnimated?: boolean | null;
   fingerprint: string;
   mtimeMs: number;
+  sortTimestamp?: number;
+  caption?: string | null;
   takenAt: number;
   takenAtSource: TakenAtSource;
   exifJson: string | null;
@@ -670,6 +673,8 @@ export interface ReconcileImageMoveInput {
   isAnimated?: boolean | null;
   fingerprint: string;
   mtimeMs: number;
+  sortTimestamp?: number;
+  caption?: string | null;
   takenAt: number;
   takenAtSource: TakenAtSource;
   exifJson: string | null;
@@ -1216,7 +1221,7 @@ export const postRepository = {
             place_id = ?,
             source_path = ?,
             post_type = ?,
-            caption = COALESCE(caption, ?),
+            caption = CASE WHEN ? = 1 THEN ? ELSE caption END,
             sort_timestamp = ?,
             taken_at = ?,
             taken_at_source = ?,
@@ -1230,6 +1235,7 @@ export const postRepository = {
         input.placeId ?? null,
         input.sourcePath,
         input.postType,
+        input.caption !== undefined ? 1 : 0,
         input.caption ?? null,
         input.sortTimestamp,
         input.takenAt ?? null,
@@ -1256,7 +1262,7 @@ export const postRepository = {
           folder_id = excluded.folder_id,
           place_id = excluded.place_id,
           post_type = excluded.post_type,
-          caption = COALESCE(posts.caption, excluded.caption),
+          caption = COALESCE(excluded.caption, posts.caption),
           sort_timestamp = excluded.sort_timestamp,
           taken_at = excluded.taken_at,
           taken_at_source = excluded.taken_at_source,
@@ -1295,7 +1301,7 @@ export const postRepository = {
           folder_id = excluded.folder_id,
           place_id = excluded.place_id,
           post_type = excluded.post_type,
-          caption = COALESCE(posts.caption, excluded.caption),
+          caption = COALESCE(excluded.caption, posts.caption),
           sort_timestamp = excluded.sort_timestamp,
           taken_at = excluded.taken_at,
           taken_at_source = excluded.taken_at_source,
@@ -2405,9 +2411,9 @@ export const imageRepository = {
       INSERT INTO images (
         folder_id, source_id, asset_key, filename, extension, relative_path, absolute_path, file_size, width, height, display_orientation,
         media_type, mime_type, duration_ms, is_animated, checksum_or_fingerprint, mtime_ms, first_seen_at, sort_timestamp, taken_at, taken_at_source, exif_json,
-        thumbnail_path, preview_path, playback_strategy, is_deleted, deleted_at, is_trashed, trashed_at, updated_at
+        thumbnail_path, preview_path, playback_strategy, caption, is_deleted, deleted_at, is_trashed, trashed_at, updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, 0, NULL, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, 0, NULL, ?)
       ON CONFLICT(source_id, relative_path) DO UPDATE SET
         folder_id = excluded.folder_id,
         asset_key = COALESCE(images.asset_key, excluded.asset_key),
@@ -2426,6 +2432,7 @@ export const imageRepository = {
         mtime_ms = excluded.mtime_ms,
         taken_at = excluded.taken_at,
         taken_at_source = excluded.taken_at_source,
+        caption = COALESCE(excluded.caption, images.caption),
         exif_json = excluded.exif_json,
         thumbnail_path = excluded.thumbnail_path,
         preview_path = excluded.preview_path,
@@ -2460,6 +2467,7 @@ export const imageRepository = {
       input.thumbnailPath,
       input.previewPath,
       input.playbackStrategy ?? 'preview',
+      input.caption ?? null,
       nowIso()
     );
 
@@ -2476,8 +2484,9 @@ export const imageRepository = {
         placeId: record.place_id,
         postType: 'single',
         sourcePath: input.relativePath,
-        caption: null,
+        caption: input.caption !== undefined && input.caption !== null ? input.caption : (existingPost?.caption ?? record.caption ?? null),
         takenAt: input.takenAt ?? null,
+        takenAtSource: input.takenAtSource ?? null,
         sortTimestamp: input.sortTimestamp,
         isDeleted: 0,
         isTrashed: 0
@@ -2509,8 +2518,10 @@ export const imageRepository = {
         is_animated = ?,
         checksum_or_fingerprint = ?,
         mtime_ms = ?,
+        sort_timestamp = COALESCE(?, sort_timestamp),
         taken_at = ?,
         taken_at_source = ?,
+        caption = CASE WHEN ? = 1 THEN ? ELSE caption END,
         exif_json = ?,
         thumbnail_path = ?,
         preview_path = ?,
@@ -2536,8 +2547,11 @@ export const imageRepository = {
       serializeAnimatedFlag(input.isAnimated),
       input.fingerprint,
       input.mtimeMs,
+      input.sortTimestamp ?? null,
       input.takenAt,
       input.takenAtSource,
+      input.caption !== undefined ? 1 : 0,
+      input.caption ?? null,
       input.exifJson,
       input.thumbnailPath,
       input.previewPath,
@@ -2560,9 +2574,10 @@ export const imageRepository = {
         placeId: record.place_id,
         postType: 'single',
         sourcePath: input.relativePath,
-        caption: null,
+        caption: input.caption !== undefined ? input.caption : (existingPost?.caption ?? record.caption ?? null),
         takenAt: input.takenAt ?? null,
-        sortTimestamp: record.sort_timestamp,
+        takenAtSource: input.takenAtSource ?? null,
+        sortTimestamp: input.sortTimestamp ?? record.sort_timestamp,
         isDeleted: 0,
         isTrashed: 0
       }, [{ imageId: record.id, position: 1 }]);
@@ -2700,8 +2715,10 @@ export const imageRepository = {
         is_animated = ?,
         checksum_or_fingerprint = ?,
         mtime_ms = ?,
+        sort_timestamp = COALESCE(?, sort_timestamp),
         taken_at = ?,
         taken_at_source = ?,
+        caption = CASE WHEN ? = 1 THEN ? ELSE caption END,
         exif_json = ?,
         playback_strategy = ?,
         is_deleted = 0,
@@ -2725,8 +2742,11 @@ export const imageRepository = {
       serializeAnimatedFlag(input.isAnimated),
       input.fingerprint,
       input.mtimeMs,
+      input.sortTimestamp ?? null,
       input.takenAt,
       input.takenAtSource,
+      input.caption !== undefined ? 1 : 0,
+      input.caption ?? null,
       input.exifJson,
       input.playbackStrategy ?? 'preview',
       nowIso(),
@@ -2747,10 +2767,10 @@ export const imageRepository = {
         placeId: record.place_id,
         postType: 'single',
         sourcePath: input.relativePath,
-        caption: existingPost?.caption ?? null,
+        caption: input.caption !== undefined ? input.caption : (existingPost?.caption ?? record.caption ?? null),
         takenAt: input.takenAt,
         takenAtSource: input.takenAtSource,
-        sortTimestamp: existingPost?.sort_timestamp ?? record.sort_timestamp,
+        sortTimestamp: input.sortTimestamp ?? (existingPost?.sort_timestamp ?? record.sort_timestamp),
         isDeleted: 0,
         isTrashed: existingPost?.is_trashed ?? 0
       }, [{ imageId: record.id, position: 1 }]);
