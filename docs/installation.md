@@ -96,8 +96,11 @@ In the default Docker Compose setup, the container uses the image's built-in
 production defaults plus the mounted `./data/...` volumes. The source-install
 `.env` file is not read directly inside the container.
 
-The shipped Compose file includes `IMAGE_DETAIL_SOURCE: preview` and
-`DERIVATIVE_MODE: eager`.
+The shipped Compose file uses streaming for new local videos and keeps the
+temporary video cache in `./data/hls-cache` on the host. See the
+[video playback settings](./configuration.md#video-playback) for the available options.
+
+It also sets `IMAGE_DETAIL_SOURCE: preview` and `DERIVATIVE_MODE: eager`.
 
 If you want lazy derivatives or original-backed image detail pages, edit those
 values in `docker-compose.yml` before starting the container.
@@ -167,7 +170,7 @@ The shipped `.env.example` keeps the development ports aligned like this:
 | Node.js 22 | Use 22.23.4 or a newer patched Node.js 22 release. The Docker image bundles Node.js 22.23.4. |
 | `pnpm` | Matches the workspace scripts and lockfile. |
 | Writable local storage | Foldergram creates and maintains the gallery, database, thumbnails, and previews directories. Keep `DB_DIR` on a local filesystem inside the host; WAL mode requires reliable local file locking. |
-| FFmpeg and FFprobe | Needed only when you run the app outside Docker and want supported video processing or animated AVIF image-sequence processing. The backend calls `ffprobe` for metadata and `ffmpeg` for video thumbnails, video previews, and animated AVIF derivatives. |
+| FFmpeg and FFprobe | Install both for local video playback and animated AVIF processing. Foldergram uses FFprobe to inspect files and FFmpeg to make posters, previews, and streaming segments. The Docker image includes both. |
 
 ## Supported media
 
@@ -200,10 +203,11 @@ The shipped `.env.example` points at:
 | `DB_DIR` | `./data/db` |
 | `THUMBNAILS_DIR` | `./data/thumbnails` |
 | `PREVIEWS_DIR` | `./data/previews` |
+| `HLS_CACHE_DIR` | `<DATA_ROOT>/hls-cache` |
 | `SCAN_MEDIA_ERROR_MODE` | `skip` |
 
 `DATA_ROOT` is the base path for this layout. If you change only `DATA_ROOT`,
-Foldergram will look for `gallery`, `db`, `thumbnails`, and `previews`
+Foldergram uses `gallery`, `db`, `thumbnails`, `previews`, and `hls-cache`
 under that directory unless you override those paths individually.
 Full scan error reports are written under `<DATA_ROOT>/scan-errors/` when skip
 mode records supported-media failures.
@@ -301,6 +305,10 @@ file. When shutdown reports `SQLite WAL checkpoint incomplete`, keep the WAL
 sidecars with the backup. Keep `DB_DIR` on local storage rather than a network
 share.
 
+Videos already in your library keep their current playback after an update.
+Use [preview cleanup](./media-processing.md#switch-existing-local-videos-to-streaming)
+when you're ready to switch them to streaming.
+
 ### Docker Compose
 
 Stop the app, then take the backup of the host directories mounted by Compose:
@@ -325,6 +333,13 @@ docker compose logs --tail=100 foldergram
 
 Pending SQLite migrations run automatically before requests are served. Check
 the logs and open your existing library after startup.
+
+If you keep an older Compose file, add this line under the `foldergram`
+service's `volumes` to keep the streaming cache across container replacements.
+
+```yaml
+- ./data/hls-cache:/app/data/hls-cache
+```
 
 ### Source installs
 

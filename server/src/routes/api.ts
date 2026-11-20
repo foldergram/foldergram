@@ -22,6 +22,8 @@ import { watcherService } from '../services/watcher-service.js';
 import { applyOriginalMediaHeaders } from '../utils/media-response.js';
 import { REEL_CURSOR_MAX_LENGTH } from '../utils/reels-utils.js';
 import { serveDerivativeForImage } from './lazy-derivatives.js';
+import { registerVideoPlaybackRoutes } from './video-playback.js';
+import { videoPreviewReclamation } from '../services/video-preview-reclamation.js';
 
 const router = express.Router();
 
@@ -974,6 +976,15 @@ router.get('/share/posts/:id', (request, response) => {
   response.json(image);
 });
 
+registerVideoPlaybackRoutes(router, (request, response, image) => {
+  const derivative = galleryService.getShareDerivativeImage(image.id);
+  if (!derivative) {
+    response.status(404).json({ message: 'Shared video not found.' });
+    return false;
+  }
+  return ensureShareFolderAccess(request, response, derivative.folder_id);
+});
+
 router.get('/share/images/:id/thumbnail', async (request, response) => {
   const params = imageIdSchema.parse(request.params);
   const image = galleryService.getShareDerivativeImage(params.id);
@@ -1561,6 +1572,31 @@ router.post('/admin/settings/carousels-migration-decision', requireCapability('c
     response.status(500).json({ message });
   }
 });
+
+const reclamationPath = '/admin/video-previews/reclamation';
+const reclamationCapability = requireCapability('canManageLibrary', 'Admin access is required.');
+const reclamationParams = z.object({ id: z.string().uuid() });
+router.get(reclamationPath, reclamationCapability, (_request, response) => {
+  response.json(videoPreviewReclamation.list());
+});
+router.get(reclamationPath + '/:id', reclamationCapability, (request, response) => {
+  const job = videoPreviewReclamation.get(reclamationParams.parse(request.params).id);
+  if (!job) { response.status(404).json({ message: 'Preview reclamation was not found.' }); return; }
+  response.json(job);
+});
+router.post(reclamationPath, reclamationCapability, adminMutationRateLimiter, (request, response) => {
+  const body = z.object({ sourceId: z.number().int().positive().optional() }).parse(request.body);
+  const job = videoPreviewReclamation.assess(body.sourceId);
+  if (!job) { response.status(409).json({ message: 'Select a local source or wait for the current preview operation.' }); return; }
+  response.status(202).json(job);
+});
+for (const action of ['confirm', 'cancel', 'retry'] as const) {
+  router.post(reclamationPath + '/:id/' + action, reclamationCapability, adminMutationRateLimiter, (request, response) => {
+    const job = videoPreviewReclamation[action](reclamationParams.parse(request.params).id);
+    if (!job) { response.status(409).json({ message: 'This preview operation is unavailable in its current state.' }); return; }
+    response.status(202).json(job);
+  });
+}
 
 router.get('/admin/stats', requireCapability('canAccessSettings', 'Admin access is required.'), (_request, response) => {
   response.json(galleryService.getStats());

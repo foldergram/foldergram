@@ -533,8 +533,13 @@ function getParentNamesBySource<T>(items: T[], getSourceId: (item: T) => number 
   return new Map([...pathsBySource].map(([sourceId, paths]) => [sourceId, folderRepository.getNamesByFolderPaths([...paths], sourceId ?? undefined)]));
 }
 
+function buildVideoPlaybackUrl(id: number, policy: FeedImage['videoDeliveryPolicy'], shared = false): string | undefined {
+  if (policy !== 'streaming') return;
+  return (shared ? '/api/share/images/' : '/api/videos/') + id + '/playback';
+}
+
 function mapFeedImage(image: IndexedFeedImage, derivativeVersion = getDerivativeAssetVersion(), parentNames?: Map<string, string>): FeedImage {
-  const { playbackStrategy, fileSize, placeId, placeSlug, placeName, placeKind, placeIsApproximate, isSaved, mediaItems, itemCount, ...rest } = image as any;
+  const { playbackStrategy, videoDeliveryPolicy, fileSize, placeId, placeSlug, placeName, placeKind, placeIsApproximate, isSaved, mediaItems, itemCount, ...rest } = image as any;
   const representativeMediaItem = mediaItems?.[0];
   const representativeImageId = representativeMediaItem?.imageId ?? rest.id;
   const videoPlaybackSource = getVideoPlaybackSource({
@@ -563,6 +568,7 @@ function mapFeedImage(image: IndexedFeedImage, derivativeVersion = getDerivative
       videoPlaybackSource
     }, false, derivativeVersion),
     videoPlaybackSource: videoPlaybackSource ?? undefined,
+    videoPlaybackUrl: buildVideoPlaybackUrl(representativeImageId, videoDeliveryPolicy),
     place: mapPlaceSummaryFromRow({ placeId, placeSlug, placeName, placeKind, placeIsApproximate }),
     mediaItems: (mediaItems ?? []).map((item: any) => {
       const itemPlaybackSource = getVideoPlaybackSource({
@@ -592,6 +598,7 @@ function mapFeedImage(image: IndexedFeedImage, derivativeVersion = getDerivative
         originalUrl: buildOriginalUrl(item.imageId),
         playbackStrategy: item.playbackStrategy ?? 'preview',
         videoPlaybackSource: itemPlaybackSource ?? undefined,
+        videoPlaybackUrl: buildVideoPlaybackUrl(item.imageId, item.videoDeliveryPolicy),
         mimeType: item.mimeType,
         fileSize: item.fileSize,
         relativePath: item.relativePath,
@@ -625,6 +632,7 @@ function mapSharedMediaItem(item: PostMediaItem, derivativeVersion: string | nul
     isAnimated: Boolean(item.isAnimated),
     thumbnailUrl: buildShareThumbnailUrl(item.imageId, derivativeVersion),
     previewUrl: buildSharePreviewUrl(item.imageId, derivativeVersion),
+    videoPlaybackUrl: buildVideoPlaybackUrl(item.imageId, item.videoDeliveryPolicy, true),
     playbackStrategy: item.playbackStrategy ?? 'preview',
     videoPlaybackSource: getVideoPlaybackSource({
       mediaType: item.mediaType,
@@ -657,6 +665,7 @@ function mapSharedFeedImage(image: IndexedFeedImage, derivativeVersion = getDeri
     isAnimated: Boolean(image.isAnimated),
     thumbnailUrl: buildShareThumbnailUrl(representativeImageId, derivativeVersion),
     previewUrl: buildSharePreviewUrl(representativeImageId, derivativeVersion),
+    videoPlaybackUrl: buildVideoPlaybackUrl(representativeImageId, image.videoDeliveryPolicy, true),
     videoPlaybackSource: getVideoPlaybackSource({
       mediaType: image.mediaType,
       filename: image.filename,
@@ -673,7 +682,7 @@ function mapSharedFeedImage(image: IndexedFeedImage, derivativeVersion = getDeri
 }
 
 function mapImageDetail(image: IndexedImageDetail, derivativeVersion = getDerivativeAssetVersion()): ImageDetail {
-  const { playbackStrategy, exifJson, placeId, placeSlug, placeName, placeKind, placeIsApproximate, isSaved, mediaItems, itemCount, ...rest } = image as any;
+  const { playbackStrategy, videoDeliveryPolicy, exifJson, placeId, placeSlug, placeName, placeKind, placeIsApproximate, isSaved, mediaItems, itemCount, ...rest } = image as any;
   const useOriginalForImages = appConfig.imageDetailSource === 'original' && !isHeicFile(rest.filename);
   const representativeImageId = mediaItems?.[0]?.imageId ?? rest.id;
   const videoPlaybackSource = getVideoPlaybackSource({
@@ -705,6 +714,7 @@ function mapImageDetail(image: IndexedImageDetail, derivativeVersion = getDeriva
     originalUrl: buildOriginalUrl(representativeImageId),
     playbackStrategy,
     videoPlaybackSource: videoPlaybackSource ?? undefined,
+    videoPlaybackUrl: buildVideoPlaybackUrl(representativeImageId, videoDeliveryPolicy),
     place: mapPlaceSummaryFromRow({ placeId, placeSlug, placeName, placeKind, placeIsApproximate }),
     mediaItems: (mediaItems ?? []).map((item: any) => {
       const itemPlaybackSource = getVideoPlaybackSource({
@@ -734,6 +744,7 @@ function mapImageDetail(image: IndexedImageDetail, derivativeVersion = getDeriva
         originalUrl: buildOriginalUrl(item.imageId),
         playbackStrategy: item.playbackStrategy ?? 'preview',
         videoPlaybackSource: itemPlaybackSource ?? undefined,
+        videoPlaybackUrl: buildVideoPlaybackUrl(item.imageId, item.videoDeliveryPolicy),
         mimeType: item.mimeType,
         fileSize: item.fileSize,
         relativePath: item.relativePath,
@@ -763,6 +774,7 @@ function mapSharedImageDetail(image: IndexedImageDetail, derivativeVersion = get
     isAnimated: Boolean(image.isAnimated),
     thumbnailUrl: buildShareThumbnailUrl(representativeImageId, derivativeVersion),
     previewUrl: buildSharePreviewUrl(representativeImageId, derivativeVersion),
+    videoPlaybackUrl: buildVideoPlaybackUrl(representativeImageId, image.videoDeliveryPolicy, true),
     videoPlaybackSource: getVideoPlaybackSource({
       mediaType: image.mediaType,
       filename: image.filename,

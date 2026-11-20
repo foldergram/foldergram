@@ -118,6 +118,7 @@ The current GitHub workflow publishes tagged releases and deploys docs; it does 
   test(auth): cover viewer mutation rejection
   ```
 
+- Use a one lowercase Conventional Commit subject line.
 - Use the same style for PR titles so a squash commit has a useful subject. Link actual issues/discussions; use `Closes #...` only when the change resolves that issue.
 - Before committing, inspect `git diff`, stage only intended files, then inspect `git diff --cached` and run `git diff --cached --check`. Check for accidental files, secrets, generated output, debugging code, and unrelated lockfile changes. Do not use blanket staging in a dirty worktree.
 - PR descriptions should state the concrete problem, resulting behavior, tests run and their outcomes, and any unverified areas. Include screenshots or short recordings for UI changes and compatibility, security, or data-migration implications when applicable. The contributor remains responsible for reviewing LLM-generated code and explanations.

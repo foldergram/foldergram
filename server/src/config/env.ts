@@ -37,6 +37,11 @@ const envSchema = z.object({
   HEIC_MAX_PIXELS: z.coerce.number().int().min(1).max(64_000_000).default(64_000_000),
   HEIC_JOB_TIMEOUT_MS: z.coerce.number().int().min(100).max(120_000).default(60_000),
   DERIVATIVE_MODE: z.enum(['eager', 'lazy']).default('eager'),
+  VIDEO_DELIVERY_MODE: z.enum(['streaming', 'previews']).default('streaming'),
+  HLS_CACHE_DIR: z.string().optional(),
+  HLS_CACHE_MAX_BYTES: z.coerce.number().int().positive().max(Number.MAX_SAFE_INTEGER).default(2_147_483_648),
+  HLS_CACHE_MAX_AGE_HOURS: z.coerce.number().positive().max(Number.MAX_SAFE_INTEGER / 3_600_000).default(24),
+  HLS_TRANSCODE_CONCURRENCY: z.coerce.number().int().min(1).max(8).default(1),
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development')
 });
 
@@ -105,6 +110,7 @@ const geodataDir = path.join(dataRoot, 'geodata');
 const thumbnailsDir = resolveConfiguredPath(parsed.THUMBNAILS_DIR, path.join(dataRoot, 'thumbnails'));
 const previewsDir = resolveConfiguredPath(parsed.PREVIEWS_DIR, path.join(dataRoot, 'previews'));
 const scanErrorReportDir = path.join(dataRoot, 'scan-errors');
+const hlsCacheDir = resolveConfiguredPath(parsed.HLS_CACHE_DIR, path.join(dataRoot, 'hls-cache'));
 const logVerbose = parseBooleanFlag(parsed.LOG_VERBOSE);
 const publicDemoMode = parseBooleanFlag(parsed.PUBLIC_DEMO_MODE);
 const csrfTrustedOrigins = parseConfiguredOrigins(parsed.CSRF_TRUSTED_ORIGINS);
@@ -135,6 +141,11 @@ if (isSameOrWithinPath(previewsDir, galleryRoot)) {
   throw new Error('Invalid storage configuration: PREVIEWS_DIR cannot contain GALLERY_ROOT.');
 }
 
+if ([galleryRoot, dbDir, geodataDir, thumbnailsDir, previewsDir, scanErrorReportDir].some(directory =>
+  isSameOrWithinPath(directory, hlsCacheDir) || isSameOrWithinPath(hlsCacheDir, directory))) {
+  throw new Error('HLS_CACHE_DIR must be separate from gallery and other Foldergram storage.');
+}
+
 const managedGalleryRelativeIgnores = uniq(
   [dbDir, thumbnailsDir, previewsDir, scanErrorReportDir]
     .map((directoryPath) => getRelativePathWithinRoot(galleryRoot, directoryPath))
@@ -155,6 +166,11 @@ export const appConfig = {
   thumbnailsDir,
   previewsDir,
   scanErrorReportDir,
+  hlsCacheDir,
+  hlsCacheMaxBytes: parsed.HLS_CACHE_MAX_BYTES,
+  hlsCacheMaxAgeMs: parsed.HLS_CACHE_MAX_AGE_HOURS * 3_600_000,
+  hlsTranscodeConcurrency: parsed.HLS_TRANSCODE_CONCURRENCY,
+  videoDeliveryMode: parsed.VIDEO_DELIVERY_MODE,
   managedGalleryRelativeIgnores,
   galleryExcludedFolders,
   logVerbose,

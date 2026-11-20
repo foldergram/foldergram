@@ -154,7 +154,7 @@
             <media-player
               ref="playerElement"
               class="viewer__player"
-              :src.prop="videoSource"
+              :src.prop="streaming.source.value ?? videoSource"
               :title.prop="image.filename"
               :fullscreenOrientation.prop="'none'"
               :playsInline.prop="true"
@@ -166,9 +166,16 @@
               @media-mute-request="appStore.setVideoMuted(true)"
               @media-unmute-request="appStore.setVideoMuted(false)"
               @media-volume-change-request="appStore.setVideoMuted($event.detail === 0)"
-              >
-                <media-provider />
+            >
+              <media-provider :loaders.prop="streaming.loaders" />
+              <LocalVideoFeedback
+                v-if="streaming.source.value"
+                :poster="image.thumbnailUrl"
+                :state="streaming.state.value"
+                @retry="streaming.play"
+              />
               <media-poster
+                v-else
                 class="viewer__player-poster"
                 :src.prop="image.thumbnailUrl"
                 :alt.prop="image.filename"
@@ -253,7 +260,7 @@
               </VideoProgressFooter>
             </media-player>
             <div
-              v-if="showVideoPausedIndicator"
+              v-if="showVideoPausedIndicator && !streaming.state.value.pending && !streaming.state.value.failed"
               class="viewer__pause-indicator"
               aria-hidden="true"
             >
@@ -618,7 +625,9 @@
   import CollectionBookmark from "./CollectionBookmark.vue"
   import PostCaptionModal from "./PostCaptionModal.vue"
   import ResilientImage from "./ResilientImage.vue"
+  import { useLocalVideoPlayback } from "../composables/useLocalVideoPlayback"
   import VideoProgressFooter from "./VideoProgressFooter.vue"
+  import LocalVideoFeedback from "./LocalVideoFeedback.vue"
   import { formatMediaDuration, formatVideoTimestamp, videoPreviewWouldDownscale } from "../utils/media"
 
   const props = defineProps<{
@@ -653,6 +662,11 @@
   const isSidebarExpanded = ref(!isSidebarCollapsible.value)
   const isSidebarSheetDragging = ref(false)
   const isPlayingHd = ref(false)
+  const streaming = useLocalVideoPlayback(() => props.image?.videoPlaybackUrl, {
+    autoplay: () => true,
+    original: () => isPlayingHd.value,
+    onAutoplayBlocked: () => { isVideoPaused.value = true }
+  })
   const isVideoPaused = ref(false)
   const videoDurationMs = ref(props.image?.durationMs ?? 0)
   const videoCurrentTimeMs = ref(0)
@@ -1449,7 +1463,7 @@
   }
 
   async function attemptVideoPlayback(): Promise<void> {
-    if (props.image?.mediaType !== "video") {
+    if (props.image?.mediaType !== "video" || streaming.source.value) {
       return
     }
 
@@ -1494,6 +1508,11 @@
       return
     }
 
+    if (image.videoPlaybackUrl) {
+      isPlayingHd.value = !isPlayingHd.value
+      return
+    }
+
     const savedTime = player.currentTime
     pendingVideoRestore = {
       currentTime: savedTime,
@@ -1503,6 +1522,7 @@
   }
 
   async function handlePlayerReadyForPlayback(): Promise<void> {
+    if (props.image?.videoPlaybackUrl) return
     const player = playerElement.value
     if (player && pendingVideoRestore) {
       const restoreState = pendingVideoRestore
@@ -1724,7 +1744,8 @@
     }
 
     if (player.paused) {
-      await resumeVideoPlayback()
+      if (streaming.source.value) await streaming.play()
+      else await resumeVideoPlayback()
       return
     }
 

@@ -88,7 +88,14 @@ If multiple slides in a carousel match the search query, the carousel appears ex
 
 ## Reels and mixed videos
 
-Videos play inside the carousel using the integrated video player with interactive timeline scrubbing, play/pause controls, mute toggling, and optional HD source switching. In the post viewer, the active video starts automatically when the browser permits it. Carousel videos use the same sound preference as other players, including after a reload. If the browser blocks autoplay with sound, use the play control; the video keeps your chosen sound setting. The HD button appears only when the original video is larger than the generated preview and uses a browser-supported direct playback format (`playbackStrategy: 'original'`). Toggling HD switches resolution without resetting current playback time or playing state.
+Videos play inside the carousel with the same play, mute, and seek controls as
+other videos. In the post viewer, the active video slide starts automatically
+when the browser allows it. If the browser blocks autoplay with sound, press
+Play. The video uses your saved sound setting.
+
+Carousel videos follow the same playback rules as the rest of the library.
+When the player offers **HD**, you can switch sources and keep your place.
+See [video playback](./features.md#video-playback).
 
 Swiping or navigating through slides isolates video controls so that dragging the time slider or tapping player buttons does not trigger slide changes, and unmounting or switching slides pauses background playback cleanly.
 

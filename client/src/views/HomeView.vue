@@ -162,7 +162,7 @@
 
       <section
         v-else-if="showHomeSetupNotice"
-        class="grid gap-[0.85rem] px-5 py-5 mb-[1.1rem] border rounded-[1rem] shadow-[var(--shadow)]"
+        class="home-layout__feed-width mx-auto w-full max-w-[29.375rem] grid gap-[0.85rem] px-5 py-5 mb-[1.1rem] border rounded-[1rem] shadow-[var(--shadow)]"
         :style="homeSetupNoticeStyle"
       >
         <span class="text-[0.75rem] font-bold tracking-[0.08em] uppercase" :class="homeSetupNoticeEyebrowClass">

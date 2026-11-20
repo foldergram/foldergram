@@ -25,6 +25,7 @@ import { databaseManager } from "./db/database.js";
 import { collectionRepository, scanRunRepository } from "./db/repositories.js";
 import { log } from "./services/log-service.js";
 import { stopHeicProcessing } from "./services/heic/service.js";
+import { hlsCache } from "./services/hls-cache.js";
 import { permanentDeletionService } from "./services/permanent-deletion-service.js";
 import { scannerService } from "./services/scanner-service.js";
 import { watcherService } from "./services/watcher-service.js";
@@ -85,6 +86,7 @@ async function bootstrap(): Promise<void> {
 
   server.listen(appConfig.port, () => {
     logServerReady();
+    void hlsCache.recover().catch(() => log.info("HLS cache startup failed. Check its storage configuration."));
     void startSources().catch(() => log.info("Immich source startup failed; local content remains available. Check source configuration."));
     const startupAction = scannerService.handleStartup("startup");
     if (startupAction === "blocked") {
@@ -103,7 +105,7 @@ async function bootstrap(): Promise<void> {
     log.info(`Received ${signal}, shutting down`);
     stopSources();
     scannerService.stopActiveOperationForShutdown();
-    await Promise.all([watcherService.stop(), stopHeicProcessing()]);
+    await Promise.all([watcherService.stop(), stopHeicProcessing(), hlsCache.stop()]);
     server.close(() => {
       databaseManager.close();
       process.exit(0);

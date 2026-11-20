@@ -1,4 +1,52 @@
 {
+  "streamingVideo": {
+    "loading": "Preparing video…",
+    "unavailable": "This video could not be played.",
+    "retry": "Retry playback",
+    "reclamation": {
+      "action": "Switch to streaming and remove video previews",
+      "description": "Free storage by removing generated video copies.",
+      "preserved": "Foldergram keeps originals, photos, thumbnails, library organization, and Immich data.",
+      "playbackNote": "Some videos may take longer to start or seek while conversion runs. Future imports still follow VIDEO_DELIVERY_MODE.",
+      "confirmTitle": "Switch to streaming?",
+      "confirmAction": "Remove previews",
+      "confirmPending": "Starting cleanup…",
+      "videosToSwitch": "Videos to switch",
+      "previewsToRemove": "Previews to remove",
+      "estimatedSavings": "Estimated savings",
+      "source": "Local source",
+      "allSources": "All local sources",
+      "assess": "Assess previews",
+      "scope": "Sources: {names}",
+      "noEligibleVideos": "No eligible videos or previews found for these sources.",
+      "spaceFreed": "{bytes} freed",
+      "completedChanges": "{files} previews removed · {videos} videos switched to streaming",
+      "dismissResult": "Dismiss cleanup result",
+      "estimate": "Checked {checked} videos. {videos} would switch to streaming. {files} previews could free {bytes}.",
+      "result": "Switched {videos} videos. Removed {files} previews and freed {bytes}.",
+      "cancel": "Cancel operation",
+      "resume": "Resume or retry",
+      "status": {
+        "assessing": "Assessing previews…",
+        "ready": "Assessment ready",
+        "running": "Switching videos and removing previews…",
+        "complete": "Operation complete",
+        "cancelled": "Operation cancelled",
+        "interrupted": "Operation interrupted"
+      },
+      "reason": {
+        "originalUnavailable": "Original unavailable or changed",
+        "unsupported": "Conversion unsupported",
+        "sharedPreview": "Preview shared by another item",
+        "unsafePreview": "Unsafe preview path",
+        "unreadablePreview": "Preview unreadable",
+        "inUse": "Preview in use",
+        "busy": "Library maintenance busy",
+        "removalFailed": "Preview removal failed",
+        "changed": "Video changed since assessment"
+      }
+    }
+  },
   "displayPreferences": {
     "appearance": {
       "label": "Appearance",

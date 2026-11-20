@@ -160,6 +160,8 @@ SELECT 1;
     ]);
     await fs.rm(path.join(legacyMigrations, '000006_immich_sources.sql'));
     await fs.rm(path.join(legacyMigrations, '000007_local_source_ownership.sql'));
+    await fs.rm(path.join(legacyMigrations, '000008_local_video_delivery.sql'));
+    await fs.rm(path.join(legacyMigrations, '000010_video_delivery_maintenance.sql'));
 
     const { databasePath } = runStartupMigrations({ migrationsDirectory: legacyMigrations });
     const legacy = new DatabaseSync(databasePath);
@@ -183,7 +185,8 @@ SELECT 1;
     try {
       for (let boot = 0; boot < 2; boot++) {
         const database = databaseManager.connection;
-        expect(listAppliedVersions(database)).toEqual(['000001', '000002', '000004', '000005', '000006', '000007']);
+        expect(listAppliedVersions(database)).toEqual(['000001', '000002', '000004', '000005', '000006', '000007', '000008', '000010']);
+        expect(tableExists(database, 'video_preview_reclamation_items')).toBe(true);
         const source = database.prepare("SELECT id FROM media_sources WHERE kind='local' AND managed_by='environment'").all();
         expect(source).toHaveLength(1);
         expect(database.prepare('SELECT source_id, thumbnail_path FROM images WHERE id = 22').get())
@@ -219,7 +222,7 @@ SELECT 1;
       expect(tableHasColumn(database, 'collection_items', 'post_id')).toBe(true);
       expect(tableHasColumn(database, 'scan_runs', 'warning_count')).toBe(true);
       expect(tableHasColumn(database, 'scan_runs', 'warning_text')).toBe(true);
-      expect(listAppliedVersions(database)).toEqual([BASELINE_MIGRATION_VERSION, '000002', '000004', '000005', '000006', '000007']);
+      expect(listAppliedVersions(database)).toEqual([BASELINE_MIGRATION_VERSION, '000002', '000004', '000005', '000006', '000007', '000008', '000010']);
     } finally {
       database.close();
     }
@@ -254,7 +257,7 @@ SELECT 1;
       // No runtime connection has been opened yet. This must wait in the
       // migration bootstrap, before the runtime connection is configured.
       const database = databaseManager.connection;
-      expect(listAppliedVersions(database)).toEqual(['000001', '000002', '000004', '000005', '000006', '000007']);
+      expect(listAppliedVersions(database)).toEqual(['000001', '000002', '000004', '000005', '000006', '000007', '000008', '000010']);
       expect(database.prepare('SELECT value FROM cold_start_probe').get()).toEqual({ value: 'preserved' });
     } finally {
       databaseManager.close();
@@ -306,7 +309,7 @@ SELECT 1;
 
         const database = new DatabaseSync(databasePath);
         try {
-          expect(listAppliedVersions(database)).toEqual(['000001', '000002', '000004', '000005', '000006', '000007']);
+          expect(listAppliedVersions(database)).toEqual(['000001', '000002', '000004', '000005', '000006', '000007', '000008', '000010']);
         } finally {
           database.close();
         }
@@ -405,7 +408,7 @@ SELECT 1;
     const database = new DatabaseSync(databasePath);
 
     try {
-      expect(listAppliedVersions(database)).toEqual([BASELINE_MIGRATION_VERSION, '000002', '000004', '000005', '000006', '000007']);
+      expect(listAppliedVersions(database)).toEqual([BASELINE_MIGRATION_VERSION, '000002', '000004', '000005', '000006', '000007', '000008', '000010']);
       expect(tableExists(database, 'collections')).toBe(true);
       expect(tableHasColumn(database, 'folders', 'avatar_image_id')).toBe(true);
       expect(tableHasColumn(database, 'folders', 'avatar_source')).toBe(true);
@@ -517,9 +520,70 @@ SELECT 1;
       expect(tableExists(database, 'folder_share_links')).toBe(true);
       expect(tableExists(database, 'folder_share_passwords')).toBe(true);
       expect(tableHasColumn(database, 'folders', 'share_password_version')).toBe(true);
-      expect(listAppliedVersions(database)).toEqual(['000001', '000002', '000004', '000005', '000006', '000007']);
+      expect(listAppliedVersions(database)).toEqual(['000001', '000002', '000004', '000005', '000006', '000007', '000008', '000010']);
     } finally {
       database.close();
+    }
+  });
+
+  it('backfills only previously indexed local videos without changing their data', async () => {
+    const { runStartupMigrations } = await importMigrationModule();
+    const migrationName = '000008_local_video_delivery.sql';
+    const previousMigrations = await createTestMigrationsDirectory(tempRoot);
+    await fs.rm(path.join(previousMigrations, migrationName));
+    await fs.rm(path.join(previousMigrations, '000010_video_delivery_maintenance.sql'));
+    const { databasePath } = runStartupMigrations({ migrationsDirectory: previousMigrations });
+    const previous = new DatabaseSync(databasePath);
+    try {
+      previous.exec(`
+        INSERT INTO media_sources (id, name, kind, config_json) VALUES (20, 'Other local gallery', 'local', '{}');
+        INSERT INTO media_sources (id, name, kind, config_json, server_url, api_key_ciphertext)
+        VALUES (21, 'Immich', 'immich', '{}', 'http://immich.test', 'fixture');
+        INSERT INTO folders (id, name, slug, folder_path, source_id)
+        SELECT id + 100, name, 'folder-' || id, 'album', id FROM media_sources;
+        INSERT INTO images (
+          id, folder_id, source_id, filename, extension, relative_path, absolute_path,
+          file_size, width, height, media_type, mime_type, checksum_or_fingerprint,
+          mtime_ms, first_seen_at, sort_timestamp, thumbnail_path, preview_path, caption, is_trashed
+        )
+        SELECT id, id, source_id, 'clip.mp4', '.mp4', 'album/clip.mp4', '/fixture/clip.mp4',
+          512, 640, 480, 'video', 'video/mp4', 'fixture', 1, CURRENT_TIMESTAMP, 500,
+          'poster.webp', 'preview-' || id || '.mp4', 'original caption', 1
+        FROM folders;
+        UPDATE images SET media_type = 'image' WHERE id = 120;
+        INSERT INTO images (
+          id, folder_id, source_id, filename, extension, relative_path, absolute_path,
+          file_size, width, height, media_type, mime_type, checksum_or_fingerprint,
+          mtime_ms, first_seen_at, sort_timestamp, thumbnail_path, preview_path
+        ) VALUES (200, 120, 20, 'second.mp4', '.mp4', 'album/second.mp4', '/other/second.mp4',
+          512, 640, 480, 'video', 'video/mp4', 'fixture-2', 1, CURRENT_TIMESTAMP, 600,
+          'poster2.webp', 'preview2.mp4');
+        INSERT INTO posts (id, folder_id, source_id, source_path, sort_timestamp, is_trashed)
+        SELECT id + 1000, folder_id, source_id, relative_path, sort_timestamp, is_trashed FROM images;
+        INSERT INTO post_items (post_id, image_id, position)
+        SELECT id + 1000, id, 1 FROM images;
+      `);
+    } finally {
+      previous.close();
+    }
+
+    runStartupMigrations({ databasePath });
+    const upgraded = new DatabaseSync(databasePath);
+    try {
+      expect(upgraded.prepare(`
+        SELECT kind, media_type, video_delivery_policy, video_metadata_json
+        FROM images JOIN media_sources ON images.source_id = media_sources.id
+        ORDER BY images.id
+      `).all()).toEqual([
+        { kind: 'local', media_type: 'video', video_delivery_policy: 'legacy', video_metadata_json: null },
+        { kind: 'local', media_type: 'image', video_delivery_policy: null, video_metadata_json: null },
+        { kind: 'immich', media_type: 'video', video_delivery_policy: null, video_metadata_json: null },
+        { kind: 'local', media_type: 'video', video_delivery_policy: 'legacy', video_metadata_json: null }
+      ]);
+      expect(upgraded.prepare('SELECT caption, preview_path, is_trashed, sort_timestamp FROM images WHERE id = 101').get())
+        .toEqual({ caption: 'original caption', preview_path: 'preview-101.mp4', is_trashed: 1, sort_timestamp: 500 });
+    } finally {
+      upgraded.close();
     }
   });
 
@@ -529,7 +593,7 @@ SELECT 1;
     await fs.mkdir(path.dirname(databasePath), { recursive: true });
     const migrationsDirectory = await createTestMigrationsDirectory(tempRoot, [
       [
-        '000008_add_pending_note.sql',
+        '000009_add_pending_note.sql',
         `-- migrate:up
 
 ALTER TABLE images ADD COLUMN migration_note TEXT NULL;
@@ -550,7 +614,7 @@ ALTER TABLE images ADD COLUMN migration_note TEXT NULL;
 
     try {
       expect(tableHasColumn(database, 'images', 'migration_note')).toBe(true);
-      expect(listAppliedVersions(database)).toEqual([BASELINE_MIGRATION_VERSION, '000002', '000004', '000005', '000006', '000007', '000008']);
+      expect(listAppliedVersions(database)).toEqual([BASELINE_MIGRATION_VERSION, '000002', '000004', '000005', '000006', '000007', '000008', '000009', '000010']);
     } finally {
       database.close();
     }
@@ -641,7 +705,7 @@ ALTER TABLE images ADD COLUMN migration_note TEXT NULL;
     const { runStartupMigrations } = await importMigrationModule();
     const migrationsDirectory = await createTestMigrationsDirectory(tempRoot, [
       [
-        '000008_add_test_note.sql',
+        '000009_add_test_note.sql',
         `-- migrate:up
 
 ALTER TABLE images ADD COLUMN migration_note TEXT NULL;
@@ -658,7 +722,7 @@ ALTER TABLE images ADD COLUMN migration_note TEXT NULL;
     const database = new DatabaseSync(databasePath);
 
     try {
-      expect(listAppliedVersions(database)).toEqual(['000001', '000002', '000004', '000005', '000006', '000007', '000008']);
+      expect(listAppliedVersions(database)).toEqual(['000001', '000002', '000004', '000005', '000006', '000007', '000008', '000009', '000010']);
       expect(tableHasColumn(database, 'images', 'migration_note')).toBe(true);
       expect(tableHasColumn(database, 'images', 'caption')).toBe(true);
       expect(database.prepare('SELECT playback_strategy AS playbackStrategy FROM images WHERE id = 1').get()).toEqual({
@@ -693,8 +757,8 @@ ALTER TABLE images ADD COLUMN migration_note TEXT NULL;
     const database = new DatabaseSync(databasePath);
 
     try {
-      expect(listAppliedVersions(database)).toEqual(['000001', '000002', '000003', '000004', '000005', '000006', '000007']);
-      expect(database.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 7 });
+      expect(listAppliedVersions(database)).toEqual(['000001', '000002', '000003', '000004', '000005', '000006', '000007', '000008', '000010']);
+      expect(database.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({ count: 9 });
     } finally {
       database.close();
     }
@@ -725,7 +789,7 @@ ALTER TABLE images ADD COLUMN migration_note TEXT NULL;
       expect(tableExists(repairedDatabase, 'folder_share_links')).toBe(true);
       expect(tableExists(repairedDatabase, 'folder_share_passwords')).toBe(true);
       expect(tableHasColumn(repairedDatabase, 'folders', 'share_password_version')).toBe(true);
-      expect(listAppliedVersions(repairedDatabase)).toEqual(['000001', '000002', '000004', '000005', '000006', '000007']);
+      expect(listAppliedVersions(repairedDatabase)).toEqual(['000001', '000002', '000004', '000005', '000006', '000007', '000008', '000010']);
     } finally {
       repairedDatabase.close();
     }
@@ -739,6 +803,8 @@ ALTER TABLE images ADD COLUMN migration_note TEXT NULL;
     await fs.rm(path.join(throughFolderSharesMigrations, '000005_add_posts_and_carousels.sql'));
     await fs.rm(path.join(throughFolderSharesMigrations, '000006_immich_sources.sql'));
     await fs.rm(path.join(throughFolderSharesMigrations, '000007_local_source_ownership.sql'));
+    await fs.rm(path.join(throughFolderSharesMigrations, '000008_local_video_delivery.sql'));
+    await fs.rm(path.join(throughFolderSharesMigrations, '000010_video_delivery_maintenance.sql'));
 
     runStartupMigrations({
       databasePath,
@@ -767,7 +833,7 @@ ALTER TABLE images ADD COLUMN migration_note TEXT NULL;
       expect(tableHasColumn(repairedDatabase, 'folders', 'carousel_owner_folder_id')).toBe(true);
       expect(tableHasColumn(repairedDatabase, 'scan_runs', 'warning_count')).toBe(true);
       expect(tableHasColumn(repairedDatabase, 'scan_runs', 'warning_text')).toBe(true);
-      expect(listAppliedVersions(repairedDatabase)).toEqual(['000001', '000002', '000004', '000005', '000006', '000007']);
+      expect(listAppliedVersions(repairedDatabase)).toEqual(['000001', '000002', '000004', '000005', '000006', '000007', '000008', '000010']);
     } finally {
       repairedDatabase.close();
     }
@@ -947,6 +1013,8 @@ THIS IS NOT VALID SQL;
     await fs.rm(path.join(throughFolderSharesMigrations, '000005_add_posts_and_carousels.sql'));
     await fs.rm(path.join(throughFolderSharesMigrations, '000006_immich_sources.sql'));
     await fs.rm(path.join(throughFolderSharesMigrations, '000007_local_source_ownership.sql'));
+    await fs.rm(path.join(throughFolderSharesMigrations, '000008_local_video_delivery.sql'));
+    await fs.rm(path.join(throughFolderSharesMigrations, '000010_video_delivery_maintenance.sql'));
     runStartupMigrations({ databasePath, migrationsDirectory: throughFolderSharesMigrations });
 
     const legacyDatabase = new DatabaseSync(databasePath);

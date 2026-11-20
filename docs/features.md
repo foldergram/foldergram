@@ -95,6 +95,16 @@ For large libraries, Recommended describes its bounded session queue in
 `total`/`hasMore` rather than promising every video in one session. Starting a
 new Reels session with a new seed rotates the discovery sample.
 
+## Video playback
+
+New local videos stream by default, so Foldergram can play them without making
+a saved MP4 preview first. If a video needs conversion, the player shows its
+cover while it gets ready and offers **Retry playback** if it can't start.
+
+Existing local videos keep their current playback. Admins can use
+**Settings → Scan & Library** to see how much space they could free before
+switching videos to streaming. [See the cleanup steps](./media-processing.md#switch-existing-local-videos-to-streaming).
+
 ## Explore
 
 Explore is a dedicated full-screen shell with a darker visual treatment.
@@ -246,8 +256,8 @@ and scroll independently of the media.
 The detail view includes:
 
 - image detail media sourced from either generated previews or originals, depending on `IMAGE_DETAIL_SOURCE`
-- video detail playback that uses the selected ordinary source: the original for qualifying direct-playback videos, or a generated preview otherwise
-- an optional `HD` toggle for compatible higher-resolution MP4 originals that use a generated preview
+- video playback from the original, on-demand streaming, or a saved preview, depending on the video
+- an **HD** toggle when the player can offer a higher-quality original
 - previous and next navigation within the same folder and active media filter
 - folder link and breadcrumb context
 - caption text that uses a saved custom caption when present and otherwise falls back to a readable filename
@@ -376,7 +386,7 @@ Current non-admin behavior:
 | Action | What changes |
 | --- | --- |
 | Scan for changes | Discovers additions, updates, removals, and exclusions without verifying generated media for unchanged assets. In `SCAN_MEDIA_ERROR_MODE=skip`, supported-media failures are reported, skipped, and the run finishes as `completed_with_errors`. |
-| Scan and repair derivatives | Performs the same discovery and also verifies generated media for unchanged assets. This action also reclaims obsolete video previews for qualifying direct-playback videos. |
+| Scan and repair derivatives | Scans for changes and checks thumbnails and previews for unchanged files. |
 | Regenerate Thumbnails | Clears generated thumbnails and video poster images, then rebuilds them from indexed media only. |
 | Rebuild Library Index | Clears indexed folders, posts, likes, folder scan state, and scan history, then rescans the active gallery root and reuses matching cached derivatives when possible. In lazy derivative mode it does not pre-generate missing thumbnails or previews. |
 

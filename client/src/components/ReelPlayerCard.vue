@@ -12,7 +12,7 @@
         <media-player
           ref="playerElement"
           class="reel-player-card__player"
-          :src.prop="videoSource"
+          :src.prop="streaming.source.value ?? videoSource"
           :title.prop="item.filename"
           :fullscreenOrientation.prop="'none'"
           :playsInline.prop="true"
@@ -25,8 +25,16 @@
           @media-unmute-request="appStore.setVideoMuted(false)"
           @media-volume-change-request="appStore.setVideoMuted($event.detail === 0)"
         >
-          <media-provider />
+          <media-provider :loaders.prop="streaming.loaders" />
+          <LocalVideoFeedback
+            v-if="streaming.source.value"
+            :poster="item.thumbnailUrl"
+            :active="active"
+            :state="streaming.state.value"
+            @retry="streaming.play"
+          />
           <media-poster
+            v-else
             :src.prop="item.thumbnailUrl"
             :alt.prop="item.filename"
           />
@@ -48,7 +56,7 @@
         </media-player>
 
         <div
-          v-if="showPausedIndicator"
+          v-if="showPausedIndicator && !streaming.state.value.pending && !streaming.state.value.failed"
           class="reel-player-card__pause-indicator"
           aria-hidden="true"
         >
@@ -128,14 +136,19 @@ import { useNativeVideoMuteSync } from '../composables/useNativeVideoMuteSync';
 import { useAppStore } from '../stores/app';
 import type { FeedItem, FolderSummary } from '../types/api';
 import { formatFolderTitle } from '../utils/folder-titles';
+import type { ReelVideoPreparation } from '../utils/local-video-provider';
 import { getOriginalMediaUrl } from '../utils/original-media';
 import { applyVideoMutePreference, createVideoMuteStorage } from '../utils/video-mute';
 import Avatar from './Avatar.vue';
+import LocalVideoFeedback from './LocalVideoFeedback.vue';
+import { useLocalVideoPlayback } from '../composables/useLocalVideoPlayback';
 
 const props = defineProps<{
   item: FeedItem;
   folder: FolderSummary | null;
   active: boolean;
+  nextVideoPlaybackUrl?: string;
+  videoPreparation?: ReelVideoPreparation;
   externalMetadata?: boolean;
 }>();
 
@@ -143,6 +156,12 @@ const { t } = useI18n();
 const appStore = useAppStore();
 const videoMuteStorage = createVideoMuteStorage(() => appStore.videoMuted);
 const playerElement = ref<MediaPlayerElement | null>(null);
+const streaming = useLocalVideoPlayback(() => props.item.videoPlaybackUrl, {
+  active: () => props.active, autoplay: () => true,
+  next: () => props.nextVideoPlaybackUrl,
+  reelPreparation: props.videoPreparation,
+  onAutoplayBlocked: () => { isPaused.value = true; }
+});
 useNativeVideoMuteSync(playerElement, () => appStore.videoMuted, (muted) => appStore.setVideoMuted(muted));
 const isPaused = ref(false);
 const isUsingOriginalFallback = ref(false);
@@ -208,6 +227,7 @@ function syncMuted(player: MediaPlayerElement, muted: boolean) {
 }
 
 async function syncPlayback() {
+  if (streaming.source.value) return;
   const player = playerElement.value;
   if (!player) {
     return;
@@ -252,7 +272,7 @@ function bindPlayerEventListeners(player: MediaPlayerElement | null) {
   }
 
   const handleReady = () => {
-    void syncPlayback();
+    if (!props.item.videoPlaybackUrl) void syncPlayback();
   };
   const handlePlay = () => {
     isPaused.value = false;
@@ -295,7 +315,8 @@ async function toggleSound() {
   syncMuted(player, nextMuted);
 
   if (player.paused) {
-    await syncPlayback();
+    if (streaming.source.value) await streaming.play();
+    else await syncPlayback();
   }
 }
 
@@ -310,7 +331,8 @@ async function handleSurfaceClick(event?: MouseEvent) {
   }
 
   if (player.paused) {
-    await syncPlayback();
+    if (streaming.source.value) await streaming.play();
+    else await syncPlayback();
     return;
   }
 

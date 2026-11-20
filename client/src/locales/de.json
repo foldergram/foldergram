@@ -1,4 +1,52 @@
 {
+  "streamingVideo": {
+    "loading": "Video wird vorbereitet…",
+    "unavailable": "Dieses Video konnte nicht abgespielt werden.",
+    "retry": "Wiedergabe erneut versuchen",
+    "reclamation": {
+      "action": "Auf Streaming umstellen und Videovorschauen entfernen",
+      "description": "Gib Speicherplatz frei, indem du erzeugte Videokopien entfernst.",
+      "preserved": "Foldergram behält Originale, Fotos, Miniaturbilder, die Bibliotheksstruktur und Immich-Daten.",
+      "playbackNote": "Start und Spulen können während der Konvertierung länger dauern. Neue Importe folgen weiterhin VIDEO_DELIVERY_MODE.",
+      "confirmTitle": "Auf Streaming umstellen?",
+      "confirmAction": "Vorschauen entfernen",
+      "confirmPending": "Bereinigung wird gestartet…",
+      "videosToSwitch": "Videos zum Umstellen",
+      "previewsToRemove": "Vorschauen zum Entfernen",
+      "estimatedSavings": "Geschätzter Speichergewinn",
+      "source": "Lokale Quelle",
+      "allSources": "Alle lokalen Quellen",
+      "assess": "Vorschauen prüfen",
+      "scope": "Quellen: {names}",
+      "noEligibleVideos": "In diesen Quellen wurden keine geeigneten Videos oder Vorschauen gefunden.",
+      "spaceFreed": "{bytes} freigegeben",
+      "completedChanges": "{files} Vorschauen entfernt · {videos} Videos auf Streaming umgestellt",
+      "dismissResult": "Ergebnis der Bereinigung schließen",
+      "estimate": "{checked} Videos geprüft. {videos} können auf Streaming umgestellt werden. {files} Vorschauen könnten {bytes} freigeben.",
+      "result": "{videos} Videos umgestellt. {files} Vorschauen entfernt und {bytes} freigegeben.",
+      "cancel": "Vorgang abbrechen",
+      "resume": "Fortsetzen oder erneut versuchen",
+      "status": {
+        "assessing": "Vorschauen werden geprüft…",
+        "ready": "Prüfung abgeschlossen",
+        "running": "Videos werden umgestellt und Vorschauen entfernt…",
+        "complete": "Vorgang abgeschlossen",
+        "cancelled": "Vorgang abgebrochen",
+        "interrupted": "Vorgang unterbrochen"
+      },
+      "reason": {
+        "originalUnavailable": "Original nicht verfügbar oder geändert",
+        "unsupported": "Konvertierung nicht unterstützt",
+        "sharedPreview": "Vorschau wird von einem anderen Element verwendet",
+        "unsafePreview": "Unsicherer Vorschaupfad",
+        "unreadablePreview": "Vorschau nicht lesbar",
+        "inUse": "Vorschau wird verwendet",
+        "busy": "Bibliothekswartung läuft",
+        "removalFailed": "Vorschau konnte nicht entfernt werden",
+        "changed": "Video wurde seit der Prüfung geändert"
+      }
+    }
+  },
   "displayPreferences": {
     "appearance": {
       "label": "Darstellung",

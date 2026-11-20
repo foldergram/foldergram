@@ -1324,6 +1324,11 @@
             <p v-if="thumbnailRebuildError" class="m-0 px-4 py-[0.85rem] border border-[rgba(214,48,49,0.24)] rounded-[0.9rem] text-[#c0392b] bg-[rgba(214,48,49,0.08)]">{{ thumbnailRebuildError }}</p>
           </section>
 
+          <VideoPreviewReclamation
+            v-if="authStore.capabilities.canManageLibrary && authStore.publicDemoMode === false"
+            @changed="refreshAfterVideoReclamation"
+          />
+
           <!-- Danger Zone -->
           <div class="border border-[rgba(214,48,49,0.3)] rounded-[1.05rem] overflow-hidden" :class="highlightRebuildAction ? 'ring-2 ring-[color-mix(in_srgb,var(--accent)_45%,transparent_55%)]' : ''">
             <div class="bg-[rgba(214,48,49,0.04)] px-6 py-4 border-b border-[rgba(214,48,49,0.1)] flex items-center justify-between">
@@ -1454,6 +1459,8 @@ import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
 
 import SourceSettings from '../components/SourceSettings.vue';
+import VideoPreviewReclamation from '../components/VideoPreviewReclamation.vue';
+import { useReelsStore } from '../stores/reels';
 import AppearanceSettings from '../components/AppearanceSettings.vue';
 import ConfirmDialog from '../components/ConfirmDialog.vue';
 import {
@@ -3214,6 +3221,16 @@ async function runLibraryRebuild() {
   } finally {
     rebuilding.value = false;
   }
+}
+
+async function refreshAfterVideoReclamation() {
+  useReelsStore().reset();
+  await Promise.allSettled([
+    appStore.fetchStats({ background: true }),
+    foldersStore.fetchFolders(true),
+    feedStore.loadInitial(true),
+    momentsStore.fetchMoments(true)
+  ]);
 }
 
 async function runThumbnailRebuild() {

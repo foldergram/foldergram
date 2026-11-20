@@ -6,7 +6,7 @@
     @scroll="handleScroll"
   >
     <div
-      v-for="item in items"
+      v-for="(item, index) in items"
       :key="item.id"
       :ref="setPanelRef(item.id)"
       class="reel-deck__panel"
@@ -15,6 +15,8 @@
         :item="item"
         :folder="folderLookup.get(item.folderSlug) ?? null"
         :active="item.id === activeReelId"
+        :video-preparation="videoPreparation"
+        :next-video-playback-url="item.id === activeReelId ? items[index + 1]?.videoPlaybackUrl ?? undefined : undefined"
         :external-metadata="externalMetadata"
       >
         <template v-if="item.id === activeReelId" #mobile-action-rail>
@@ -38,6 +40,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type Compon
 import { useI18n } from 'vue-i18n';
 
 import type { FeedItem, FolderSummary } from '../types/api';
+import { ReelVideoPreparation } from '../utils/local-video-provider';
 import { getActiveReelId, shouldPrefetchReels } from '../utils/reels';
 import ReelPlayerCard from './ReelPlayerCard.vue';
 
@@ -58,6 +61,7 @@ const emit = defineEmits<{
 
 const scrollerElement = ref<HTMLElement | null>(null);
 const panelElements = new Map<number, HTMLElement>();
+const videoPreparation = new ReelVideoPreparation();
 const folderLookup = computed(() => new Map(props.folders.map((folder) => [folder.slug, folder])));
 
 let resizeObserver: ResizeObserver | null = null;
