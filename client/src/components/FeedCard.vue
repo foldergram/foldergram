@@ -456,7 +456,7 @@ import { resolveDisplayCaption } from '../utils/caption';
 import { formatFolderTitle } from '../utils/folder-titles';
 import { formatMediaDuration, formatVideoTimestamp } from '../utils/media';
 import { resolveFeedAspectRatio } from '../utils/media-layout';
-import { getOriginalMediaDownloadUrl, getOriginalMediaUrl, isHeicFilename } from '../utils/original-media';
+import { getOriginalMediaDownloadUrl, getOriginalMediaUrl, isHeicMedia } from '../utils/original-media';
 import { applyVideoMutePreference, createVideoMuteStorage } from '../utils/video-mute';
 import Avatar from './Avatar.vue';
 import CarouselMediaStage from './CarouselMediaStage.vue';
@@ -626,7 +626,7 @@ const activeMediaImageId = computed(() =>
 );
 const originalMediaUrl = computed(() => getOriginalMediaUrl(activeMediaImageId.value));
 const isActiveLocalHeic = computed(() => props.item.sourceKind !== 'immich'
-  && isHeicFilename(props.item.mediaItems?.find(media => media.imageId === activeMediaImageId.value)?.filename ?? props.item.filename));
+  && isHeicMedia(props.item.mediaItems?.find(media => media.imageId === activeMediaImageId.value) ?? { filename: props.item.filename }));
 const downloadOriginalMediaUrl = computed(() => getOriginalMediaDownloadUrl(activeMediaImageId.value));
 const homeVideoSource = computed<PlayerSrc>(() => ({
   src: props.item.previewUrl,

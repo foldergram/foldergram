@@ -611,7 +611,7 @@
   import { useFoldersStore } from "../stores/folders"
   import { resolveDisplayCaption } from "../utils/caption"
   import { formatFolderTitle } from "../utils/folder-titles"
-  import { getImageViewingFallback, getOriginalMediaDownloadUrl, getOriginalMediaUrl, isHeicFilename, needsWebpViewing } from "../utils/original-media"
+  import { getImageViewingFallback, getOriginalMediaDownloadUrl, getOriginalMediaUrl, isHeicMedia, needsWebpViewing } from "../utils/original-media"
   import { applyVideoMutePreference, createVideoMuteStorage } from "../utils/video-mute"
   import Avatar from "./Avatar.vue"
   import CarouselMediaStage from "./CarouselMediaStage.vue"
@@ -673,7 +673,7 @@
   const activeMediaItem = computed(() => isCarousel.value ? props.image?.mediaItems?.[carouselIndex.value] ?? null : null)
   const activeMediaImageId = computed(() => activeMediaItem.value?.imageId ?? props.image?.mediaItems?.[0]?.imageId ?? props.image?.id ?? null)
   const isActiveLocalHeic = computed(() => props.image?.sourceKind !== 'immich'
-    && isHeicFilename(activeMediaItem.value?.filename ?? props.image?.filename ?? ""))
+    && isHeicMedia(activeMediaItem.value ?? props.image ?? { filename: "" }))
   const activeMediaWidth = computed(() => activeMediaItem.value?.width ?? props.image?.width ?? 0)
   const activeMediaHeight = computed(() => activeMediaItem.value?.height ?? props.image?.height ?? 0)
   const activeMediaDurationMs = computed(() => activeMediaItem.value?.durationMs ?? props.image?.durationMs ?? null)

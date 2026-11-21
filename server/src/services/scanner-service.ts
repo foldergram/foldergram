@@ -58,7 +58,11 @@ import {
   getMediaTypeFromExtension,
   getMimeTypeFromExtension,
   getStableSortTimestamp,
+  hasHeicContent,
+  HEIC_CONTENT_CHECK_EXTENSIONS,
   isHeicFile,
+  isHeicImage,
+  isHeicMimeType,
   isSupportedMediaFile
 } from '../utils/image-utils.js';
 import { generateAssetKey, getPreviewPathForAssetKey, getThumbnailPathForAssetKey } from '../utils/derivative-paths.js';
@@ -118,6 +122,8 @@ interface ScanSummary {
 interface DerivativeJob {
   sourceId?: number;
   inspectedHeicMetadata?: MediaMetadata;
+  /** HEIC by extension or by content; unset means decide by extension. */
+  heic?: boolean;
   absolutePath: string;
   relativePath: string;
   folderId: number;
@@ -126,6 +132,10 @@ interface DerivativeJob {
   force: boolean;
   kind: 'all' | 'thumbnail';
   videoPlaybackSource?: VideoPlaybackSource | null;
+}
+
+function isHeicJob(job: DerivativeJob): boolean {
+  return job.heic ?? isHeicFile(job.relativePath);
 }
 
 interface ProcessedFileSummary {
@@ -2113,6 +2123,9 @@ class ScannerService {
     const scanFile = async (file: IndexedFileCandidate) => {
       try {
         const result = await this.processImageFile(folder, file, options, context);
+        if (!result) {
+          return;
+        }
 
         if (result.status === 'new') {
           newFiles += 1;
@@ -2269,6 +2282,7 @@ class ScannerService {
       );
       const derivativeJobs: DerivativeJob[] = indexedImages.map((image) => ({
         sourceId: image.source_id,
+        heic: isHeicImage(image),
         absolutePath: resolveOriginalPath(image.relative_path, image.source_id, true),
         relativePath: image.relative_path,
         folderId: image.folder_id,
@@ -3128,10 +3142,10 @@ class ScannerService {
           currentFolder: getSourceFolderPathFromRelativePath(job.relativePath)
         });
 
-        const indexedHeic = isHeicFile(job.relativePath)
+        const indexedHeic = isHeicJob(job)
           ? imageRepository.getByRelativePath(job.relativePath, job.sourceId)
           : undefined;
-        if (isHeicFile(job.relativePath) && !indexedHeic) {
+        if (isHeicJob(job) && !indexedHeic) {
           throw new HeicError('stale', 'The indexed HEIC image is no longer available.');
         }
         const heicSource = indexedHeic
@@ -3196,14 +3210,14 @@ class ScannerService {
 
     if (appConfig.scanMediaErrorMode === 'fail') {
       for (const job of jobs) {
-        await this.scanTask(() => isHeicFile(job.relativePath)
+        await this.scanTask(() => isHeicJob(job)
           ? processJob(job)
           : derivativeWorkLimit(() => processJob(job)));
       }
     } else {
       const regularJobs: DerivativeJob[] = [];
       const heicJobs: DerivativeJob[] = [];
-      for (const job of jobs) (isHeicFile(job.relativePath) ? heicJobs : regularJobs).push(job);
+      for (const job of jobs) (isHeicJob(job) ? heicJobs : regularJobs).push(job);
 
       // Pull one job per runner. An entire scan in the shared limiter would
       // make HEIC admission and on-demand work wait behind the scan backlog.
@@ -3430,18 +3444,36 @@ class ScannerService {
     file: IndexedFileCandidate,
     options: FullScanOptions,
     context: ImageProcessingContext
-  ): Promise<ProcessedFileSummary> {
+  ): Promise<ProcessedFileSummary | null> {
     const fingerprint = createFingerprint(file.relativePath, file.stats.size, file.stats.mtimeMs);
     const extension = path.extname(file.absolutePath).toLowerCase();
     const mediaType = getMediaTypeFromExtension(extension);
-    const localHeic = isHeicFile(file.relativePath);
+    const existingByPath = imageRepository.getByRelativePath(file.relativePath, context.source.id);
+    // A HEIC photo can carry a JPEG extension (`IMG_1234.HEIC.jpeg`). Check the
+    // header of new or changed JPEG files; unchanged rows keep the stored MIME type.
+    const contentHeic = HEIC_CONTENT_CHECK_EXTENSIONS.has(extension) && (
+      existingByPath?.checksum_or_fingerprint === fingerprint
+        ? isHeicMimeType(existingByPath.mime_type)
+        : await hasHeicContent(file.absolutePath)
+    );
+    if (
+      contentHeic
+      && !context.heicImportEnabled
+      && !existingByPath
+      && !context.rebuildDerivativeReuseIndex?.byRelativePath.has(file.relativePath)
+    ) {
+      // Same rule as discovery applies to `.heic` files: with HEIC imports off,
+      // new HEIC files are not indexed, and indexed ones stay available.
+      return null;
+    }
+    const localHeic = isHeicFile(file.relativePath) || contentHeic;
+    const mimeType = contentHeic ? 'image/heic' : getMimeTypeFromExtension(extension);
     const metadataOptions = {
       fileSize: file.stats.size,
       ...(localHeic ? {
         heicSource: heicScanSource(context.source, context.root, file.relativePath, file.absolutePath, fingerprint)
       } : {})
     };
-    const existingByPath = imageRepository.getByRelativePath(file.relativePath, context.source.id);
     const moveCandidate = existingByPath ? undefined : await this.findMoveCandidate(file, extension, context);
     const rebuildDerivativeReuseCandidate = existingByPath || moveCandidate
       ? undefined
@@ -3556,7 +3588,7 @@ class ScannerService {
           height: metadataHeight,
           displayOrientation: metadataDisplayOrientation,
           mediaType,
-          mimeType: getMimeTypeFromExtension(extension),
+          mimeType,
           durationMs: metadataDurationMs,
           isAnimated: metadataIsAnimated,
           fingerprint,
@@ -3579,6 +3611,7 @@ class ScannerService {
           ? (shouldQueueDerivativeJobForStatus('unchanged', options) || needsPlaybackStrategyBackfill
             ? {
                 sourceId: context.source.id,
+                heic: localHeic,
                 absolutePath: file.absolutePath,
                 relativePath: file.relativePath,
                 folderId: folder.id,
@@ -3669,7 +3702,7 @@ class ScannerService {
         height: metadata.height,
         displayOrientation: mediaType === 'image' ? (metadata.displayOrientation ?? 1) : null,
         mediaType,
-        mimeType: getMimeTypeFromExtension(extension),
+        mimeType,
         durationMs: metadata.durationMs,
         isAnimated: metadata.isAnimated,
         fingerprint,
@@ -3693,7 +3726,7 @@ class ScannerService {
         height: metadata.height,
         displayOrientation: mediaType === 'image' ? (metadata.displayOrientation ?? 1) : null,
         mediaType,
-        mimeType: getMimeTypeFromExtension(extension),
+        mimeType,
         durationMs: metadata.durationMs,
         isAnimated: metadata.isAnimated,
         fingerprint,
@@ -3716,6 +3749,7 @@ class ScannerService {
         ? null
         : {
             sourceId: context.source.id,
+            heic: localHeic,
             inspectedHeicMetadata: localHeic ? metadata : undefined,
             absolutePath: file.absolutePath,
             relativePath: file.relativePath,

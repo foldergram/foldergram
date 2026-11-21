@@ -129,6 +129,14 @@ Immich uses its own metadata and media endpoints.
 If Settings shows **Managed by environment**, see the
 [HEIC environment override](./configuration.md#local-heic-and-heif-imports).
 
+Some devices and exports save HEIC photos with a JPEG extension, such as
+`IMG_1234.HEIC.jpeg`. The scan reads the first bytes of new or changed `.jpg`
+and `.jpeg` files and treats a file whose header declares a HEVC still image
+(`heic` or `heix` brand) as HEIC. AVIF files and image sequences are not
+affected. These photos follow the same import setting, limits, and WebP viewing
+as `.heic` files, and keep their original name and bytes. Their original
+downloads use the `image/heic` MIME type.
+
 The prototype accepts 8-bit SDR HEVC stills, including grid-composed stills
 and files with recognized thumbnail or auxiliary items. It renders the primary
 image to sRGB WebP. The worker handles container orientation first and uses

@@ -12,7 +12,7 @@ import { authService } from '../services/auth-service.js';
 import { galleryService } from '../services/gallery-service.js';
 import { indexedHeicSource } from '../services/heic/indexed-source.js';
 import { derivativeWorkLimit, HeicError } from '../services/heic/service.js';
-import { isHeicFile } from '../utils/image-utils.js';
+import { isHeicImage } from '../utils/image-utils.js';
 import { MaintenancePausedError, maintenanceOperationLock } from '../services/maintenance-operation-lock.js';
 import { resolveOriginalPath } from '../utils/media-paths.js';
 import { isImmichSource, isLocalOriginalUnavailable, isSourceVisible } from '../sources/local-source.js';
@@ -67,7 +67,7 @@ function findCurrentImageRecord(
     return null;
   }
   if (isImmichSource(imageRecord.source_id) || !isSourceVisible(imageRecord.source_id)) return null;
-  if (isHeicFile(imageRecord.relative_path) && (imageRecord.is_deleted || (imageRecord.is_trashed && !allowTrashed))) return null;
+  if (isHeicImage(imageRecord) && (imageRecord.is_deleted || (imageRecord.is_trashed && !allowTrashed))) return null;
   return imageRecord;
 }
 
@@ -112,7 +112,7 @@ function queueLazyGeneration(
   allowTrashed = false
 ): Promise<void> {
   const expectedImageId = initialImage.id;
-  const isHeic = isHeicFile(initialImage.relative_path);
+  const isHeic = isHeicImage(initialImage);
   const key = JSON.stringify([absoluteOutputPath, expectedImageId, initialImage.checksum_or_fingerprint, allowTrashed]);
   const existingGeneration = inflightGenerations.get(key);
   if (existingGeneration) return existingGeneration;
@@ -289,7 +289,7 @@ async function serveOrGenerate(
     return;
   }
 
-  if ((!generateMissing && !isHeicFile(initialImageRecord.relative_path)) || (kind === 'preview' && isEligibleNormalVideo(initialImageRecord))) {
+  if ((!generateMissing && !isHeicImage(initialImageRecord)) || (kind === 'preview' && isEligibleNormalVideo(initialImageRecord))) {
     sendDerivativeNotFound(response);
     return;
   }
