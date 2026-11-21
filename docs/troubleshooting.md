@@ -207,10 +207,8 @@ after the retention window on a later successful full scan.
 That is intentional so temporary share outages or accidental moves do not
 immediately delete cached derivatives.
 
-Obsolete playable video previews for qualifying direct-playback videos are a
-separate cleanup. **Scan and repair derivatives** removes them after validating
-the current source, live derivative references, and active share requirements.
-Quick scans do not remove them.
+Scans keep saved previews for unchanged videos. To free up space, follow the
+[preview cleanup steps](./media-processing.md#switch-existing-local-videos-to-streaming).
 
 ## A scan failed or completed with errors on a corrupt or unreadable media file
 
@@ -251,28 +249,29 @@ regeneration; Foldergram does not probe every cached video on each request.
 **Regenerate Thumbnails** only rebuilds thumbnails and video posters, so it
 does not repair a nonempty corrupt video preview.
 
-A missing video preview is expected for a qualifying direct-playback video.
-Normal playback uses the original, and the old preview URL resolves to it.
-
 See [Video preview generation](/media-processing#video-preview-generation)
-for audio selection, output validation, and cache behavior.
+for details on saved MP4 previews.
 
-## A video preview disappears after a repair scan
+## Streaming playback starts slowly or fails
 
-If the video qualifies for direct playback, its generated preview is no longer
-needed for normal playback. **Scan and repair derivatives** removes only that
-generated preview file after validating the source and share requirements.
-Thumbnails, originals, and indexed identities are preserved.
+Videos that need conversion can take a little longer to start or seek. If the
+player offers **Retry playback**, try that first.
 
-If a folder share still needs scoped preview media, the preview is retained or
-recreated. Enabling sharing later also works without a library rebuild because
-the scoped share route can generate the required preview on authorized first
-access.
+- Check that the original video is still available and its gallery drive is mounted.
+- For source installs, make sure the server can run both `ffmpeg` and `ffprobe`.
+  Docker includes them. HDR conversion also needs the `zscale` and `tonemap` filters.
+- If several videos are playing, wait for an encoder to free up. If the cache
+  is full, check the available disk space and the [video playback settings](./configuration.md#video-playback).
+- If you still have the app open from before an upgrade, reload the page.
 
-If you later run an older Foldergram version that expects generated video
-previews by default, use **Scan and repair derivatives** to regenerate them.
-Lazy mode can also recover them on demand. Originals and indexed identities are
-not affected.
+## A video preview is missing
+
+Streaming videos use the original or temporary video segments, so there may be
+no saved MP4 preview. Some older videos also play their compatible MP4 originals
+directly.
+
+If the video still needs a saved preview, use **Scan and repair derivatives**
+in eager mode. In lazy mode, open the video to generate a missing preview.
 
 ## Moments are missing and highlights appear instead
 
@@ -336,20 +335,9 @@ not require these tools.
 
 ## A video opens from the original file instead of a generated preview
 
-That is a normal optimization. Foldergram streams the original file directly
-when the video is already suitable for browser playback under the current size
-and codec rules.
-
-The current policy requires a compatible `.mp4` with H.264 video, `yuv420p`
-pixels, AAC or no audio, a known size of at most `24 MiB`, and a known
-orientation-correct display width of at most `1500` pixels. Larger compatible
-videos use a generated preview and can still offer the HD original switch.
-
-Folder-share visitors never receive ordinary original access. Shared playback
-continues to use scoped preview media, which may be generated even for a video
-that normally plays from its original.
-
-See [Media Processing](/media-processing) for the exact conditions.
+Streaming uses the original when the browser can play it and the connection
+can handle it. Older videos and videos imported in preview mode can also play
+small, compatible MP4s directly. See the [video playback rules](./media-processing.md#direct-original-video-playback-for-legacy-and-preview-policies).
 
 ## Video seeking is slow or playback stalls behind a reverse proxy
 
@@ -362,7 +350,7 @@ If seeking works directly but fails through a reverse proxy:
 - forward `Range`, `If-Range`, `If-None-Match`, `If-Modified-Since`, `Cookie`, and `Host`
 - allow `206 Partial Content` responses through
 - avoid buffering long video responses when the proxy supports streaming controls
-- remove rules that ignore Foldergram's `Cache-Control` headers on protected endpoints
+- pass streaming requests through to Foldergram and respect their `private, no-store` headers
 - do not cache API responses by URL alone when cookies or folder-share grants affect access
 - do not alias `/thumbnails` or `/previews` to their filesystem directories without equivalent authorization
 - test against Foldergram directly to separate proxy behavior from the app

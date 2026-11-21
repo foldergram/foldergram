@@ -6,6 +6,11 @@ services:
     environment:
       IMAGE_DETAIL_SOURCE: preview
       DERIVATIVE_MODE: eager
+      VIDEO_DELIVERY_MODE: ${VIDEO_DELIVERY_MODE:-streaming}
+      HLS_CACHE_DIR: ${HLS_CACHE_DIR:-/app/data/hls-cache}
+      HLS_CACHE_MAX_BYTES: "${HLS_CACHE_MAX_BYTES:-2147483648}"
+      HLS_CACHE_MAX_AGE_HOURS: "${HLS_CACHE_MAX_AGE_HOURS:-24}"
+      HLS_TRANSCODE_CONCURRENCY: "${HLS_TRANSCODE_CONCURRENCY:-1}"
       # Optional Immich integration: see docs/immich.md for explicit roots/albums and Docker secrets.
       # IMMICH_URL: http://immich-server:2283
       # IMMICH_API_KEY_FILE: /run/secrets/immich_api_key
@@ -24,4 +29,5 @@ services:
       - ./data/db:/app/data/db
       - ./data/thumbnails:/app/data/thumbnails
       - ./data/previews:/app/data/previews
+      - ./data/hls-cache:/app/data/hls-cache
     restart: unless-stopped

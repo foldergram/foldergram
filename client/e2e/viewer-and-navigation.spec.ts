@@ -1,4 +1,8 @@
-import { readFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { promisify } from 'node:util';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
 const folder = {
@@ -779,6 +783,869 @@ test('home videos stop playing off screen after leaving fullscreen', async ({ pa
   }
 });
 
+test('Home starts playback only for the selected visible streaming video', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 1050 });
+  await mockGallery(page, 'light');
+  const clip = await readFile(new URL('./fixtures/feed-video.mp4', import.meta.url));
+  const items = [31, 32].map(id => ({
+    ...panorama, id, mediaType: 'video', filename: 'stream-' + id + '.mp4',
+    width: 640, height: 180, durationMs: 1000, videoPlaybackUrl: '/api/videos/' + id + '/playback'
+  }));
+  await page.route('**/api/feed?*', route => route.fulfill({
+    json: { items, page: 1, limit: 24, total: 2, hasMore: false }
+  }));
+
+  await page.route(/\/api\/videos\/(31|32)\/playback$/, route =>
+    route.fulfill({ json: {
+      duration: 1, width: 640, height: 180, bitrate: 200_000,
+      original: { url: '/mock-active-stream.mp4', type: 'video/mp4' }
+    } }));
+  await page.route('**/mock-active-stream.mp4', route => route.fulfill({ contentType: 'video/mp4', body: clip }));
+  await page.goto('/');
+  const videos = page.locator('.feed-card__player video');
+  await expect(videos).toHaveCount(2);
+  // The neighboring card's cover loads independently of playback ownership.
+  await expect.poll(() => page.locator('.feed-card__player .local-video-feedback__cover').last()
+    .evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
+  await expect(videos.first()).toBeInViewport({ ratio: 0.4 });
+  await expect(videos.last()).toBeInViewport({ ratio: 0.4 });
+  await expect.poll(() => videos.evaluateAll(elements => elements.filter(element =>
+    !(element as HTMLVideoElement).paused && (element as HTMLVideoElement).currentTime > 0.3).length)).toBe(1);
+  const maximumPlaying = await videos.evaluateAll(async elements => {
+    const until = performance.now() + 750;
+    let maximum = 0;
+    while (performance.now() < until) {
+      maximum = Math.max(maximum, elements.filter(element => !(element as HTMLVideoElement).paused).length);
+      await new Promise(requestAnimationFrame);
+    }
+    return maximum;
+  });
+  expect(maximumPlaying).toBe(1);
+  await page.screenshot({ path: test.info().outputPath('streaming-home-desktop.png') });
+  await page.setViewportSize({ width: 390, height: 450 });
+  await videos.last().evaluate(media => media.scrollIntoView({ block: 'center' }));
+  await expect(videos.last()).toHaveJSProperty('paused', false);
+  await expect(videos.first()).toHaveJSProperty('paused', true);
+  await page.screenshot({ path: test.info().outputPath('streaming-home-mobile.png') });
+});
+
+for (const viewport of [{ width: 1280, height: 950 }, { width: 390, height: 680 }]) {
+  test(`streaming failure shows the cover and a working Retry at ${viewport.width}px`, async ({ page }) => {
+    try {
+      await promisify(execFile)('ffmpeg', ['-version']);
+    } catch {
+      test.skip(true, 'FFmpeg is required for the generated HLS fixture.');
+    }
+    const temp = await mkdtemp(join(tmpdir(), 'foldergram-playwright-retry-'));
+    try {
+      await promisify(execFile)('ffmpeg', [
+        '-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=s=96x64:r=10:d=3',
+        '-c:v', 'libx264', '-threads', '1', '-pix_fmt', 'yuv420p', '-hls_time', '3',
+        '-hls_playlist_type', 'vod', '-hls_segment_filename', join(temp, 'segment-%03d.ts'),
+        join(temp, 'stream.m3u8')
+      ]);
+      const manifest = await readFile(join(temp, 'stream.m3u8'));
+      const segment = await readFile(join(temp, 'segment-000.ts'));
+      await page.setViewportSize(viewport);
+      await mockGallery(page, 'light');
+
+      const endpoint = '/api/videos/37/playback';
+      const thumbnailUrl = '/test-streaming-cover.svg';
+      const item = { ...panorama, id: 37, filename: 'retry.mkv', mediaType: 'video', width: 640, height: 280,
+        durationMs: 3000, videoPlaybackUrl: endpoint, thumbnailUrl };
+      await page.route('**/api/feed?*', route => route.fulfill({
+        json: { items: [item], page: 1, limit: 24, total: 1, hasMore: false }
+      }));
+      await page.route('**' + thumbnailUrl, route => route.fulfill({
+        contentType: 'image/svg+xml',
+        body: '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="280"><rect width="640" height="280" fill="#40658a"/></svg>'
+      }));
+
+      const first = Promise.withResolvers<void>();
+      const profiles: string[] = [];
+      await page.route('**' + endpoint, route => route.fulfill({
+        json: { original: null, width: 96, height: 64, duration: 3, bitrate: 150_000 }
+      }));
+      const window = endpoint + '/sessions/mock';
+      await page.route('**' + endpoint + '/sessions', async route => {
+        profiles.push(route.request().postDataJSON().profile);
+        if (profiles.length === 1) await first.promise;
+        if (profiles.length <= 2) {
+          await route.fulfill({ status: 422, json: { message: 'The conversion failed.' } });
+          return;
+        }
+        await route.fulfill({ json: { offset: 0, duration: 3, window: 3, profile: 'standard',
+          url: window + '/stream.m3u8', releaseUrl: window + '/release' } });
+      });
+      await page.route('**' + window + '/stream.m3u8', route => route.fulfill({
+        contentType: 'application/vnd.apple.mpegurl', body: manifest
+      }));
+      await page.route('**' + window + '/segment-000.ts', route => route.fulfill({ contentType: 'video/mp2t', body: segment }));
+      await page.route('**' + window + '/release', route => route.fulfill({ status: 204 }));
+
+      await page.goto('/');
+      const player = page.locator('.feed-card__player');
+      await player.scrollIntoViewIfNeeded();
+      const cover = player.locator('.local-video-feedback__cover');
+      try {
+        await expect(cover).toBeVisible();
+        await expect.poll(() => cover.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(640);
+        await expect(player.getByRole('status', { name: 'Preparing video…' })).toBeVisible();
+      } finally {
+        first.resolve();
+      }
+      await expect(player.getByRole('alert')).toHaveText('This video could not be played.');
+      await expect(cover).toBeVisible();
+      await expect(player.locator('.video-progress-footer')).toBeVisible();
+      const retry = player.getByRole('button', { name: 'Retry playback' });
+      await expect(retry).toBeInViewport();
+      const retryBox = (await retry.boundingBox())!;
+      const timeBox = (await player.locator('.video-progress-footer__time').boundingBox())!;
+      expect(retryBox.y + retryBox.height).toBeLessThan(timeBox.y);
+      await page.screenshot({ path: test.info().outputPath('streaming-retry.png') });
+      await retry.focus();
+      await page.keyboard.press('Enter');
+      await expect.poll(() => profiles).toEqual(['standard', 'low', 'standard']);
+      await expect(player.getByRole('alert')).toHaveCount(0);
+      await expect.poll(() => player.locator('video').evaluate((video: HTMLVideoElement) => video.currentTime)).toBeGreaterThan(0.1);
+      await expect(cover).toBeHidden();
+    } finally {
+      await rm(temp, { recursive: true, force: true });
+    }
+  });
+}
+
+test('a streaming Home carousel waits for Play or fullscreen', async ({ page }) => {
+  await mockGallery(page, 'light');
+  const endpoint = '/api/videos/38/playback';
+  const clip = await readFile(new URL('./fixtures/feed-video.mp4', import.meta.url));
+  const item = { ...panorama, id: 38, postType: 'carousel', mediaCount: 2, mediaItems: [
+    { ...panorama, imageId: 38, position: 1, mediaType: 'video', videoPlaybackUrl: endpoint, filename: 'carousel.mp4' },
+    { ...panorama, imageId: 39, position: 2 }
+  ] };
+  await page.route('**/api/feed?*', route => route.fulfill({
+    json: { items: [item], page: 1, limit: 24, total: 1, hasMore: false }
+  }));
+  let metadataRequests = 0;
+  await page.route('**' + endpoint, route => {
+    metadataRequests++;
+    return route.fulfill({ json: { duration: 1, width: 640, height: 360, bitrate: 200_000,
+      original: { url: '/mock-carousel.mp4', type: 'video/mp4' } } });
+  });
+  await page.route('**/mock-carousel.mp4', route => route.fulfill({ contentType: 'video/mp4', body: clip }));
+  await page.goto('/');
+  const player = page.getByRole('region', { name: 'Video Player - carousel.mp4' });
+  await player.scrollIntoViewIfNeeded();
+  await expect(player.locator('video')).toBeVisible();
+  // Let the ordinary 200 ms auto-start interval pass with the card in view.
+  await page.waitForTimeout(300);
+  expect(metadataRequests).toBe(0);
+
+  await player.locator('media-play-button').click();
+  await expect.poll(() => metadataRequests).toBe(1);
+  await expect.poll(() => player.locator('video').evaluate((video: HTMLVideoElement) => video.currentTime)).toBeGreaterThan(0.1);
+
+  await page.reload();
+  await player.scrollIntoViewIfNeeded();
+  await expect(player.locator('video')).toBeVisible();
+  await player.locator('media-fullscreen-button').click();
+  await expect(player).toHaveAttribute('data-fullscreen', '');
+  await expect.poll(() => metadataRequests).toBe(2);
+});
+
+test('fullscreen transfers streaming Home playback to the inactive card and releases ownership on exit', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 1050 });
+  await mockGallery(page, 'light');
+  const clip = await readFile(new URL('./fixtures/feed-video.mp4', import.meta.url));
+  const items = [31, 32].map(id => ({ ...panorama, id, mediaType: 'video', filename: `stream-${id}.mp4`,
+    width: 640, height: 180, durationMs: 1000, videoPlaybackUrl: `/api/videos/${id}/playback` }));
+  await page.route('**/api/feed?*', route => route.fulfill({
+    json: { items, page: 1, limit: 24, total: 2, hasMore: false }
+  }));
+  await page.route(/\/api\/videos\/(31|32)\/playback$/, route => route.fulfill({ json: {
+    duration: 1, width: 640, height: 180, bitrate: 200_000,
+    original: { url: '/mock-fullscreen-stream.mp4', type: 'video/mp4' }
+  } }));
+  await page.route('**/mock-fullscreen-stream.mp4', route => route.fulfill({ contentType: 'video/mp4', body: clip }));
+  await page.goto('/');
+  const players = page.locator('.feed-card__player');
+  await expect(players).toHaveCount(2);
+  await expect.poll(() => players.locator('video').evaluateAll(elements =>
+    elements.filter(element => !(element as HTMLVideoElement).paused).length)).toBe(1);
+  const inactiveIndex = await players.evaluateAll(elements => elements.findIndex(element =>
+    (element.querySelector('video') as HTMLVideoElement).paused));
+  const inactive = players.nth(inactiveIndex);
+  const previous = players.nth(1 - inactiveIndex);
+  await inactive.evaluate((element: HTMLElement & { enterFullscreen(target: string): Promise<void> }) => element.enterFullscreen('media'));
+  await expect(inactive).toHaveAttribute('data-fullscreen', '');
+  await expect(previous.locator('video')).toHaveJSProperty('paused', true);
+  await expect(inactive.locator('video')).toHaveJSProperty('paused', false);
+  // Exercise the restored controls after fullscreen has taken playback ownership.
+  await inactive.locator('media-play-button').click();
+  await expect(inactive.locator('video')).toHaveJSProperty('paused', true);
+  await inactive.locator('media-play-button').click();
+  await expect(inactive.locator('video')).toHaveJSProperty('paused', false);
+  await expect.poll(() => inactive.locator('video').evaluate((media: HTMLVideoElement) => media.currentTime)).toBeGreaterThan(0.2);
+  await inactive.locator('media-mute-button').click();
+  await expect(inactive.locator('video')).toHaveJSProperty('muted', false);
+  await inactive.locator('media-fullscreen-button').click();
+  await expect(inactive).not.toHaveAttribute('data-fullscreen', '');
+  await expect.poll(() => players.locator('video').evaluateAll(elements =>
+    elements.filter(element => !(element as HTMLVideoElement).paused).length)).toBe(1);
+  await page.setViewportSize({ width: 390, height: 450 });
+  await players.first().evaluate(element => element.scrollIntoView({ block: 'center' }));
+  await expect(players.first().locator('video')).toHaveJSProperty('paused', false);
+});
+
+test('a streaming feed video seeks, hands off HLS windows, and respects a native pause', async ({ page }) => {
+  const temp = await mkdtemp(join(tmpdir(), 'foldergram-playwright-hls-'));
+  try {
+    try {
+      await promisify(execFile)('ffmpeg', ['-version']);
+    } catch {
+      test.skip(true, 'FFmpeg is required for the generated HLS fixture.');
+    }
+    await promisify(execFile)('ffmpeg', [
+      '-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=s=96x64:r=10:d=24',
+      '-c:v', 'libx264', '-threads', '1', '-pix_fmt', 'yuv420p',
+      '-force_key_frames', 'expr:gte(t,n_forced*3)', '-hls_time', '3', '-hls_playlist_type', 'vod',
+      '-hls_flags', 'independent_segments', '-hls_segment_filename', join(temp, 'segment-%d.ts'),
+      join(temp, 'stream.m3u8')
+    ]);
+    const manifest = await readFile(join(temp, 'stream.m3u8'));
+    const segments = await Promise.all(Array.from({ length: 8 }, (_, index) => readFile(join(temp, 'segment-' + index + '.ts'))));
+    await mockGallery(page, 'light');
+    const playback = '/api/videos/9/playback';
+    const item = { ...panorama, id: 9, mediaType: 'video', filename: 'stream.mp4', width: 96, height: 64,
+      durationMs: 90_000, videoPlaybackUrl: playback };
+    await page.route('**/api/feed?*', route => route.fulfill({
+      json: { items: [item], page: 1, limit: 24, total: 1, hasMore: false }
+    }));
+
+    const starts: number[] = [];
+    const prefetchPositions: number[] = [];
+    const handoffManifest = Promise.withResolvers<void>();
+    let handoffWaiting = false;
+    let originalRequests = 0;
+    let releases = 0;
+    await page.route(/\/api\/videos\/9\/playback(?:\/|$)/, async route => {
+      const url = new URL(route.request().url()).pathname;
+      if (url === playback) {
+        await route.fulfill({ json: { duration: 90, bitrate: 200_000, width: 96, height: 64,
+          original: { type: 'video/mp4; codecs="avc1.64001e"', url: playback + '/original' } } });
+      } else if (url.endsWith('/original')) {
+        originalRequests++;
+        await route.fulfill({ status: 415, contentType: 'text/plain', body: 'Unsupported' });
+      } else if (url.endsWith('/sessions')) {
+        const { at } = route.request().postDataJSON();
+        if (at === 59) {
+          prefetchPositions.push(await page.locator('.feed-card__player video').evaluate((media: HTMLVideoElement) => media.currentTime));
+        }
+        starts.push(at);
+        const prefix = playback + '/sessions/window-' + starts.length;
+        await route.fulfill({ json: {
+          url: prefix + '/stream.m3u8', releaseUrl: prefix + '/release',
+          offset: Math.floor(at), duration: 90, window: 24, profile: 'standard'
+        } });
+      } else if (url.endsWith('/stream.m3u8')) {
+        if (url.endsWith('/window-3/stream.m3u8')) {
+          handoffWaiting = true;
+          await handoffManifest.promise;
+        }
+        await route.fulfill({ contentType: 'application/vnd.apple.mpegurl', body: manifest });
+      } else if (url.endsWith('/release')) {
+        releases++;
+        await route.fulfill({ status: 204 });
+      } else {
+        const segment = Number(/segment-(\d+)\.ts$/.exec(url)?.[1]);
+        await route.fulfill({ contentType: 'video/mp2t', body: segments[segment] });
+      }
+    });
+
+    await page.goto('/');
+    const player = page.locator('.feed-card__player').first();
+    const video = player.locator('video');
+    await expect.poll(() => originalRequests).toBeGreaterThan(0);
+    await expect.poll(() => starts[0]).toBe(0);
+    await expect.poll(() => video.evaluate((element: HTMLVideoElement) => element.currentTime)).toBeGreaterThan(0.1);
+    const slider = player.getByRole('slider', { name: 'Seek video' });
+    await expect(player.locator('.video-progress-footer__time')).toHaveText(/^0:\d{2} \/ 1:30$/);
+    await expect(slider).toHaveAttribute('aria-valuemax', '100');
+    await expect(player.locator('media-play-button span').first())
+      .toHaveCSS('mask-image', /data:image\/svg\+xml/);
+    await player.evaluate((element: HTMLElement & { currentTime: number }) => {
+      element.currentTime = 35;
+    });
+    await expect.poll(() => starts.at(-1)).toBe(35);
+    await expect.poll(() => releases).toBeGreaterThan(0);
+    await expect.poll(() => player.evaluate((element: HTMLElement & { currentTime: number }) => element.currentTime)).toBeGreaterThan(35);
+    await video.evaluate((media: HTMLVideoElement & { handoffFrames?: Array<{ at: number; time: number }> }) => {
+      const frames: Array<{ at: number; time: number }> = [];
+      media.handoffFrames = frames;
+      const observe = (at: number, frame: VideoFrameCallbackMetadata) => {
+        frames.push({ at, time: frame.mediaTime });
+        media.requestVideoFrameCallback(observe);
+      };
+      media.requestVideoFrameCallback(observe);
+      media.playbackRate = 5;
+    });
+    await expect.poll(() => prefetchPositions[0], { timeout: 8000 }).toBeGreaterThan(17);
+    expect(prefetchPositions[0]).toBeLessThan(23.8);
+    try {
+      await expect.poll(() => handoffWaiting).toBe(true);
+      await expect(player.locator('.local-video-feedback__cover')).toBeVisible();
+    } finally {
+      handoffManifest.resolve();
+    }
+    await expect.poll(() => player.evaluate((element: HTMLElement & { currentTime: number }) => element.currentTime)).toBeGreaterThan(59.15);
+    await expect(player.locator('.local-video-feedback__cover')).toBeHidden();
+    expect(starts.filter(at => at === 59)).toHaveLength(1);
+    const frames = await video.evaluate((media: HTMLVideoElement & { handoffFrames?: Array<{ at: number; time: number }> }) =>
+      media.handoffFrames!);
+    const handoff = frames.findIndex((frame, index) => index > 0 && frame.time < frames[index - 1].time - 10);
+    expect(handoff).toBeGreaterThan(0);
+    const handoffGapMs = frames[handoff].at - frames[handoff - 1].at;
+    expect(handoffGapMs).toBeLessThan(1500);
+    await test.info().attach('decoded-window-handoff', {
+      body: JSON.stringify({ handoffGapMs, framesBefore: frames[handoff - 1], framesAfter: frames.slice(handoff) }),
+      contentType: 'application/json'
+    });
+
+    await video.evaluate((media: HTMLVideoElement) => media.pause());
+    await expect(video).toHaveJSProperty('paused', true);
+    const startsOnPause = starts.slice();
+    const pausedAt = await video.evaluate((media: HTMLVideoElement) => media.currentTime);
+    await page.waitForTimeout(11_500);
+    expect(starts).toEqual(startsOnPause);
+    await expect(video).toHaveJSProperty('paused', true);
+    expect(await video.evaluate((media: HTMLVideoElement) => media.currentTime)).toBeCloseTo(pausedAt, 1);
+    await video.evaluate((media: HTMLVideoElement) => media.play());
+    await expect.poll(() => video.evaluate((media: HTMLVideoElement) => media.currentTime)).toBeGreaterThan(pausedAt + 0.2);
+    const releasedBeforeNavigation = releases;
+    await page.getByRole('link', { name: 'Library', exact: true }).click();
+    await expect.poll(() => releases).toBeGreaterThan(releasedBeforeNavigation);
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+  }
+}, 45_000);
+
+test('Reels uses bundled HLS for growing playlists and resumes watched windows across swipes', async ({ page }) => {
+  try {
+    await promisify(execFile)('ffmpeg', ['-version']);
+  } catch {
+    test.skip(true, 'FFmpeg is required for the generated HLS fixture.');
+  }
+  const temp = await mkdtemp(join(tmpdir(), 'foldergram-reels-hls-'));
+  try {
+    await promisify(execFile)('ffmpeg', [
+      '-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=s=160x90:r=10:d=15',
+      '-f', 'lavfi', '-i', 'sine=frequency=440:duration=15', '-c:v', 'libx264', '-threads', '1',
+      '-pix_fmt', 'yuv420p', '-force_key_frames', 'expr:gte(t,n_forced*3)', '-c:a', 'aac',
+      '-hls_time', '3', '-hls_playlist_type', 'event', '-hls_flags', 'independent_segments',
+      '-hls_segment_filename', join(temp, 'segment-%03d.ts'), join(temp, 'stream.m3u8')
+    ]);
+    const full = await readFile(join(temp, 'stream.m3u8'), 'utf8');
+    // Expose enough segments for default live-edge selection to skip the opening.
+    const growing = full.slice(0, full.indexOf('segment-003.ts\n') + 'segment-003.ts\n'.length);
+    let complete = false;
+    await page.setViewportSize({ width: 390, height: 680 });
+    await mockGallery(page, 'dark');
+    // Chromium can advertise "maybe" even when its native HLS path rejects
+    // a growing FFmpeg playlist. Vidstack's default should still use HLS.js.
+    await page.addInitScript(() => {
+      const canPlayType = HTMLMediaElement.prototype.canPlayType;
+      HTMLMediaElement.prototype.canPlayType = function(type) {
+        return type === 'application/vnd.apple.mpegurl' ? 'maybe' : canPlayType.call(this, type);
+      };
+    });
+    const items = [41, 42].map(id => ({ ...panorama, id, mediaType: 'video', filename: `reel-${id}.mkv`,
+      width: 160, height: 90, durationMs: 15_000, videoPlaybackUrl: `/api/videos/${id}/playback` }));
+    await page.route('**/api/reels?*', route => route.fulfill({
+      json: { items, page: 1, limit: 24, total: 2, hasMore: false }
+    }));
+    const sessions: Array<{ id: string; at: number; profile?: string; warmup?: boolean }> = [];
+    const manifestTypes: string[] = [];
+    const metadataRequests: string[] = [];
+    const firstOpeningSegments: string[] = [];
+    const secondOpening = Promise.withResolvers<void>();
+    await page.route(/\/api\/videos\/(41|42)\/playback(?:\/.*)?$/, async route => {
+      const request = route.request();
+      const pathname = new URL(request.url()).pathname;
+      const id = pathname.split('/')[3];
+      if (pathname.endsWith('/playback')) {
+        metadataRequests.push(id);
+        await route.fulfill({ json: { original: null, duration: 15, width: 160, height: 90, bitrate: 200_000 } });
+      } else if (pathname.endsWith('/sessions')) {
+        const body = request.postDataJSON();
+        sessions.push({ id, ...body });
+        if (id === '42' && !body.warmup) await secondOpening.promise;
+        await route.fulfill({ json: body.warmup ? { warmed: true } : {
+          offset: 0, duration: 15, window: 15, profile: 'standard',
+          url: `/api/videos/${id}/playback/sessions/mock/stream.m3u8`,
+          releaseUrl: `/api/videos/${id}/playback/sessions/mock/release`
+        } });
+      } else if (pathname.endsWith('/release')) {
+        await route.fulfill({ status: 204 });
+      } else if (pathname.endsWith('.m3u8')) {
+        manifestTypes.push(request.resourceType());
+        await route.fulfill({ contentType: 'application/vnd.apple.mpegurl', body: complete ? full : growing });
+      } else {
+        const segment = pathname.split('/').at(-1)!;
+        if (id === '41' && !complete) firstOpeningSegments.push(segment);
+        await route.fulfill({ contentType: 'video/mp2t', body: await readFile(join(temp, segment)) });
+      }
+    });
+    await page.goto('/reels');
+    const players = page.locator('.reel-player-card__player');
+    const firstVideo = players.first().locator('video');
+    await expect.poll(() => firstVideo.evaluate((video: HTMLVideoElement) => video.currentTime)).toBeGreaterThan(0.3);
+    await expect(players.first().locator('.local-video-feedback__cover')).toBeHidden();
+    expect(firstOpeningSegments[0]).toBe('segment-000.ts');
+    await expect.poll(() => sessions.some(session => session.id === '42' && session.warmup)).toBe(true);
+    complete = true;
+    const secondPlayer = players.nth(1);
+    await secondPlayer.evaluate(element => element.closest('.reel-deck__panel')!.scrollIntoView({ block: 'start', behavior: 'instant' }));
+    try {
+      await expect(secondPlayer.getByRole('status')).toBeVisible();
+      await expect(secondPlayer.locator('.local-video-feedback__cover')).toBeVisible();
+    } finally {
+      secondOpening.resolve();
+    }
+    for (const index of [1, 0, 1, 0]) {
+      const player = players.nth(index);
+      await player.evaluate(element => element.closest('.reel-deck__panel')!.scrollIntoView({ block: 'start', behavior: 'instant' }));
+      await expect.poll(() => player.locator('video').evaluate((video: HTMLVideoElement) => video.currentTime)).toBeGreaterThan(0.3);
+      await expect(player.locator('video')).toHaveJSProperty('paused', false);
+      await expect(player.locator('.local-video-feedback__cover')).toBeHidden();
+      await expect(players.nth(1 - index).locator('video')).toHaveJSProperty('paused', true);
+      await expect(page.getByRole('alert')).toHaveCount(0);
+    }
+    expect(metadataRequests.filter(id => id === '42')).toHaveLength(1);
+    expect(manifestTypes.length).toBeGreaterThan(0);
+    expect(manifestTypes).not.toContain('media');
+    const starts = sessions.filter(session => !session.warmup);
+    expect(starts.length).toBeGreaterThanOrEqual(5);
+    expect(starts.every(session => session.at === 0 && session.profile === 'standard')).toBe(true);
+    await page.screenshot({ path: test.info().outputPath('reels-hls-resumed.png') });
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+  }
+}, 40_000);
+
+for (const surface of ['post', 'reel', 'carousel', 'story', 'share'] as const) {
+  test(`streaming ${surface} keeps its existing player controls and plays decoded video`, async ({ page }) => {
+    await mockGallery(page, 'light');
+    await page.mouse.move(1200, 700);
+    const clip = await readFile(new URL('./fixtures/feed-video.mp4', import.meta.url));
+    const endpoint = surface === 'share' ? '/api/share/images/1/playback' : '/api/videos/1/playback';
+    const item = { ...panorama, mediaType: 'video', filename: 'stream.mp4', width: 640, height: 360,
+      durationMs: 1000, videoPlaybackUrl: endpoint };
+    const requests: string[] = [];
+    const outsideScripts: string[] = [];
+    page.on('request', request => {
+      if (request.resourceType() === 'script' && !new URL(request.url()).hostname.match(/^(127\.0\.0\.1|localhost)$/)) outsideScripts.push(request.url());
+    });
+    await page.route(/\/api\/(?:videos|share\/images)\/\d+\/playback$/, async route => {
+      requests.push(new URL(route.request().url()).pathname);
+      await route.fulfill({ json: { duration: 1, width: 640, height: 360, bitrate: 200_000,
+        original: { url: '/mock-surface-stream.mp4', type: 'video/mp4' } } });
+    });
+    await page.route('**/mock-surface-stream.mp4', route => route.fulfill({ contentType: 'video/mp4', body: clip }));
+    let player: Locator;
+    if (surface === 'reel') {
+      await page.route('**/api/reels?*', route => route.fulfill({ json: { items: [item], page: 1, limit: 24, total: 1, hasMore: false } }));
+      await page.goto('/reels');
+      player = page.locator('.reel-player-card__player').first();
+      await expect(player.locator('.reel-player-card__seekbar')).toBeVisible();
+      await expect(player.locator('.video-progress-footer')).toHaveCount(0);
+    } else if (surface === 'share') {
+      await page.route('**/api/share/posts/1', route => route.fulfill({ json: item }));
+      await page.goto('/share/panoramas/posts/1');
+      player = page.locator('.video-media-player media-player');
+      await expect(player.locator('.video-progress-footer')).toBeVisible();
+      await expect(player).toHaveAttribute('data-can-play', '');
+      await player.locator('media-play-button').click();
+    } else if (surface === 'story') {
+      const capsule = { id: 'stream-story', title: 'Streaming story', subtitle: 'Recent clips', dateContext: '', imageCount: 2, coverImage: item };
+      const rail = { railKind: 'moments', railTitle: 'Moments', railDescription: '', railSingularLabel: 'Moment' };
+      await page.route('**/api/feed/moments', route => route.fulfill({ json: { ...rail, items: [capsule] } }));
+      await page.route('**/api/feed/moments/stream-story?*', route => route.fulfill({ json: {
+        ...rail, moment: capsule, items: [item, { ...item, id: 2, videoPlaybackUrl: '/api/videos/2/playback' }], page: 1, limit: 18, total: 2, hasMore: false
+      } }));
+      const openingMetadata = Promise.withResolvers<void>();
+      await page.route('**' + endpoint, async route => {
+        await openingMetadata.promise;
+        await route.fallback();
+      });
+      await page.goto('/');
+      await page.mouse.move(1200, 700);
+      const openingRequest = page.waitForRequest('**' + endpoint);
+      await page.locator('.story-rail__button').filter({ hasText: 'Streaming story' }).click();
+      player = page.locator('.story-stage__video');
+      await expect(player.locator('media-time-slider')).toHaveCount(0);
+      await expect(page.locator('.story-stage__controls')).toBeVisible();
+      try {
+        await openingRequest;
+        await page.getByRole('button', { name: 'Pause playback', exact: true }).click();
+      } finally {
+        openingMetadata.resolve();
+      }
+      await expect(player).toHaveAttribute('data-can-play', '');
+      await expect(player.locator('video')).toHaveJSProperty('paused', true);
+      await page.getByRole('button', { name: 'Resume playback', exact: true }).click();
+    } else {
+      const mediaItems = [11, 12].map((imageId, position) => ({ ...item, imageId, position,
+        videoPlaybackUrl: `/api/videos/${imageId}/playback` }));
+      await page.route('**/api/posts/1', route => route.fulfill({ json: surface === 'carousel'
+        ? { ...item, postType: 'carousel', mediaItems, mediaCount: 2 } : item }));
+      await page.goto('/post/1');
+      player = surface === 'carousel' ? page.locator('.video-media-player media-player') : page.locator('.viewer__player');
+      await expect(player.locator('.video-progress-footer')).toBeVisible();
+    }
+    await page.mouse.move(1200, 700);
+    const video = player.locator('video');
+    await expect.poll(() => video.evaluate((media: HTMLVideoElement) => media.currentTime)).toBeGreaterThan(0.1);
+    await expect(video).toHaveJSProperty('paused', false);
+    if (surface === 'story') {
+      await page.getByRole('button', { name: 'Pause playback', exact: true }).click();
+      await expect(video).toHaveJSProperty('paused', true);
+      await video.evaluate((media: HTMLVideoElement) => { media.muted = false; });
+      await expect.poll(() => page.evaluate(() => localStorage.getItem('foldergram-video-muted'))).toBe('false');
+      await page.getByRole('button', { name: 'Resume playback', exact: true }).click();
+      await expect(video).toHaveJSProperty('paused', false);
+      await expect.poll(() => requests.includes('/api/videos/2/playback')).toBe(true);
+      await expect.poll(() => video.evaluate((media: HTMLVideoElement) => media.currentTime)).toBeGreaterThan(0.1);
+      await expect(video).toHaveJSProperty('muted', false);
+      // The final story stays on its final frame, matching the existing viewer.
+      await expect(video).toHaveJSProperty('ended', true);
+    } else if (surface === 'reel') {
+      await page.locator('.reel-player-card__surface').click({ position: { x: 20, y: 100 } });
+      await expect(video).toHaveJSProperty('paused', true);
+      await page.locator('.reel-player-card__sound-button').click();
+      await expect(video).toHaveJSProperty('muted', false);
+      await expect(video).toHaveJSProperty('paused', false);
+    } else {
+      await player.locator('media-play-button').click();
+      await expect(video).toHaveJSProperty('paused', true);
+      await player.locator('media-play-button').click();
+      await expect(video).toHaveJSProperty('paused', false);
+      await player.locator('media-mute-button').click();
+      await expect(video).toHaveJSProperty('muted', false);
+      if (surface === 'carousel') {
+        await page.getByRole('button', { name: 'Next carousel item', exact: true }).click();
+        await expect.poll(() => requests.includes('/api/videos/12/playback')).toBe(true);
+        await expect.poll(() => page.locator('.video-media-player video').evaluate((media: HTMLVideoElement) => media.currentTime)).toBeGreaterThan(0.1);
+        expect(requests).toEqual(['/api/videos/11/playback', '/api/videos/12/playback']);
+      }
+    }
+    expect(outsideScripts).toEqual([]);
+    await page.screenshot({ path: test.info().outputPath(`streaming-${surface}.png`) });
+  });
+}
+
+async function mockVideoDeliveryMode(page: Page, videoDeliveryMode: 'streaming' | 'previews') {
+  await page.route('**/api/admin/stats', route => route.fulfill({
+    json: {
+      videoDeliveryMode,
+      libraryIndex: { currentGalleryRoot: '/gallery' },
+      excludedFolders: { envExcludedFolders: [], customExcludedFolders: [], effectiveExcludedFolders: [] },
+      deletionRecovery: { failedCount: 0, failures: [] }
+    }
+  }));
+}
+
+test('saved previews mode hides cleanup controls and lets an admin switch a local source', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 840 });
+  await mockGallery(page);
+  await page.route('**/api/auth/status', route => route.fulfill({ json: adminAuthStatus }));
+  await mockVideoDeliveryMode(page, 'previews');
+  const sources = [{ id: 1, name: 'Primary gallery' }, { id: 14, name: 'External gallery' }];
+  const requests: string[] = [];
+  await page.route('**/api/admin/video-previews/reclamation', route => {
+    requests.push('cleanup ' + route.request().method());
+    return route.fulfill({ json: { sources, job: null } });
+  });
+
+  const job = {
+    id: 'preview-job', state: 'ready', sources: [sources[1]], confirmed: false, cancelRequested: false,
+    assessment: { checked: 3, videos: 3, files: 2, bytes: 0, skipped: 0, reasons: {} },
+    result: { switched: 0, files: 0, bytes: 0, skipped: 0, deferred: 0, failed: 0, reasons: {} }
+  };
+  let streamingCount = 3;
+  let savedJob: object | null = null;
+  await page.route('**/api/admin/video-previews/generation**', async route => {
+    const request = route.request();
+    if (request.method() === 'GET') {
+      await route.fulfill({ json: { sources, job: savedJob, streamingCount } });
+    } else if (request.url().endsWith('/confirm')) {
+      requests.push('generation confirmed');
+      streamingCount = 0;
+      savedJob = { ...job, state: 'complete', confirmed: true, result: { ...job.result, switched: 3, files: 2 } };
+      await route.fulfill({ json: savedJob });
+    } else {
+      expect(request.postDataJSON()).toEqual({ sourceId: 14 });
+      requests.push('generation assessed');
+      await route.fulfill({ json: job });
+    }
+  });
+
+  await page.goto('/settings#library');
+  await expect(page.getByText('/gallery', { exact: true })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Switch to streaming and remove video previews' })).toHaveCount(0);
+  const card = page.getByRole('region', { name: 'Switch existing videos to saved previews' });
+  const playback = page.getByRole('region', { name: 'Video playback', exact: true });
+  await expect(playback.getByText('Saved previews', { exact: true })).toBeVisible();
+  await expect(card.getByText(/3 existing videos are still set to streaming/)).toBeVisible();
+  await card.getByRole('combobox', { name: 'Local source' }).selectOption('14');
+  await card.getByRole('button', { name: 'Check videos' }).click();
+  await expect(card.getByRole('status').getByRole('term')).toHaveText(['Previews to generate', 'Videos to switch']);
+  await expect(card.getByRole('status').getByRole('definition')).toHaveText(['2', '3']);
+  await card.getByRole('button', { name: 'Generate previews and switch' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Switch to saved previews?' });
+  await expect(dialog.getByText(/Creating previews takes time and disk space/)).toBeVisible();
+  await dialog.getByRole('button', { name: 'Generate previews and switch' }).click();
+  const result = '3 videos switched to saved previews · 2 previews generated';
+  await expect(playback.getByRole('status')).toContainText(result);
+  await expect(playback.getByText('No videos left to switch to saved previews.')).toBeVisible();
+  await expect(card).toHaveCount(0);
+  expect(requests).toEqual(['cleanup GET', 'generation assessed', 'generation confirmed']);
+
+  await page.reload();
+  await expect(playback.getByRole('status')).toContainText(result);
+  await expect(card).toHaveCount(0);
+  await playback.screenshot({ path: test.info().outputPath('saved-previews-result.png') });
+  await playback.getByRole('button', { name: 'Dismiss preview generation result' }).click();
+  await expect(playback).toBeFocused();
+  await page.reload();
+  await expect(playback.getByText('No videos left to switch to saved previews.')).toBeVisible();
+  await expect(playback.getByRole('status')).toHaveCount(0);
+  await expect(card).toHaveCount(0);
+});
+
+test('saved previews mode keeps interrupted cleanup jobs accessible', async ({ page }) => {
+  await mockGallery(page, 'dark');
+  await page.route('**/api/auth/status', route => route.fulfill({ json: adminAuthStatus }));
+  await mockVideoDeliveryMode(page, 'previews');
+  const sources = [{ id: 1, name: 'Primary gallery' }];
+  const job = {
+    id: 'old-cleanup', state: 'interrupted', sources, confirmed: true, cancelRequested: false,
+    assessment: { checked: 1, videos: 1, files: 1, bytes: 2_000_000, skipped: 0, reasons: {} },
+    result: { switched: 0, files: 0, bytes: 0, skipped: 0, deferred: 1, failed: 0, reasons: { inUse: 1 } }
+  };
+  let streamingCount = 0;
+  await page.route('**/api/admin/video-previews/generation', route => route.fulfill({ json: { sources, streamingCount, job: null } }));
+  await page.route('**/api/admin/video-previews/reclamation**', async route => {
+    if (route.request().method() === 'GET') {
+      await route.fulfill({ json: { sources, job } });
+    } else {
+      expect(route.request().url()).toMatch(/\/old-cleanup\/retry$/);
+      streamingCount = 1;
+      await route.fulfill({ json: {
+        ...job, state: 'complete', result: { ...job.result, switched: 1, files: 1, bytes: 2_000_000, deferred: 0, reasons: {} }
+      } });
+    }
+  });
+
+  await page.goto('/settings#library');
+  const card = page.getByRole('region', { name: 'Video preview cleanup recovery' });
+  await expect(card.getByText('Operation interrupted')).toBeVisible();
+  await expect(card.getByText('Preview in use (1)')).toBeVisible();
+  await expect(card.getByRole('button', { name: 'Assess previews' })).toHaveCount(0);
+  await expect(card.getByRole('button', { name: 'Switch to streaming and remove video previews' })).toHaveCount(0);
+  await expect(page.getByRole('region', { name: 'Switch existing videos to saved previews' })).toHaveCount(0);
+  await card.getByRole('button', { name: 'Resume or retry' }).click();
+  const result = page.getByRole('region', { name: 'Video maintenance result' });
+  await expect(result.getByRole('status')).toContainText('2 MB freed');
+  await expect(page.getByRole('region', { name: 'Switch existing videos to saved previews' }))
+    .toContainText('1 existing video is still set to streaming.');
+  await result.screenshot({ path: test.info().outputPath('cleanup-recovery.png') });
+  await result.getByRole('button', { name: 'Dismiss cleanup result' }).click();
+  await expect(result).toHaveCount(0);
+  await expect(card).toHaveCount(0);
+});
+
+test('streaming status stays fast while an optional assessment finds leftover previews', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 840 });
+  await mockGallery(page);
+  await page.route('**/api/auth/status', route => route.fulfill({ json: adminAuthStatus }));
+  await mockVideoDeliveryMode(page, 'streaming');
+  const sources = [{ id: 1, name: 'Primary gallery' }];
+  const ready = {
+    id: 'leftover-preview', state: 'ready', sources, confirmed: false, cancelRequested: false,
+    assessment: { checked: 1, videos: 0, files: 1, bytes: 12_000, skipped: 0, reasons: {} },
+    result: { switched: 0, files: 0, bytes: 0, skipped: 0, deferred: 0, failed: 0, reasons: {} }
+  };
+  let job: typeof ready | null = null;
+  let assessments = 0;
+  await page.route('**/api/admin/video-previews/reclamation**', route => {
+    if (route.request().method() === 'POST') {
+      assessments++;
+      job = ready;
+      return route.fulfill({ status: 202, json: ready });
+    }
+    return route.fulfill({ json: { sources, job, cleanupPending: false } });
+  });
+  await page.goto('/settings#library');
+  const playback = page.getByRole('region', { name: 'Video playback', exact: true });
+  const card = page.getByRole('region', { name: 'Switch to streaming and remove video previews' });
+  await expect(playback.getByText('All indexed local videos use streaming.')).toBeVisible();
+  await expect(card).toHaveCount(0);
+  await playback.getByRole('button', { name: 'Check for remaining previews' }).click();
+  await expect(card.getByRole('button', { name: 'Assess previews' })).toBeVisible();
+  await card.getByRole('button', { name: 'Assess previews' }).click();
+  await expect(card.getByText('Previews to remove')).toBeVisible();
+  await expect(card.getByRole('definition')).toHaveText(['12 kB', '1', '0']);
+  expect(assessments).toBe(1);
+  await card.getByRole('button', { name: 'Close', exact: true }).click();
+  await expect(card).toHaveCount(0);
+  await expect(playback.getByRole('button', { name: 'Check for remaining previews' })).toBeFocused();
+  expect(assessments).toBe(1);
+  await page.reload();
+  await expect(card.getByText('Previews to remove')).toBeVisible();
+  await card.getByRole('button', { name: 'Close', exact: true }).click();
+  await expect(card).toHaveCount(0);
+  await expect(playback.getByRole('button', { name: 'Check for remaining previews' })).toBeFocused();
+  expect(assessments).toBe(1);
+  await playback.screenshot({ path: test.info().outputPath('remaining-previews-closed.png') });
+});
+
+for (const theme of ['light', 'dark'] as const) {
+  test(`preview reclamation confirms the assessed local source in ${theme} mode`, async ({ page }) => {
+    await page.emulateMedia({ colorScheme: theme === 'light' ? 'dark' : 'light' });
+    await page.setViewportSize({ width: theme === 'light' ? 390 : 1280, height: 840 });
+    await mockGallery(page, theme);
+    await page.route('**/api/auth/status', route => route.fulfill({ json: adminAuthStatus }));
+    await mockVideoDeliveryMode(page, 'streaming');
+    const sources = [{ id: 1, name: 'Primary gallery' }, { id: 14, name: 'External gallery' }];
+    const assessedSources = theme === 'light' ? [sources[1]] : sources;
+    const [bytes, formattedSize]: [number, string] = theme === 'light' ? [206_667_409, '207 MB'] : [1_240_000_000, '1.2 GB'];
+    const job = {
+      id: 'test-job', state: 'ready', sources: assessedSources, confirmed: false, cancelRequested: false,
+      assessment: { checked: 4, videos: 3, files: 2, bytes, skipped: 1, reasons: { originalUnavailable: 1 } },
+      result: { switched: 0, files: 0, bytes: 0, skipped: 0, deferred: 0, failed: 0, reasons: {} }
+    };
+    const completedJob = {
+      ...job, state: 'complete', confirmed: true, result: { ...job.result, switched: 3, files: 2, bytes }
+    };
+    let savedJob: typeof completedJob | null = null;
+    let cleanupPending = true;
+    const requests: string[] = [];
+    await page.route('**/api/admin/video-previews/reclamation**', async route => {
+      const request = route.request();
+      const pathname = new URL(request.url()).pathname;
+      if (request.method() === 'GET') {
+        await route.fulfill({ json: pathname.endsWith('/test-job') ? completedJob : { sources, job: savedJob, cleanupPending } });
+      } else if (pathname.endsWith('/confirm')) {
+        expect(request.headers()['x-foldergram-intent']).toBe('1');
+        requests.push('confirmed');
+        savedJob = completedJob;
+        cleanupPending = theme === 'light';
+        await route.fulfill({ json: theme === 'light' ? completedJob : { ...job, state: 'running', confirmed: true } });
+      } else {
+        expect(request.postDataJSON()).toEqual(theme === 'light' ? { sourceId: 14 } : {});
+        requests.push('assessed');
+        await route.fulfill({ json: job });
+      }
+    });
+    await page.clock.install();
+    await page.goto('/settings#library');
+    const card = page.getByRole('region', { name: 'Switch to streaming and remove video previews' });
+    const sourceSelect = card.getByRole('combobox', { name: 'Local source' });
+    await expect(sourceSelect).toHaveCSS('border-top-width', '1px');
+    await expect(sourceSelect).toHaveCSS('color-scheme', theme);
+    await expectReadableControl(sourceSelect);
+    await expectReadableControl(sourceSelect.locator('option[value="14"]'));
+    await expect(card.getByRole('status')).toHaveCount(0);
+    await sourceSelect.selectOption(theme === 'light' ? '14' : '');
+    const assess = card.getByRole('button', { name: 'Assess previews' });
+    await assess.click();
+    const summary = card.getByRole('status');
+    await expect(summary.getByRole('term')).toHaveText(['Estimated savings', 'Previews to remove', 'Videos to switch']);
+    await expect(summary.getByRole('definition')).toHaveText([formattedSize, '2', '3']);
+    await expect(summary.getByText(/Original unavailable or changed/)).toBeVisible();
+    await expect(summary.getByText(`Sources: ${assessedSources.map(source => source.name).join(', ')}`, { exact: true })).toBeVisible();
+    await card.screenshot({ path: test.info().outputPath('preview-reclamation-assessment.png') });
+    const openDialog = card.getByRole('button', { name: 'Switch to streaming and remove video previews' });
+    const dialog = page.getByRole('dialog', { name: 'Switch to streaming?' });
+    const confirm = dialog.getByRole('button', { name: 'Remove previews' });
+
+    await openDialog.click();
+    await expect(dialog.getByText(`Sources: ${assessedSources.map(source => source.name).join(', ')}`, { exact: true })).toBeVisible();
+    await expect(dialog.getByText('Videos to switch')).toBeVisible();
+    await expect(dialog.getByText('Previews to remove')).toBeVisible();
+    await expect(dialog.getByText('Estimated savings')).toBeVisible();
+    await expect(dialog.getByRole('definition')).toHaveText(['3', '2', formattedSize]);
+
+    if (theme === 'light') {
+      await page.setViewportSize({ width: 390, height: 360 });
+      const bounds = (await dialog.boundingBox())!;
+      expect(bounds.width).toBeLessThanOrEqual(390 - 32);
+      expect(bounds.y).toBeGreaterThanOrEqual(16);
+      expect(bounds.y + bounds.height).toBeLessThanOrEqual(360 - 16);
+      const playbackNote = dialog.getByText(/Some videos may take longer/);
+      await playbackNote.scrollIntoViewIfNeeded();
+      await expect(playbackNote).toBeInViewport();
+      await expect(confirm).toBeInViewport();
+      await page.setViewportSize({ width: 390, height: 840 });
+    } else {
+      const bounds = (await dialog.boundingBox())!;
+      expect(bounds.width).toBeGreaterThan(500);
+      expect(bounds.x + bounds.width / 2).toBeCloseTo(1280 / 2, 0);
+    }
+
+    await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(dialog).toBeHidden();
+    expect(requests).toEqual(['assessed']);
+    await openDialog.click();
+    await confirm.click();
+    if (theme === 'dark') {
+      await expect(card.getByText('Switching videos and removing previews…')).toBeVisible();
+      await page.clock.fastForward(1_100);
+    }
+    const playback = page.getByRole('region', { name: 'Video playback', exact: true });
+    await expect(playback.getByText('Streaming', { exact: true })).toBeVisible();
+    await expect(playback.getByRole('status')).toContainText(`${formattedSize} freed`);
+    await expect(playback.getByRole('status')).toContainText('2 previews removed · 3 videos switched to streaming');
+    expect(requests).toEqual(['assessed', 'confirmed']);
+    if (theme === 'dark') {
+      await expect(playback.getByText('All indexed local videos use streaming.')).toBeVisible();
+      await expect(card).toHaveCount(0);
+      await page.reload();
+    } else {
+      await assess.focus();
+    }
+    const dismiss = playback.getByRole('button', { name: 'Dismiss cleanup result' });
+    await expect(dismiss).toBeVisible();
+    await playback.screenshot({ path: test.info().outputPath('preview-reclamation-complete.png') });
+    await page.mouse.move(0, 0);
+    await page.clock.fastForward(60_000);
+    await expect(dismiss).toBeVisible();
+    if (theme === 'light') {
+      await dismiss.press('Enter');
+    } else {
+      await dismiss.click();
+    }
+    await expect(theme === 'light' ? assess : playback).toBeFocused();
+    await expect(playback.getByRole('status')).toHaveCount(0);
+
+    await page.reload();
+    if (theme === 'light') {
+      await expect(assess).toBeEnabled();
+    } else {
+      await expect(playback.getByText('All indexed local videos use streaming.')).toBeVisible();
+      await expect(card).toHaveCount(0);
+    }
+    await expect(playback.getByRole('status')).toHaveCount(0);
+
+    if (theme === 'dark') {
+      savedJob = { ...completedJob, result: { ...completedJob.result, failed: 1, reasons: { removalFailed: 1 } } };
+      await page.reload();
+      await expect(card.getByRole('button', { name: 'Resume or retry' })).toBeVisible();
+      await expect(card.getByText('Preview removal failed (1)')).toBeVisible();
+    }
+  });
+}
+
 test('very tall home videos play at their original aspect ratio', async ({ page }) => {
   await mockGallery(page, 'light');
   await page.setViewportSize({ width: 1280, height: 720 });
@@ -968,6 +1835,7 @@ for (const theme of ['light', 'dark'] as const) {
       test(`panoramic details remain readable at ${viewport.width}×${viewport.height}`, async ({ page }) => {
         await page.setViewportSize(viewport);
         await page.goto('/f/panoramas');
+        await page.mouse.move(viewport.width - 1, 0);
         await page.locator('main a[href="/post/1"]').last().click();
         const panel = page.locator('.viewer--details-docked .viewer__sidebar');
         await expect(panel).toBeVisible();

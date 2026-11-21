@@ -1,3 +1,4 @@
+import { appConfig } from '../config/env.js';
 import { databaseManager } from './database.js';
 import { isImmichSource, primaryLocalSource } from '../sources/local-source.js';
 import { SHARE_SESSION_SECRET_SETTING_KEY } from '../constants/app-setting-keys.js';
@@ -306,6 +307,7 @@ const BASE_POST_SELECT_SQL = `
     images.preview_path AS previewUrl,
     images.file_size AS fileSize,
     images.playback_strategy AS playbackStrategy,
+    images.video_delivery_policy AS videoDeliveryPolicy,
     posts.sort_timestamp AS sortTimestamp,
     posts.taken_at AS takenAt,
     ${POST_SAVED_SELECT_SQL},
@@ -341,6 +343,7 @@ const REEL_CANDIDATE_SELECT_SQL = `
     images.thumbnail_path AS thumbnailUrl,
     images.preview_path AS previewUrl,
     images.playback_strategy AS playbackStrategy,
+    images.video_delivery_policy AS videoDeliveryPolicy,
     posts.sort_timestamp AS sortTimestamp,
     posts.taken_at AS takenAt,
     ${POST_SAVED_SELECT_SQL},
@@ -599,6 +602,7 @@ export interface UpsertPostInput {
 }
 
 export interface UpsertImageInput {
+  videoMetadataJson?: string | null;
   folderId: number;
   placeId?: number | null;
   assetKey?: string | null;
@@ -627,6 +631,7 @@ export interface UpsertImageInput {
 }
 
 export interface RefreshIndexedImageInput {
+  videoMetadataJson?: string | null;
   folderId: number;
   placeId?: number | null;
   assetKey?: string | null;
@@ -653,6 +658,7 @@ export interface RefreshIndexedImageInput {
 }
 
 export interface ReconcileImageMoveInput {
+  videoMetadataJson?: string | null;
   id: number;
   folderId: number;
   placeId?: number | null;
@@ -1542,6 +1548,7 @@ export const postRepository = {
           img.mime_type AS mimeType,
           img.file_size AS fileSize,
           img.playback_strategy AS playbackStrategy,
+          img.video_delivery_policy AS videoDeliveryPolicy,
           img.exif_json AS exifJson
         FROM post_items pi
         JOIN images img ON pi.image_id = img.id
@@ -1565,6 +1572,7 @@ export const postRepository = {
         mimeType: string;
         fileSize: number;
         playbackStrategy: PlaybackStrategy | null;
+        videoDeliveryPolicy: ImageRecord['video_delivery_policy'];
         exifJson: string | null;
       }>;
 
@@ -1586,6 +1594,7 @@ export const postRepository = {
         previewUrl: row.previewUrl,
         originalUrl: `/api/originals/${row.imageId}`,
         playbackStrategy: row.playbackStrategy,
+        videoDeliveryPolicy: row.videoDeliveryPolicy,
         mimeType: row.mimeType,
         fileSize: row.fileSize,
         relativePath: row.relativePath,
@@ -2079,6 +2088,7 @@ export const postRepository = {
         images.thumbnail_path AS thumbnailUrl,
         images.preview_path AS previewUrl,
         images.playback_strategy AS playbackStrategy,
+        images.video_delivery_policy AS videoDeliveryPolicy,
         posts.sort_timestamp AS sortTimestamp,
         posts.taken_at AS takenAt,
         ${POST_SAVED_SELECT_SQL},
@@ -2148,6 +2158,7 @@ export const postRepository = {
         images.thumbnail_path AS thumbnailUrl,
         images.preview_path AS previewUrl,
         images.playback_strategy AS playbackStrategy,
+        images.video_delivery_policy AS videoDeliveryPolicy,
         images.exif_json AS exifJson,
         images.absolute_path AS originalUrl,
         posts.sort_timestamp AS sortTimestamp,
@@ -2211,6 +2222,7 @@ export const postRepository = {
       exif: detailRow.exifJson && isValidJson(detailRow.exifJson) ? JSON.parse(detailRow.exifJson) : null,
       originalUrl: detailRow.originalUrl,
       playbackStrategy: detailRow.playbackStrategy,
+      videoDeliveryPolicy: detailRow.videoDeliveryPolicy,
       nextPostId,
       previousPostId,
       nextImageId: nextPostId,
@@ -2405,9 +2417,10 @@ export const imageRepository = {
       INSERT INTO images (
         folder_id, source_id, asset_key, filename, extension, relative_path, absolute_path, file_size, width, height, display_orientation,
         media_type, mime_type, duration_ms, is_animated, checksum_or_fingerprint, mtime_ms, first_seen_at, sort_timestamp, taken_at, taken_at_source, exif_json,
-        thumbnail_path, preview_path, playback_strategy, is_deleted, deleted_at, is_trashed, trashed_at, updated_at
+        thumbnail_path, preview_path, playback_strategy, video_delivery_policy, video_metadata_json,
+        is_deleted, deleted_at, is_trashed, trashed_at, updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, 0, NULL, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, 0, NULL, ?)
       ON CONFLICT(source_id, relative_path) DO UPDATE SET
         folder_id = excluded.folder_id,
         asset_key = COALESCE(images.asset_key, excluded.asset_key),
@@ -2430,6 +2443,9 @@ export const imageRepository = {
         thumbnail_path = excluded.thumbnail_path,
         preview_path = excluded.preview_path,
         playback_strategy = excluded.playback_strategy,
+        video_delivery_policy = CASE WHEN excluded.media_type = 'video'
+          THEN COALESCE(images.video_delivery_policy, excluded.video_delivery_policy) END,
+        video_metadata_json = excluded.video_metadata_json,
         is_deleted = 0,
         deleted_at = NULL,
         updated_at = excluded.updated_at
@@ -2460,6 +2476,8 @@ export const imageRepository = {
       input.thumbnailPath,
       input.previewPath,
       input.playbackStrategy ?? 'preview',
+      input.mediaType === 'video' ? appConfig.videoDeliveryMode : null,
+      input.videoMetadataJson ?? null,
       nowIso()
     );
 
@@ -2515,6 +2533,7 @@ export const imageRepository = {
         thumbnail_path = ?,
         preview_path = ?,
         playback_strategy = ?,
+        video_metadata_json = CASE WHEN ? = 'video' THEN COALESCE(?, video_metadata_json) END,
         is_deleted = 0,
         deleted_at = NULL,
         updated_at = ?
@@ -2542,6 +2561,8 @@ export const imageRepository = {
       input.thumbnailPath,
       input.previewPath,
       input.playbackStrategy ?? 'preview',
+      input.mediaType,
+      input.videoMetadataJson ?? null,
       nowIso(),
       sourceId,
       input.relativePath
@@ -2704,6 +2725,7 @@ export const imageRepository = {
         taken_at_source = ?,
         exif_json = ?,
         playback_strategy = ?,
+        video_metadata_json = ?,
         is_deleted = 0,
         deleted_at = NULL,
         updated_at = ?
@@ -2729,6 +2751,7 @@ export const imageRepository = {
       input.takenAtSource,
       input.exifJson,
       input.playbackStrategy ?? 'preview',
+      input.videoMetadataJson ?? null,
       nowIso(),
       input.id
     );
@@ -2894,6 +2917,7 @@ export const imageRepository = {
         images.preview_path AS previewUrl,
         images.file_size AS fileSize,
         images.playback_strategy AS playbackStrategy,
+        images.video_delivery_policy AS videoDeliveryPolicy,
         images.sort_timestamp AS sortTimestamp,
         images.taken_at AS takenAt,
         0 AS isSaved,
@@ -2934,6 +2958,7 @@ export const imageRepository = {
         images.preview_path AS previewUrl,
         images.file_size AS fileSize,
         images.playback_strategy AS playbackStrategy,
+        images.video_delivery_policy AS videoDeliveryPolicy,
         images.sort_timestamp AS sortTimestamp,
         images.taken_at AS takenAt,
         0 AS isSaved,
@@ -3334,6 +3359,7 @@ export const likeRepository = {
         images.thumbnail_path AS thumbnailUrl,
         images.preview_path AS previewUrl,
         images.playback_strategy AS playbackStrategy,
+        images.video_delivery_policy AS videoDeliveryPolicy,
         posts.sort_timestamp AS sortTimestamp,
         posts.taken_at AS takenAt,
         1 AS isSaved,
@@ -3380,6 +3406,7 @@ export const likeRepository = {
         images.thumbnail_path AS thumbnailUrl,
         images.preview_path AS previewUrl,
         images.playback_strategy AS playbackStrategy,
+        images.video_delivery_policy AS videoDeliveryPolicy,
         posts.sort_timestamp AS sortTimestamp,
         posts.taken_at AS takenAt,
         1 AS isSaved,
@@ -3425,6 +3452,7 @@ export const likeRepository = {
         images.thumbnail_path AS thumbnailUrl,
         images.preview_path AS previewUrl,
         images.playback_strategy AS playbackStrategy,
+        images.video_delivery_policy AS videoDeliveryPolicy,
         posts.sort_timestamp AS sortTimestamp,
         posts.taken_at AS takenAt,
         1 AS isSaved,
@@ -3794,6 +3822,7 @@ export const collectionRepository = {
         images.thumbnail_path AS thumbnailUrl,
         images.preview_path AS previewUrl,
         images.playback_strategy AS playbackStrategy,
+        images.video_delivery_policy AS videoDeliveryPolicy,
         posts.sort_timestamp AS sortTimestamp,
         posts.taken_at AS takenAt,
         1 AS isSaved,
@@ -4008,28 +4037,6 @@ export function listFolderIdsRequiringSharedPreviews(now = nowIso()): Set<number
   }
 
   return requiringFolderIds;
-}
-
-// Reclamation yields while validating sources. Refresh its batched share lookup
-// when SQLite changes, including writes from another connection, instead of
-// querying share tables separately for each media item.
-export function createSharedPreviewRequirementLookup(): () => ReadonlySet<number> {
-  const changesStatement = database.prepare('SELECT total_changes() AS changes');
-  const versionStatement = database.prepare('PRAGMA data_version');
-  let lastChanges = -1;
-  let lastVersion = -1;
-  let folderIds: ReadonlySet<number> = new Set();
-
-  return () => {
-    const { changes } = changesStatement.get() as { changes: number };
-    const { data_version: version } = versionStatement.get() as { data_version: number };
-    if (changes !== lastChanges || version !== lastVersion) {
-      folderIds = listFolderIdsRequiringSharedPreviews();
-      lastChanges = changes;
-      lastVersion = version;
-    }
-    return folderIds;
-  };
 }
 
 export const folderSharePasswordRepository = {

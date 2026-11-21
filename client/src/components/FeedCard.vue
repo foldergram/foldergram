@@ -62,6 +62,7 @@
       :style="mediaFrameStyle(mediaAspectRatio, true)"
       :items="item.mediaItems!"
       :prefer-preview="isHomeContext"
+      stream-on-play
       :retry-while="appStore.isScanning"
       :loading="isHomeContext ? 'eager' : 'lazy'"
       :muted="appStore.videoMuted"
@@ -127,7 +128,7 @@
       <media-player
         ref="homePlayerElement"
         class="feed-card__player"
-        :src.prop="homeVideoSource"
+        :src.prop="streaming.source.value ?? homeVideoSource"
         :title.prop="item.filename"
         :fullscreenOrientation.prop="'none'"
         :playsInline.prop="true"
@@ -141,8 +142,17 @@
         @media-unmute-request="appStore.setVideoMuted(false)"
         @media-volume-change-request="appStore.setVideoMuted($event.detail === 0)"
       >
-        <media-provider />
+        <media-provider :loaders.prop="streaming.loaders" />
+        <LocalVideoFeedback
+          v-if="streaming.source.value"
+          :poster="item.thumbnailUrl"
+          :cover-fit="fitTallMedia || isHomeVideoFullscreen ? 'contain' : 'cover'"
+          :active="showHomeVideoControls"
+          :state="streaming.state.value"
+          @retry="streaming.play"
+        />
         <media-poster
+          v-else
           :src.prop="item.thumbnailUrl"
           :alt.prop="item.filename"
         />
@@ -201,7 +211,7 @@
         </VideoProgressFooter>
       </media-player>
       <div
-        v-if="showHomeVideoPausedIndicator"
+        v-if="showHomeVideoPausedIndicator && !streaming.state.value.pending && !streaming.state.value.failed"
         class="feed-card__pause-indicator"
         aria-hidden="true"
       >
@@ -463,7 +473,9 @@ import CarouselMediaStage from './CarouselMediaStage.vue';
 import CollectionBookmark from './CollectionBookmark.vue';
 import ConfirmDialog from './ConfirmDialog.vue';
 import PostCaptionModal from './PostCaptionModal.vue';
+import LocalVideoFeedback from './LocalVideoFeedback.vue';
 import ResilientImage from './ResilientImage.vue';
+import { useLocalVideoPlayback } from '../composables/useLocalVideoPlayback';
 import VideoProgressFooter from './VideoProgressFooter.vue';
 
 interface HomeVideoVisibilityChange {
@@ -482,6 +494,7 @@ const props = withDefaults(
     hasAvatarStory?: boolean;
     context?: 'default' | 'home';
     isActiveVideo?: boolean;
+    nextVideoPlaybackUrl?: string;
     fitTallMedia?: boolean;
   }>(),
   {
@@ -516,6 +529,12 @@ const feedCardElement = ref<HTMLElement | null>(null);
 const availableMediaWidth = ref(0);
 const homeVideoTarget = ref<HTMLElement | null>(null);
 const homePlayerElement = ref<MediaPlayerElement | null>(null);
+const streaming = useLocalVideoPlayback(() => props.item.videoPlaybackUrl, {
+  active: () => props.isActiveVideo,
+  autoplay: () => true,
+  next: () => props.nextVideoPlaybackUrl,
+  onAutoplayBlocked: () => { isHomeVideoPaused.value = true; }
+});
 useNativeVideoMuteSync(homePlayerElement, () => appStore.videoMuted, (muted) => appStore.setVideoMuted(muted));
 const loadedHomeVideoAspectRatio = ref<string | null>(null);
 const isHomeVideoPaused = ref(false);
@@ -846,7 +865,7 @@ function syncHomeVideoMuted(player: MediaPlayerElement, muted: boolean) {
 }
 
 async function syncHomeVideoPlayback() {
-  if (!isHomeContext.value || props.item.mediaType !== 'video') {
+  if (!isHomeContext.value || props.item.mediaType !== 'video' || streaming.source.value) {
     return;
   }
 
@@ -930,7 +949,8 @@ async function handleHomeVideoSurfaceClick(event: MouseEvent) {
   }
 
   if (player.paused) {
-    await syncHomeVideoPlayback();
+    if (streaming.source.value) await streaming.play();
+    else await syncHomeVideoPlayback();
     return;
   }
 
@@ -981,7 +1001,7 @@ function bindHomePlayerEventListeners(player: MediaPlayerElement | null) {
   const handleReady = () => {
     syncHomeVideoAspectRatio(player);
     syncHomeVideoTimelineState(player);
-    void syncHomeVideoPlayback();
+    if (!props.item.videoPlaybackUrl) void syncHomeVideoPlayback();
   };
   const handlePlay = () => {
     handleHomeVideoPlay();

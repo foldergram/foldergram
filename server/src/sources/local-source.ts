@@ -147,7 +147,7 @@ function checkDirectory(rootPath: string): string {
   }
 }
 
-const privateDirectories = () => [appConfig.dbDir, appConfig.thumbnailsDir, appConfig.previewsDir, appConfig.scanErrorReportDir, appConfig.geodataDir];
+const privateDirectories = () => [appConfig.dbDir, appConfig.thumbnailsDir, appConfig.previewsDir, appConfig.scanErrorReportDir, appConfig.geodataDir, appConfig.hlsCacheDir];
 const overlaps = (left: string, right: string) => ensureWithinRoot(left, right) || ensureWithinRoot(right, left);
 const aliases = (root: string, saved?: string | null) => [...new Set([path.resolve(root), canonicalPath(root), saved].filter((item): item is string => Boolean(item)))];
 
@@ -159,6 +159,9 @@ export function validateLocalPath(input: string, excludeId?: number, primary = f
     throw new LocalPathError('Choose a folder below the filesystem root.', 'filesystem_root');
   }
   const paths = [rootPath, canonicalRootPath];
+  if (aliases(appConfig.hlsCacheDir).some(cache => paths.some(root => overlaps(root, cache)))) {
+    throw new LocalPathError('This folder overlaps the HLS cache.', 'private_storage');
+  }
   if (!primary && privateDirectories().some(directory => aliases(directory).some(privatePath => paths.some(root => overlaps(root, privatePath))))) {
     throw new LocalPathError('This folder overlaps Foldergram application storage.', 'private_storage');
   }

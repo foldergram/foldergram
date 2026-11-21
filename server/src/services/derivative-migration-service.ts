@@ -723,7 +723,8 @@ class DerivativeMigrationService {
       fileSize: row.file_size,
       width: row.width,
       height: row.height,
-      playbackStrategy: row.playback_strategy
+      playbackStrategy: row.playback_strategy,
+      videoDeliveryPolicy: row.video_delivery_policy
     }, sharedPreviewFolderIds.has(row.folder_id) ? 'share' : 'normal');
   }
 

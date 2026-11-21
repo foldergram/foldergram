@@ -124,7 +124,7 @@ that folder.
 No. A folder share is not an admin session, viewer session, or public-library
 mode. It does not grant Home, feed search, Reels, Places, Likes, Collections,
 Trash, Settings, scans, rebuild actions, caption editing, cover editing, delete
-actions, or original-file downloads.
+actions, or the library's original-file download route.
 
 ## Why does the API call posts "images" in some fields?
 
@@ -133,14 +133,17 @@ several payload fields still use `image` terminology while carrying mixed media.
 
 ## Can Foldergram play videos directly from the original file?
 
-Yes, sometimes. A compatible `.mp4` with H.264 video, `yuv420p` pixels, AAC or
-no audio, a known size of at most `24 MiB`, and a known display width of at most
-`1500` pixels uses the original as its ordinary playback source. Posters are
-still generated, and larger compatible videos use a generated preview with an
-optional `HD` original source in the detail player.
+Yes. New local videos use streaming by default. Foldergram plays the original
+when the browser and connection can handle it. If the video needs conversion,
+Foldergram prepares short sections as you watch. Visitors to a shared folder
+can also stream the videos they have permission to watch.
 
-Folder-share playback keeps using scoped preview media instead of granting
-ordinary original access.
+## Will upgrading remove my video previews?
+
+No. Upgrading keeps your existing video previews. Videos already in your
+library keep their current playback. To see how much space you could free,
+open **Settings → Scan & Library** and assess the previews before confirming
+cleanup. [See the cleanup steps](./media-processing.md#switch-existing-local-videos-to-streaming).
 
 ## Can I import iPhone HEIC photos?
 

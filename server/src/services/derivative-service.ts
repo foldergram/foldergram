@@ -9,7 +9,7 @@ import sharp from 'sharp';
 import { processHeicSource, type HeicSource } from './heic/service.js';
 import type { HeicMetadata } from './heic/protocol.js';
 
-import type { ImageExifData, MediaType, PlaybackStrategy } from '../types/models.js';
+import type { ImageExifData, LocalVideoMetadata, MediaType, PlaybackStrategy } from '../types/models.js';
 import { appConfig } from '../config/env.js';
 import { extractImageExif, normalizeTakenAtValue } from '../utils/exif-utils.js';
 import {
@@ -37,6 +37,15 @@ interface FfprobeStream {
   width?: number;
   height?: number;
   pix_fmt?: string;
+  profile?: string;
+  level?: number;
+  bits_per_raw_sample?: string;
+  sample_aspect_ratio?: string;
+  color_space?: string;
+  color_transfer?: string;
+  color_primaries?: string;
+  channels?: number;
+  disposition?: { attached_pic?: number };
   duration?: string;
   nb_frames?: string;
   tags?: {
@@ -53,6 +62,8 @@ interface FfprobeStream {
 interface FfprobeFormat {
   duration?: string;
   format_name?: string;
+  size?: string;
+  bit_rate?: string;
   nb_streams?: number;
   tags?: {
     creation_time?: string;
@@ -75,6 +86,7 @@ export interface MediaMetadata {
   durationMs: number | null;
   mediaType: MediaType;
   playbackStrategy: PlaybackStrategy;
+  localVideoMetadata?: LocalVideoMetadata;
   isAnimated: boolean;
 }
 
@@ -131,13 +143,21 @@ async function readMediaProbe(sourcePath: string): Promise<FfprobePayload> {
       '-v',
       'error',
       '-show_entries',
-      'format=duration,format_name,nb_streams:format_tags=creation_time,major_brand,compatible_brands:stream=index,codec_type,codec_name,width,height,pix_fmt,duration,nb_frames:stream_tags=creation_time,rotate,title,handler_name:stream_side_data=rotation',
+      [
+        'format=duration,format_name,nb_streams,size,bit_rate',
+        'format_tags=creation_time,major_brand,compatible_brands',
+        'stream=index,codec_type,codec_name,profile,level,width,height,pix_fmt,bits_per_raw_sample,sample_aspect_ratio,color_space,color_transfer,color_primaries,channels,duration,nb_frames',
+        'stream_disposition=attached_pic',
+        'stream_tags=creation_time,rotate,title,handler_name',
+        'stream_side_data=rotation'
+      ].join(':'),
       '-of',
       'json',
       sourcePath
     ],
     {
-      maxBuffer: 2 * 1024 * 1024
+      maxBuffer: 2 * 1024 * 1024,
+      timeout: 30_000
     }
   );
 
@@ -184,8 +204,11 @@ function normalizeVideoRotation(rotation: number | string | null | undefined): n
 }
 
 function resolveVideoDisplayDimensions(videoStream: FfprobeStream | undefined): Pick<MediaMetadata, 'width' | 'height'> {
-  const width = videoStream?.width ?? THUMBNAIL_SIZE;
+  const codedWidth = videoStream?.width ?? THUMBNAIL_SIZE;
   const height = videoStream?.height ?? THUMBNAIL_SIZE;
+  const sar = /^([1-9]\d*):([1-9]\d*)$/.exec(videoStream?.sample_aspect_ratio ?? '');
+  const squarePixelWidth = sar ? Math.max(1, Math.round(codedWidth * Number(sar[1]) / Number(sar[2]))) : codedWidth;
+  const width = Number.isSafeInteger(squarePixelWidth) ? squarePixelWidth : codedWidth;
   const rotation =
     videoStream?.side_data_list?.find((sideData) => typeof sideData.rotation === 'number')?.rotation
     ?? videoStream?.tags?.rotate;
@@ -414,19 +437,50 @@ async function resolveVideoPlaybackStrategy(
 async function readVideoMetadata(sourcePath: string, options: ReadMediaMetadataOptions = {}): Promise<MediaMetadata> {
   const payload = await readMediaProbe(sourcePath);
   const videoStream = payload.streams?.find((stream) => stream.codec_type === 'video');
+  const indexedVideo = payload.streams?.find((stream) => stream.codec_type === 'video' && stream.disposition?.attached_pic !== 1);
+  const indexedDimensions = resolveVideoDisplayDimensions(indexedVideo);
   const durationSeconds = parseFfprobeFloat(payload.format?.duration);
   const durationMs = durationSeconds !== null ? Math.round(durationSeconds * 1000) : null;
   const takenAt = normalizeTakenAtValue(videoStream?.tags?.creation_time ?? payload.format?.tags?.creation_time ?? null);
-  const displayDimensions = resolveVideoDisplayDimensions(videoStream);
-
   return {
-    width: displayDimensions.width,
-    height: displayDimensions.height,
+    width: indexedDimensions.width,
+    height: indexedDimensions.height,
     takenAt,
     exif: null,
     durationMs,
     mediaType: 'video',
     playbackStrategy: await resolveVideoPlaybackStrategy(sourcePath, payload),
+    localVideoMetadata: {
+      version: 2,
+      container: payload.format?.format_name ?? null,
+      majorBrand: payload.format?.tags?.major_brand ?? null,
+      durationMs,
+      fileSize: options.fileSize ?? parseFfprobeFloat(payload.format?.size),
+      bitrate: parseFfprobeFloat(payload.format?.bit_rate),
+      displayWidth: indexedDimensions.width,
+      displayHeight: indexedDimensions.height,
+      rotation: indexedVideo?.side_data_list?.find(entry => typeof entry.rotation === 'number')?.rotation
+        ?? parseFfprobeFloat(indexedVideo?.tags?.rotate),
+      video: indexedVideo ? {
+        index: indexedVideo.index ?? null,
+        codec: indexedVideo.codec_name ?? null,
+        profile: indexedVideo.profile ?? null,
+        level: indexedVideo.level ?? null,
+        pixelFormat: indexedVideo.pix_fmt ?? null,
+        bitDepth: parseFfprobeInteger(indexedVideo.bits_per_raw_sample)
+          || parseFfprobeInteger(indexedVideo.pix_fmt?.match(/(?:p|gray)(10|12|14|16)(?:be|le)$/)?.[1])
+          || (indexedVideo.pix_fmt === 'yuv420p' ? 8 : null),
+        sampleAspectRatio: indexedVideo.sample_aspect_ratio ?? null,
+        colorSpace: indexedVideo.color_space ?? null,
+        colorTransfer: indexedVideo.color_transfer ?? null,
+        colorPrimaries: indexedVideo.color_primaries ?? null
+      } : null,
+      audio: (payload.streams ?? []).filter(stream => stream.codec_type === 'audio').map(stream => ({
+        index: stream.index ?? null,
+        codec: stream.codec_name ?? null,
+        channels: stream.channels ?? null
+      }))
+    },
     isAnimated: false
   };
 }
@@ -573,7 +627,8 @@ const inflightVideoPreviews = new Map<string, Promise<void>>();
 async function getAudioDecoderCodecs(): Promise<Set<string>> {
   if (!audioDecoderCodecs) {
     audioDecoderCodecs = execFileAsync('ffmpeg', ['-hide_banner', '-decoders'], {
-      maxBuffer: 2 * 1024 * 1024
+      maxBuffer: 2 * 1024 * 1024,
+      timeout: 6000
     }).then(({ stdout }) => {
       const codecs = new Set<string>();
       for (const line of stdout.split('\n')) {
@@ -593,25 +648,27 @@ async function getAudioDecoderCodecs(): Promise<Set<string>> {
   return audioDecoderCodecs;
 }
 
-async function selectPreviewAudio(sourcePath: string): Promise<number | null> {
-  const payload = await readMediaProbe(sourcePath);
-  const streams = payload.streams?.filter((stream) => stream.codec_type === 'audio') ?? [];
+export async function selectDecodableVideoAudio(streams: LocalVideoMetadata['audio']): Promise<number | null> {
   if (streams.length === 0) return null;
 
   const codecs = await getAudioDecoderCodecs();
-  const selected = streams.find((stream) => stream.codec_name && codecs.has(stream.codec_name));
+  const selected = streams.find((stream) => stream.codec && codecs.has(stream.codec));
   if (!selected || typeof selected.index !== 'number' || !Number.isInteger(selected.index) || selected.index < 0) {
     throw new Error('No audio track has an available FFmpeg decoder; refusing to create a silent preview.');
   }
   return selected.index;
 }
 
-export async function writeVideoPreview(sourcePath: string, previewAbsolutePath: string): Promise<void> {
+export async function writeVideoPreview(
+  sourcePath: string,
+  previewAbsolutePath: string,
+  beforePublish?: () => Promise<unknown>
+): Promise<void> {
   const outputPath = path.resolve(previewAbsolutePath);
   const existing = inflightVideoPreviews.get(outputPath);
   if (existing) return existing;
 
-  const generation = publishVideoPreview(sourcePath, outputPath);
+  const generation = publishVideoPreview(sourcePath, outputPath, beforePublish);
   inflightVideoPreviews.set(outputPath, generation);
   try {
     await generation;
@@ -620,9 +677,12 @@ export async function writeVideoPreview(sourcePath: string, previewAbsolutePath:
   }
 }
 
-async function publishVideoPreview(sourcePath: string, previewAbsolutePath: string): Promise<void> {
+async function publishVideoPreview(sourcePath: string, previewAbsolutePath: string, beforePublish?: () => Promise<unknown>): Promise<void> {
   await ensureParentDirectory(previewAbsolutePath);
-  const audioIndex = await selectPreviewAudio(sourcePath);
+  const probe = await readMediaProbe(sourcePath);
+  const audioIndex = await selectDecodableVideoAudio((probe.streams ?? [])
+    .filter(stream => stream.codec_type === 'audio')
+    .map(stream => ({ index: stream.index ?? null, codec: stream.codec_name ?? null, channels: stream.channels ?? null })));
   const temporaryPath = path.join(path.dirname(previewAbsolutePath), `.preview-${randomUUID()}.mp4`);
   try {
     // Landscape videos target up to 1280x720. Portrait and square videos cap their
@@ -636,6 +696,7 @@ async function publishVideoPreview(sourcePath: string, previewAbsolutePath: stri
       '-y',
       '-v',
       'error',
+      ...(beforePublish ? ['-xerror'] : []),
       '-i',
       sourcePath,
       '-map',
@@ -676,6 +737,7 @@ async function publishVideoPreview(sourcePath: string, previewAbsolutePath: stri
       || !hasPositiveDuration || !hasExpectedAudio) {
       throw new Error('FFmpeg produced an invalid video preview.');
     }
+    await beforePublish?.();
     await fs.rename(temporaryPath, previewAbsolutePath);
   } finally {
     await fs.rm(temporaryPath, { force: true });
@@ -744,9 +806,6 @@ async function generateVideoDerivatives(
   force: boolean,
   generatePreview: boolean
 ): Promise<Pick<DerivativeResult, 'generatedThumbnail' | 'generatedPreview'>> {
-  if (force && !generatePreview) {
-    await fs.rm(previewAbsolutePath, { force: true });
-  }
   const shouldWriteThumbnail = force || !(await isNonemptyDerivative(thumbnailAbsolutePath));
   const shouldWritePreview = generatePreview && (force || !(await isNonemptyDerivative(previewAbsolutePath)));
 

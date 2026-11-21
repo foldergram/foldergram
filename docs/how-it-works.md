@@ -99,6 +99,7 @@ data/
     gallery.sqlite
   thumbnails/    # asset-key-sharded thumbnail derivatives
   previews/      # asset-key-sharded preview derivatives
+  hls-cache/     # temporary video segments
   scan-errors/   # created on demand for full scan error reports
 ```
 
@@ -208,11 +209,10 @@ During a full scan, Foldergram:
 5. Reads or refreshes media metadata.
 6. Reconciles eligible file moves so the same row, likes, and derivative paths can survive path changes.
 7. Marks missing indexed rows as deleted.
-8. Queues derivative work for changed or missing outputs. Qualifying direct-playback videos generate posters but skip the playable preview.
-9. During an explicit repair scan, reclaims generated video previews that are no longer needed after validating the source, live references, and active share requirements.
-10. Depending on `SCAN_MEDIA_ERROR_MODE`, either records and skips supported-media failures or fails fast on the first one.
-11. Performs deferred stale-derivative cleanup after successful scans.
-12. Writes scan status to `scan_runs` and, when needed, a per-run full scan error report.
+8. Queues missing or changed thumbnails, video posters, and any saved previews the video needs.
+9. Depending on `SCAN_MEDIA_ERROR_MODE`, either records and skips supported-media failures or fails fast on the first one.
+10. Performs deferred stale-derivative cleanup after successful scans.
+11. Writes scan status to `scan_runs` and, when needed, a per-run full scan error report.
 
 ## Quick scans and derivative repair
 
@@ -222,9 +222,9 @@ During a full scan, Foldergram:
   stats, computes fingerprints and folder signatures, reconciles removals, and
   applies changed or new media. It does not queue ordinary unchanged derivative
   verification.
-- **Scan and repair derivatives** (`true`) performs the same discovery and also
-  verifies generated media for unchanged assets. It is also the action that
-  reclaims obsolete video previews for already-indexed qualifying videos.
+- **Scan and repair derivatives** (`true`) also checks thumbnails and previews
+  for unchanged files. To switch existing videos to streaming and remove their
+  previews, use [preview cleanup](./media-processing.md#switch-existing-local-videos-to-streaming).
 
 Both modes still perform pending one-time metadata repairs and derivative-storage
 migration work. Neither mode turns directory traversal into a changed-path-only scan;
@@ -291,6 +291,32 @@ Recommended pages describe the bounded session queue in `total` and `hasMore`.
 Changing the seed rotates the discovery sample and starts a new queue, which
 keeps large libraries explorable across sessions without loading every video at
 once.
+
+## Local video streaming
+
+The scanner stores a playback mode for each local video. New videos use the
+configured mode. Updates to the same indexed video and moves the scanner
+recognizes keep that mode. A full index rebuild treats the videos as new
+imports.
+
+For streaming videos, the player first checks whether the browser can play the
+original. If it needs conversion, Foldergram uses FFmpeg to prepare up to 24
+seconds at a time and serve them as HLS. The player loads more sections as
+needed, starts a new section when you seek outside the current one, and can
+retry at lower resolution. Conversion uses H.264 and the first available audio
+track FFmpeg can decode. On browsers that support it, the player uses its
+bundled HLS.js. It can also use native HLS where available.
+
+Home and Reels wait for the active video to settle before starting a
+conversion. Reels can check playback information during this wait. Once the
+current video is playing and an encoder is free, Home and Reels can prepare
+the first three seconds of the next video. Playback and seeks take priority.
+In Reels, the cover stays visible until the first frame appears. A loading
+spinner appears only if playback takes a little longer to start. When you
+leave a video, Foldergram can stop unused conversion work and keep a finished
+opening in the temporary cache.
+
+See the [streaming API](./api.md#local-streaming-playback) for playback and cache behavior.
 
 ## Moments and highlights
 
@@ -383,9 +409,9 @@ Once data is indexed:
 - feed pages read from SQLite
 - likes read from SQLite
 - moments, highlights, and folder stories read from SQLite
-- thumbnails and previews are served as static files
-- qualifying direct-playback videos use the original-media route as their normal playback source
-- originals are served by image ID only
+- thumbnails and saved previews are served as files
+- streaming videos use a compatible original or temporary HLS segments
+- originals are served by image ID
 
 ## Posts and carousel discovery
 

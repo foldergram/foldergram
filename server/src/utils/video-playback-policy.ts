@@ -1,4 +1,4 @@
-import type { MediaType, PlaybackStrategy } from '../types/models.js';
+import type { LocalVideoDeliveryPolicy, MediaType, PlaybackStrategy } from '../types/models.js';
 
 export const DIRECT_VIDEO_PLAYBACK_MAX_BYTES = 24 * 1024 * 1024;
 export const DIRECT_VIDEO_PLAYBACK_MAX_DISPLAY_WIDTH = 1500;
@@ -14,6 +14,7 @@ export interface VideoPlaybackCandidate {
   width: number | null | undefined;
   height?: number | null | undefined;
   playbackStrategy: PlaybackStrategy | null | undefined;
+  videoDeliveryPolicy?: LocalVideoDeliveryPolicy | null;
 }
 
 function hasPositiveFiniteNumber(value: number | null | undefined): value is number {
@@ -59,5 +60,6 @@ export function shouldGenerateVideoPreview(
   candidate: VideoPlaybackCandidate,
   context: VideoDeliveryContext = 'normal'
 ): boolean {
-  return candidate.mediaType !== 'video' || resolveVideoPlaybackSource(candidate, context) === 'preview';
+  return candidate.mediaType !== 'video' ||
+    (candidate.videoDeliveryPolicy !== 'streaming' && resolveVideoPlaybackSource(candidate, context) === 'preview');
 }

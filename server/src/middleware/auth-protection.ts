@@ -1,6 +1,7 @@
 import type express from 'express';
 
 import { authService, type AuthCapabilities } from '../services/auth-service.js';
+import { isPlaybackSessionMutation } from '../utils/playback-session-request.js';
 
 export const AUTH_REQUIRED_MESSAGE = 'Authentication required.';
 export const AUTH_REQUIRED_HEADER = 'x-foldergram-auth-required';
@@ -19,6 +20,7 @@ function isPublicApiRoute(request: express.Request): boolean {
     (method === 'GET' && (path === '/health' || path === '/auth/status' || path === '/appearance')) ||
     (method === 'POST' && (path === '/auth/login' || path === '/auth/logout' || path === '/auth/unlock-admin')) ||
     isShareReadRoute ||
+    (path.startsWith('/share/') && isPlaybackSessionMutation(method, path)) ||
     isShareUnlockRoute
   );
 }
@@ -49,7 +51,8 @@ export function requireApiAuthentication(
     return;
   }
 
-  if (authService.isPublicViewerAccessEnabled() && isSafeReadMethod(request.method.toUpperCase())) {
+  if (authService.isPublicViewerAccessEnabled() &&
+      (isSafeReadMethod(request.method.toUpperCase()) || isPlaybackSessionMutation(request.method, request.path))) {
     authService.setNoStoreHeaders(response);
     response.setHeader('Vary', 'Cookie');
     next();

@@ -19,13 +19,13 @@ All documented routes come from `server/src/routes/api.ts`.
 
 - JSON API responses use `Cache-Control: no-store`.
 - `/thumbnails/...` and `/previews/...` derivatives use the immutable protected-derivative policy: `private, max-age=604800, immutable` with `Vary: Cookie` when password protection is enabled, or `public, max-age=604800, immutable` when it is disabled.
-- Folder-share media under `/api/share/images/:id/...` always uses `private, no-store`.
+- Folder-share media, streaming playback URLs, and preview URLs for videos that have switched to streaming use `private, no-store` with `Vary: Cookie`.
 - Original media uses a revalidation-friendly policy instead of an immutable lifetime because a file can change without its image ID changing:
   - password protection enabled: `Cache-Control: private, no-cache` with `Vary: Cookie`
   - password protection disabled: `Cache-Control: public, no-cache`
 - Original responses still include `ETag`, `Last-Modified`, and `Accept-Ranges`, so browsers can revalidate and seek with bounded range requests.
 
-This applies to `/api/originals/:id` and to legacy `/previews/...` URLs that resolve to an original.
+The revalidation policy applies to `/api/originals/:id` and to legacy `/previews/...` URLs for direct-playback videos still using the older preview policy.
 
 ## Authentication and protected routes
 
@@ -33,7 +33,7 @@ Foldergram can optionally require a role-bearing password session.
 
 When password protection is enabled:
 
-- most `/api` routes return `401` until the browser logs in, except for safe read routes in public viewer mode
+- most `/api` routes return `401` until the browser logs in. Public viewer mode allows library reads and the requests to open and close video playback sessions.
 - `GET /api/health`, `GET /api/auth/status`, `POST /api/auth/login`, `POST /api/auth/unlock-admin`, and `POST /api/auth/logout` stay reachable without an authenticated session
 - scoped `/api/share/...` routes stay reachable so folder-share visitors can unlock and read one shared folder
 - `PUT /api/auth/password` is public only when password protection is currently disabled, so the first admin password can be set
@@ -158,10 +158,11 @@ Notes:
 
 - `items` contain both images and videos.
 - `thumbnailUrl` points to `/thumbnails/...`.
-- `previewUrl` points to `/previews/...` for generated media. For a qualifying
-  direct-playback video it points to `/api/originals/:id`.
-- video items can include `videoPlaybackSource` with `original` or `preview` to
-  distinguish the selected ordinary source from compatibility metadata.
+- use `videoPlaybackUrl` when present to start [streaming playback](#local-streaming-playback).
+- `previewUrl` points to `/previews/...` for generated media. On the older
+  preview policy, compatible videos can use `/api/originals/:id` instead.
+- videos on the older preview policy can include `videoPlaybackSource` with
+  `original` or `preview` to show which one the app uses.
 - feed items can include a nullable `caption`.
 - feed items representing carousel posts include `carouselTitle`, a display-safe child-folder label that remains available when anonymous-public responses omit `sourcePath`.
 
@@ -443,7 +444,10 @@ Returns one shared post detail using the canonical `posts.id` namespace after
 checking access to that post's folder. Shared folder grids and carousel links
 use this route.
 
-Shared detail payloads do not expose original-file URLs (`originalUrl`) or local system paths. Only `thumbnailUrl` and `previewUrl` are provided, both pointing to guarded shared media endpoints. Video items in shared payloads report `videoPlaybackSource: "preview"`.
+Shared detail payloads omit `originalUrl` and local filesystem paths.
+`thumbnailUrl` and `previewUrl` point to routes that check the folder grant.
+Streaming videos also include `videoPlaybackUrl` under the same share scope.
+See [local streaming playback](#local-streaming-playback).
 
 ### `GET /api/share/images/:imageId`
 
@@ -462,9 +466,10 @@ checking its folder grant. The ID is an `images.id`, including for Carousel slid
 Serves or lazily generates the preview for one physical media asset after
 checking its folder grant. The ID is an `images.id`, including for Carousel slides.
 
-Folder-share visitors do not receive ordinary original URLs. A qualifying video
-may still need a generated preview for shared delivery, so this route can create
-one on authorized first access even when normal playback uses the original.
+For videos on the preview policy, this route can create a preview on first
+access even when normal browsing uses the original. For streaming videos,
+use `videoPlaybackUrl`. An old preview URL can serve a compatible MP4 original
+through the share scope, or return `410` and ask the visitor to reload.
 
 ### `GET /api/places`
 
@@ -787,8 +792,9 @@ Errors:
 Detail media rules:
 
 - if `IMAGE_DETAIL_SOURCE=original` and the item is an image, `previewUrl` points to `/api/originals/:id`
-- an eligible direct-playback video also uses `/api/originals/:id` for `previewUrl`
-- other videos keep `previewUrl` on `/previews/...`
+- streaming videos include `videoPlaybackUrl`. Use it to start playback.
+- on the older preview policy, `previewUrl` points to `/api/originals/:id` for
+  videos that can play directly and `/previews/...` for videos that need a preview.
 - `playbackStrategy: "original"` reports original-playback compatibility
 - `videoPlaybackSource` reports the selected ordinary video source. When it is
   `original`, the client does not show an HD switch that would toggle between
@@ -922,6 +928,7 @@ additional fields below and uses the same admin-detailed `scan` payload as
 | `deletedImages` | Soft-deleted post count. |
 | `thumbnailCount` | Count of indexed media-asset rows that store a non-empty thumbnail target. Independent of physical file existence. |
 | `previewCount` | Count of indexed media-asset rows that store a non-empty preview target. Independent of physical file existence. |
+| `videoDeliveryMode` | Configured playback mode for new local videos. Either `streaming` or `previews`. |
 | `storage.usingInMemoryDatabase` | Whether SQLite had to fall back to in-memory mode. |
 | `libraryIndex.currentGalleryRoot` | Current configured gallery root. |
 | `libraryIndex.previousGalleryRoot` | Prior configured gallery root when the root changed. |
@@ -961,6 +968,49 @@ Response shape:
 
 When prepared, `metadata` includes `source`, `sourceUrl`, `importedAt`, and
 `rowCount`.
+
+## Local streaming playback
+
+Use the `videoPlaybackUrl` from the video item. The ID is the media file's
+`images.id`, including for carousel slides. The URL is
+`/api/videos/:id/playback` for the library or `/api/share/images/:id/playback`
+for a folder share.
+
+1. Send `GET` to the playback URL. The response includes `duration` in seconds,
+   `width`, `height`, `bitrate`, and `original`. When Foldergram can offer the
+   original, `original` contains `url` and `type`. Otherwise it is `null`.
+2. If the original needs conversion, send `POST` to the playback URL plus
+   `/sessions` with `{ "at": 0, "profile": "standard" }`. Set `at` to the
+   position in seconds. Use `profile: "low"` for lower resolution. The default
+   profile is `standard`.
+3. Play the playlist at the returned `url`. The response also gives its MIME
+   `type`, `profile`, `releaseUrl`, and three values in seconds. `duration`
+   is the full video length, `offset` is where this section starts in the full
+   video, and `window` is the length of this section. Use the returned
+   values when resuming because a cached opening can be shorter than a normal
+   section.
+4. Send `POST` to `releaseUrl` when you leave the video. It returns `204`.
+   Foldergram can stop conversion when nobody is watching and keep a finished
+   opening in the cache.
+
+To prepare the next video in advance, send `{ "at": 0, "warmup": true }` to the
+same session endpoint. Foldergram uses the standard profile and returns
+`{ "warmed": true }` when the first three seconds or an existing full section
+are ready. This response gives you no playback URL. Open a normal session when
+the user starts playing. `warmupAvailable` in the metadata is a hint about
+spare capacity. Foldergram checks it again when deciding whether to start work.
+
+Every playback request checks access, even if the video is already cached.
+Session and release requests require `x-foldergram-intent: 1` and the normal
+origin checks. Public viewers and public demos can use these requests for
+playback. Folder-share sessions still require a valid grant.
+
+| Status | Meaning |
+| --- | --- |
+| `422` | Foldergram could not convert the video. |
+| `429` | Too many session requests. |
+| `503` | Conversion is busy or temporarily unavailable. |
+| `507` | The cache cannot hold the conversion right now. |
 
 ## Mutating endpoints
 
@@ -1829,13 +1879,36 @@ Notes:
 
 - in `SCAN_MEDIA_ERROR_MODE=skip`, a successful rescan can also return `"status": "completed_with_errors"` when supported media was skipped and reported
 - quick scans still discover files, read source stats, reconcile removals, and perform any one-time derivative migration work. They skip verification and repair of unchanged generated derivatives.
-- `{"repairDerivatives": true}` also reclaims generated video previews that are no longer needed under the current direct-playback policy after validating the source, derivative references, and share requirements.
+- `{"repairDerivatives": true}` also checks thumbnails and previews for unchanged files. Switching videos to streaming and removing their previews is a separate action.
 
 Errors:
 
 - `409` with the library-rebuild-required message when the gallery root changed
 - `403` for viewer sessions
 - `500` for scan failures surfaced from the scanner
+
+### Switch video playback modes
+
+These admin routes use `/api/admin/video-previews/reclamation` to switch to
+streaming and remove previews, or `/api/admin/video-previews/generation` to
+switch to saved previews. Send `{ "sourceId": 12 }` to assess one local source,
+or `{}` to assess all local sources. Generation counts enabled local sources
+only.
+
+| Method and path | What it does |
+| --- | --- |
+| `GET` on the base path | Lists local sources and returns the latest job for this operation. For generation in previews mode, `streamingCount` is the number of indexed local videos still set to streaming. For cleanup in streaming mode, `cleanupPending` reports whether indexed videos still need switching. It is a database-only hint, not a check for leftover files; an explicit assessment checks the preview files on disk. |
+| `POST` on the base path | Starts an assessment and returns the job. |
+| `GET /:id` | Returns the estimate, progress, or final results. |
+| `POST /:id/confirm` | Starts switching after assessment. |
+| `POST /:id/cancel` | Asks the job to stop between items. |
+| `POST /:id/retry` | Resumes interrupted or retryable work. |
+
+Accepted POSTs return `202` with the job. Poll `GET /:id` until its state
+changes. A `409` means the operation is unavailable for the source or current
+job state. Assessment and confirmation require the matching configured playback
+mode. Existing jobs can be read and recovered in either mode. All POSTs require
+the usual admin and mutation checks.
 
 ### `POST /api/admin/rebuild-index`
 
