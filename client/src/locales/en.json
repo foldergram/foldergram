@@ -3,7 +3,25 @@
     "loading": "Preparing video…",
     "unavailable": "This video could not be played.",
     "retry": "Retry playback",
+    "maintenance": {
+      "title": "Video playback",
+      "streaming": "Streaming",
+      "previews": "Saved previews",
+      "result": "Video maintenance result",
+      "checking": "Checking local videos…",
+      "checkFailed": "Couldn't check video maintenance.",
+      "working": "Video maintenance is in progress.",
+      "needsAttention": "A video maintenance job needs attention.",
+      "skipped": "The last operation skipped some videos.",
+      "videosPending": "Some local videos are still set to streaming.",
+      "noVideosPending": "No videos left to switch to saved previews.",
+      "cleanupPending": "Videos or saved previews are available to assess.",
+      "noCleanupPending": "All indexed local videos use streaming.",
+      "checkRemaining": "Check for remaining previews",
+      "closeCheck": "Close"
+    },
     "reclamation": {
+      "recoveryTitle": "Video preview cleanup recovery",
       "action": "Switch to streaming and remove video previews",
       "description": "Free storage by removing generated video copies.",
       "preserved": "Foldergram keeps originals, photos, thumbnails, library organization, and Immich data.",
@@ -45,6 +63,22 @@
         "removalFailed": "Preview removal failed",
         "changed": "Video changed since assessment"
       }
+    },
+    "generation": {
+      "title": "Switch existing videos to saved previews",
+      "description": "New videos use saved previews when needed. {count} existing video is still set to streaming. | New videos use saved previews when needed. {count} existing videos are still set to streaming.",
+      "assess": "Check videos",
+      "previewsToGenerate": "Previews to generate",
+      "confirmTitle": "Switch to saved previews?",
+      "confirmAction": "Generate previews and switch",
+      "confirmNote": "Creating previews takes time and disk space. Videos that need a preview keep streaming until it’s ready.",
+      "noEligibleVideos": "No videos can be switched for these sources.",
+      "assessing": "Checking videos…",
+      "running": "Generating previews and switching videos…",
+      "estimate": "Checked {checked} videos. {videos} would switch and {files} need a preview.",
+      "result": "{videos} videos switched to saved previews · {files} previews generated",
+      "dismissResult": "Dismiss preview generation result",
+      "failed": "Preview generation failed"
     }
   },
   "displayPreferences": {

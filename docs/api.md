@@ -928,6 +928,7 @@ additional fields below and uses the same admin-detailed `scan` payload as
 | `deletedImages` | Soft-deleted post count. |
 | `thumbnailCount` | Count of indexed media-asset rows that store a non-empty thumbnail target. Independent of physical file existence. |
 | `previewCount` | Count of indexed media-asset rows that store a non-empty preview target. Independent of physical file existence. |
+| `videoDeliveryMode` | Configured playback mode for new local videos. Either `streaming` or `previews`. |
 | `storage.usingInMemoryDatabase` | Whether SQLite had to fall back to in-memory mode. |
 | `libraryIndex.currentGalleryRoot` | Current configured gallery root. |
 | `libraryIndex.previousGalleryRoot` | Prior configured gallery root when the root changed. |
@@ -1886,24 +1887,28 @@ Errors:
 - `403` for viewer sessions
 - `500` for scan failures surfaced from the scanner
 
-### Video preview cleanup
+### Switch video playback modes
 
-These admin routes start under `/api/admin/video-previews/reclamation`. Send
-`{ "sourceId": 12 }` to limit an assessment to one local source, or `{}` for
-all enabled local sources.
+These admin routes use `/api/admin/video-previews/reclamation` to switch to
+streaming and remove previews, or `/api/admin/video-previews/generation` to
+switch to saved previews. Send `{ "sourceId": 12 }` to assess one local source,
+or `{}` to assess all local sources. Generation counts enabled local sources
+only.
 
 | Method and path | What it does |
 | --- | --- |
-| `GET` on the base path | Lists local sources and returns the latest job, if any. |
+| `GET` on the base path | Lists local sources and returns the latest job for this operation. For generation in previews mode, `streamingCount` is the number of indexed local videos still set to streaming. For cleanup in streaming mode, `cleanupPending` reports whether indexed videos still need switching. It is a database-only hint, not a check for leftover files; an explicit assessment checks the preview files on disk. |
 | `POST` on the base path | Starts an assessment and returns the job. |
 | `GET /:id` | Returns the estimate, progress, or final results. |
-| `POST /:id/confirm` | Starts removal after assessment. |
+| `POST /:id/confirm` | Starts switching after assessment. |
 | `POST /:id/cancel` | Asks the job to stop between items. |
 | `POST /:id/retry` | Resumes interrupted or retryable work. |
 
 Accepted POSTs return `202` with the job. Poll `GET /:id` until its state
 changes. A `409` means the operation is unavailable for the source or current
-job state. All POSTs require the usual admin and mutation checks.
+job state. Assessment and confirmation require the matching configured playback
+mode. Existing jobs can be read and recovered in either mode. All POSTs require
+the usual admin and mutation checks.
 
 ### `POST /api/admin/rebuild-index`
 

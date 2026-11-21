@@ -3,7 +3,25 @@
     "loading": "Preparando el vídeo…",
     "unavailable": "No se pudo reproducir este vídeo.",
     "retry": "Reintentar reproducción",
+    "maintenance": {
+      "title": "Reproducción de video",
+      "streaming": "Streaming",
+      "previews": "Vistas previas guardadas",
+      "result": "Resultado del mantenimiento de video",
+      "checking": "Revisando los videos locales…",
+      "checkFailed": "No se pudo comprobar el estado del mantenimiento.",
+      "working": "El mantenimiento de video está en curso.",
+      "needsAttention": "Una tarea de mantenimiento de video requiere atención.",
+      "skipped": "La última operación omitió algunos videos.",
+      "videosPending": "Algunos videos locales siguen configurados para streaming.",
+      "noVideosPending": "No quedan videos por cambiar a vistas previas guardadas.",
+      "cleanupPending": "Hay videos o vistas previas guardadas para revisar.",
+      "noCleanupPending": "Todos los videos locales indexados usan streaming.",
+      "checkRemaining": "Comprobar vistas previas restantes",
+      "closeCheck": "Cerrar"
+    },
     "reclamation": {
+      "recoveryTitle": "Recuperar la limpieza de vistas previas de video",
       "action": "Cambiar a streaming y eliminar las vistas previas de vídeo",
       "description": "Libera espacio eliminando copias generadas de los vídeos.",
       "preserved": "Foldergram conserva los originales, las fotos, las miniaturas, la organización de la biblioteca y los datos de Immich.",
@@ -45,6 +63,22 @@
         "removalFailed": "No se pudo eliminar la vista previa",
         "changed": "El vídeo cambió después de la evaluación"
       }
+    },
+    "generation": {
+      "title": "Cambiar los videos existentes a vistas previas guardadas",
+      "description": "Los videos nuevos usan vistas previas guardadas cuando las necesitan. {count} video existente sigue configurado para streaming. | Los videos nuevos usan vistas previas guardadas cuando las necesitan. {count} videos existentes siguen configurados para streaming.",
+      "assess": "Revisar videos",
+      "previewsToGenerate": "Vistas previas por generar",
+      "confirmTitle": "¿Cambiar a vistas previas guardadas?",
+      "confirmAction": "Generar vistas previas y cambiar",
+      "confirmNote": "Crear vistas previas requiere tiempo y espacio en disco. Los videos que las necesitan se siguen reproduciendo por streaming hasta que estén listas.",
+      "noEligibleVideos": "No hay videos que puedan cambiarse en estas fuentes.",
+      "assessing": "Revisando videos…",
+      "running": "Generando vistas previas y cambiando videos…",
+      "estimate": "Se revisaron {checked} videos. Cambiarían {videos} y {files} necesitan una vista previa.",
+      "result": "{videos} videos cambiados a vistas previas guardadas · {files} vistas previas generadas",
+      "dismissResult": "Cerrar el resultado de la generación de vistas previas",
+      "failed": "No se pudo generar la vista previa"
     }
   },
   "displayPreferences": {

@@ -1167,6 +1167,7 @@ test('Reels uses bundled HLS for growing playlists and resumes watched windows a
     const manifestTypes: string[] = [];
     const metadataRequests: string[] = [];
     const firstOpeningSegments: string[] = [];
+    const secondOpening = Promise.withResolvers<void>();
     await page.route(/\/api\/videos\/(41|42)\/playback(?:\/.*)?$/, async route => {
       const request = route.request();
       const pathname = new URL(request.url()).pathname;
@@ -1177,6 +1178,7 @@ test('Reels uses bundled HLS for growing playlists and resumes watched windows a
       } else if (pathname.endsWith('/sessions')) {
         const body = request.postDataJSON();
         sessions.push({ id, ...body });
+        if (id === '42' && !body.warmup) await secondOpening.promise;
         await route.fulfill({ json: body.warmup ? { warmed: true } : {
           offset: 0, duration: 15, window: 15, profile: 'standard',
           url: `/api/videos/${id}/playback/sessions/mock/stream.m3u8`,
@@ -1201,6 +1203,14 @@ test('Reels uses bundled HLS for growing playlists and resumes watched windows a
     expect(firstOpeningSegments[0]).toBe('segment-000.ts');
     await expect.poll(() => sessions.some(session => session.id === '42' && session.warmup)).toBe(true);
     complete = true;
+    const secondPlayer = players.nth(1);
+    await secondPlayer.evaluate(element => element.closest('.reel-deck__panel')!.scrollIntoView({ block: 'start', behavior: 'instant' }));
+    try {
+      await expect(secondPlayer.getByRole('status')).toBeVisible();
+      await expect(secondPlayer.locator('.local-video-feedback__cover')).toBeVisible();
+    } finally {
+      secondOpening.resolve();
+    }
     for (const index of [1, 0, 1, 0]) {
       const player = players.nth(index);
       await player.evaluate(element => element.closest('.reel-deck__panel')!.scrollIntoView({ block: 'start', behavior: 'instant' }));
@@ -1333,12 +1343,179 @@ for (const surface of ['post', 'reel', 'carousel', 'story', 'share'] as const) {
   });
 }
 
+async function mockVideoDeliveryMode(page: Page, videoDeliveryMode: 'streaming' | 'previews') {
+  await page.route('**/api/admin/stats', route => route.fulfill({
+    json: {
+      videoDeliveryMode,
+      libraryIndex: { currentGalleryRoot: '/gallery' },
+      excludedFolders: { envExcludedFolders: [], customExcludedFolders: [], effectiveExcludedFolders: [] },
+      deletionRecovery: { failedCount: 0, failures: [] }
+    }
+  }));
+}
+
+test('saved previews mode hides cleanup controls and lets an admin switch a local source', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 840 });
+  await mockGallery(page);
+  await page.route('**/api/auth/status', route => route.fulfill({ json: adminAuthStatus }));
+  await mockVideoDeliveryMode(page, 'previews');
+  const sources = [{ id: 1, name: 'Primary gallery' }, { id: 14, name: 'External gallery' }];
+  const requests: string[] = [];
+  await page.route('**/api/admin/video-previews/reclamation', route => {
+    requests.push('cleanup ' + route.request().method());
+    return route.fulfill({ json: { sources, job: null } });
+  });
+
+  const job = {
+    id: 'preview-job', state: 'ready', sources: [sources[1]], confirmed: false, cancelRequested: false,
+    assessment: { checked: 3, videos: 3, files: 2, bytes: 0, skipped: 0, reasons: {} },
+    result: { switched: 0, files: 0, bytes: 0, skipped: 0, deferred: 0, failed: 0, reasons: {} }
+  };
+  let streamingCount = 3;
+  let savedJob: object | null = null;
+  await page.route('**/api/admin/video-previews/generation**', async route => {
+    const request = route.request();
+    if (request.method() === 'GET') {
+      await route.fulfill({ json: { sources, job: savedJob, streamingCount } });
+    } else if (request.url().endsWith('/confirm')) {
+      requests.push('generation confirmed');
+      streamingCount = 0;
+      savedJob = { ...job, state: 'complete', confirmed: true, result: { ...job.result, switched: 3, files: 2 } };
+      await route.fulfill({ json: savedJob });
+    } else {
+      expect(request.postDataJSON()).toEqual({ sourceId: 14 });
+      requests.push('generation assessed');
+      await route.fulfill({ json: job });
+    }
+  });
+
+  await page.goto('/settings#library');
+  await expect(page.getByText('/gallery', { exact: true })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Switch to streaming and remove video previews' })).toHaveCount(0);
+  const card = page.getByRole('region', { name: 'Switch existing videos to saved previews' });
+  const playback = page.getByRole('region', { name: 'Video playback', exact: true });
+  await expect(playback.getByText('Saved previews', { exact: true })).toBeVisible();
+  await expect(card.getByText(/3 existing videos are still set to streaming/)).toBeVisible();
+  await card.getByRole('combobox', { name: 'Local source' }).selectOption('14');
+  await card.getByRole('button', { name: 'Check videos' }).click();
+  await expect(card.getByRole('status').getByRole('term')).toHaveText(['Previews to generate', 'Videos to switch']);
+  await expect(card.getByRole('status').getByRole('definition')).toHaveText(['2', '3']);
+  await card.getByRole('button', { name: 'Generate previews and switch' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Switch to saved previews?' });
+  await expect(dialog.getByText(/Creating previews takes time and disk space/)).toBeVisible();
+  await dialog.getByRole('button', { name: 'Generate previews and switch' }).click();
+  const result = '3 videos switched to saved previews · 2 previews generated';
+  await expect(playback.getByRole('status')).toContainText(result);
+  await expect(playback.getByText('No videos left to switch to saved previews.')).toBeVisible();
+  await expect(card).toHaveCount(0);
+  expect(requests).toEqual(['cleanup GET', 'generation assessed', 'generation confirmed']);
+
+  await page.reload();
+  await expect(playback.getByRole('status')).toContainText(result);
+  await expect(card).toHaveCount(0);
+  await playback.screenshot({ path: test.info().outputPath('saved-previews-result.png') });
+  await playback.getByRole('button', { name: 'Dismiss preview generation result' }).click();
+  await expect(playback).toBeFocused();
+  await page.reload();
+  await expect(playback.getByText('No videos left to switch to saved previews.')).toBeVisible();
+  await expect(playback.getByRole('status')).toHaveCount(0);
+  await expect(card).toHaveCount(0);
+});
+
+test('saved previews mode keeps interrupted cleanup jobs accessible', async ({ page }) => {
+  await mockGallery(page, 'dark');
+  await page.route('**/api/auth/status', route => route.fulfill({ json: adminAuthStatus }));
+  await mockVideoDeliveryMode(page, 'previews');
+  const sources = [{ id: 1, name: 'Primary gallery' }];
+  const job = {
+    id: 'old-cleanup', state: 'interrupted', sources, confirmed: true, cancelRequested: false,
+    assessment: { checked: 1, videos: 1, files: 1, bytes: 2_000_000, skipped: 0, reasons: {} },
+    result: { switched: 0, files: 0, bytes: 0, skipped: 0, deferred: 1, failed: 0, reasons: { inUse: 1 } }
+  };
+  let streamingCount = 0;
+  await page.route('**/api/admin/video-previews/generation', route => route.fulfill({ json: { sources, streamingCount, job: null } }));
+  await page.route('**/api/admin/video-previews/reclamation**', async route => {
+    if (route.request().method() === 'GET') {
+      await route.fulfill({ json: { sources, job } });
+    } else {
+      expect(route.request().url()).toMatch(/\/old-cleanup\/retry$/);
+      streamingCount = 1;
+      await route.fulfill({ json: {
+        ...job, state: 'complete', result: { ...job.result, switched: 1, files: 1, bytes: 2_000_000, deferred: 0, reasons: {} }
+      } });
+    }
+  });
+
+  await page.goto('/settings#library');
+  const card = page.getByRole('region', { name: 'Video preview cleanup recovery' });
+  await expect(card.getByText('Operation interrupted')).toBeVisible();
+  await expect(card.getByText('Preview in use (1)')).toBeVisible();
+  await expect(card.getByRole('button', { name: 'Assess previews' })).toHaveCount(0);
+  await expect(card.getByRole('button', { name: 'Switch to streaming and remove video previews' })).toHaveCount(0);
+  await expect(page.getByRole('region', { name: 'Switch existing videos to saved previews' })).toHaveCount(0);
+  await card.getByRole('button', { name: 'Resume or retry' }).click();
+  const result = page.getByRole('region', { name: 'Video maintenance result' });
+  await expect(result.getByRole('status')).toContainText('2 MB freed');
+  await expect(page.getByRole('region', { name: 'Switch existing videos to saved previews' }))
+    .toContainText('1 existing video is still set to streaming.');
+  await result.screenshot({ path: test.info().outputPath('cleanup-recovery.png') });
+  await result.getByRole('button', { name: 'Dismiss cleanup result' }).click();
+  await expect(result).toHaveCount(0);
+  await expect(card).toHaveCount(0);
+});
+
+test('streaming status stays fast while an optional assessment finds leftover previews', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 840 });
+  await mockGallery(page);
+  await page.route('**/api/auth/status', route => route.fulfill({ json: adminAuthStatus }));
+  await mockVideoDeliveryMode(page, 'streaming');
+  const sources = [{ id: 1, name: 'Primary gallery' }];
+  const ready = {
+    id: 'leftover-preview', state: 'ready', sources, confirmed: false, cancelRequested: false,
+    assessment: { checked: 1, videos: 0, files: 1, bytes: 12_000, skipped: 0, reasons: {} },
+    result: { switched: 0, files: 0, bytes: 0, skipped: 0, deferred: 0, failed: 0, reasons: {} }
+  };
+  let job: typeof ready | null = null;
+  let assessments = 0;
+  await page.route('**/api/admin/video-previews/reclamation**', route => {
+    if (route.request().method() === 'POST') {
+      assessments++;
+      job = ready;
+      return route.fulfill({ status: 202, json: ready });
+    }
+    return route.fulfill({ json: { sources, job, cleanupPending: false } });
+  });
+  await page.goto('/settings#library');
+  const playback = page.getByRole('region', { name: 'Video playback', exact: true });
+  const card = page.getByRole('region', { name: 'Switch to streaming and remove video previews' });
+  await expect(playback.getByText('All indexed local videos use streaming.')).toBeVisible();
+  await expect(card).toHaveCount(0);
+  await playback.getByRole('button', { name: 'Check for remaining previews' }).click();
+  await expect(card.getByRole('button', { name: 'Assess previews' })).toBeVisible();
+  await card.getByRole('button', { name: 'Assess previews' }).click();
+  await expect(card.getByText('Previews to remove')).toBeVisible();
+  await expect(card.getByRole('definition')).toHaveText(['12 kB', '1', '0']);
+  expect(assessments).toBe(1);
+  await card.getByRole('button', { name: 'Close', exact: true }).click();
+  await expect(card).toHaveCount(0);
+  await expect(playback.getByRole('button', { name: 'Check for remaining previews' })).toBeFocused();
+  expect(assessments).toBe(1);
+  await page.reload();
+  await expect(card.getByText('Previews to remove')).toBeVisible();
+  await card.getByRole('button', { name: 'Close', exact: true }).click();
+  await expect(card).toHaveCount(0);
+  await expect(playback.getByRole('button', { name: 'Check for remaining previews' })).toBeFocused();
+  expect(assessments).toBe(1);
+  await playback.screenshot({ path: test.info().outputPath('remaining-previews-closed.png') });
+});
+
 for (const theme of ['light', 'dark'] as const) {
   test(`preview reclamation confirms the assessed local source in ${theme} mode`, async ({ page }) => {
     await page.emulateMedia({ colorScheme: theme === 'light' ? 'dark' : 'light' });
     await page.setViewportSize({ width: theme === 'light' ? 390 : 1280, height: 840 });
     await mockGallery(page, theme);
     await page.route('**/api/auth/status', route => route.fulfill({ json: adminAuthStatus }));
+    await mockVideoDeliveryMode(page, 'streaming');
     const sources = [{ id: 1, name: 'Primary gallery' }, { id: 14, name: 'External gallery' }];
     const assessedSources = theme === 'light' ? [sources[1]] : sources;
     const [bytes, formattedSize]: [number, string] = theme === 'light' ? [206_667_409, '207 MB'] : [1_240_000_000, '1.2 GB'];
@@ -1350,20 +1527,19 @@ for (const theme of ['light', 'dark'] as const) {
     const completedJob = {
       ...job, state: 'complete', confirmed: true, result: { ...job.result, switched: 3, files: 2, bytes }
     };
-    let savedJob = {
-      ...completedJob,
-      result: { ...completedJob.result, switched: 52, files: 28, bytes: 206_667_409 }
-    };
+    let savedJob: typeof completedJob | null = null;
+    let cleanupPending = true;
     const requests: string[] = [];
     await page.route('**/api/admin/video-previews/reclamation**', async route => {
       const request = route.request();
       const pathname = new URL(request.url()).pathname;
       if (request.method() === 'GET') {
-        await route.fulfill({ json: pathname.endsWith('/test-job') ? completedJob : { sources, job: savedJob } });
+        await route.fulfill({ json: pathname.endsWith('/test-job') ? completedJob : { sources, job: savedJob, cleanupPending } });
       } else if (pathname.endsWith('/confirm')) {
         expect(request.headers()['x-foldergram-intent']).toBe('1');
         requests.push('confirmed');
         savedJob = completedJob;
+        cleanupPending = theme === 'light';
         await route.fulfill({ json: theme === 'light' ? completedJob : { ...job, state: 'running', confirmed: true } });
       } else {
         expect(request.postDataJSON()).toEqual(theme === 'light' ? { sourceId: 14 } : {});
@@ -1426,13 +1602,21 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(card.getByText('Switching videos and removing previews…')).toBeVisible();
       await page.clock.fastForward(1_100);
     }
-    await expect(card.getByRole('status')).toContainText(`${formattedSize} freed`);
-    await expect(card.getByRole('status')).toContainText('2 previews removed · 3 videos switched to streaming');
-    await expect(card.getByText(/^Sources:/)).toHaveCount(0);
+    const playback = page.getByRole('region', { name: 'Video playback', exact: true });
+    await expect(playback.getByText('Streaming', { exact: true })).toBeVisible();
+    await expect(playback.getByRole('status')).toContainText(`${formattedSize} freed`);
+    await expect(playback.getByRole('status')).toContainText('2 previews removed · 3 videos switched to streaming');
     expect(requests).toEqual(['assessed', 'confirmed']);
-    await card.screenshot({ path: test.info().outputPath('preview-reclamation-complete.png') });
-    const dismiss = card.getByRole('button', { name: 'Dismiss cleanup result' });
-    await assess.focus();
+    if (theme === 'dark') {
+      await expect(playback.getByText('All indexed local videos use streaming.')).toBeVisible();
+      await expect(card).toHaveCount(0);
+      await page.reload();
+    } else {
+      await assess.focus();
+    }
+    const dismiss = playback.getByRole('button', { name: 'Dismiss cleanup result' });
+    await expect(dismiss).toBeVisible();
+    await playback.screenshot({ path: test.info().outputPath('preview-reclamation-complete.png') });
     await page.mouse.move(0, 0);
     await page.clock.fastForward(60_000);
     await expect(dismiss).toBeVisible();
@@ -1441,13 +1625,17 @@ for (const theme of ['light', 'dark'] as const) {
     } else {
       await dismiss.click();
     }
-    await expect(assess).toBeFocused();
-    await expect(card.getByRole('status')).toHaveCount(0);
-    await expect(assess).toBeEnabled();
+    await expect(theme === 'light' ? assess : playback).toBeFocused();
+    await expect(playback.getByRole('status')).toHaveCount(0);
 
     await page.reload();
-    await expect(assess).toBeEnabled();
-    await expect(card.getByRole('status')).toHaveCount(0);
+    if (theme === 'light') {
+      await expect(assess).toBeEnabled();
+    } else {
+      await expect(playback.getByText('All indexed local videos use streaming.')).toBeVisible();
+      await expect(card).toHaveCount(0);
+    }
+    await expect(playback.getByRole('status')).toHaveCount(0);
 
     if (theme === 'dark') {
       savedJob = { ...completedJob, result: { ...completedJob.result, failed: 1, reasons: { removalFailed: 1 } } };

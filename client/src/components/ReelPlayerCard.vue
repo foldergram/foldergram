@@ -31,6 +31,7 @@
             :poster="item.thumbnailUrl"
             :active="active"
             :state="streaming.state.value"
+            :spinner-delay="REEL_LOADING_SPINNER_DELAY_MS"
             @retry="streaming.play"
           />
           <media-poster
@@ -186,6 +187,7 @@ let removePlayerEventListeners: (() => void) | null = null;
 let autoplayRetryAttempts = 0;
 let autoplayRetryTimer = 0;
 
+const REEL_LOADING_SPINNER_DELAY_MS = 650;
 const AUTOPLAY_RETRY_DELAY_MS = 140;
 const MAX_AUTOPLAY_RETRIES = 3;
 

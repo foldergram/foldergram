@@ -72,6 +72,69 @@ describe.skipIf(binariesAvailable.includes(false)).sequential('local on-demand s
     return requestTestApp(app, 'POST', url, headers, payload);
   }
 
+  it('uses indexed playback policies for the overview and checks leftover files only on assessment', async () => {
+    const endpoint = '/api/admin/video-previews/reclamation';
+    const image = repos.imageRepository.getByRelativePath('Album/stream.mkv')!;
+    const original = repos.imageRepository.getByRelativePath('Album/direct.mp4')!;
+    const preview = path.join(config.previewsDir, image.preview_path);
+    const setPolicy = db.connection.prepare('UPDATE images SET video_delivery_policy = ? WHERE id = ?');
+
+    expect((await get(endpoint)).body.cleanupPending).toBe(false);
+    try {
+      setPolicy.run('previews', image.id);
+      expect((await get(endpoint)).body.cleanupPending).toBe(true);
+      setPolicy.run('streaming', image.id);
+      await fs.mkdir(path.dirname(preview), { recursive: true });
+      await fs.copyFile(path.join(config.galleryRoot, original.relative_path), preview);
+      expect((await get(endpoint)).body.cleanupPending).toBe(false);
+      const assessed = await post(endpoint, { sourceId: image.source_id });
+      expect(assessed.status).toBe(202);
+      await eventually(async () => {
+        expect((await get(endpoint + '/' + assessed.body.id)).body)
+          .toMatchObject({ state: 'ready', assessment: { videos: 0, files: 1 } });
+      });
+      config.videoDeliveryMode = 'previews';
+      expect((await get(endpoint)).body.cleanupPending).toBe(false);
+      expect((await get('/api/admin/video-previews/generation')).body.streamingCount).toBe(2);
+    } finally {
+      config.videoDeliveryMode = 'streaming';
+      setPolicy.run('streaming', image.id);
+      await fs.rm(preview, { force: true });
+    }
+    expect((await get(endpoint)).body.cleanupPending).toBe(false);
+  });
+
+  it('does not probe preview paths when opening Settings for a large streaming library', async () => {
+    const seed = repos.imageRepository.getByRelativePath('Album/stream.mkv')!;
+    // The overview must not do one filesystem call per indexed video.
+    db.connection.prepare(`
+      WITH RECURSIVE sequence(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM sequence WHERE n < 128)
+      INSERT INTO images (
+        source_id, folder_id, relative_path, filename, extension, absolute_path, file_size, width, height,
+        media_type, mime_type, checksum_or_fingerprint, mtime_ms, first_seen_at, sort_timestamp,
+        thumbnail_path, preview_path, playback_strategy, video_delivery_policy
+      )
+      SELECT image.source_id, image.folder_id, '__overview__/clip-' || n || '.mkv',
+        'clip-' || n || '.mkv', '.mkv', '/missing/clip-' || n || '.mkv', image.file_size,
+        image.width, image.height, 'video', image.mime_type, 'overview-' || n,
+        image.mtime_ms, image.first_seen_at, image.sort_timestamp,
+        '__overview__/clip-' || n || '.webp', '__overview__/clip-' || n || '.mp4',
+        image.playback_strategy, 'streaming'
+      FROM images AS image CROSS JOIN sequence WHERE image.id = ?
+    `).run(seed.id);
+    const lstat = vi.spyOn(fs, 'lstat');
+    try {
+      const response = await get('/api/admin/video-previews/reclamation');
+      expect(response.status).toBe(200);
+      expect(response.body.cleanupPending).toBe(false);
+      expect(lstat).not.toHaveBeenCalled();
+    } finally {
+      lstat.mockRestore();
+      db.connection.prepare("DELETE FROM images WHERE relative_path LIKE '__overview__/%' AND source_id = ?")
+        .run(seed.source_id);
+    }
+  });
+
   it('indexes posters only, negotiates originals, and serves decodable bounded HLS across seeks', async () => {
     const converted = repos.imageRepository.getByRelativePath('Album/stream.mkv')!;
     const direct = repos.imageRepository.getByRelativePath('Album/direct.mp4')!;
@@ -564,6 +627,86 @@ describe.skipIf(binariesAvailable.includes(false)).sequential('local on-demand s
     await expect(fs.stat(previews[1])).rejects.toMatchObject({ code: 'ENOENT' });
   }, 30_000);
 
+  it('switches a selected source to previews after generation, preserving streaming on failure', async () => {
+    const sourceRoot = path.join(temp, 'generation-source');
+    const album = path.join(sourceRoot, 'Videos');
+    await fs.mkdir(album, { recursive: true });
+    const create = (name: string) => run('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=s=96x64:r=10:d=1',
+      '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-threads', '1', path.join(album, name)]);
+    await create('direct.mp4');
+    await fs.copyFile(path.join(album, 'direct.mp4'), path.join(album, 'preview.mov'));
+    await fs.copyFile(path.join(album, 'direct.mp4'), path.join(album, 'retry.mov'));
+    const { createLocalSource } = await import('../src/sources/source-service.js');
+    const sourceId = await createLocalSource({ kind: 'local', name: 'Preview generation', rootPath: sourceRoot,
+      readOnlyOriginals: true, enabled: true });
+    expect((await scanner.scanSource(sourceId))?.status).toBe('completed');
+    const direct = repos.imageRepository.getByRelativePath('Videos/direct.mp4', sourceId)!;
+    const preview = repos.imageRepository.getByRelativePath('Videos/preview.mov', sourceId)!;
+    const retry = repos.imageRepository.getByRelativePath('Videos/retry.mov', sourceId)!;
+    const retryPath = path.join(config.previewsDir, retry.preview_path);
+    const generation = '/api/admin/video-previews/generation';
+    // Isolate this test’s administrative request budget from the cleanup tests.
+    app.set('trust proxy', 'loopback');
+    const fromGenerationTest = { ...intent, 'x-forwarded-for': '192.0.2.42' };
+    const startGeneration = (url: string, body = {}) => post(url, body, fromGenerationTest);
+    try {
+      expect((await startGeneration(generation, { sourceId })).status).toBe(409);
+
+      config.videoDeliveryMode = 'previews';
+      config.derivativeMode = 'lazy';
+      expect((await get(generation)).body.streamingCount).toBeGreaterThanOrEqual(3);
+      expect((await post(generation, { sourceId }, { 'content-type': 'application/json' })).status).toBe(403);
+      const assessed = await startGeneration(generation, { sourceId });
+      expect(assessed.status).toBe(202);
+      const url = generation + '/' + assessed.body.id;
+      await eventually(async () => {
+        expect((await get(url)).body).toMatchObject({
+          state: 'ready', assessment: { videos: 3, files: 2 }
+        });
+      });
+      expect((await get('/api/admin/video-previews/reclamation/' + assessed.body.id)).status).toBe(404);
+      await expect(fs.stat(path.join(config.previewsDir, preview.preview_path))).rejects.toMatchObject({ code: 'ENOENT' });
+
+      const rename = fs.rename;
+      const failPublication = vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+        if (to === retryPath) throw new Error('Preview storage is full');
+        if (to === path.join(config.previewsDir, preview.preview_path)) {
+          expect(repos.imageRepository.getById(preview.id)?.video_delivery_policy).toBe('streaming');
+        }
+        return rename(from, to);
+      });
+      try {
+        expect((await startGeneration(url + '/confirm')).status).toBe(202);
+        await eventually(async () => {
+          expect((await get(url)).body).toMatchObject({
+            state: 'complete', result: { switched: 2, files: 1, failed: 1 }, failedVideos: ['retry.mov']
+          });
+        });
+      } finally {
+        failPublication.mockRestore();
+      }
+      expect(repos.imageRepository.getById(direct.id)?.video_delivery_policy).toBe('previews');
+      await expect(fs.stat(path.join(config.previewsDir, direct.preview_path))).rejects.toMatchObject({ code: 'ENOENT' });
+      expect((await get('/api/originals/' + direct.id)).status).toBe(200);
+      expect((await get('/previews/' + preview.preview_path)).status).toBe(200);
+      expect(repos.imageRepository.getById(retry.id)?.video_delivery_policy).toBe('streaming');
+      expect((await get('/api/videos/' + retry.id + '/playback')).status).toBe(200);
+      expect(repos.imageRepository.getByRelativePath('Album/stream.mkv')?.video_delivery_policy).toBe('streaming');
+
+      expect((await startGeneration(url + '/retry')).status).toBe(202);
+      await eventually(async () => {
+        expect((await get(url)).body).toMatchObject({ state: 'complete', result: { switched: 3, files: 2, failed: 0 } });
+      });
+      expect((await get('/api/videos/' + retry.id + '/playback')).status).toBe(404);
+      await run('ffmpeg', ['-v', 'error', '-xerror', '-i', retryPath, '-f', 'null', '-']);
+      expect((await fs.stat(path.join(album, 'retry.mov'))).isFile()).toBe(true);
+    } finally {
+      app.set('trust proxy', false);
+      config.videoDeliveryMode = 'streaming';
+      config.derivativeMode = 'eager';
+    }
+  }, 30_000);
+
   it('transitions a confirmed local video before removing its preview and respects a scoped share', async () => {
     config.videoDeliveryMode = 'previews';
     try {
@@ -626,13 +769,26 @@ describe.skipIf(binariesAvailable.includes(false)).sequential('local on-demand s
       .run(JSON.stringify(interrupted), interrupted.id);
     db.connection.prepare("UPDATE video_preview_reclamation_items SET state = 'pending', reason = NULL WHERE job_id = ? AND image_id = ?")
       .run(interrupted.id, image.id);
-    expect((await get(jobUrl)).body.state).toBe('interrupted');
-    expect((await post(jobUrl + '/retry')).status).toBe(202);
-    await eventually(async () => {
-      expect((await get(jobUrl)).body).toMatchObject({
-        state: 'complete', result: { switched: 1, files: 1, bytes, failed: 0, deferred: 0 }
+    // Older job records have no target mode. They must remain recoverable after a mode change.
+    delete interrupted.targetMode;
+    db.connection.prepare('UPDATE video_preview_reclamation SET data = ? WHERE id = ?')
+      .run(JSON.stringify(interrupted), interrupted.id);
+    config.videoDeliveryMode = 'previews';
+    app.set('trust proxy', 'loopback');
+    const recoveryRequest = { ...intent, 'x-forwarded-for': '192.0.2.43' };
+    try {
+      expect((await post(endpoint, { sourceId: image.source_id }, recoveryRequest)).status).toBe(409);
+      expect((await get(endpoint)).body.job).toMatchObject({ id: interrupted.id, state: 'interrupted' });
+      expect((await post(jobUrl + '/retry', {}, recoveryRequest)).status).toBe(202);
+      await eventually(async () => {
+        expect((await get(jobUrl)).body).toMatchObject({
+          state: 'complete', result: { switched: 1, files: 1, bytes, failed: 0, deferred: 0 }
+        });
       });
-    });
+    } finally {
+      app.set('trust proxy', false);
+      config.videoDeliveryMode = 'streaming';
+    }
     expect(repos.imageRepository.getById(image.id)?.video_delivery_policy).toBe('streaming');
     await expect(fs.stat(preview)).rejects.toMatchObject({ code: 'ENOENT' });
     expect((await fs.stat(path.join(config.galleryRoot, image.relative_path))).isFile()).toBe(true);

@@ -2523,6 +2523,7 @@ export const galleryService = {
         deletedImages: mediaIndexAvailable() ? imageRepository.countDeleted() : 0,
         thumbnailCount: mediaIndexAvailable() ? imageRepository.countWithThumbnail() : 0,
         previewCount: mediaIndexAvailable() ? imageRepository.countWithPreview() : 0,
+        videoDeliveryMode: appConfig.videoDeliveryMode,
         lastScan: lastCompletedScan,
         scan: this.getAdminScanProgress(),
         storage: {

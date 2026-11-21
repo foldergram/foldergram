@@ -1324,10 +1324,20 @@
             <p v-if="thumbnailRebuildError" class="m-0 px-4 py-[0.85rem] border border-[rgba(214,48,49,0.24)] rounded-[0.9rem] text-[#c0392b] bg-[rgba(214,48,49,0.08)]">{{ thumbnailRebuildError }}</p>
           </section>
 
-          <VideoPreviewReclamation
-            v-if="authStore.capabilities.canManageLibrary && authStore.publicDemoMode === false"
-            @changed="refreshAfterVideoReclamation"
-          />
+          <template v-if="adminStats?.videoDeliveryMode && authStore.capabilities.canManageLibrary && authStore.publicDemoMode === false">
+            <VideoPreviewReclamation
+              mode="previews"
+              :can-start="adminStats.videoDeliveryMode === 'previews'"
+              :overview-revision="previewOverviewRevision"
+              @changed="refreshAfterVideoDeliveryChange"
+            />
+            <VideoPreviewReclamation
+              mode="streaming"
+              :can-start="adminStats.videoDeliveryMode === 'streaming'"
+              :overview-revision="previewOverviewRevision"
+              @changed="refreshAfterVideoDeliveryChange"
+            />
+          </template>
 
           <!-- Danger Zone -->
           <div class="border border-[rgba(214,48,49,0.3)] rounded-[1.05rem] overflow-hidden" :class="highlightRebuildAction ? 'ring-2 ring-[color-mix(in_srgb,var(--accent)_45%,transparent_55%)]' : ''">
@@ -1541,6 +1551,7 @@ const authFeedback = ref<{ tone: 'success' | 'error'; message: string } | null>(
 const viewerFeedback = ref<{ tone: 'success' | 'error'; message: string } | null>(null);
 const generalSettingsFeedback = ref<{ tone: 'success' | 'error'; message: string } | null>(null);
 const adminStats = ref<AppStats | null>(null);
+const previewOverviewRevision = ref(0);
 const failedDeletionRecoveryCount = computed(() => adminStats.value?.deletionRecovery.failedCount ?? 0);
 const deletionRecoveryFailures = computed(() => adminStats.value?.deletionRecovery.failures ?? []);
 const showChangePasswordForm = ref(false);
@@ -3223,7 +3234,8 @@ async function runLibraryRebuild() {
   }
 }
 
-async function refreshAfterVideoReclamation() {
+async function refreshAfterVideoDeliveryChange() {
+  previewOverviewRevision.value++;
   useReelsStore().reset();
   await Promise.allSettled([
     appStore.fetchStats({ background: true }),

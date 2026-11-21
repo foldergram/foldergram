@@ -1573,29 +1573,33 @@ router.post('/admin/settings/carousels-migration-decision', requireCapability('c
   }
 });
 
-const reclamationPath = '/admin/video-previews/reclamation';
-const reclamationCapability = requireCapability('canManageLibrary', 'Admin access is required.');
-const reclamationParams = z.object({ id: z.string().uuid() });
-router.get(reclamationPath, reclamationCapability, (_request, response) => {
-  response.json(videoPreviewReclamation.list());
-});
-router.get(reclamationPath + '/:id', reclamationCapability, (request, response) => {
-  const job = videoPreviewReclamation.get(reclamationParams.parse(request.params).id);
-  if (!job) { response.status(404).json({ message: 'Preview reclamation was not found.' }); return; }
-  response.json(job);
-});
-router.post(reclamationPath, reclamationCapability, adminMutationRateLimiter, (request, response) => {
-  const body = z.object({ sourceId: z.number().int().positive().optional() }).parse(request.body);
-  const job = videoPreviewReclamation.assess(body.sourceId);
-  if (!job) { response.status(409).json({ message: 'Select a local source or wait for the current preview operation.' }); return; }
-  response.status(202).json(job);
-});
-for (const action of ['confirm', 'cancel', 'retry'] as const) {
-  router.post(reclamationPath + '/:id/' + action, reclamationCapability, adminMutationRateLimiter, (request, response) => {
-    const job = videoPreviewReclamation[action](reclamationParams.parse(request.params).id);
-    if (!job) { response.status(409).json({ message: 'This preview operation is unavailable in its current state.' }); return; }
+const previewMaintenanceCapability = requireCapability('canManageLibrary', 'Admin access is required.');
+const previewMaintenanceParams = z.object({ id: z.string().uuid() });
+const previewMaintenanceScope = z.object({ sourceId: z.number().int().positive().optional() });
+
+for (const [operation, targetMode] of [['reclamation', 'streaming'], ['generation', 'previews']] as const) {
+  const route = '/admin/video-previews/' + operation;
+  router.get(route, previewMaintenanceCapability, async (_request, response) => {
+    response.json(await videoPreviewReclamation.list(targetMode));
+  });
+  router.get(route + '/:id', previewMaintenanceCapability, (request, response) => {
+    const job = videoPreviewReclamation.get(previewMaintenanceParams.parse(request.params).id, targetMode);
+    if (!job) { response.status(404).json({ message: 'Preview operation was not found.' }); return; }
+    response.json(videoPreviewReclamation.summarize(job));
+  });
+  router.post(route, previewMaintenanceCapability, adminMutationRateLimiter, (request, response) => {
+    const { sourceId } = previewMaintenanceScope.parse(request.body);
+    const job = videoPreviewReclamation.assess(sourceId, targetMode);
+    if (!job) { response.status(409).json({ message: 'Preview assessment is unavailable for the selected source or current playback mode.' }); return; }
     response.status(202).json(job);
   });
+  for (const action of ['confirm', 'cancel', 'retry'] as const) {
+    router.post(route + '/:id/' + action, previewMaintenanceCapability, adminMutationRateLimiter, (request, response) => {
+      const job = videoPreviewReclamation[action](previewMaintenanceParams.parse(request.params).id, targetMode);
+      if (!job) { response.status(409).json({ message: 'This preview operation is unavailable in its current state.' }); return; }
+      response.status(202).json(videoPreviewReclamation.summarize(job));
+    });
+  }
 }
 
 router.get('/admin/stats', requireCapability('canAccessSettings', 'Admin access is required.'), (_request, response) => {

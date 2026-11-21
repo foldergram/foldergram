@@ -657,6 +657,7 @@ export interface AppStats extends AppStatus {
   deletedImages: number;
   thumbnailCount: number;
   previewCount: number;
+  videoDeliveryMode: 'streaming' | 'previews';
   excludedFolders: ExcludedFoldersSettings;
   storage: AppStatus['storage'] & {
     usingInMemoryDatabase: boolean;

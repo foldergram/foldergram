@@ -659,12 +659,16 @@ export async function selectDecodableVideoAudio(streams: LocalVideoMetadata['aud
   return selected.index;
 }
 
-export async function writeVideoPreview(sourcePath: string, previewAbsolutePath: string): Promise<void> {
+export async function writeVideoPreview(
+  sourcePath: string,
+  previewAbsolutePath: string,
+  beforePublish?: () => Promise<unknown>
+): Promise<void> {
   const outputPath = path.resolve(previewAbsolutePath);
   const existing = inflightVideoPreviews.get(outputPath);
   if (existing) return existing;
 
-  const generation = publishVideoPreview(sourcePath, outputPath);
+  const generation = publishVideoPreview(sourcePath, outputPath, beforePublish);
   inflightVideoPreviews.set(outputPath, generation);
   try {
     await generation;
@@ -673,7 +677,7 @@ export async function writeVideoPreview(sourcePath: string, previewAbsolutePath:
   }
 }
 
-async function publishVideoPreview(sourcePath: string, previewAbsolutePath: string): Promise<void> {
+async function publishVideoPreview(sourcePath: string, previewAbsolutePath: string, beforePublish?: () => Promise<unknown>): Promise<void> {
   await ensureParentDirectory(previewAbsolutePath);
   const probe = await readMediaProbe(sourcePath);
   const audioIndex = await selectDecodableVideoAudio((probe.streams ?? [])
@@ -692,6 +696,7 @@ async function publishVideoPreview(sourcePath: string, previewAbsolutePath: stri
       '-y',
       '-v',
       'error',
+      ...(beforePublish ? ['-xerror'] : []),
       '-i',
       sourcePath,
       '-map',
@@ -732,6 +737,7 @@ async function publishVideoPreview(sourcePath: string, previewAbsolutePath: stri
       || !hasPositiveDuration || !hasExpectedAudio) {
       throw new Error('FFmpeg produced an invalid video preview.');
     }
+    await beforePublish?.();
     await fs.rename(temporaryPath, previewAbsolutePath);
   } finally {
     await fs.rm(temporaryPath, { force: true });

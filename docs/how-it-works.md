@@ -308,11 +308,13 @@ track FFmpeg can decode. On browsers that support it, the player uses its
 bundled HLS.js. It can also use native HLS where available.
 
 Home and Reels wait for the active video to settle before starting a
-conversion. Reels can check playback information during this wait. When an
-encoder is free, Home and Reels can prepare the first three seconds of the
-next video. Playback and seeks take priority. When you leave a video,
-Foldergram can stop unused conversion work and keep a finished opening in the
-temporary cache.
+conversion. Reels can check playback information during this wait. Once the
+current video is playing and an encoder is free, Home and Reels can prepare
+the first three seconds of the next video. Playback and seeks take priority.
+In Reels, the cover stays visible until the first frame appears. A loading
+spinner appears only if playback takes a little longer to start. When you
+leave a video, Foldergram can stop unused conversion work and keep a finished
+opening in the temporary cache.
 
 See the [streaming API](./api.md#local-streaming-playback) for playback and cache behavior.
 

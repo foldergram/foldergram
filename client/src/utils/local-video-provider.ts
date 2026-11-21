@@ -525,7 +525,7 @@ export class LocalVideoDelivery {
         this.lastLocalTime = local;
         this.position = Number(detail);
         this.prefetch();
-        this.warmNext(local);
+        this.warmNext();
       }
     }
     if (type === 'end') {
@@ -604,10 +604,10 @@ export class LocalVideoDelivery {
     this.warmup = undefined;
   };
 
-  private warmNext(localTime: number) {
+  private warmNext() {
     const candidate = this.options.next?.();
     if (!candidate || candidate === this.lastWarmCandidate || this.warmup || this.upcoming ||
-        !this.hasFrame || !this.intended || this.video.paused || this.video.seeking || localTime < 0.5 ||
+        !this.hasFrame || !this.intended || this.video.paused || this.video.seeking ||
         Date.now() < this.warmRetryAt || !this.canPlay() || this.ctx.$state.fullscreen()) return;
     this.warmRetryAt = Date.now() + 1000;
     const controller = new AbortController();

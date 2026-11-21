@@ -420,8 +420,10 @@ Docker, set it under the service's `environment` block and recreate the
 container with `docker compose up -d`.
 
 Changing the setting leaves existing videos on their current playback mode.
-To switch them and free disk space, follow the [preview cleanup steps](./media-processing.md#switch-existing-local-videos-to-streaming).
-Immich playback uses its own settings.
+In **Settings → Scan & Library**, you can switch existing local videos to the
+configured mode. Use [preview cleanup](./media-processing.md#switch-existing-local-videos-to-streaming)
+for `streaming` or [preview generation](./media-processing.md#switch-existing-local-videos-to-saved-previews)
+for `previews`. Immich playback uses its own settings.
 
 Use a writable location for `HLS_CACHE_DIR`. Keep it separate from your
 galleries, database, thumbnails, previews, and other app storage. In Docker,

@@ -185,7 +185,7 @@ describe('Vidstack local video delivery', () => {
     expect(onStateChange).toHaveBeenLastCalledWith({ ...idle, hasFrame: true });
   });
 
-  it('warms at most one next video after a rendered frame and aborts that request on seek', async () => {
+  it('warms at most one next video as soon as the current one renders and aborts on seek', async () => {
     mockRequests();
     const requests = vi.mocked(requestJson).getMockImplementation()!;
     const candidate = '/api/videos/2/playback';
@@ -199,10 +199,10 @@ describe('Vidstack local video delivery', () => {
     let frame!: VideoFrameRequestCallback;
     video.requestVideoFrameCallback = vi.fn(callback => { frame = callback; return 1; });
     await start(delivery);
-    delivery.notify('time-change', 1);
+    delivery.notify('time-change', 0.1);
     expect(requestJson).not.toHaveBeenCalledWith(candidate, expect.anything());
     frame(0, {} as VideoFrameCallbackMetadata);
-    delivery.notify('time-change', 1.5);
+    delivery.notify('time-change', 0.2);
     await vi.waitFor(() => expect(warmSignal).toBeDefined());
     delivery.notify('time-change', 2);
     expect(vi.mocked(requestJson).mock.calls.filter(([url]) => url === candidate + '/sessions')).toHaveLength(1);

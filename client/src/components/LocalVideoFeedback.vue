@@ -9,9 +9,9 @@
     loading="lazy"
     decoding="async"
   />
-  <div v-if="active && (state.pending || state.failed)" class="local-video-feedback__status">
+  <div v-if="active && (showSpinner || state.failed)" class="local-video-feedback__status">
     <span
-      v-if="state.pending"
+      v-if="!state.failed"
       class="local-video-feedback__spinner"
       role="status"
       :aria-label="t('streamingVideo.loading')"
@@ -26,19 +26,34 @@
 </template>
 
 <script setup lang="ts">
+import { ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 
 import type { LocalVideoState } from '../utils/local-video-provider';
 
-withDefaults(defineProps<{
+const props = withDefaults(defineProps<{
   poster?: string;
   state: LocalVideoState;
   coverFit?: 'cover' | 'contain';
   active?: boolean;
-}>(), { coverFit: 'contain', active: true });
+  spinnerDelay?: number;
+}>(), { coverFit: 'contain', active: true, spinnerDelay: 0 });
 
 const emit = defineEmits<{ retry: [] }>();
 const { t } = useI18n();
+const showSpinner = ref(false);
+
+watch(
+  () => props.active && props.state.pending && !props.state.failed ? props.spinnerDelay : null,
+  (delay, _previous, onCleanup) => {
+    showSpinner.value = delay === 0;
+    if (delay === null || delay === 0) return;
+
+    const timer = setTimeout(() => { showSpinner.value = true; }, delay);
+    onCleanup(() => clearTimeout(timer));
+  },
+  { immediate: true }
+);
 </script>
 
 <style scoped>

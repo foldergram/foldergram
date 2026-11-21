@@ -242,7 +242,17 @@ Existing local videos keep their current playback after an upgrade. Immich
 continues to use its own playback. To use saved MP4 previews for future local
 imports, see the [video playback settings](./configuration.md#video-playback).
 
+**Settings → Scan & Library → Video playback** shows the configured mode and
+whether indexed videos still need switching. This quick status does not scan
+preview files on disk. In streaming mode, use **Check for remaining previews**
+to look for leftover files even when every indexed video already uses streaming.
+After an operation, its result stays visible in the browser until you dismiss
+it. When there is no known work left, only the status row remains.
+
 ### Switch existing local videos to streaming
+
+The cleanup card appears in `streaming` mode when there are local videos to
+switch or saved previews to assess.
 
 1. Open **Settings → Scan & Library → Switch to streaming and remove video previews**.
 2. Pick a local source or **All local sources**, then select **Assess previews**.
@@ -258,6 +268,23 @@ setting.
 The cleanup result shows how many previews were removed and how much space was
 freed. You can dismiss it when you're done. Use **Cancel operation** to stop
 between videos, or **Resume or retry** if the app reports unfinished work.
+
+### Switch existing local videos to saved previews
+
+When `VIDEO_DELIVERY_MODE=previews`, **Settings → Scan & Library** shows how
+many existing local videos still use streaming. Open **Switch existing videos
+to saved previews**, choose a local source or **All local sources**, and select
+**Check videos**. Review the estimate, then select **Generate previews and
+switch**.
+
+Eligible originals can play directly. For other videos and videos that need a
+copy for an active folder share, Foldergram generates a full MP4 preview before
+switching playback. This also works in lazy mode. A video keeps streaming if
+generation fails. You can cancel between videos and resume or retry unfinished
+work. The job leaves your original files and library index in place.
+
+If you change the setting while a job is unfinished, **Scan & Library** still
+shows its progress and recovery controls. New jobs follow the configured mode.
 
 ### Playback URLs from older clients
 
