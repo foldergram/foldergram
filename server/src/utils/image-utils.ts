@@ -33,7 +33,8 @@ export function isHeicImage(image: { relative_path: string; mime_type?: string |
 /** Extensions whose files the scanner checks for HEIC content. */
 export const HEIC_CONTENT_CHECK_EXTENSIONS = new Set(['.jpg', '.jpeg']);
 
-const HEIC_HEADER_BYTES = 256;
+// Match the largest file type box accepted by the HEIC worker.
+const HEIC_HEADER_BYTES = 4096;
 // Still-image HEVC brands the HEIC worker decodes. `mif1` alone is not enough
 // (AVIF uses it too), and image sequences (`msf1`, `hevc`, `hevx`) are not
 // supported by the worker.
@@ -47,7 +48,7 @@ export function readFtypBrands(header: Buffer): string[] | null {
   }
 
   const boxSize = header.readUInt32BE(0);
-  if (boxSize < 16) {
+  if (boxSize < 16 || boxSize > HEIC_HEADER_BYTES || boxSize % 4 !== 0 || boxSize > header.length) {
     return null;
   }
 
@@ -68,7 +69,7 @@ export function isHeicHeader(header: Buffer): boolean {
 }
 
 /**
- * Reads at most the first 256 bytes of a file and reports whether they start a
+ * Reads at most the first 4096 bytes of a file and reports whether they start a
  * HEIC image. Read errors report false: the regular decode path then surfaces
  * the real error, as it did before this check existed.
  */

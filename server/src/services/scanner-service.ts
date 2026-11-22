@@ -13,6 +13,7 @@ import {
   AVIF_METADATA_REPAIR_VERSION_SETTING_KEY,
   CAROUSELS_APPLIED_MODE_SETTING_KEY,
   EXCLUDED_FOLDERS_SETTING_KEY,
+  HEIC_CONTENT_REPAIR_VERSION_SETTING_KEY,
   LAST_SUCCESSFUL_GALLERY_ROOT_SETTING_KEY,
   LIBRARY_REBUILD_REQUIRED_SETTING_KEY,
   PREVIOUS_GALLERY_ROOT_SETTING_KEY,
@@ -243,6 +244,7 @@ interface ImageProcessingContext {
   galleryRootChanged: boolean;
   hasStoredGalleryRoot: boolean;
   avifMetadataRepairPending: boolean;
+  heicContentRepairPending: boolean;
   moveReconciliationEnabled: boolean;
   claimedMoveImageIds: Set<number>;
   rebuildDerivativeReuseIndex?: RebuildDerivativeReuseIndex;
@@ -324,16 +326,15 @@ function isDiscoverableMediaFile(
   relativePath: string,
   context: Pick<ImageProcessingContext, 'source' | 'heicImportEnabled' | 'rebuildDerivativeReuseIndex'>
 ): boolean {
-  return isSupportedMediaFile(relativePath, context.heicImportEnabled)
-    || (isHeicFile(relativePath) && (
-      context.rebuildDerivativeReuseIndex?.byRelativePath.has(relativePath)
-      || imageRepository.getByRelativePath(relativePath, context.source.id) !== undefined
-    ));
+  // Discover disabled HEIC files so existing photos can still be reconciled
+  // after a move. processImageFile rejects truly new imports.
+  return isSupportedMediaFile(relativePath, context.heicImportEnabled) || isHeicFile(relativePath);
 }
 const HEARTBEAT_INTERVAL_MS = 5000;
 const DERIVATIVE_CACHE_KEEP_FILE = '.gitkeep';
 const ROOT_DISCOVERY_LABEL = '(root)';
 const CURRENT_AVIF_METADATA_REPAIR_VERSION = '1';
+const CURRENT_HEIC_CONTENT_REPAIR_VERSION = '1';
 const MAX_SCAN_ERROR_TEXT_LENGTH = 8000;
 const MAX_SCAN_ERROR_LINE_LENGTH = 2000;
 export const LIBRARY_REBUILD_REQUIRED_MESSAGE =
@@ -1216,6 +1217,10 @@ class ScannerService {
     appSettingsRepository.set(AVIF_METADATA_REPAIR_VERSION_SETTING_KEY, CURRENT_AVIF_METADATA_REPAIR_VERSION);
   }
 
+  private heicContentRepairKey(sourceId: number): string {
+    return `${HEIC_CONTENT_REPAIR_VERSION_SETTING_KEY}.${sourceId}`;
+  }
+
   private async resetDerivativeDirectory(targetDirectory: string): Promise<void> {
     await fs.mkdir(targetDirectory, { recursive: true });
     const entries = await fs.readdir(targetDirectory, { withFileTypes: true });
@@ -1251,7 +1256,7 @@ class ScannerService {
   private async walkMediaSourceFolders(
     context: ImageProcessingContext,
     currentAbsolutePath: string,
-    onSourceFolder: (sourceFolder: SourceFolderCandidate) => Promise<void>,
+    onSourceFolder: (sourceFolder: SourceFolderCandidate) => Promise<boolean>,
     currentRelativePath: string | null = null,
     treatStoriesAsFolders = this.shouldTreatStoriesAsFolders(),
     treatCarouselsAsFolders = this.shouldTreatCarouselsAsFolders(),
@@ -1318,7 +1323,8 @@ class ScannerService {
         discoveredFolders: this.progress.discoveredFolders + 1,
         currentFolder: normalizedRelativePath
       });
-      await onSourceFolder({
+      // Skipped imports must not establish ownership of the stories directory.
+      hasDirectImages = await onSourceFolder({
         absolutePath: currentAbsolutePath,
         relativePath: normalizedRelativePath
       });
@@ -2077,6 +2083,10 @@ class ScannerService {
     const needsAvifMetadataRepair = context.avifMetadataRepairPending && discoveredFiles.some(
       (file) => path.extname(file.relativePath).toLowerCase() === '.avif'
     );
+    const needsHeicContentRepair = context.heicContentRepairPending && discoveredFiles.some(
+      (file) => HEIC_CONTENT_CHECK_EXTENSIONS.has(path.extname(file.relativePath).toLowerCase())
+        && imageRepository.getByRelativePath(file.relativePath, context.source.id) !== undefined
+    );
     const hasMatchingIndexedFiles =
       discoveredFiles.length > 0 &&
       hasCompleteTakenAtMetadata &&
@@ -2090,6 +2100,7 @@ class ScannerService {
     if (
       !folderHadErrors &&
       !needsAvifMetadataRepair &&
+      !needsHeicContentRepair &&
       shouldSkipFolderBySignature({
         currentSignature: folderSignature.signature,
         galleryRootChanged: context.galleryRootChanged,
@@ -2194,7 +2205,8 @@ class ScannerService {
     return {
       folder,
       sourceFolderPath: normalizedFolderPath,
-      discoveredDirectImages: true,
+      // Preserve ownership on media errors, but not for intentionally skipped imports.
+      discoveredDirectImages: folderHadErrors || newFiles + updatedFiles + unchangedFiles > 0,
       wroteFolder: resolvedFolder.wroteFolder,
       scannedFiles: scannedFileCount,
       newFiles,
@@ -2375,6 +2387,7 @@ class ScannerService {
     const hasStoredGalleryRoot = storedGalleryRoot !== null;
     const galleryRootChanged = isPrimary && storedGalleryRoot !== currentGalleryRoot;
     const avifMetadataRepairPending = isPrimary && this.isAvifMetadataRepairPending();
+    const heicContentRepairPending = appSettingsRepository.get(this.heicContentRepairKey(source.id)) !== CURRENT_HEIC_CONTENT_REPAIR_VERSION;
     let checkedRoot: string;
     try {
       if (isPrimary && currentGalleryRoot !== normalizePath(appConfig.galleryRoot)) {
@@ -2408,6 +2421,7 @@ class ScannerService {
       galleryRootChanged,
       hasStoredGalleryRoot,
       avifMetadataRepairPending,
+      heicContentRepairPending,
       moveReconciliationEnabled: false,
       claimedMoveImageIds: new Set<number>(),
       rebuildDerivativeReuseIndex: contextOptions.rebuildDerivativeReuseIndex
@@ -2431,6 +2445,7 @@ class ScannerService {
         formatStep('root-changed', formatToggle(galleryRootChanged)),
         formatStep('stored-root', formatToggle(hasStoredGalleryRoot)),
         formatStep('avif-repair', formatToggle(avifMetadataRepairPending)),
+        formatStep('heic-content-repair', formatToggle(heicContentRepairPending)),
         formatStep('media-errors', appConfig.scanMediaErrorMode),
         formatStep('stories-as-folders', formatToggle(treatStoriesAsFolders)),
         formatStep('carousels-as-folders', formatToggle(treatCarouselsAsFolders)),
@@ -2660,6 +2675,7 @@ class ScannerService {
           processedFolders: this.progress.processedFolders + 1
         });
         this.logProgress('folder');
+        return result.discoveredDirectImages;
       }, null, treatStoriesAsFolders, treatCarouselsAsFolders, excludedFolderRules, (excluded, exact) => {
         if (indexedFolderPaths.has(excluded) || (!exact && [...indexedFolderPaths].some(folderPath => folderPath.startsWith(excluded + '/')))) {
           imageProcessingContext.intentionalExclusion = true;
@@ -2748,6 +2764,9 @@ class ScannerService {
 
     if (summary.status === 'completed' && avifMetadataRepairPending) {
       this.markAvifMetadataRepairComplete();
+    }
+    if (summary.status === 'completed' && heicContentRepairPending) {
+      appSettingsRepository.set(this.heicContentRepairKey(source.id), CURRENT_HEIC_CONTENT_REPAIR_VERSION);
     }
 
     if (summary.status === 'completed' && eager) appSettingsRepository.remove(repairKey);
@@ -2868,6 +2887,7 @@ class ScannerService {
         galleryRootChanged: false,
         hasStoredGalleryRoot: appSettingsRepository.get(LAST_SUCCESSFUL_GALLERY_ROOT_SETTING_KEY) !== null,
         avifMetadataRepairPending: false,
+        heicContentRepairPending: false,
         moveReconciliationEnabled: false,
         claimedMoveImageIds: new Set<number>()
       };
@@ -3449,18 +3469,23 @@ class ScannerService {
     const extension = path.extname(file.absolutePath).toLowerCase();
     const mediaType = getMediaTypeFromExtension(extension);
     const existingByPath = imageRepository.getByRelativePath(file.relativePath, context.source.id);
-    // A HEIC photo can carry a JPEG extension (`IMG_1234.HEIC.jpeg`). Check the
-    // header of new or changed JPEG files; unchanged rows keep the stored MIME type.
+    // Recheck unchanged JPEG-extension rows once after upgrading, as older
+    // scans could have saved actual HEIC files under image/jpeg.
     const contentHeic = HEIC_CONTENT_CHECK_EXTENSIONS.has(extension) && (
-      existingByPath?.checksum_or_fingerprint === fingerprint
+      existingByPath?.checksum_or_fingerprint === fingerprint && !context.heicContentRepairPending
         ? isHeicMimeType(existingByPath.mime_type)
         : await hasHeicContent(file.absolutePath)
     );
+    const moveCandidate = existingByPath ? undefined : await this.findMoveCandidate(file, extension, context);
+    const rebuildDerivativeReuseCandidate = existingByPath || moveCandidate
+      ? undefined
+      : this.findRebuildDerivativeReuseCandidate(file, extension, context);
     if (
-      contentHeic
+      (contentHeic || isHeicFile(file.relativePath))
       && !context.heicImportEnabled
       && !existingByPath
-      && !context.rebuildDerivativeReuseIndex?.byRelativePath.has(file.relativePath)
+      && !moveCandidate
+      && !rebuildDerivativeReuseCandidate
     ) {
       // Same rule as discovery applies to `.heic` files: with HEIC imports off,
       // new HEIC files are not indexed, and indexed ones stay available.
@@ -3474,10 +3499,6 @@ class ScannerService {
         heicSource: heicScanSource(context.source, context.root, file.relativePath, file.absolutePath, fingerprint)
       } : {})
     };
-    const moveCandidate = existingByPath ? undefined : await this.findMoveCandidate(file, extension, context);
-    const rebuildDerivativeReuseCandidate = existingByPath || moveCandidate
-      ? undefined
-      : this.findRebuildDerivativeReuseCandidate(file, extension, context);
     const existing = existingByPath ?? moveCandidate ?? rebuildDerivativeReuseCandidate;
     const canReuseDerivativeFiles = Boolean(moveCandidate) ||
       (rebuildDerivativeReuseCandidate
@@ -3498,7 +3519,8 @@ class ScannerService {
       && extension === '.avif'
       && existingByPath !== undefined;
 
-    if (existingByPath && existingByPath.checksum_or_fingerprint === fingerprint) {
+    const needsHeicContentRepair = existingByPath && contentHeic && !isHeicMimeType(existingByPath.mime_type);
+    if (existingByPath && existingByPath.checksum_or_fingerprint === fingerprint && !needsHeicContentRepair) {
       const refreshedIndexedRow = shouldRefreshUnchangedImage({
         absolutePathChanged,
         galleryRootChanged: context.galleryRootChanged,

@@ -45,6 +45,16 @@ describe('HEIC header detection', () => {
     const shortBox = ftyp('mif1', ['mif1', 'heic']);
     shortBox.writeUInt32BE(20, 0);
     expect(isHeicHeader(shortBox)).toBe(false);
+    const oversized = ftyp('heic', ['mif1']);
+    oversized.writeUInt32BE(4096, 0);
+    expect(isHeicHeader(oversized)).toBe(false);
+    const unaligned = ftyp('heic', ['mif1']);
+    unaligned.writeUInt32BE(21, 0);
+    expect(isHeicHeader(unaligned)).toBe(false);
+    const beyondWorkerLimit = Buffer.alloc(4100);
+    beyondWorkerLimit.writeUInt32BE(4100, 0);
+    beyondWorkerLimit.write('ftypheic', 4, 'ascii');
+    expect(isHeicHeader(beyondWorkerLimit)).toBe(false);
   });
 
   it('reads only a bounded header and reports unreadable files as not HEIC', async () => {
@@ -58,6 +68,23 @@ describe('HEIC header detection', () => {
       const empty = path.join(directory, 'empty.jpeg');
       await fs.writeFile(empty, '');
       expect(await hasHeicContent(empty)).toBe(false);
+    } finally {
+      await fs.rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('reads a complete 4096-byte file type box and rejects a truncated one', async () => {
+    const { hasHeicContent } = await import('../src/utils/image-utils.js');
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'foldergram-heic-header-limit-'));
+    try {
+      const original = path.join(directory, 'photo.jpeg');
+      const brands = Array.from({ length: 1020 }, (_, index) => index === 1019 ? 'heic' : 'zzzz');
+      const header = ftyp('mif1', brands).subarray(0, 4096);
+      await fs.writeFile(original, header);
+      expect(await hasHeicContent(original)).toBe(true);
+
+      await fs.writeFile(original, header.subarray(0, 4092));
+      expect(await hasHeicContent(original)).toBe(false);
     } finally {
       await fs.rm(directory, { recursive: true, force: true });
     }
@@ -155,6 +182,44 @@ describe('HEIC content behind a JPEG extension', () => {
       expect(rowByFilename('IMG_0001.HEIC.jpeg')).toMatchObject({ id: heic.id, mime_type: 'image/heic' });
       expect(rowByFilename('IMG_0002.HEIC.jpeg')).toMatchObject({ id: jpeg.id, mime_type: 'image/jpeg' });
     }, 30_000);
+
+    it(`indexes and renders HEIC with a 260-byte file type box in ${mode} mode`, async () => {
+      const boxSize = 260;
+      const originalBoxSize = heicFixture.readUInt32BE(0);
+      const paddingSize = boxSize - originalBoxSize;
+      const compatibleBrands = Buffer.alloc(paddingSize);
+      for (let offset = 0; offset < paddingSize; offset += 4) {
+        compatibleBrands.write('zzzz', offset, 'ascii');
+      }
+      const file = Buffer.concat([
+        heicFixture.subarray(0, originalBoxSize),
+        compatibleBrands,
+        heicFixture.subarray(originalBoxSize)
+      ]);
+      file.writeUInt32BE(boxSize, 0);
+      // This fixture has one iloc v0 item with a four-byte absolute base offset.
+      // Move that offset with the image data when extending the file type box.
+      const itemLocation = heicFixture.indexOf(Buffer.from('iloc'));
+      file.writeUInt32BE(
+        heicFixture.readUInt32BE(itemLocation + 16) + paddingSize,
+        itemLocation + paddingSize + 16
+      );
+      const originalPath = path.join(gallery, 'Phone', 'IMG_0001.HEIC.jpeg');
+      await fs.writeFile(originalPath, file);
+      const { hasHeicContent } = await import('../src/utils/image-utils.js');
+      expect(await hasHeicContent(originalPath)).toBe(true);
+
+      await start(mode, true);
+      expect((await scanner.scanAll('fixture'))?.status).toBe('completed');
+      const heic = rowByFilename('IMG_0001.HEIC.jpeg')!;
+      expect(heic).toMatchObject({ mime_type: 'image/heic', width: 96, height: 64 });
+      const detail = await request('GET', `/api/images/${heic.id}`);
+      expect(detail.status).toBe(200);
+      const rendered = await request('GET', detail.body.previewUrl);
+      expect(rendered.status).toBe(200);
+      expect(await sharp(rendered.rawBody).metadata()).toMatchObject({ format: 'webp', width: 96, height: 64 });
+      expect(await fs.readFile(originalPath)).toEqual(file);
+    }, 30_000);
   }
 
   it('follows the HEIC import setting and keeps indexed photos when it is turned off', async () => {
@@ -175,6 +240,110 @@ describe('HEIC content behind a JPEG extension', () => {
     expect(rowByFilename('IMG_0001.HEIC.jpeg')).toMatchObject({ id: heic.id, mime_type: 'image/heic' });
     expect(db.connection.prepare('SELECT is_deleted FROM images WHERE id = ?').get(heic.id)).toMatchObject({ is_deleted: 0 });
     expect((await request('GET', `/api/images/${heic.id}`)).status).toBe(200);
+  }, 30_000);
+
+  it.each(['eager', 'lazy'] as const)('repairs legacy JPEG-classified HEIC without replacing its identity in %s mode', async (mode) => {
+    const appConfig = await start(mode, true);
+    expect((await scanner.scanAll('fixture'))?.status).toBe('completed');
+    const original = rowByFilename('IMG_0001.HEIC.jpeg')!;
+    // Model an existing pre-fix database, including the old MIME and cache paths.
+    db.connection.prepare("UPDATE images SET mime_type = 'image/jpeg' WHERE id = ?").run(original.id);
+    const { HEIC_CONTENT_REPAIR_VERSION_SETTING_KEY } = await import('../src/constants/app-setting-keys.js');
+    const { appSettingsRepository } = await import('../src/db/repositories.js');
+    const sourceId = (db.connection.prepare('SELECT source_id FROM images WHERE id = ?').get(original.id) as { source_id: number }).source_id;
+    appSettingsRepository.remove(`${HEIC_CONTENT_REPAIR_VERSION_SETTING_KEY}.${sourceId}`);
+
+    expect((await scanner.scanAll('upgrade', { repairUnchangedDerivatives: false }))?.status).toBe('completed');
+    const repaired = rowByFilename('IMG_0001.HEIC.jpeg')!;
+    expect(repaired).toMatchObject({ id: original.id, mime_type: 'image/heic', width: 96, height: 64 });
+    expect((await request('GET', `/api/images/${original.id}`)).body).toMatchObject({ mimeType: 'image/heic' });
+    const previewUrl = (await request('GET', `/api/images/${original.id}`)).body as { previewUrl: string };
+    expect((await request('GET', previewUrl.previewUrl)).status).toBe(200);
+    expect(await sharp((await request('GET', previewUrl.previewUrl)).rawBody).metadata()).toMatchObject({ format: 'webp' });
+    expect(appSettingsRepository.get(`${HEIC_CONTENT_REPAIR_VERSION_SETTING_KEY}.${sourceId}`)).toBe('1');
+    expect((await scanner.scanAll('routine', { repairUnchangedDerivatives: false }))?.status).toBe('completed');
+    expect(rowByFilename('IMG_0001.HEIC.jpeg')?.id).toBe(original.id);
+  }, 30_000);
+
+  it.each(['IMG_0001.HEIC.jpeg', 'photo.heic'] as const)('keeps %s identity after moving it with imports disabled', async (filename) => {
+    if (filename === 'photo.heic') await fs.writeFile(path.join(gallery, 'Phone', filename), heicFixture);
+    await start('eager', true);
+    expect((await scanner.scanAll('fixture'))?.status).toBe('completed');
+    const original = rowByFilename(filename)!;
+    const { appConfig } = await import('../src/config/env.js');
+    appConfig.heicEnabledOverride = false;
+    await fs.mkdir(path.join(gallery, 'Moved'));
+    await fs.rename(path.join(gallery, 'Phone', filename), path.join(gallery, 'Moved', filename));
+    expect((await scanner.scanAll('move'))?.status).toBe('completed');
+    const moved = db.connection.prepare('SELECT id, relative_path, is_deleted, mime_type FROM images WHERE id = ?').get(original.id);
+    expect(moved).toMatchObject({ id: original.id, relative_path: `Moved/${filename}`, is_deleted: 0 });
+    expect((await request('GET', `/api/images/${original.id}`)).status).toBe(200);
+  }, 30_000);
+
+  for (const scanKind of ['full', 'incremental'] as const) {
+    it.each(['ignored.heic', 'ignored.HEIC.jpeg'])(`does not change story ownership for %s during ${scanKind} scanning with imports disabled`, async (filename) => {
+      await fs.mkdir(path.join(gallery, 'Album', 'stories'), { recursive: true });
+      await fs.copyFile(
+        path.join(gallery, 'Phone', 'IMG_0002.HEIC.jpeg'),
+        path.join(gallery, 'Album', 'stories', 'story.jpg')
+      );
+      await start('eager', false);
+      const { galleryService } = await import('../src/services/gallery-service.js');
+      expect((await scanner.scanAll('fixture'))?.status).toBe('completed');
+      const original = galleryService.getFeed(1, 20, 'recent').items.find(item => item.filename === 'story.jpg');
+      expect(original).toMatchObject({ folderPath: 'Album/stories' });
+
+      const relativePath = `Album/${filename}`;
+      await fs.writeFile(path.join(gallery, relativePath), heicFixture);
+      const scan = scanKind === 'full'
+        ? await scanner.scanAll('fixture')
+        : await scanner.scanChangedPaths([relativePath], 'watcher');
+      expect(scan?.status).toBe('completed');
+      expect(rowByFilename(filename)).toBeUndefined();
+      expect(galleryService.getFeed(1, 20, 'recent').items.find(item => item.filename === 'story.jpg'))
+        .toMatchObject({ id: original!.id, folderPath: 'Album/stories' });
+      expect(db.connection.prepare('SELECT role, story_owner_folder_id FROM folders WHERE folder_path = ?').get('Album/stories'))
+        .toMatchObject({ role: 'normal', story_owner_folder_id: null });
+
+      expect((await scanner.scanAll('routine', { repairUnchangedDerivatives: false }))?.status).toBe('completed');
+      expect(galleryService.getFeed(1, 20, 'recent').items.find(item => item.filename === 'story.jpg')?.id).toBe(original!.id);
+    }, 30_000);
+  }
+
+  it('keeps stories reserved for an indexed HEIC owner after imports are disabled', async () => {
+    await fs.mkdir(path.join(gallery, 'Album', 'stories'), { recursive: true });
+    await fs.copyFile(
+      path.join(gallery, 'Phone', 'IMG_0002.HEIC.jpeg'),
+      path.join(gallery, 'Album', 'stories', 'story.jpg')
+    );
+    await fs.writeFile(path.join(gallery, 'Album', 'photo.heic'), heicFixture);
+    const appConfig = await start('eager', true);
+    expect((await scanner.scanAll('fixture'))?.status).toBe('completed');
+    const original = rowByFilename('photo.heic')!;
+    appConfig.heicEnabledOverride = false;
+
+    expect((await scanner.scanAll('fixture'))?.status).toBe('completed');
+    const { galleryService } = await import('../src/services/gallery-service.js');
+    expect(rowByFilename('photo.heic')).toMatchObject({ id: original.id });
+    expect(galleryService.getFeed(1, 20, 'recent').items.some(item => item.filename === 'story.jpg')).toBe(false);
+    expect(db.connection.prepare('SELECT role, story_owner_folder_id FROM folders WHERE folder_path = ?').get('Album/stories'))
+      .toMatchObject({ role: 'story_root', story_owner_folder_id: expect.any(Number) });
+  }, 30_000);
+
+  it('does not confuse JPEG APP metadata with an invalid ftyp header', async () => {
+    const jpeg = await sharp({ create: { width: 8, height: 8, channels: 3, background: '#abcdef' } }).jpeg().toBuffer();
+    const appLength = 0x6674;
+    const app = Buffer.alloc(2 + appLength);
+    app[0] = 0xff;
+    app[1] = 0xef;
+    app.writeUInt16BE(appLength, 2);
+    app.write('ypheic', 4, 'ascii');
+    const file = Buffer.concat([jpeg.subarray(0, 2), app, jpeg.subarray(2)]);
+    expect((await sharp(file).metadata()).format).toBe('jpeg');
+    await fs.writeFile(path.join(gallery, 'Phone', 'genuine.jpeg'), file);
+    await start('eager', false);
+    expect((await scanner.scanAll('fixture'))?.status).toBe('completed');
+    expect(rowByFilename('genuine.jpeg')).toMatchObject({ mime_type: 'image/jpeg', width: 8, height: 8 });
   }, 30_000);
 
   it('does not treat an AVIF behind a JPEG extension as HEIC', async () => {
