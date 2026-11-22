@@ -911,9 +911,21 @@ It uses the same overall shape as `GET /api/scan-progress`, with the following d
 
 - `currentFile` and `currentFolder` are populated when the active operation can identify a source path
 - `operation.id` identifies a local operation across its source runs, and `operation.controls` lists its currently available actions
-- `recentIssues` returns up to ten recent failed, unavailable, or error-bearing runs for acknowledgement
+- `recentIssues` returns unacknowledged runs from the ten most recent failed, unavailable, or error-bearing runs
 - `lastCompletedScan` is the full terminal scan record, including `error_text`
 - when a run finishes as `completed_with_errors`, `error_text` contains a short sample plus the full report path under `<DATA_ROOT>/scan-errors/`
+
+### `POST /api/admin/scan-issues/acknowledge`
+
+Requires admin access and the mutation intent header. Send one to ten displayed
+scan identities as `{ "results": [{ "id": 2, "started_at": "2026-10-04T03:04:00.000Z", "finished_at": "2026-10-04T03:05:00.000Z" }] }`.
+
+Returns `{ "ok": true }` after saving acknowledgements in the existing SQLite
+`app_settings` table. Repeated requests are safe. Only matching terminal issue
+records are acknowledged; stale identities, successful scans, and running scans
+are ignored. Scan history remains intact, and a new failure still needs its own
+acknowledgement. Subsequent admin scan-progress and stats responses omit the
+acknowledged records from `recentIssues` for every browser and device.
 
 ### `GET /api/admin/stats`
 

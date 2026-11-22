@@ -1465,6 +1465,7 @@
     "openIssue": "Ver el resultado del escaneo en Estado",
     "openStatus": "Ver el último escaneo en Estado",
     "acknowledge": "Marcar como revisado",
+    "acknowledgeError": "No se pudo guardar la confirmación. Inténtalo de nuevo.",
     "acknowledgeResults": "Marcar {count} resultados como revisados",
     "earlierIssue": "Un escaneo anterior requiere atención",
     "similarResults": "{count} escaneos notificaron este problema.",

@@ -1465,6 +1465,7 @@
     "openIssue": "View scan result in Status",
     "openStatus": "View last scan in Status",
     "acknowledge": "Acknowledge",
+    "acknowledgeError": "Could not save the acknowledgement. Please try again.",
     "acknowledgeResults": "Acknowledge {count} results",
     "earlierIssue": "Earlier scan needs attention",
     "similarResults": "{count} scans reported this issue.",

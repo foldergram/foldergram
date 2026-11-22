@@ -55,6 +55,7 @@ import type {
   RebuildLibraryResult,
   RebuildThumbnailsResult,
   ScanProgress,
+  ScanRunSummary,
   ScanControl,
   ScanOperationStatus,
   FolderSummary,
@@ -446,6 +447,14 @@ export function fetchScanProgress() {
 
 export function fetchAdminScanProgress() {
   return requestJson<ScanProgress>('/api/admin/scan-progress');
+}
+
+export function acknowledgeScanIssues(results: readonly ScanRunSummary[]) {
+  return requestJson<{ ok: boolean }>('/api/admin/scan-issues/acknowledge', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ results: results.map(({ id, started_at, finished_at }) => ({ id, started_at, finished_at })) })
+  });
 }
 
 export function fetchAuthStatus() {

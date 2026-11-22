@@ -37,11 +37,15 @@
         {{ t('scanActivity.openIssue') }}
       </RouterLink>
       <button
+        v-if="!authStore.publicDemoMode"
         class="btn-ghost"
         type="button"
+        :disabled="appStore.scanAcknowledgementPending"
+        :aria-busy="appStore.scanAcknowledgementPending"
         @click="appStore.acknowledgeScanResults(issues)"
       >{{ issues.length > 1 ? t('scanActivity.acknowledgeResults', { count: issues.length }) : t('scanActivity.acknowledge') }}</button>
     </div>
+    <p v-if="appStore.scanAcknowledgementError" class="m-0 text-[0.8rem]" role="alert">{{ t('scanActivity.acknowledgeError') }}</p>
   </section>
 </template>
 

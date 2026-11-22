@@ -1,6 +1,6 @@
 import { authorizedImage, imageFolderIds, serveRemoteMedia } from '../immich/media.js';
 import { isImmichSource, isSourceVisible, isLocalOriginalUnavailable } from '../sources/local-source.js';
-import { appSettingsRepository, imageRepository, folderRepository, postRepository } from '../db/repositories.js';
+import { appSettingsRepository, imageRepository, folderRepository, postRepository, scanRunRepository } from '../db/repositories.js';
 import { HEIC_IMPORT_ENABLED_SETTING_KEY } from '../constants/app-setting-keys.js';
 import { getHeicImportSetting } from '../services/heic/import-setting.js';
 import express from 'express';
@@ -129,6 +129,13 @@ const collectionBodySchema = z.object({
 export const manualRescanBodySchema = z.object({
   repairDerivatives: z.boolean().optional()
 });
+const acknowledgeScanIssuesBodySchema = z.object({
+  results: z.array(z.object({
+    id: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+    started_at: z.string().datetime({ offset: true }),
+    finished_at: z.string().datetime({ offset: true })
+  }).strict()).min(1).max(10)
+}).strict();
 
 const slugSchema = z.object({
   slug: z.string().min(1).max(240)
@@ -1374,6 +1381,17 @@ const adminMutationRateLimiter = createRateLimiter({
   max: 10,
   message: 'Too many administrative requests. Please try again in a minute.'
 });
+
+router.post(
+  '/admin/scan-issues/acknowledge',
+  requireCapability('canAccessSettings', 'Admin access is required.'),
+  adminMutationRateLimiter,
+  (request, response) => {
+    const { results } = acknowledgeScanIssuesBodySchema.parse(request.body);
+    scanRunRepository.acknowledgeIssues(results);
+    response.json({ ok: true });
+  }
+);
 
 router.get(
   '/admin/settings/heic-import',

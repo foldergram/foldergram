@@ -1,7 +1,7 @@
 import { appConfig } from '../config/env.js';
 import { databaseManager } from './database.js';
 import { isImmichSource, primaryLocalSource } from '../sources/local-source.js';
-import { SHARE_SESSION_SECRET_SETTING_KEY } from '../constants/app-setting-keys.js';
+import { SCAN_ACKNOWLEDGEMENT_SETTING_PREFIX, SHARE_SESSION_SECRET_SETTING_KEY } from '../constants/app-setting-keys.js';
 import { normalizePath, safeJoin } from '../utils/path-utils.js';
 import { REEL_RECOMMENDED_WINDOW_SIZE, REEL_RECOMMENDED_WINDOW_SLICES } from '../utils/reels-utils.js';
 import { resolveUniqueSlug, slugifyFolderName } from '../utils/slug.js';
@@ -4153,6 +4153,11 @@ export const maintenanceRepository = {
       database.prepare('DELETE FROM images WHERE source_id = ?').run(sourceId);
       database.prepare('DELETE FROM folders WHERE source_id = ?').run(sourceId);
       database.prepare('DELETE FROM folder_scan_state WHERE source_id = ?').run(sourceId);
+      database.prepare(`
+        DELETE FROM app_settings WHERE key IN (
+          SELECT ? || id FROM scan_runs WHERE source_id = ?
+        )
+      `).run(SCAN_ACKNOWLEDGEMENT_SETTING_PREFIX, sourceId);
       database.prepare('DELETE FROM scan_runs WHERE source_id = ?').run(sourceId);
       if (removeSource) database.prepare("DELETE FROM media_sources WHERE id = ? AND kind = 'local' AND managed_by = 'settings'").run(sourceId);
       database.exec('COMMIT');
@@ -4263,9 +4268,30 @@ export const scanRunRepository = {
 
   recentIssues(): ScanRunRecord[] {
     return database.prepare(`
-      SELECT * FROM scan_runs
-      WHERE finished_at IS NOT NULL AND status IN ('failed', 'completed_with_errors', 'skipped_unavailable')
-      ORDER BY id DESC LIMIT 10
-    `).all() as unknown as ScanRunRecord[];
+      SELECT issues.* FROM (
+        SELECT * FROM scan_runs
+        WHERE finished_at IS NOT NULL AND status IN ('failed', 'completed_with_errors', 'skipped_unavailable')
+        ORDER BY id DESC LIMIT 10
+      ) AS issues
+      WHERE NOT EXISTS (
+        SELECT 1 FROM app_settings
+        WHERE key = ? || issues.id AND value = issues.started_at || '/' || issues.finished_at
+      )
+      ORDER BY issues.id DESC
+    `).all(SCAN_ACKNOWLEDGEMENT_SETTING_PREFIX) as unknown as ScanRunRecord[];
+  },
+
+  acknowledgeIssues(results: Pick<ScanRunRecord, 'id' | 'started_at' | 'finished_at'>[]): void {
+    database.prepare(`
+      INSERT INTO app_settings (key, value)
+      SELECT ? || scan_runs.id, scan_runs.started_at || '/' || scan_runs.finished_at
+      FROM scan_runs JOIN json_each(?) AS requested
+        ON scan_runs.id = json_extract(requested.value, '$.id')
+        AND scan_runs.started_at = json_extract(requested.value, '$.started_at')
+        AND scan_runs.finished_at = json_extract(requested.value, '$.finished_at')
+      WHERE scan_runs.finished_at IS NOT NULL
+        AND scan_runs.status IN ('failed', 'completed_with_errors', 'skipped_unavailable')
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `).run(SCAN_ACKNOWLEDGEMENT_SETTING_PREFIX, JSON.stringify(results));
   }
 };

@@ -1465,6 +1465,7 @@
     "openIssue": "在状态页查看扫描结果",
     "openStatus": "在状态页查看上次扫描",
     "acknowledge": "确认已查看",
+    "acknowledgeError": "无法保存确认状态，请重试。",
     "acknowledgeResults": "确认已查看 {count} 个结果",
     "earlierIssue": "较早的扫描需要处理",
     "similarResults": "{count} 次扫描报告了此问题。",

@@ -1465,6 +1465,7 @@
     "openIssue": "Scanergebnis unter Status anzeigen",
     "openStatus": "Letzten Scan unter Status anzeigen",
     "acknowledge": "Zur Kenntnis nehmen",
+    "acknowledgeError": "Die Bestätigung konnte nicht gespeichert werden. Bitte versuche es erneut.",
     "acknowledgeResults": "{count} Ergebnisse zur Kenntnis nehmen",
     "earlierIssue": "Ein früherer Scan erfordert Aufmerksamkeit",
     "similarResults": "Bei {count} Scans trat dieses Problem auf.",

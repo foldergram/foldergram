@@ -214,6 +214,15 @@ During a full scan, Foldergram:
 10. Performs deferred stale-derivative cleanup after successful scans.
 11. Writes scan status to `scan_runs` and, when needed, a per-run full scan error report.
 
+Library activity shows the latest scan separately from earlier scan issues.
+Acknowledge saves the displayed issues as reviewed in SQLite's existing
+`app_settings` table. These acknowledgements apply to the whole instance across
+server restarts, browsers, devices, and addresses. They do not change scan history,
+and new scan issues still appear. If saving fails, the issue stays visible so the
+acknowledgement can be retried.
+Existing browser dismissals are copied to the database when an admin opens the
+app and those scan issues are loaded.
+
 ## Quick scans and derivative repair
 
 `POST /api/admin/rescan` accepts an optional `repairDerivatives` boolean.
