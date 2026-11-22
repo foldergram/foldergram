@@ -1,3 +1,4 @@
+import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import type { MediaType } from '../types/models.js';
@@ -12,6 +13,78 @@ export const PREVIEW_MAX_WIDTH = 1500;
 export function isHeicFile(filename: string): boolean {
   const extension = path.extname(filename).toLowerCase();
   return extension === '.heic' || extension === '.heif';
+}
+
+const HEIC_MIME_TYPES = new Set(['image/heic', 'image/heif']);
+
+export function isHeicMimeType(mimeType: string | null | undefined): boolean {
+  return mimeType !== null && mimeType !== undefined && HEIC_MIME_TYPES.has(mimeType);
+}
+
+/**
+ * Whether an indexed image is HEIC: by extension, or because the scanner found
+ * HEIC content in a file with another extension (iOS can export HEIC photos as
+ * `IMG_1234.HEIC.jpeg`) and stored `image/heic` as its MIME type.
+ */
+export function isHeicImage(image: { relative_path: string; mime_type?: string | null }): boolean {
+  return isHeicFile(image.relative_path) || isHeicMimeType(image.mime_type);
+}
+
+/** Extensions whose files the scanner checks for HEIC content. */
+export const HEIC_CONTENT_CHECK_EXTENSIONS = new Set(['.jpg', '.jpeg']);
+
+// Match the largest file type box accepted by the HEIC worker.
+const HEIC_HEADER_BYTES = 4096;
+// Still-image HEVC brands the HEIC worker decodes. `mif1` alone is not enough
+// (AVIF uses it too), and image sequences (`msf1`, `hevc`, `hevx`) are not
+// supported by the worker.
+const HEIC_BRANDS = new Set(['heic', 'heix']);
+const NON_HEIC_MAJOR_BRANDS = new Set(['msf1', 'hevc', 'hevx', 'avif', 'avis']);
+
+/** The major and compatible brands of a leading ISO-BMFF `ftyp` box, or null when there is none. */
+export function readFtypBrands(header: Buffer): string[] | null {
+  if (header.length < 16 || header.toString('latin1', 4, 8) !== 'ftyp') {
+    return null;
+  }
+
+  const boxSize = header.readUInt32BE(0);
+  if (boxSize < 16 || boxSize > HEIC_HEADER_BYTES || boxSize % 4 !== 0 || boxSize > header.length) {
+    return null;
+  }
+
+  const end = Math.min(boxSize, header.length);
+  const brands = [header.toString('latin1', 8, 12)];
+  for (let offset = 16; offset + 4 <= end; offset += 4) {
+    brands.push(header.toString('latin1', offset, offset + 4));
+  }
+  return brands;
+}
+
+export function isHeicHeader(header: Buffer): boolean {
+  const brands = readFtypBrands(header);
+  if (!brands || NON_HEIC_MAJOR_BRANDS.has(brands[0])) {
+    return false;
+  }
+  return brands.some((brand) => HEIC_BRANDS.has(brand));
+}
+
+/**
+ * Reads at most the first 4096 bytes of a file and reports whether they start a
+ * HEIC image. Read errors report false: the regular decode path then surfaces
+ * the real error, as it did before this check existed.
+ */
+export async function hasHeicContent(absolutePath: string): Promise<boolean> {
+  let handle: fs.FileHandle | undefined;
+  try {
+    handle = await fs.open(absolutePath, 'r');
+    const header = Buffer.alloc(HEIC_HEADER_BYTES);
+    const { bytesRead } = await handle.read(header, 0, HEIC_HEADER_BYTES, 0);
+    return isHeicHeader(header.subarray(0, bytesRead));
+  } catch {
+    return false;
+  } finally {
+    await handle?.close();
+  }
 }
 
 export function isSupportedImageFile(filename: string, includeHeic = false): boolean {

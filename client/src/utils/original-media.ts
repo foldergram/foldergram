@@ -2,12 +2,18 @@ export function isHeicFilename(filename: string): boolean {
   return /\.hei[cf]$/i.test(filename);
 }
 
-export function needsWebpViewing(media: { filename: string; previewUrl?: string }): boolean {
-  return isHeicFilename(media.filename) && !media.previewUrl?.startsWith('/api/remote-media/');
+/** HEIC by extension, or HEIC content the server found behind another extension (`IMG_1234.HEIC.jpeg`). */
+export function isHeicMedia(media: { filename: string; mimeType?: string | null }): boolean {
+  return isHeicFilename(media.filename) || media.mimeType === 'image/heic' || media.mimeType === 'image/heif';
+}
+
+export function needsWebpViewing(media: { filename: string; mimeType?: string | null; previewUrl?: string }): boolean {
+  return isHeicMedia(media) && !media.previewUrl?.startsWith('/api/remote-media/');
 }
 
 export function getImageViewingFallback(media: {
   filename: string;
+  mimeType?: string | null;
   previewUrl?: string;
   thumbnailUrl?: string;
   originalUrl?: string;

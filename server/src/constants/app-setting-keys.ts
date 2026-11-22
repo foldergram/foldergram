@@ -7,6 +7,7 @@ export const DERIVATIVE_STORAGE_MIGRATION_CURSOR_SETTING_KEY = 'derivatives.stor
 export const DERIVATIVE_STORAGE_MIGRATION_COMPLETE_AT_SETTING_KEY = 'derivatives.storage_migration_complete_at';
 export const STALE_DERIVATIVE_GC_LAST_RUN_AT_SETTING_KEY = 'derivatives.stale_gc_last_run_at';
 export const AVIF_METADATA_REPAIR_VERSION_SETTING_KEY = 'library.avif_metadata_repair_version';
+export const HEIC_CONTENT_REPAIR_VERSION_SETTING_KEY = 'library.heic_content_repair_version';
 export const TREAT_STORIES_AS_FOLDERS_SETTING_KEY = 'library.treat_stories_as_folders';
 export const EXCLUDED_FOLDERS_SETTING_KEY = 'library.excluded_folders';
 export const HEIC_IMPORT_ENABLED_SETTING_KEY = 'library.heic_import_enabled';

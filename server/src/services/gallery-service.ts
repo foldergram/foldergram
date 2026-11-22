@@ -5,7 +5,7 @@ import { imageBelongsToFolder } from '../immich/media.js';
 import fs from 'node:fs';
 import fsPromises from 'node:fs/promises';
 import path from 'node:path';
-import { isHeicFile } from '../utils/image-utils.js';
+import { isHeicFile, isHeicMimeType } from '../utils/image-utils.js';
 
 import {
   APP_DEFAULT_LOCALE_SETTING_KEY,
@@ -683,7 +683,9 @@ function mapSharedFeedImage(image: IndexedFeedImage, derivativeVersion = getDeri
 
 function mapImageDetail(image: IndexedImageDetail, derivativeVersion = getDerivativeAssetVersion()): ImageDetail {
   const { playbackStrategy, videoDeliveryPolicy, exifJson, placeId, placeSlug, placeName, placeKind, placeIsApproximate, isSaved, mediaItems, itemCount, ...rest } = image as any;
-  const useOriginalForImages = appConfig.imageDetailSource === 'original' && !isHeicFile(rest.filename);
+  const useOriginalForImages = appConfig.imageDetailSource === 'original'
+    && !isHeicFile(rest.filename)
+    && !isHeicMimeType(rest.mimeType);
   const representativeImageId = mediaItems?.[0]?.imageId ?? rest.id;
   const videoPlaybackSource = getVideoPlaybackSource({
     mediaType: rest.mediaType,

@@ -508,7 +508,8 @@ export async function readMediaMetadata(
     return readVideoMetadata(sourcePath, options);
   }
 
-  if (isHeicFile(sourcePath)) {
+  // `heicSource` is passed for HEIC content behind another extension too.
+  if (isHeicFile(sourcePath) || options.heicSource) {
     return toHeicMediaMetadata(await processHeicSource(sourcePath, [], options.heicSource));
   }
 
@@ -861,7 +862,7 @@ export async function generateThumbnailDerivative(
   const shouldWriteThumbnail = force || !(await isNonemptyDerivative(thumbnailAbsolutePath));
 
   if (shouldWriteThumbnail) {
-    if (isHeicFile(relativePath)) {
+    if (isHeicFile(relativePath) || overrides.heicSource) {
       await processHeicSource(sourcePath, [{ kind: 'thumbnail', path: thumbnailAbsolutePath }], overrides.heicSource, overrides.heicForeground);
     } else if (mediaType === 'video') {
       await writeVideoThumbnail(sourcePath, thumbnailAbsolutePath);
@@ -903,7 +904,7 @@ export async function generatePreviewDerivative(
   const shouldWritePreview = force || !(await isNonemptyDerivative(previewAbsolutePath));
 
   if (shouldWritePreview) {
-    if (isHeicFile(relativePath)) {
+    if (isHeicFile(relativePath) || overrides.heicSource) {
       await processHeicSource(sourcePath, [{ kind: 'preview', path: previewAbsolutePath }], overrides.heicSource, overrides.heicForeground);
     } else if (mediaType === 'video') {
       const policy = overrides.videoPreviewPolicy ?? 'required';
@@ -965,7 +966,7 @@ export async function generateDerivatives(
   let metadata: MediaMetadata;
   let generated: Pick<DerivativeResult, 'generatedThumbnail' | 'generatedPreview'>;
 
-  if (isHeicFile(relativePath)) {
+  if (isHeicFile(relativePath) || overrides.heicSource) {
     const generatedThumbnail = force || !(await isNonemptyDerivative(thumbnailAbsolutePath));
     const generatedPreview = force || !(await isNonemptyDerivative(previewAbsolutePath));
     const outputs = [];
