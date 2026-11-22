@@ -1,7 +1,7 @@
 export type MediaType = 'image' | 'video';
 export type FolderImageOrder = 'newest' | 'oldest';
 export type NestedFolderTitleFormat = 'folder' | 'parent-plus-folder';
-export type TakenAtSource = 'exif' | 'mtime' | 'first_seen' | 'sort_timestamp';
+export type TakenAtSource = 'exif' | 'mtime' | 'first_seen' | 'sort_timestamp' | 'metadata';
 export type PlaybackStrategy = 'preview' | 'original';
 export type LocalVideoDeliveryPolicy = 'legacy' | 'streaming' | 'previews';
 
@@ -148,6 +148,7 @@ export interface ImageRecord {
   taken_at: number | null;
   taken_at_source: TakenAtSource | null;
   caption: string | null;
+  companion_caption: string | null;
   exif_json: string | null;
   thumbnail_path: string;
   preview_path: string;
@@ -170,6 +171,8 @@ export interface PostRecord {
   source_path: string;
   post_type: PostType;
   caption: string | null;
+  companion_caption: string | null;
+  caption_edited_at: string | null;
   sort_timestamp: number;
   taken_at: number | null;
   taken_at_source: TakenAtSource | null;

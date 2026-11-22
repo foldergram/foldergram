@@ -78,6 +78,7 @@ import {
   normalizePath,
   safeJoin
 } from '../utils/path-utils.js';
+import { readCompanionMetadata, isSupportedMetadataExtension } from '../utils/metadata-file.js';
 import {
   getEffectiveExcludedFolderRules,
   matchesExcludedFolder,
@@ -149,6 +150,8 @@ interface IndexedFileCandidate {
   absolutePath: string;
   relativePath: string;
   stats: Stats;
+  metadataFilePath?: string;
+  metadataStats?: Stats;
 }
 
 interface SourceFolderCandidate {
@@ -184,6 +187,7 @@ interface IndexedFolderScanOptions {
   storyOwnerFolderId?: number | null;
   carouselOwnerFolderId?: number | null;
   folderHadErrors?: boolean;
+  extraMetadataEntries?: Array<{ relativePath: string; fileSize: number; mtimeMs: number }>;
 }
 
 interface ReservedCarouselScanResult {
@@ -194,7 +198,8 @@ interface ReservedCarouselScanResult {
 interface PendingCarouselPost {
   folderId: number;
   sourcePath: string;
-  images: Array<Pick<ImageRecord, 'id' | 'place_id' | 'taken_at' | 'taken_at_source' | 'sort_timestamp'>>;
+  metadataFilePath?: string;
+  images: Array<Pick<ImageRecord, 'id' | 'place_id' | 'taken_at' | 'taken_at_source' | 'sort_timestamp' | 'caption'>>;
 }
 
 interface CarouselDiscovery {
@@ -211,6 +216,7 @@ class SourcePathAccessError extends Error {
 interface IndexedFileReference {
   absolutePath: string;
   relativePath: string;
+  metadataFilePath?: string;
 }
 
 interface StatIndexedFilesResult {
@@ -1386,6 +1392,24 @@ class ScannerService {
       return this.clearIndexedFolder(sourceFolderPath);
     }
 
+    const metadataFiles = new Map<string, string>();
+    for (const entry of entries) {
+      if (entry.isFile() && !entry.name.startsWith('.')) {
+        const ext = path.extname(entry.name);
+        if (isSupportedMetadataExtension(ext)) {
+          const baseName = path.basename(entry.name, ext).toLowerCase();
+          const fullName = entry.name.toLowerCase();
+          const absPath = path.join(sourceFolder.absolutePath, entry.name);
+          if (!metadataFiles.has(baseName) || ext.toLowerCase() === '.txt') {
+            metadataFiles.set(baseName, absPath);
+          }
+          if (!metadataFiles.has(fullName) || ext.toLowerCase() === '.txt') {
+            metadataFiles.set(fullName, absPath);
+          }
+        }
+      }
+    }
+
     const imageFiles = entries.filter(entry =>
       entry.isFile() && !entry.name.startsWith('.')
       && isDiscoverableMediaFile(normalizePath(`${sourceFolderPath}/${entry.name}`), context)
@@ -1403,9 +1427,14 @@ class ScannerService {
     const statResult = await this.statIndexedFiles(
       imageFiles.map((entry) => {
         const absolutePath = path.join(sourceFolder.absolutePath, entry.name);
+        const mediaExt = path.extname(entry.name);
+        const mediaBase = path.basename(entry.name, mediaExt).toLowerCase();
+        const mediaFullName = entry.name.toLowerCase();
+        const metadataFilePath = metadataFiles.get(mediaFullName) ?? metadataFiles.get(mediaBase);
         return {
           absolutePath,
-          relativePath: getRelativeGalleryPath(context.root, absolutePath)
+          relativePath: getRelativeGalleryPath(context.root, absolutePath),
+          metadataFilePath
         };
       }),
       errors,
@@ -1456,10 +1485,20 @@ class ScannerService {
       try {
         const absolutePath = resolveLocalPath(context.source, normalizedRelativePath, { scanRoot: context.root });
         const stats = await fs.stat(absolutePath);
+        let metadataStats: Stats | undefined;
+        if (file.metadataFilePath) {
+          try {
+            metadataStats = await fs.stat(file.metadataFilePath);
+          } catch {
+            // Ignore missing metadata file stat
+          }
+        }
         discoveredFiles.push({
           absolutePath: file.absolutePath,
           relativePath: normalizedRelativePath,
-          stats
+          stats,
+          metadataFilePath: file.metadataFilePath,
+          metadataStats
         });
       } catch (error) {
         folderHadErrors = true;
@@ -1576,14 +1615,39 @@ class ScannerService {
       return [];
     }
 
+    const storyMetadataFiles = new Map<string, string>();
+    for (const entry of storiesEntries) {
+      if (entry.isFile() && !entry.name.startsWith('.')) {
+        const ext = path.extname(entry.name);
+        if (isSupportedMetadataExtension(ext)) {
+          const baseName = path.basename(entry.name, ext).toLowerCase();
+          const fullName = entry.name.toLowerCase();
+          const absPath = path.join(storiesAbsolutePath, entry.name);
+          if (!storyMetadataFiles.has(baseName) || ext.toLowerCase() === '.txt') {
+            storyMetadataFiles.set(baseName, absPath);
+          }
+          if (!storyMetadataFiles.has(fullName) || ext.toLowerCase() === '.txt') {
+            storyMetadataFiles.set(fullName, absPath);
+          }
+        }
+      }
+    }
+
     const storyResults: SourceFolderScanResult[] = [];
     const directStoryFiles = storiesEntries
       .filter(entry => entry.isFile() && !entry.name.startsWith('.')
         && isDiscoverableMediaFile(normalizePath(`${storiesRelativePath}/${entry.name}`), context))
-      .map((entry) => ({
-        absolutePath: path.join(storiesAbsolutePath, entry.name),
-        relativePath: normalizePath(`${storiesRelativePath}/${entry.name}`)
-      }));
+      .map((entry) => {
+        const mediaExt = path.extname(entry.name);
+        const mediaBase = path.basename(entry.name, mediaExt).toLowerCase();
+        const mediaFullName = entry.name.toLowerCase();
+        const metadataFilePath = storyMetadataFiles.get(mediaFullName) ?? storyMetadataFiles.get(mediaBase);
+        return {
+          absolutePath: path.join(storiesAbsolutePath, entry.name),
+          relativePath: normalizePath(`${storiesRelativePath}/${entry.name}`),
+          metadataFilePath
+        };
+      });
 
     if (directStoryFiles.length > 0) {
       const startedAt = performance.now();
@@ -1831,11 +1895,40 @@ class ScannerService {
         ownerFolder = this.resolveFolder(context.source.id, existingFolders, usedSlugs, sourceFolder.relativePath).folder;
       }
 
+      const carouselMetaEntry = postDirEntries.find((e) =>
+        e.isFile() && !e.name.startsWith('.') &&
+        ['metadata.txt', 'metadata.nfo', 'post.txt', 'post.nfo', `${postEntry.name.toLowerCase()}.txt`, `${postEntry.name.toLowerCase()}.nfo`].includes(e.name.toLowerCase())
+      );
+      const carouselMetadataPath = carouselMetaEntry ? path.join(postAbsolutePath, carouselMetaEntry.name) : undefined;
+
+      const slideMetadataFiles = new Map<string, string>();
+      for (const entry of postDirEntries) {
+        if (entry.isFile() && !entry.name.startsWith('.')) {
+          const ext = path.extname(entry.name);
+          if (isSupportedMetadataExtension(ext)) {
+            const baseName = path.basename(entry.name, ext).toLowerCase();
+            const fullName = entry.name.toLowerCase();
+            const absPath = path.join(postAbsolutePath, entry.name);
+            if (!slideMetadataFiles.has(baseName) || ext.toLowerCase() === '.txt') {
+              slideMetadataFiles.set(baseName, absPath);
+            }
+            if (!slideMetadataFiles.has(fullName) || ext.toLowerCase() === '.txt') {
+              slideMetadataFiles.set(fullName, absPath);
+            }
+          }
+        }
+      }
+
       const directFiles = validEntries.map((e) => {
         const abs = path.join(postAbsolutePath, e.name);
+        const mediaExt = path.extname(e.name);
+        const mediaBase = path.basename(e.name, mediaExt).toLowerCase();
+        const mediaFullName = e.name.toLowerCase();
+        const metadataFilePath = slideMetadataFiles.get(mediaFullName) ?? slideMetadataFiles.get(mediaBase);
         return {
           absolutePath: abs,
-          relativePath: normalizePath(`${postRelativePath}/${e.name}`)
+          relativePath: normalizePath(`${postRelativePath}/${e.name}`),
+          metadataFilePath
         };
       });
 
@@ -1846,6 +1939,15 @@ class ScannerService {
 
       const statResult = await this.statIndexedFiles(directFiles, errors, context);
       await this.validateCarouselDestination(postRelativePath, statResult.discoveredFiles, context);
+      let carouselMetadataStats: Stats | undefined;
+      if (carouselMetadataPath) {
+        try {
+          carouselMetadataStats = await fs.stat(carouselMetadataPath);
+        } catch {
+          // Ignore missing carousel metadata file
+        }
+      }
+
       const result = await this.scanIndexedFolderFiles({
         folderPath: postRelativePath,
         scannedFileCount: directFiles.length,
@@ -1861,7 +1963,12 @@ class ScannerService {
         logLabel: 'Carousel item indexed',
         role: 'carousel_source',
         carouselOwnerFolderId: ownerFolder.id,
-        folderHadErrors: statResult.folderHadErrors
+        folderHadErrors: statResult.folderHadErrors,
+        extraMetadataEntries: carouselMetadataStats && carouselMetadataPath ? [{
+          relativePath: getRelativeGalleryPath(context.root, carouselMetadataPath),
+          fileSize: carouselMetadataStats.size,
+          mtimeMs: carouselMetadataStats.mtimeMs
+        }] : undefined
       });
 
       const indexedImageRecords: ImageRecord[] = [];
@@ -1876,8 +1983,9 @@ class ScannerService {
         discovery.posts.push({
           folderId: ownerFolder.id,
           sourcePath: postRelativePath,
-          images: indexedImageRecords.map(({ id, place_id, taken_at, taken_at_source, sort_timestamp }) => (
-            { id, place_id, taken_at, taken_at_source, sort_timestamp }
+          metadataFilePath: carouselMetadataPath,
+          images: indexedImageRecords.map(({ id, place_id, taken_at, taken_at_source, sort_timestamp, caption }) => (
+            { id, place_id, taken_at, taken_at_source, sort_timestamp, caption }
           ))
         });
       }
@@ -1990,6 +2098,24 @@ class ScannerService {
     await this.activeOperation?.checkpoint();
     for (const { pending, existingPost } of plans) {
       const firstItem = pending.images[0];
+      const carouselMetadata = pending.metadataFilePath
+        ? await readCompanionMetadata(pending.metadataFilePath)
+        : null;
+      const metadataCaption = carouselMetadata?.caption ?? firstItem.caption ?? null;
+      // A first-slide companion date also defines the carousel's display order
+      // when there is no separate carousel-level date.
+      const metadataTakenAt = carouselMetadata?.takenAt ?? (
+        firstItem.taken_at_source === 'metadata' ? firstItem.taken_at : null
+      );
+      const captionEditedAt = existingPost?.caption_edited_at ? Date.parse(existingPost.caption_edited_at) : 0;
+      const companionMtime = pending.metadataFilePath
+        ? (await fs.stat(pending.metadataFilePath).catch(() => null))?.mtimeMs ?? 0 : 0;
+      const canImportCaption = !existingPost?.caption_edited_at || companionMtime > captionEditedAt;
+      const importedCaptionChanged = !existingPost || existingPost.companion_caption !== metadataCaption;
+      const selectedCaption = importedCaptionChanged && canImportCaption
+        ? metadataCaption : (existingPost ? existingPost.caption : metadataCaption);
+      const effectiveDate = metadataTakenAt ?? firstItem.taken_at;
+      const hadImportedDate = existingPost?.taken_at_source === 'metadata' && metadataTakenAt === null;
       postRepository.upsertPostWithItems({
         existingPostId: existingPost?.id,
         id: !existingPost && pending.images.length === 1 ? firstItem.id : undefined,
@@ -1997,10 +2123,14 @@ class ScannerService {
         placeId: firstItem.place_id,
         postType: pending.images.length > 1 ? 'carousel' : 'single',
         sourcePath: pending.sourcePath,
-        caption: existingPost?.caption ?? null,
-        takenAt: firstItem.taken_at ?? null,
-        takenAtSource: firstItem.taken_at_source,
-        sortTimestamp: existingPost?.sort_timestamp ?? Math.max(...pending.images.map(image => image.sort_timestamp)),
+        caption: selectedCaption,
+        companionCaption: metadataCaption,
+        clearCaptionEdit: importedCaptionChanged && canImportCaption,
+        takenAt: effectiveDate,
+        takenAtSource: metadataTakenAt !== null ? 'metadata' : firstItem.taken_at_source,
+        sortTimestamp: metadataTakenAt !== null ? metadataTakenAt : (hadImportedDate
+          ? Math.max(...pending.images.map(image => image.sort_timestamp))
+          : (existingPost?.sort_timestamp ?? Math.max(...pending.images.map(image => image.sort_timestamp)))),
         isDeleted: 0,
         isTrashed: 0
       }, pending.images.map((image, index) => ({ imageId: image.id, position: index + 1 })));
@@ -2025,7 +2155,8 @@ class ScannerService {
     role = 'normal',
     storyOwnerFolderId = null,
     carouselOwnerFolderId = null,
-    folderHadErrors = false
+    folderHadErrors = false,
+    extraMetadataEntries
   }: IndexedFolderScanOptions): Promise<SourceFolderScanResult> {
     const normalizedFolderPath = normalizePath(folderPath);
 
@@ -2069,13 +2200,21 @@ class ScannerService {
     let skippedUnchangedRows = 0;
     let usedFolderShortcut = false;
 
-    const folderSignature = createFolderScanSignature(
-      discoveredFiles.map((file) => ({
-        relativePath: file.relativePath,
-        fileSize: file.stats.size,
-        mtimeMs: file.stats.mtimeMs
-      }))
-    );
+    const folderSignature = createFolderScanSignature([
+      ...discoveredFiles.flatMap((file) => [
+        {
+          relativePath: file.relativePath,
+          fileSize: file.stats.size,
+          mtimeMs: file.stats.mtimeMs
+        },
+        ...(file.metadataStats && file.metadataFilePath ? [{
+          relativePath: getRelativeGalleryPath(context.root, file.metadataFilePath),
+          fileSize: file.metadataStats.size,
+          mtimeMs: file.metadataStats.mtimeMs
+        }] : [])
+      ]),
+      ...(extraMetadataEntries ?? [])
+    ]);
     const storedFolderState = folderScanStates.get(normalizedFolderPath);
     const hasCompleteTakenAtMetadata = imageRepository.countMissingTimestampMetadataByFolder(folder.id) === 0;
     const hasCompletePlaybackStrategyMetadata = imageRepository.countMissingPlaybackStrategyByFolder(folder.id) === 0;
@@ -2813,7 +2952,8 @@ class ScannerService {
         continue;
       }
 
-      if (!isDiscoverableMediaFile(relativePath, discoveryContext)) {
+      if (!isDiscoverableMediaFile(relativePath, discoveryContext) &&
+          !isSupportedMetadataExtension(path.extname(relativePath))) {
         continue;
       }
 
@@ -2823,13 +2963,17 @@ class ScannerService {
         continue;
       }
 
-      if (!treatStoriesAsFolders && findReservedStoriesOwnerPath(relativePath)) {
+      if (findReservedStoriesOwnerPath(relativePath) && (
+        !treatStoriesAsFolders || isSupportedMetadataExtension(path.extname(relativePath))
+      )) {
         fallbackReason = `${reason}:fallback`;
         break;
       }
 
       const treatCarouselsAsFolders = this.shouldTreatCarouselsAsFolders();
-      if (!treatCarouselsAsFolders && findReservedCarouselsOwnerPath(relativePath)) {
+      if (findReservedCarouselsOwnerPath(relativePath) && (
+        !treatCarouselsAsFolders || isSupportedMetadataExtension(path.extname(relativePath))
+      )) {
         fallbackReason = `${reason}:fallback`;
         break;
       }
@@ -3355,6 +3499,11 @@ class ScannerService {
     options: FullScanOptions,
     context: ImageProcessingContext
   ): Promise<ProcessedFileSummary | null> {
+    const companionMetadata = file.metadataFilePath
+      ? await readCompanionMetadata(file.metadataFilePath)
+      : null;
+    const companionCaption = companionMetadata?.caption ?? null;
+    const companionTakenAt = companionMetadata?.takenAt ?? null;
     const fingerprint = createFingerprint(file.relativePath, file.stats.size, file.stats.mtimeMs);
     const extension = path.extname(file.absolutePath).toLowerCase();
     const mediaType = getMediaTypeFromExtension(extension);
@@ -3390,6 +3539,19 @@ class ScannerService {
       } : {})
     };
     const existing = existingByPath ?? moveCandidate ?? rebuildDerivativeReuseCandidate;
+    const existingPost = existing ? postRepository.findByImageId(existing.id) : undefined;
+    const manualCaptionTime = existingPost?.caption_edited_at ? Date.parse(existingPost.caption_edited_at) : 0;
+    const companionChangedAfterManualEdit = (file.metadataStats?.mtimeMs ?? 0) > manualCaptionTime;
+    const canReplaceCaption = !existingPost?.caption_edited_at || companionChangedAfterManualEdit;
+    const previousImportedCaption = existing?.companion_caption ?? null;
+    const captionWasImported = !existingPost?.caption_edited_at && (
+      existingPost?.caption === previousImportedCaption ||
+      (previousImportedCaption === null && existingPost?.caption === existing?.caption)
+    );
+    const captionRemoved = previousImportedCaption !== null && companionCaption === null;
+    const captionToImport = (companionCaption !== previousImportedCaption || captionRemoved) &&
+      (canReplaceCaption || captionWasImported)
+      ? companionCaption : undefined;
     const streamingVideo = mediaType === 'video' &&
       ((existingByPath ?? moveCandidate)?.video_delivery_policy ?? appConfig.videoDeliveryMode) === 'streaming';
     const canReuseDerivativeFiles = Boolean(moveCandidate) ||
@@ -3412,6 +3574,7 @@ class ScannerService {
       && existingByPath !== undefined;
 
     const needsHeicContentRepair = existingByPath && contentHeic && !isHeicMimeType(existingByPath.mime_type);
+    const companionDateRemoved = existingByPath?.taken_at_source === 'metadata' && companionTakenAt === null;
     if (existingByPath && existingByPath.checksum_or_fingerprint === fingerprint && !needsHeicContentRepair) {
       const refreshedIndexedRow = shouldRefreshUnchangedImage({
         absolutePathChanged,
@@ -3438,6 +3601,7 @@ class ScannerService {
         || needsAnimatedBackfill
         || needsExifBackfill
         || needsAvifMetadataRepair
+        || companionDateRemoved
       ) {
         const metadata = await readMediaMetadata(file.absolutePath, mediaType, metadataOptions);
         metadataTakenAt = metadata.takenAt;
@@ -3470,6 +3634,15 @@ class ScannerService {
         && metadataIsAnimated
         && metadataTakenAt !== existingByPath.taken_at;
 
+      const shouldApplyMetadataTakenAt = companionTakenAt !== null;
+      const metadataTakenAtChanged = companionDateRemoved || (
+        companionTakenAt !== null && (
+          existingByPath.taken_at_source !== 'metadata' || companionTakenAt !== existingByPath.taken_at
+        )
+      );
+      const metadataCaptionChanged = captionToImport !== undefined || companionCaption !== previousImportedCaption;
+      const needsMetadataRefresh = metadataCaptionChanged || metadataTakenAtChanged;
+
       if (
         refreshedIndexedRow
         || needsTakenAtBackfill
@@ -3479,18 +3652,24 @@ class ScannerService {
         || needsAnimatedBackfill
         || needsExifBackfill
         || needsAvifMetadataRepair
+        || needsMetadataRefresh
       ) {
-        const resolvedTakenAt = resolveTakenAt({
-          exifTakenAt: metadataTakenAt,
-          existingTakenAt: shouldResetLegacyAnimatedAvifTakenAt ? null : existingByPath.taken_at,
-          existingTakenAtSource: shouldResetLegacyAnimatedAvifTakenAt ? null : existingByPath.taken_at_source,
-          existingSortTimestamp: existingByPath.sort_timestamp,
-          existingFirstSeenAt: existingByPath.first_seen_at,
-          existingMtimeMs: existingByPath.mtime_ms,
-          fileMtimeMs: file.stats.mtimeMs,
-          firstSeenAt: existingByPath.first_seen_at,
-          stableFallbackTimestamp: existingByPath.sort_timestamp
-        });
+        const resolvedTakenAt = (companionTakenAt !== null && shouldApplyMetadataTakenAt)
+          ? { takenAt: companionTakenAt, source: 'metadata' as const }
+          : resolveTakenAt({
+              exifTakenAt: metadataTakenAt,
+              existingTakenAt: (companionDateRemoved || shouldResetLegacyAnimatedAvifTakenAt) ? null : existingByPath.taken_at,
+              existingTakenAtSource: (companionDateRemoved || shouldResetLegacyAnimatedAvifTakenAt) ? null : existingByPath.taken_at_source,
+              existingSortTimestamp: companionDateRemoved ? null : existingByPath.sort_timestamp,
+              existingFirstSeenAt: existingByPath.first_seen_at,
+              existingMtimeMs: existingByPath.mtime_ms,
+              fileMtimeMs: file.stats.mtimeMs,
+              firstSeenAt: existingByPath.first_seen_at,
+              stableFallbackTimestamp: companionDateRemoved ? Math.round(file.stats.mtimeMs) : existingByPath.sort_timestamp
+            });
+
+        const nextCaption = captionToImport === undefined && !existingPost && companionCaption !== null
+          ? companionCaption : captionToImport;
 
         const image = imageRepository.refreshIndexed({
           folderId: folder.id,
@@ -3509,6 +3688,9 @@ class ScannerService {
           isAnimated: metadataIsAnimated,
           fingerprint,
           mtimeMs: file.stats.mtimeMs,
+          caption: nextCaption,
+          companionCaption,
+          sortTimestamp: resolvedTakenAt.source === 'metadata' ? resolvedTakenAt.takenAt : (companionDateRemoved ? resolvedTakenAt.takenAt : existingByPath.sort_timestamp),
           takenAt: resolvedTakenAt.takenAt,
           takenAtSource: resolvedTakenAt.source,
           exifJson: mediaType === 'image' ? (metadataExifJson ?? '{}') : null,
@@ -3523,7 +3705,7 @@ class ScannerService {
       }
 
       return {
-        status: 'unchanged',
+        status: needsMetadataRefresh ? 'updated' : 'unchanged',
         derivativeJob: !appConfig.derivativeMode || appConfig.derivativeMode === 'eager'
           ? (shouldQueueDerivativeJobForStatus('unchanged', options) || needsPlaybackStrategyBackfill
             ? {
@@ -3546,15 +3728,6 @@ class ScannerService {
     }
 
     const metadata = await readMediaMetadata(file.absolutePath, mediaType, metadataOptions);
-    const sortTimestamp = getStableSortTimestamp(
-      existing
-        ? {
-            sortTimestamp: existing.sort_timestamp,
-            firstSeenAt: existing.first_seen_at
-          }
-        : null,
-      file.stats.mtimeMs
-    );
     const firstSeenAt = existing?.first_seen_at ?? new Date().toISOString();
     const shouldResetLegacyAnimatedAvifTakenAt = context.avifMetadataRepairPending
       && mediaType === 'image'
@@ -3562,17 +3735,39 @@ class ScannerService {
       && existing?.taken_at_source === 'exif'
       && metadata.isAnimated
       && metadata.takenAt !== existing.taken_at;
-    const resolvedTakenAt = resolveTakenAt({
-      exifTakenAt: metadata.takenAt,
-      existingTakenAt: shouldResetLegacyAnimatedAvifTakenAt ? null : existing?.taken_at,
-      existingTakenAtSource: shouldResetLegacyAnimatedAvifTakenAt ? null : existing?.taken_at_source,
-      existingSortTimestamp: existing?.sort_timestamp,
-      existingFirstSeenAt: existing?.first_seen_at,
-      existingMtimeMs: existing?.mtime_ms,
-      fileMtimeMs: file.stats.mtimeMs,
-      firstSeenAt,
-      stableFallbackTimestamp: sortTimestamp
-    });
+    const removedCompanionDate = existing?.taken_at_source === 'metadata' && companionTakenAt === null;
+    const resolvedTakenAt = companionTakenAt !== null
+      ? { takenAt: companionTakenAt, source: 'metadata' as const }
+      : resolveTakenAt({
+          exifTakenAt: metadata.takenAt,
+          existingTakenAt: (removedCompanionDate || shouldResetLegacyAnimatedAvifTakenAt) ? null : existing?.taken_at,
+          existingTakenAtSource: (removedCompanionDate || shouldResetLegacyAnimatedAvifTakenAt) ? null : existing?.taken_at_source,
+          existingSortTimestamp: removedCompanionDate ? null : existing?.sort_timestamp,
+          existingFirstSeenAt: existing?.first_seen_at,
+          existingMtimeMs: existing?.mtime_ms,
+          fileMtimeMs: file.stats.mtimeMs,
+          firstSeenAt,
+          stableFallbackTimestamp: removedCompanionDate ? Math.round(file.stats.mtimeMs) : getStableSortTimestamp(
+            existing
+              ? {
+                  sortTimestamp: existing.sort_timestamp,
+                  firstSeenAt: existing.first_seen_at
+                }
+              : null,
+            file.stats.mtimeMs
+          )
+        });
+    const sortTimestamp = resolvedTakenAt.source === 'metadata' || removedCompanionDate
+      ? resolvedTakenAt.takenAt
+      : getStableSortTimestamp(
+          existing
+            ? {
+                sortTimestamp: existing.sort_timestamp,
+                firstSeenAt: existing.first_seen_at
+              }
+            : null,
+          file.stats.mtimeMs
+        );
 
     const exifJson = mediaType === 'image'
       ? serializeImageExifData(metadata.exif ?? null, {
@@ -3627,6 +3822,9 @@ class ScannerService {
         mtimeMs: file.stats.mtimeMs,
         takenAt: resolvedTakenAt.takenAt,
         takenAtSource: resolvedTakenAt.source,
+        caption: existing ? captionToImport : companionCaption,
+        companionCaption,
+        sortTimestamp,
         exifJson,
         playbackStrategy: metadata.playbackStrategy,
         videoMetadataJson
@@ -3652,6 +3850,8 @@ class ScannerService {
         mtimeMs: file.stats.mtimeMs,
         firstSeenAt,
         sortTimestamp,
+        caption: existing ? captionToImport : companionCaption,
+        companionCaption,
         takenAt: resolvedTakenAt.takenAt,
         takenAtSource: resolvedTakenAt.source,
         exifJson,
