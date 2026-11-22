@@ -109,6 +109,9 @@ The current GitHub workflow publishes tagged releases and deploys docs; it does 
 
 ## Commits and pull requests
 
+- Start ordinary contribution branches from the latest upstream `develop` and target `develop` when creating PRs. Pass `--base develop` to `gh pr create`; GitHub's default selection is `main`, which remains the stable release branch and public README. PRs against `main` are reserved for maintainer-managed releases, explicitly coordinated hotfixes, or contributor-guidance updates. Synchronize guidance/template changes to `main` without promoting unreleased application features, and bring those commits back into `develop`.
+- Fetch and merge upstream `develop` into the contribution branch when updating it. Push new work to the contribution branch; push review fixes to the existing PR's head branch. Do not push routine contribution commits directly to `develop` or `main`. Follow the fork/remote examples in [CONTRIBUTING.md](CONTRIBUTING.md).
+- Preserve shared history when promoting `develop` to `main` with a merge commit. Do not squash the long-lived development branch into the release branch. Merge release-only or hotfix commits from `main` back into `develop`.
 - Use short descriptive branches such as `fix/...`, `docs/...`, `feat/...`, `refactor/...`, or `test/...`. Keep one concern per PR.
 - Follow the Conventional Commit style used in project history: `type: imperative summary` or `type(scope): imperative summary`. Common types are `feat`, `fix`, `perf`, `refactor`, `test`, `docs`, `ci`, and `chore`. Keep subjects concise and explain non-obvious reasons in the body.
 

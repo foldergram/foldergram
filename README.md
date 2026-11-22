@@ -179,7 +179,7 @@ Requirements:
 1. Clone the repository:
 
 ```bash
-git clone https://github.com/foldergram/foldergram.git
+git clone --branch main https://github.com/foldergram/foldergram.git
 cd foldergram
 ```
 
@@ -423,6 +423,8 @@ Client translations live under `client/src/locales/`.
 ## Contributing
 
 Contributions are welcome! You can help by reporting bugs, suggesting improvements, improving documentation and translations, or submitting pull requests for fixes, tests, and UI polish.
+
+Start contribution branches from the latest `develop` and target `develop` in your pull request. The default branch, `main`, documents stable releases.
 
 For major features or changes to core behavior such as scanning, indexing, access, or storage, please open an issue or discussion first so we can agree on the approach before you invest time in an implementation.
 
