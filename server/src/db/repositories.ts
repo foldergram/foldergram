@@ -594,6 +594,8 @@ export interface UpsertPostInput {
   sourcePath: string;
   postType: PostType;
   caption?: string | null;
+  companionCaption?: string | null;
+  clearCaptionEdit?: boolean;
   sortTimestamp: number;
   takenAt?: number | null;
   takenAtSource?: TakenAtSource | null;
@@ -623,6 +625,7 @@ export interface UpsertImageInput {
   firstSeenAt: string;
   sortTimestamp: number;
   caption?: string | null;
+  companionCaption?: string | null;
   takenAt: number;
   takenAtSource: TakenAtSource;
   exifJson: string | null;
@@ -652,6 +655,7 @@ export interface RefreshIndexedImageInput {
   mtimeMs: number;
   sortTimestamp?: number;
   caption?: string | null;
+  companionCaption?: string | null;
   takenAt: number;
   takenAtSource: TakenAtSource;
   exifJson: string | null;
@@ -681,6 +685,7 @@ export interface ReconcileImageMoveInput {
   mtimeMs: number;
   sortTimestamp?: number;
   caption?: string | null;
+  companionCaption?: string | null;
   takenAt: number;
   takenAtSource: TakenAtSource;
   exifJson: string | null;
@@ -1228,6 +1233,8 @@ export const postRepository = {
             source_path = ?,
             post_type = ?,
             caption = CASE WHEN ? = 1 THEN ? ELSE caption END,
+            companion_caption = CASE WHEN ? = 1 THEN ? ELSE companion_caption END,
+            caption_edited_at = CASE WHEN ? = 1 THEN NULL ELSE caption_edited_at END,
             sort_timestamp = ?,
             taken_at = ?,
             taken_at_source = ?,
@@ -1243,6 +1250,9 @@ export const postRepository = {
         input.postType,
         input.caption !== undefined ? 1 : 0,
         input.caption ?? null,
+        input.companionCaption !== undefined ? 1 : 0,
+        input.companionCaption ?? null,
+        input.clearCaptionEdit ? 1 : 0,
         input.sortTimestamp,
         input.takenAt ?? null,
         input.takenAtSource ?? null,
@@ -1335,7 +1345,19 @@ export const postRepository = {
       );
     }
 
-    return this.findBySourcePath(input.sourcePath, sourceId) as PostRecord;
+    const post = this.findBySourcePath(input.sourcePath, sourceId) as PostRecord;
+    if (input.companionCaption !== undefined || input.clearCaptionEdit) {
+      database.prepare(`UPDATE posts SET
+        companion_caption = CASE WHEN ? = 1 THEN ? ELSE companion_caption END,
+        caption_edited_at = CASE WHEN ? = 1 THEN NULL ELSE caption_edited_at END
+        WHERE id = ?`).run(
+        input.companionCaption !== undefined ? 1 : 0,
+        input.companionCaption ?? null,
+        input.clearCaptionEdit ? 1 : 0,
+        post.id
+      );
+    }
+    return this.findById(post.id)!;
   },
 
   setPostItems(postId: number, items: Array<{ imageId: number; position: number }>): void {
@@ -2238,7 +2260,7 @@ export const postRepository = {
 
   updateCaption(id: number, caption: string | null): PostDetail | undefined {
     const resolvedId = id;
-    database.prepare('UPDATE posts SET caption = ?, updated_at = ? WHERE id = ?').run(caption, nowIso(), resolvedId);
+    database.prepare('UPDATE posts SET caption = ?, caption_edited_at = ?, updated_at = ? WHERE id = ?').run(caption, nowIso(), nowIso(), resolvedId);
     return this.getPostDetail(resolvedId);
   },
 
@@ -2423,10 +2445,10 @@ export const imageRepository = {
       INSERT INTO images (
         folder_id, source_id, asset_key, filename, extension, relative_path, absolute_path, file_size, width, height, display_orientation,
         media_type, mime_type, duration_ms, is_animated, checksum_or_fingerprint, mtime_ms, first_seen_at, sort_timestamp, taken_at, taken_at_source, exif_json,
-        thumbnail_path, preview_path, playback_strategy, caption, video_delivery_policy, video_metadata_json,
+        thumbnail_path, preview_path, playback_strategy, caption, companion_caption, video_delivery_policy, video_metadata_json,
         is_deleted, deleted_at, is_trashed, trashed_at, updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, 0, NULL, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, 0, NULL, ?)
       ON CONFLICT(source_id, relative_path) DO UPDATE SET
         folder_id = excluded.folder_id,
         asset_key = COALESCE(images.asset_key, excluded.asset_key),
@@ -2443,9 +2465,11 @@ export const imageRepository = {
         is_animated = excluded.is_animated,
         checksum_or_fingerprint = excluded.checksum_or_fingerprint,
         mtime_ms = excluded.mtime_ms,
+        sort_timestamp = excluded.sort_timestamp,
         taken_at = excluded.taken_at,
         taken_at_source = excluded.taken_at_source,
-        caption = COALESCE(excluded.caption, images.caption),
+        caption = CASE WHEN ? = 1 THEN excluded.caption ELSE images.caption END,
+        companion_caption = excluded.companion_caption,
         exif_json = excluded.exif_json,
         thumbnail_path = excluded.thumbnail_path,
         preview_path = excluded.preview_path,
@@ -2484,9 +2508,11 @@ export const imageRepository = {
       input.previewPath,
       input.playbackStrategy ?? 'preview',
       input.caption ?? null,
+      input.companionCaption ?? null,
       input.mediaType === 'video' ? appConfig.videoDeliveryMode : null,
       input.videoMetadataJson ?? null,
-      nowIso()
+      nowIso(),
+      input.caption !== undefined ? 1 : 0
     );
 
     const folder = folderRepository.getById(input.folderId);
@@ -2502,7 +2528,9 @@ export const imageRepository = {
         placeId: record.place_id,
         postType: 'single',
         sourcePath: input.relativePath,
-        caption: input.caption !== undefined && input.caption !== null ? input.caption : (existingPost?.caption ?? record.caption ?? null),
+        caption: input.caption !== undefined ? input.caption : (existingPost ? existingPost.caption : record.caption),
+        companionCaption: input.companionCaption,
+        clearCaptionEdit: input.caption !== undefined,
         takenAt: input.takenAt ?? null,
         takenAtSource: input.takenAtSource ?? null,
         sortTimestamp: input.sortTimestamp,
@@ -2540,6 +2568,7 @@ export const imageRepository = {
         taken_at = ?,
         taken_at_source = ?,
         caption = CASE WHEN ? = 1 THEN ? ELSE caption END,
+        companion_caption = CASE WHEN ? = 1 THEN ? ELSE companion_caption END,
         exif_json = ?,
         thumbnail_path = ?,
         preview_path = ?,
@@ -2571,6 +2600,8 @@ export const imageRepository = {
       input.takenAtSource,
       input.caption !== undefined ? 1 : 0,
       input.caption ?? null,
+      input.companionCaption !== undefined ? 1 : 0,
+      input.companionCaption ?? null,
       input.exifJson,
       input.thumbnailPath,
       input.previewPath,
@@ -2595,7 +2626,9 @@ export const imageRepository = {
         placeId: record.place_id,
         postType: 'single',
         sourcePath: input.relativePath,
-        caption: input.caption !== undefined ? input.caption : (existingPost?.caption ?? record.caption ?? null),
+        caption: input.caption !== undefined ? input.caption : (existingPost ? existingPost.caption : record.caption),
+        companionCaption: input.companionCaption,
+        clearCaptionEdit: input.caption !== undefined,
         takenAt: input.takenAt ?? null,
         takenAtSource: input.takenAtSource ?? null,
         sortTimestamp: input.sortTimestamp ?? record.sort_timestamp,
@@ -2740,6 +2773,7 @@ export const imageRepository = {
         taken_at = ?,
         taken_at_source = ?,
         caption = CASE WHEN ? = 1 THEN ? ELSE caption END,
+        companion_caption = CASE WHEN ? = 1 THEN ? ELSE companion_caption END,
         exif_json = ?,
         playback_strategy = ?,
         video_metadata_json = ?,
@@ -2769,6 +2803,8 @@ export const imageRepository = {
       input.takenAtSource,
       input.caption !== undefined ? 1 : 0,
       input.caption ?? null,
+      input.companionCaption !== undefined ? 1 : 0,
+      input.companionCaption ?? null,
       input.exifJson,
       input.playbackStrategy ?? 'preview',
       input.videoMetadataJson ?? null,
@@ -2790,7 +2826,9 @@ export const imageRepository = {
         placeId: record.place_id,
         postType: 'single',
         sourcePath: input.relativePath,
-        caption: input.caption !== undefined ? input.caption : (existingPost?.caption ?? record.caption ?? null),
+        caption: input.caption !== undefined ? input.caption : (existingPost ? existingPost.caption : record.caption),
+        companionCaption: input.companionCaption,
+        clearCaptionEdit: input.caption !== undefined,
         takenAt: input.takenAt,
         takenAtSource: input.takenAtSource,
         sortTimestamp: input.sortTimestamp ?? (existingPost?.sort_timestamp ?? record.sort_timestamp),

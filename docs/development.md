@@ -82,8 +82,7 @@ Important detail:
 - it is started by the admin scan and rebuild flows
 - it batches changes with a `700ms` debounce window
 
-Directory add/remove events force a full rescan. File-level changes are passed to
-the incremental scan path.
+Directory add/remove events force a full rescan. Media file changes and companion `.txt` or `.nfo` additions, edits, and removals are passed to the incremental scan path. Changes to companion files in reserved carousel or story folders fall back to a full rescan.
 
 ## Tests
 

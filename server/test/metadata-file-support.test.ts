@@ -600,4 +600,288 @@ describe.sequential('metadata file integration with scanner', () => {
     post = postRepository.findById(image!.id);
     expect(post?.caption).toBe('Newly Updated File Caption');
   });
+
+  it('protects captions saved through the post API when the sidecar predates the edit and media changes', async () => {
+    maintenanceRepository.resetLibraryIndex();
+    await createSourceFile('vacation/ui-edited.jpg');
+    await createMetadataFile('vacation/ui-edited.txt', 'title: Imported caption');
+    await scannerService.scanAll('manual');
+
+    const image = imageRepository.getByRelativePath('vacation/ui-edited.jpg')!;
+    const post = postRepository.findByImageId(image.id)!;
+    postRepository.updateCaption(post.id, 'Saved in the UI');
+    await scannerService.scanAll('manual');
+    expect(postRepository.findById(post.id)?.caption).toBe('Saved in the UI');
+
+    await createSourceFile('vacation/ui-edited.jpg');
+    await scannerService.scanAll('manual');
+    expect(postRepository.findById(post.id)?.caption).toBe('Saved in the UI');
+  });
+
+  it('keeps a manual post caption when its media moves without any companion file', async () => {
+    maintenanceRepository.resetLibraryIndex();
+    await createSourceFile('vacation/move-me.jpg');
+    await scannerService.scanAll('manual');
+    const image = imageRepository.getByRelativePath('vacation/move-me.jpg')!;
+    const post = postRepository.findByImageId(image.id)!;
+    postRepository.updateCaption(post.id, 'Keep this caption');
+
+    await fs.mkdir(path.join(appConfig.galleryRoot, 'relocated'), { recursive: true });
+    await fs.rename(
+      path.join(appConfig.galleryRoot, 'vacation/move-me.jpg'),
+      path.join(appConfig.galleryRoot, 'relocated/move-me.jpg')
+    );
+    await scannerService.scanAll('manual');
+    expect(imageRepository.getByRelativePath('relocated/move-me.jpg')?.id).toBe(image.id);
+    expect(postRepository.findById(post.id)?.caption).toBe('Keep this caption');
+  });
+
+  it('removes imported captions when a caption-only companion disappears or loses its caption field', async () => {
+    maintenanceRepository.resetLibraryIndex();
+    await createSourceFile('vacation/caption-only.jpg');
+    await createMetadataFile('vacation/caption-only.txt', 'title: Imported');
+    await scannerService.scanAll('manual');
+
+    const image = imageRepository.getByRelativePath('vacation/caption-only.jpg')!;
+    await createMetadataFile('vacation/caption-only.txt', 'date: 2026-06-01T12:00:00Z');
+    await scannerService.scanAll('manual');
+    expect(postRepository.findByImageId(image.id)?.caption).toBeNull();
+
+    await createMetadataFile('vacation/caption-only.txt', 'title: Imported again');
+    await scannerService.scanAll('manual');
+    expect(postRepository.findByImageId(image.id)?.caption).toBe('Imported again');
+
+    await fs.rm(path.join(appConfig.galleryRoot, 'vacation/caption-only.txt'));
+    await scannerService.scanAll('manual');
+    expect(postRepository.findByImageId(image.id)?.caption).toBeNull();
+    expect(imageRepository.getById(image.id)?.companion_caption).toBeNull();
+  });
+
+  it.each([null, Date.parse('2023-02-03T10:00:00Z')])(
+    'restores native EXIF time or mtime after removing a dated companion (%s)',
+    async (nativeTime) => {
+      maintenanceRepository.resetLibraryIndex();
+      readMediaMetadataMock.mockResolvedValue({
+        width: 1920, height: 1080, takenAt: nativeTime,
+        durationMs: null, mediaType: 'image', playbackStrategy: 'preview', isAnimated: false
+      });
+      await createSourceFile('vacation/dated.jpg');
+      await createMetadataFile('vacation/dated.txt', 'date: 2026-06-01T12:00:00Z');
+      await scannerService.scanAll('manual');
+      const image = imageRepository.getByRelativePath('vacation/dated.jpg')!;
+      expect(image.taken_at_source).toBe('metadata');
+
+      await fs.rm(path.join(appConfig.galleryRoot, 'vacation/dated.txt'));
+      await scannerService.scanAll('manual');
+      const repaired = imageRepository.getById(image.id)!;
+      expect(repaired.taken_at_source).toBe(nativeTime === null ? 'mtime' : 'exif');
+      expect(repaired.taken_at).toBe(nativeTime ?? repaired.sort_timestamp);
+      expect(repaired.taken_at).not.toBe(Date.parse('2026-06-01T12:00:00Z'));
+    }
+  );
+
+  it('preserves manually edited carousel captions and removes stale imported caption and date', async () => {
+    maintenanceRepository.resetLibraryIndex();
+    await createSourceFile('vacation/carousels/coast/01.jpg');
+    await createSourceFile('vacation/carousels/coast/02.jpg');
+    await createMetadataFile('vacation/carousels/coast/coast.txt',
+      'title: Imported carousel\ndate: 2026-06-01T12:00:00Z');
+    await scannerService.scanAll('manual');
+    const post = postRepository.listFeed(1, 20).find(p => p.postType === 'carousel')!;
+    postRepository.updateCaption(post.id, 'Manual carousel caption');
+
+    await scannerService.scanAll('manual');
+    expect(postRepository.findById(post.id)?.caption).toBe('Manual carousel caption');
+
+    await fs.rm(path.join(appConfig.galleryRoot, 'vacation/carousels/coast/coast.txt'));
+    await scannerService.scanAll('manual');
+    expect(postRepository.findById(post.id)?.caption).toBe('Manual carousel caption');
+    expect(postRepository.findById(post.id)?.taken_at_source).not.toBe('metadata');
+    expect(postRepository.findById(post.id)?.sort_timestamp).not.toBe(Date.parse('2026-06-01T12:00:00Z'));
+  });
+
+  it('keeps a deliberately cleared carousel caption on unchanged rescans', async () => {
+    maintenanceRepository.resetLibraryIndex();
+    await createSourceFile('vacation/carousels/cleared/01.jpg');
+    await createSourceFile('vacation/carousels/cleared/02.jpg');
+    await createMetadataFile('vacation/carousels/cleared/cleared.txt', 'title: Original caption');
+    await scannerService.scanAll('manual');
+    const post = postRepository.listFeed(1, 20).find(p => p.postType === 'carousel')!;
+    postRepository.updateCaption(post.id, null);
+    await scannerService.scanAll('manual');
+    expect(postRepository.findById(post.id)?.caption).toBeNull();
+  });
+
+  it('clears stale imported carousel captions when the companion disappears without a manual edit', async () => {
+    maintenanceRepository.resetLibraryIndex();
+    await createSourceFile('vacation/carousels/imported/01.jpg');
+    await createSourceFile('vacation/carousels/imported/02.jpg');
+    await createMetadataFile('vacation/carousels/imported/imported.txt', 'title: Imported caption');
+    await scannerService.scanAll('manual');
+    const post = postRepository.listFeed(1, 20).find(p => p.postType === 'carousel')!;
+    expect(postRepository.findById(post.id)?.caption).toBe('Imported caption');
+    await fs.rm(path.join(appConfig.galleryRoot, 'vacation/carousels/imported/imported.txt'));
+    await scannerService.scanAll('manual');
+    expect(postRepository.findById(post.id)?.caption).toBeNull();
+  });
+
+  it.each(['modified', 'moved'] as const)(
+    'does not resurrect a cleared imported caption when media is %s',
+    async (change) => {
+      maintenanceRepository.resetLibraryIndex();
+      await createSourceFile('vacation/cleared.jpg');
+      await createMetadataFile('vacation/cleared.txt', 'title: Sidecar caption');
+      await scannerService.scanAll('manual');
+      const image = imageRepository.getByRelativePath('vacation/cleared.jpg')!;
+      const post = postRepository.findByImageId(image.id)!;
+      expect(post.caption).toBe('Sidecar caption');
+      postRepository.updateCaption(post.id, null);
+
+      if (change === 'modified') {
+        await fs.writeFile(path.join(appConfig.galleryRoot, 'vacation/cleared.jpg'), 'modified bytes');
+        const changedTime = new Date(Date.now() + 2000);
+        await fs.utimes(path.join(appConfig.galleryRoot, 'vacation/cleared.jpg'), changedTime, changedTime);
+      } else {
+        await fs.mkdir(path.join(appConfig.galleryRoot, 'relocated'), { recursive: true });
+        await fs.rename(
+          path.join(appConfig.galleryRoot, 'vacation/cleared.jpg'),
+          path.join(appConfig.galleryRoot, 'relocated/cleared.jpg')
+        );
+        await fs.rename(
+          path.join(appConfig.galleryRoot, 'vacation/cleared.txt'),
+          path.join(appConfig.galleryRoot, 'relocated/cleared.txt')
+        );
+      }
+
+      await scannerService.scanAll('manual');
+      expect(postRepository.findById(post.id)?.caption).toBeNull();
+      expect(postRepository.findById(post.id)?.caption_edited_at).not.toBeNull();
+      expect(imageRepository.getByRelativePath(
+        change === 'modified' ? 'vacation/cleared.jpg' : 'relocated/cleared.jpg'
+      )?.id).toBe(image.id);
+    }
+  );
+
+  it('does not resurrect a cleared caption when media without a sidecar is modified', async () => {
+    maintenanceRepository.resetLibraryIndex();
+    await createSourceFile('vacation/manual-clear.jpg');
+    await scannerService.scanAll('manual');
+    const image = imageRepository.getByRelativePath('vacation/manual-clear.jpg')!;
+    const post = postRepository.findByImageId(image.id)!;
+    postRepository.updateCaption(post.id, null);
+    await fs.writeFile(path.join(appConfig.galleryRoot, 'vacation/manual-clear.jpg'), 'new content');
+    const changedTime = new Date(Date.now() + 2000);
+    await fs.utimes(path.join(appConfig.galleryRoot, 'vacation/manual-clear.jpg'), changedTime, changedTime);
+    await scannerService.scanAll('manual');
+    expect(postRepository.findById(post.id)?.caption).toBeNull();
+  });
+
+  it('clears the carousel caption when its first slide sidecar is deleted and that slide changes', async () => {
+    maintenanceRepository.resetLibraryIndex();
+    await createSourceFile('vacation/carousels/slide-meta/01.jpg');
+    await createSourceFile('vacation/carousels/slide-meta/02.jpg');
+    await createMetadataFile('vacation/carousels/slide-meta/01.txt', 'title: Slide caption');
+    await scannerService.scanAll('manual');
+
+    const image = imageRepository.getByRelativePath('vacation/carousels/slide-meta/01.jpg')!;
+    const post = postRepository.listFeed(1, 20).find(p => p.postType === 'carousel')!;
+    expect(post.caption).toBe('Slide caption');
+
+    await fs.rm(path.join(appConfig.galleryRoot, 'vacation/carousels/slide-meta/01.txt'));
+    const photoPath = path.join(appConfig.galleryRoot, 'vacation/carousels/slide-meta/01.jpg');
+    await fs.writeFile(photoPath, 'new slide content');
+    const changedTime = new Date(Date.now() + 2000);
+    await fs.utimes(photoPath, changedTime, changedTime);
+    await scannerService.scanAll('manual');
+
+    expect(imageRepository.getById(image.id)?.caption).toBeNull();
+    expect(imageRepository.getById(image.id)?.companion_caption).toBeNull();
+    expect(postRepository.findById(post.id)?.caption).toBeNull();
+  });
+
+  it('uses the first slide companion date to sort a carousel without a carousel-level sidecar', async () => {
+    maintenanceRepository.resetLibraryIndex();
+    await createSourceFile('vacation/carousels/slide-dates/01.jpg', 60_000);
+    await createSourceFile('vacation/carousels/slide-dates/02.jpg');
+    await createMetadataFile('vacation/carousels/slide-dates/01.txt', 'date: 2022-01-15T12:00:00Z');
+    await scannerService.scanAll('manual');
+
+    const post = postRepository.listFeed(1, 20).find(p => p.postType === 'carousel')!;
+    expect(post.sortTimestamp).toBe(Date.parse('2022-01-15T12:00:00Z'));
+    expect(postRepository.findById(post.id)?.taken_at_source).toBe('metadata');
+
+    await createMetadataFile('vacation/carousels/slide-dates/01.txt', 'date: 2021-07-02T12:00:00Z');
+    await scannerService.scanAll('manual');
+    expect(postRepository.findById(post.id)?.taken_at).toBe(Date.parse('2021-07-02T12:00:00Z'));
+    expect(postRepository.findById(post.id)?.sort_timestamp).toBe(Date.parse('2021-07-02T12:00:00Z'));
+  });
+
+  it('updates carousel sorting to the first slide EXIF date when its date sidecar is removed and the slide changes', async () => {
+    maintenanceRepository.resetLibraryIndex();
+    const firstPath = 'vacation/carousels/date-removed/01.jpg';
+    const secondPath = 'vacation/carousels/date-removed/02.jpg';
+    const oldSidecarDate = Date.parse('2020-01-01T00:00:00Z');
+    const firstExifDate = Date.parse('2018-05-01T00:00:00Z');
+    const secondExifDate = Date.parse('2017-01-01T00:00:00Z');
+    readMediaMetadataMock.mockImplementation(async (absolutePath: string) => ({
+      width: 1920,
+      height: 1080,
+      takenAt: absolutePath.endsWith('01.jpg') ? firstExifDate : secondExifDate,
+      durationMs: null,
+      mediaType: 'image',
+      playbackStrategy: 'preview',
+      isAnimated: false
+    }));
+
+    await createSourceFile(firstPath);
+    await createSourceFile(secondPath);
+    // The second slide must have an older sort date so it cannot outrank
+    // the repaired first slide through the carousel's max-date fallback.
+    const secondAbsolutePath = path.join(appConfig.galleryRoot, secondPath);
+    const olderDate = new Date(secondExifDate);
+    await fs.utimes(secondAbsolutePath, olderDate, olderDate);
+    await createMetadataFile('vacation/carousels/date-removed/01.txt', 'date: 2020-01-01T00:00:00Z');
+    expect((await scannerService.scanAll('manual'))?.status).toBe('completed');
+
+    const firstImage = imageRepository.getByRelativePath(firstPath)!;
+    const carousel = postRepository.listFeed(1, 20).find(post => post.postType === 'carousel')!;
+    expect(firstImage.sort_timestamp).toBe(oldSidecarDate);
+    expect(carousel.sortTimestamp).toBe(oldSidecarDate);
+
+    await fs.rm(path.join(appConfig.galleryRoot, 'vacation/carousels/date-removed/01.txt'));
+    const firstAbsolutePath = path.join(appConfig.galleryRoot, firstPath);
+    await fs.writeFile(firstAbsolutePath, 'modified first slide');
+    const changedTime = new Date(Date.now() + 2000);
+    await fs.utimes(firstAbsolutePath, changedTime, changedTime);
+    expect((await scannerService.scanAll('manual'))?.status).toBe('completed');
+
+    const updatedImage = imageRepository.getById(firstImage.id)!;
+    expect(updatedImage.taken_at).toBe(firstExifDate);
+    expect(updatedImage.taken_at_source).toBe('exif');
+    expect(updatedImage.sort_timestamp).toBe(firstExifDate);
+    const updatedCarousel = postRepository.findById(carousel.id)!;
+    expect(updatedCarousel.taken_at).toBe(firstExifDate);
+    expect(updatedCarousel.taken_at_source).toBe('exif');
+    expect(updatedCarousel.sort_timestamp).toBe(firstExifDate);
+    expect(postRepository.listFeed(1, 20).find(post => post.postType === 'carousel')?.id).toBe(carousel.id);
+  });
+
+  it('rescans a folder after incremental .txt additions, edits and deletions', async () => {
+    maintenanceRepository.resetLibraryIndex();
+    await createSourceFile('vacation/watched.jpg');
+    await scannerService.scanAll('manual');
+    const image = imageRepository.getByRelativePath('vacation/watched.jpg')!;
+
+    await createMetadataFile('vacation/watched.txt', 'title: Added');
+    await scannerService.scanChangedPaths(['vacation/watched.txt']);
+    expect(postRepository.findByImageId(image.id)?.caption).toBe('Added');
+
+    await createMetadataFile('vacation/watched.txt', 'title: Changed');
+    await scannerService.scanChangedPaths(['vacation/watched.txt']);
+    expect(postRepository.findByImageId(image.id)?.caption).toBe('Changed');
+
+    await fs.rm(path.join(appConfig.galleryRoot, 'vacation/watched.txt'));
+    await scannerService.scanChangedPaths(['vacation/watched.txt']);
+    expect(postRepository.findByImageId(image.id)?.caption).toBeNull();
+  });
 });

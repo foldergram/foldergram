@@ -2102,7 +2102,20 @@ class ScannerService {
         ? await readCompanionMetadata(pending.metadataFilePath)
         : null;
       const metadataCaption = carouselMetadata?.caption ?? firstItem.caption ?? null;
-      const metadataTakenAt = carouselMetadata?.takenAt ?? (firstItem.taken_at_source === 'metadata' ? firstItem.taken_at : null);
+      // A first-slide companion date also defines the carousel's display order
+      // when there is no separate carousel-level date.
+      const metadataTakenAt = carouselMetadata?.takenAt ?? (
+        firstItem.taken_at_source === 'metadata' ? firstItem.taken_at : null
+      );
+      const captionEditedAt = existingPost?.caption_edited_at ? Date.parse(existingPost.caption_edited_at) : 0;
+      const companionMtime = pending.metadataFilePath
+        ? (await fs.stat(pending.metadataFilePath).catch(() => null))?.mtimeMs ?? 0 : 0;
+      const canImportCaption = !existingPost?.caption_edited_at || companionMtime > captionEditedAt;
+      const importedCaptionChanged = !existingPost || existingPost.companion_caption !== metadataCaption;
+      const selectedCaption = importedCaptionChanged && canImportCaption
+        ? metadataCaption : (existingPost ? existingPost.caption : metadataCaption);
+      const effectiveDate = metadataTakenAt ?? firstItem.taken_at;
+      const hadImportedDate = existingPost?.taken_at_source === 'metadata' && metadataTakenAt === null;
       postRepository.upsertPostWithItems({
         existingPostId: existingPost?.id,
         id: !existingPost && pending.images.length === 1 ? firstItem.id : undefined,
@@ -2110,10 +2123,14 @@ class ScannerService {
         placeId: firstItem.place_id,
         postType: pending.images.length > 1 ? 'carousel' : 'single',
         sourcePath: pending.sourcePath,
-        caption: metadataCaption !== null ? metadataCaption : (existingPost?.caption ?? null),
-        takenAt: metadataTakenAt !== null ? metadataTakenAt : (firstItem.taken_at ?? null),
+        caption: selectedCaption,
+        companionCaption: metadataCaption,
+        clearCaptionEdit: importedCaptionChanged && canImportCaption,
+        takenAt: effectiveDate,
         takenAtSource: metadataTakenAt !== null ? 'metadata' : firstItem.taken_at_source,
-        sortTimestamp: metadataTakenAt !== null ? metadataTakenAt : (existingPost?.sort_timestamp ?? Math.max(...pending.images.map(image => image.sort_timestamp))),
+        sortTimestamp: metadataTakenAt !== null ? metadataTakenAt : (hadImportedDate
+          ? Math.max(...pending.images.map(image => image.sort_timestamp))
+          : (existingPost?.sort_timestamp ?? Math.max(...pending.images.map(image => image.sort_timestamp)))),
         isDeleted: 0,
         isTrashed: 0
       }, pending.images.map((image, index) => ({ imageId: image.id, position: index + 1 })));
@@ -2935,7 +2952,8 @@ class ScannerService {
         continue;
       }
 
-      if (!isDiscoverableMediaFile(relativePath, discoveryContext)) {
+      if (!isDiscoverableMediaFile(relativePath, discoveryContext) &&
+          !isSupportedMetadataExtension(path.extname(relativePath))) {
         continue;
       }
 
@@ -2945,13 +2963,17 @@ class ScannerService {
         continue;
       }
 
-      if (!treatStoriesAsFolders && findReservedStoriesOwnerPath(relativePath)) {
+      if (findReservedStoriesOwnerPath(relativePath) && (
+        !treatStoriesAsFolders || isSupportedMetadataExtension(path.extname(relativePath))
+      )) {
         fallbackReason = `${reason}:fallback`;
         break;
       }
 
       const treatCarouselsAsFolders = this.shouldTreatCarouselsAsFolders();
-      if (!treatCarouselsAsFolders && findReservedCarouselsOwnerPath(relativePath)) {
+      if (findReservedCarouselsOwnerPath(relativePath) && (
+        !treatCarouselsAsFolders || isSupportedMetadataExtension(path.extname(relativePath))
+      )) {
         fallbackReason = `${reason}:fallback`;
         break;
       }
@@ -3517,6 +3539,19 @@ class ScannerService {
       } : {})
     };
     const existing = existingByPath ?? moveCandidate ?? rebuildDerivativeReuseCandidate;
+    const existingPost = existing ? postRepository.findByImageId(existing.id) : undefined;
+    const manualCaptionTime = existingPost?.caption_edited_at ? Date.parse(existingPost.caption_edited_at) : 0;
+    const companionChangedAfterManualEdit = (file.metadataStats?.mtimeMs ?? 0) > manualCaptionTime;
+    const canReplaceCaption = !existingPost?.caption_edited_at || companionChangedAfterManualEdit;
+    const previousImportedCaption = existing?.companion_caption ?? null;
+    const captionWasImported = !existingPost?.caption_edited_at && (
+      existingPost?.caption === previousImportedCaption ||
+      (previousImportedCaption === null && existingPost?.caption === existing?.caption)
+    );
+    const captionRemoved = previousImportedCaption !== null && companionCaption === null;
+    const captionToImport = (companionCaption !== previousImportedCaption || captionRemoved) &&
+      (canReplaceCaption || captionWasImported)
+      ? companionCaption : undefined;
     const streamingVideo = mediaType === 'video' &&
       ((existingByPath ?? moveCandidate)?.video_delivery_policy ?? appConfig.videoDeliveryMode) === 'streaming';
     const canReuseDerivativeFiles = Boolean(moveCandidate) ||
@@ -3539,6 +3574,7 @@ class ScannerService {
       && existingByPath !== undefined;
 
     const needsHeicContentRepair = existingByPath && contentHeic && !isHeicMimeType(existingByPath.mime_type);
+    const companionDateRemoved = existingByPath?.taken_at_source === 'metadata' && companionTakenAt === null;
     if (existingByPath && existingByPath.checksum_or_fingerprint === fingerprint && !needsHeicContentRepair) {
       const refreshedIndexedRow = shouldRefreshUnchangedImage({
         absolutePathChanged,
@@ -3565,6 +3601,7 @@ class ScannerService {
         || needsAnimatedBackfill
         || needsExifBackfill
         || needsAvifMetadataRepair
+        || companionDateRemoved
       ) {
         const metadata = await readMediaMetadata(file.absolutePath, mediaType, metadataOptions);
         metadataTakenAt = metadata.takenAt;
@@ -3597,26 +3634,14 @@ class ScannerService {
         && metadataIsAnimated
         && metadataTakenAt !== existingByPath.taken_at;
 
-      const metadataFileMtimeMs = file.metadataStats?.mtimeMs ?? 0;
-      const existingUpdatedAtMs = existingByPath.updated_at ? Date.parse(existingByPath.updated_at) : 0;
-      const isMetadataFileNewer = metadataFileMtimeMs > existingUpdatedAtMs;
-
-      // Companion metadata was removed from disk
-      const metadataFileRemoved = !file.metadataFilePath && existingByPath.taken_at_source === 'metadata';
-
-      const shouldApplyMetadataCaption = companionCaption !== null && (
-        existingByPath.caption === null || isMetadataFileNewer
+      const shouldApplyMetadataTakenAt = companionTakenAt !== null;
+      const metadataTakenAtChanged = companionDateRemoved || (
+        companionTakenAt !== null && (
+          existingByPath.taken_at_source !== 'metadata' || companionTakenAt !== existingByPath.taken_at
+        )
       );
-      const metadataCaptionChanged = shouldApplyMetadataCaption && companionCaption !== existingByPath.caption;
-
-      const shouldApplyMetadataTakenAt = companionTakenAt !== null && (
-        existingByPath.taken_at_source !== 'metadata' || isMetadataFileNewer
-      );
-      const metadataTakenAtChanged = shouldApplyMetadataTakenAt && (
-        existingByPath.taken_at_source !== 'metadata' || companionTakenAt !== existingByPath.taken_at
-      );
-
-      const needsMetadataRefresh = metadataFileRemoved || metadataCaptionChanged || metadataTakenAtChanged;
+      const metadataCaptionChanged = captionToImport !== undefined || companionCaption !== previousImportedCaption;
+      const needsMetadataRefresh = metadataCaptionChanged || metadataTakenAtChanged;
 
       if (
         refreshedIndexedRow
@@ -3633,19 +3658,18 @@ class ScannerService {
           ? { takenAt: companionTakenAt, source: 'metadata' as const }
           : resolveTakenAt({
               exifTakenAt: metadataTakenAt,
-              existingTakenAt: (metadataFileRemoved || shouldResetLegacyAnimatedAvifTakenAt) ? null : existingByPath.taken_at,
-              existingTakenAtSource: (metadataFileRemoved || shouldResetLegacyAnimatedAvifTakenAt) ? null : existingByPath.taken_at_source,
-              existingSortTimestamp: metadataFileRemoved ? null : existingByPath.sort_timestamp,
+              existingTakenAt: (companionDateRemoved || shouldResetLegacyAnimatedAvifTakenAt) ? null : existingByPath.taken_at,
+              existingTakenAtSource: (companionDateRemoved || shouldResetLegacyAnimatedAvifTakenAt) ? null : existingByPath.taken_at_source,
+              existingSortTimestamp: companionDateRemoved ? null : existingByPath.sort_timestamp,
               existingFirstSeenAt: existingByPath.first_seen_at,
               existingMtimeMs: existingByPath.mtime_ms,
               fileMtimeMs: file.stats.mtimeMs,
               firstSeenAt: existingByPath.first_seen_at,
-              stableFallbackTimestamp: metadataFileRemoved ? file.stats.mtimeMs : existingByPath.sort_timestamp
+              stableFallbackTimestamp: companionDateRemoved ? Math.round(file.stats.mtimeMs) : existingByPath.sort_timestamp
             });
 
-        const nextCaption = metadataFileRemoved
-          ? null
-          : (shouldApplyMetadataCaption ? companionCaption : undefined);
+        const nextCaption = captionToImport === undefined && !existingPost && companionCaption !== null
+          ? companionCaption : captionToImport;
 
         const image = imageRepository.refreshIndexed({
           folderId: folder.id,
@@ -3665,7 +3689,8 @@ class ScannerService {
           fingerprint,
           mtimeMs: file.stats.mtimeMs,
           caption: nextCaption,
-          sortTimestamp: resolvedTakenAt.source === 'metadata' ? resolvedTakenAt.takenAt : (metadataFileRemoved ? resolvedTakenAt.takenAt : existingByPath.sort_timestamp),
+          companionCaption,
+          sortTimestamp: resolvedTakenAt.source === 'metadata' ? resolvedTakenAt.takenAt : (companionDateRemoved ? resolvedTakenAt.takenAt : existingByPath.sort_timestamp),
           takenAt: resolvedTakenAt.takenAt,
           takenAtSource: resolvedTakenAt.source,
           exifJson: mediaType === 'image' ? (metadataExifJson ?? '{}') : null,
@@ -3710,18 +3735,19 @@ class ScannerService {
       && existing?.taken_at_source === 'exif'
       && metadata.isAnimated
       && metadata.takenAt !== existing.taken_at;
+    const removedCompanionDate = existing?.taken_at_source === 'metadata' && companionTakenAt === null;
     const resolvedTakenAt = companionTakenAt !== null
       ? { takenAt: companionTakenAt, source: 'metadata' as const }
       : resolveTakenAt({
           exifTakenAt: metadata.takenAt,
-          existingTakenAt: shouldResetLegacyAnimatedAvifTakenAt ? null : existing?.taken_at,
-          existingTakenAtSource: shouldResetLegacyAnimatedAvifTakenAt ? null : existing?.taken_at_source,
-          existingSortTimestamp: existing?.sort_timestamp,
+          existingTakenAt: (removedCompanionDate || shouldResetLegacyAnimatedAvifTakenAt) ? null : existing?.taken_at,
+          existingTakenAtSource: (removedCompanionDate || shouldResetLegacyAnimatedAvifTakenAt) ? null : existing?.taken_at_source,
+          existingSortTimestamp: removedCompanionDate ? null : existing?.sort_timestamp,
           existingFirstSeenAt: existing?.first_seen_at,
           existingMtimeMs: existing?.mtime_ms,
           fileMtimeMs: file.stats.mtimeMs,
           firstSeenAt,
-          stableFallbackTimestamp: getStableSortTimestamp(
+          stableFallbackTimestamp: removedCompanionDate ? Math.round(file.stats.mtimeMs) : getStableSortTimestamp(
             existing
               ? {
                   sortTimestamp: existing.sort_timestamp,
@@ -3731,7 +3757,7 @@ class ScannerService {
             file.stats.mtimeMs
           )
         });
-    const sortTimestamp = resolvedTakenAt.source === 'metadata'
+    const sortTimestamp = resolvedTakenAt.source === 'metadata' || removedCompanionDate
       ? resolvedTakenAt.takenAt
       : getStableSortTimestamp(
           existing
@@ -3796,7 +3822,8 @@ class ScannerService {
         mtimeMs: file.stats.mtimeMs,
         takenAt: resolvedTakenAt.takenAt,
         takenAtSource: resolvedTakenAt.source,
-        caption: companionCaption ?? null,
+        caption: existing ? captionToImport : companionCaption,
+        companionCaption,
         sortTimestamp,
         exifJson,
         playbackStrategy: metadata.playbackStrategy,
@@ -3823,7 +3850,8 @@ class ScannerService {
         mtimeMs: file.stats.mtimeMs,
         firstSeenAt,
         sortTimestamp,
-        caption: companionCaption ?? null,
+        caption: existing ? captionToImport : companionCaption,
+        companionCaption,
         takenAt: resolvedTakenAt.takenAt,
         takenAtSource: resolvedTakenAt.source,
         exifJson,
