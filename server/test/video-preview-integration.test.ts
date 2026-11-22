@@ -102,6 +102,20 @@ describe.skipIf(binariesAvailable.includes(false)).sequential('real video previe
     const firstScan = await scannerService.scanAll('manual');
     expect(firstScan?.status).toBe('completed');
     const image = imageRepository.getByRelativePath('album/two-tracks.mov')!;
+    expect(image.video_delivery_policy).toBe('previews');
+    expect(JSON.parse(image.video_metadata_json!)).toMatchObject({
+      version: 2,
+      container: expect.stringContaining('mov'),
+      fileSize: (await fs.stat(source)).size,
+      durationMs: 500,
+      displayWidth: 96,
+      displayHeight: 64,
+      video: { codec: 'h264', pixelFormat: 'yuv420p', bitDepth: 8 },
+      audio: [
+        { index: 1, codec: null, channels: 1 },
+        { index: 2, codec: 'aac', channels: 1 }
+      ]
+    });
     const preview = path.join(appConfig.previewsDir, image.preview_path);
     await fs.writeFile(preview, '');
     const repairScan = await scannerService.scanAll('manual');
@@ -138,12 +152,17 @@ describe.skipIf(binariesAvailable.includes(false)).sequential('real video previe
     expect(first.playback_strategy).toBe('preview');
     const preview = path.join(appConfig.previewsDir, first.preview_path);
     const oldPreviewBytes = await fs.readFile(preview);
+    const { databaseManager } = await import('../src/db/database.js');
+    databaseManager.connection.prepare("UPDATE images SET video_delivery_policy = 'legacy' WHERE id = ?").run(first.id);
 
     await createReplacement('blue', 'yuv420p');
     expect((await scannerService.scanAll('manual', { repairUnchangedDerivatives: false }))?.status).toBe('completed');
     const changed = imageRepository.getByRelativePath(relativePath)!;
     expect(changed.playback_strategy).toBe('original');
     expect(changed.id).toBe(first.id);
+    expect(changed.video_delivery_policy).toBe('legacy');
+    expect(JSON.parse(first.video_metadata_json!).video.pixelFormat).toBe('yuv444p');
+    expect(JSON.parse(changed.video_metadata_json!).video.pixelFormat).toBe('yuv420p');
     await expect(fs.stat(preview)).rejects.toMatchObject({ code: 'ENOENT' });
 
     const { folderShareService } = await import('../src/services/folder-share-service.js');

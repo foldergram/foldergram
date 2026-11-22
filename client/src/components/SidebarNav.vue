@@ -1,6 +1,6 @@
 <template>
   <aside
-    class="sidebar group flex h-full w-[4.85rem] flex-col overflow-visible bg-bg px-[0.95rem] pt-7 pb-5 text-text transition-[width] duration-220 ease hover:w-60"
+    class="sidebar group flex h-full w-[var(--desktop-sidebar-width)] flex-col overflow-visible px-[0.95rem] pt-7 pb-5 text-text transition-[width] duration-220 ease hover:w-[var(--desktop-sidebar-expanded-width)]"
   >
     <RouterLink
       class="sidebar__brand relative inline-flex items-center justify-center w-12 h-12 p-[0.3rem] rounded-[1rem] color-inherit transition-[background-color,transform,opacity] duration-180 hover:bg-sidebar-hover hover:-translate-y-px"
@@ -17,29 +17,30 @@
     </RouterLink>
 
     <nav
-      class="sidebar__nav flex flex-col flex-1 min-h-0 gap-[0.4rem] overflow-y-auto mt-5 [scrollbar-width:none]"
+      class="sidebar__nav flex flex-col flex-1 min-h-0 overflow-y-auto overflow-x-hidden mt-5 [scrollbar-width:none]"
     >
       <RouterLink custom to="/" v-slot="{ href, navigate, isActive }">
         <a
           :href="href"
-          class="sidebar__link sidebar-item"
+          class="sidebar__link sidebar__row sidebar-item"
           :class="isActive ? sidebarActiveClass : ''"
           @click="navigate"
         >
-          <span
-            class="sidebar__icon flex-shrink-0 w-[1.45rem] h-[1.45rem]"
-            :class="
-              isActive ? 'i-fluent-home-16-filled' : 'i-fluent-home-16-regular'
-            "
+          <svg
+            class="sidebar__icon shrink-0 w-6 h-6"
+            viewBox="0 0 24 24"
             aria-hidden="true"
-          />
+          >
+            <path
+              d="M2 11.2a2.5 2.5 0 0 1 .8-1.83l7.5-6.97a2.5 2.5 0 0 1 3.4 0l7.5 6.97a2.5 2.5 0 0 1 .8 1.83V19a3 3 0 0 1-3 3h-4v-5a3 3 0 0 0-6 0v5H5a3 3 0 0 1-3-3z"
+              :fill="isActive ? 'currentColor' : 'none'"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linejoin="round"
+            />
+          </svg>
           <span
-            class="sidebar__label max-w-0 overflow-hidden whitespace-nowrap text-[0.9rem] opacity-0 group-hover:max-w-[12rem] group-hover:opacity-100"
-            style="
-              transition:
-                opacity 0.18s ease,
-                max-width 0.22s ease;
-            "
+            class="sidebar__label min-w-0 flex-1 truncate text-start text-base leading-6 opacity-0 transition-opacity duration-180 group-hover:opacity-100"
             >{{ t('nav.home') }}</span
           >
         </a>
@@ -52,26 +53,28 @@
       >
         <a
           :href="href"
-          class="sidebar__link sidebar-item"
+          class="sidebar__link sidebar__row sidebar-item"
           :class="isActive ? sidebarActiveClass : ''"
           @click="navigate"
         >
-          <span
-            class="sidebar__icon flex-shrink-0 w-[1.45rem] h-[1.45rem]"
-            :class="
-              isActive
-                ? 'i-fluent-play-circle-24-filled'
-                : 'i-fluent-play-circle-24-regular'
-            "
+          <svg
+            class="sidebar__icon shrink-0 w-6 h-6"
+            viewBox="0 0 24 24"
             aria-hidden="true"
-          />
+          >
+            <path
+              v-if="isActive"
+              d="M7 1h10a6 6 0 0 1 6 6v10a6 6 0 0 1-6 6H7a6 6 0 0 1-6-6V7a6 6 0 0 1 6-6ZM10 7.5a1 1 0 0 0-1 1v7a1 1 0 0 0 1.5.87l6-3.5a1 1 0 0 0 0-1.74l-6-3.5A1 1 0 0 0 10 7.5Z"
+              fill="currentColor"
+              fill-rule="evenodd"
+            />
+            <g v-else fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="2" y="2" width="20" height="20" rx="5" />
+              <path d="M9.5 8.25 16.5 12l-7 3.75z" stroke-linejoin="round" />
+            </g>
+          </svg>
           <span
-            class="sidebar__label max-w-0 overflow-hidden whitespace-nowrap text-[0.9rem] opacity-0 group-hover:max-w-[12rem] group-hover:opacity-100"
-            style="
-              transition:
-                opacity 0.18s ease,
-                max-width 0.22s ease;
-            "
+            class="sidebar__label min-w-0 flex-1 truncate text-start text-base leading-6 opacity-0 transition-opacity duration-180 group-hover:opacity-100"
             >{{ t('nav.reels') }}</span
           >
         </a>
@@ -84,26 +87,21 @@
       >
         <a
           :href="href"
-          class="sidebar__link sidebar-item"
+          class="sidebar__link sidebar__row sidebar-item"
           :class="isActive ? sidebarActiveClass : ''"
           @click="navigate"
         >
           <span
-            class="sidebar__icon flex-shrink-0 w-[1.45rem] h-[1.45rem]"
+            class="sidebar__icon shrink-0 w-6 h-6"
             :class="
               isActive
-                ? 'i-fluent-search-16-filled'
-                : 'i-fluent-search-16-regular'
+                ? 'i-fluent-search-24-filled'
+                : 'i-fluent-search-24-regular'
             "
             aria-hidden="true"
           />
           <span
-            class="sidebar__label max-w-0 overflow-hidden whitespace-nowrap text-[0.9rem] opacity-0 group-hover:max-w-[12rem] group-hover:opacity-100"
-            style="
-              transition:
-                opacity 0.18s ease,
-                max-width 0.22s ease;
-            "
+            class="sidebar__label min-w-0 flex-1 truncate text-start text-base leading-6 opacity-0 transition-opacity duration-180 group-hover:opacity-100"
             >{{ t('nav.search') }}</span
           >
         </a>
@@ -116,26 +114,21 @@
       >
         <a
           :href="href"
-          class="sidebar__link sidebar-item"
+          class="sidebar__link sidebar__row sidebar-item"
           :class="isActive ? sidebarActiveClass : ''"
           @click="navigate"
         >
           <span
-            class="sidebar__icon flex-shrink-0 w-[1.45rem] h-[1.45rem]"
+            class="sidebar__icon shrink-0 w-6 h-6"
             :class="
               isActive
-                ? 'i-fluent-folder-16-filled'
-                : 'i-fluent-folder-16-regular'
+                ? 'i-fluent-folder-24-filled'
+                : 'i-fluent-folder-24-regular'
             "
             aria-hidden="true"
           />
           <span
-            class="sidebar__label max-w-0 overflow-hidden whitespace-nowrap text-[0.9rem] opacity-0 group-hover:max-w-[12rem] group-hover:opacity-100"
-            style="
-              transition:
-                opacity 0.18s ease,
-                max-width 0.22s ease;
-            "
+            class="sidebar__label min-w-0 flex-1 truncate text-start text-base leading-6 opacity-0 transition-opacity duration-180 group-hover:opacity-100"
             >{{ t('nav.library') }}</span
           >
         </a>
@@ -149,26 +142,21 @@
       >
         <a
           :href="href"
-          class="sidebar__link sidebar-item"
+          class="sidebar__link sidebar__row sidebar-item"
           :class="isActive || isPlacesRoute ? sidebarActiveClass : ''"
           @click="navigate"
         >
           <span
-            class="sidebar__icon flex-shrink-0 w-[1.45rem] h-[1.45rem]"
+            class="sidebar__icon shrink-0 w-6 h-6"
             :class="
               isActive || isPlacesRoute
-                ? 'i-fluent-location-20-filled'
-                : 'i-fluent-location-20-regular'
+                ? 'i-fluent-location-24-filled'
+                : 'i-fluent-location-24-regular'
             "
             aria-hidden="true"
           />
           <span
-            class="sidebar__label max-w-0 overflow-hidden whitespace-nowrap text-[0.9rem] opacity-0 group-hover:max-w-[12rem] group-hover:opacity-100"
-            style="
-              transition:
-                opacity 0.18s ease,
-                max-width 0.22s ease;
-            "
+            class="sidebar__label min-w-0 flex-1 truncate text-start text-base leading-6 opacity-0 transition-opacity duration-180 group-hover:opacity-100"
             >{{ t('nav.places') }}</span
           >
         </a>
@@ -182,26 +170,21 @@
       >
         <a
           :href="href"
-          class="sidebar__link sidebar-item"
+          class="sidebar__link sidebar__row sidebar-item"
           :class="isActive ? sidebarActiveClass : ''"
           @click="navigate"
         >
           <span
-            class="sidebar__icon flex-shrink-0 w-[1.58rem] h-[1.58rem]"
+            class="sidebar__icon shrink-0 w-6 h-6"
             :class="
               isActive
-                ? 'i-fluent-heart-20-filled'
-                : 'i-fluent-heart-20-regular'
+                ? 'i-fluent-heart-24-filled'
+                : 'i-fluent-heart-24-regular'
             "
             aria-hidden="true"
           />
           <span
-            class="sidebar__label max-w-0 overflow-hidden whitespace-nowrap text-[0.9rem] opacity-0 group-hover:max-w-[12rem] group-hover:opacity-100"
-            style="
-              transition:
-                opacity 0.18s ease,
-                max-width 0.22s ease;
-            "
+            class="sidebar__label min-w-0 flex-1 truncate text-start text-base leading-6 opacity-0 transition-opacity duration-180 group-hover:opacity-100"
             >{{ likesStore.collectionLabel }}</span
           >
           <small
@@ -224,82 +207,25 @@
       >
         <a
           :href="href"
-          class="sidebar__link sidebar-item"
+          class="sidebar__link sidebar__row sidebar-item"
           :class="isActive || isCollectionsRoute ? sidebarActiveClass : ''"
           @click="navigate"
         >
           <span
-            class="sidebar__icon flex-shrink-0 w-[1.52rem] h-[1.52rem]"
+            class="sidebar__icon shrink-0 w-6 h-6"
             :class="
               isActive || isCollectionsRoute
-                ? 'i-fluent-bookmark-20-filled'
-                : 'i-fluent-bookmark-20-regular'
+                ? 'i-fluent-bookmark-24-filled'
+                : 'i-fluent-bookmark-24-regular'
             "
             aria-hidden="true"
           />
           <span
-            class="sidebar__label max-w-0 overflow-hidden whitespace-nowrap text-[0.9rem] opacity-0 group-hover:max-w-[12rem] group-hover:opacity-100"
-            style="
-              transition:
-                opacity 0.18s ease,
-                max-width 0.22s ease;
-            "
+            class="sidebar__label min-w-0 flex-1 truncate text-start text-base leading-6 opacity-0 transition-opacity duration-180 group-hover:opacity-100"
             >{{ t('nav.collections') }}</span
           >
         </a>
       </RouterLink>
-
-      <span
-        class="sidebar__section-label sidebar__meta inline-flex min-h-[1rem] items-center self-start mt-7 max-w-0 overflow-hidden whitespace-nowrap px-[0.75rem] text-[0.68rem] leading-[1.2] font-semibold uppercase tracking-[0.12em] text-muted opacity-0 group-hover:max-w-[12rem] group-hover:opacity-100"
-        style="
-          transition:
-            opacity 0.18s ease,
-            max-width 0.22s ease;
-        "
-        >{{ t('nav.foldersSpotlight') }}</span
-      >
-      <div
-        class="flex min-h-0 shrink-0 flex-col gap-[0.2rem] max-h-[22.5rem] overflow-y-auto [scrollbar-width:none]"
-      >
-        <RouterLink
-          v-for="folder in featuredFolders"
-          :key="folder.id"
-          custom
-          :to="{ name: 'folder', params: { slug: folder.slug } }"
-          v-slot="{ href, navigate, isActive }"
-        >
-          <a
-            :href="href"
-            class="sidebar__folder sidebar-item"
-            :class="isActive ? sidebarActiveClass : ''"
-            :title="
-              folder.breadcrumb
-                ? `${folder.breadcrumb} / ${folder.name}`
-                : folder.name
-            "
-            @click="navigate"
-          >
-            <Avatar
-              :name="formatFeaturedFolderTitle(folder)"
-              :src="folder.avatarUrl"
-              class="h-[1.75rem] w-[1.75rem]"
-            />
-            <span
-              class="sidebar__folder-copy sidebar__meta flex min-w-0 max-w-0 flex-col gap-[0.05rem] overflow-hidden whitespace-nowrap opacity-0 group-hover:max-w-[12rem] group-hover:opacity-100"
-              style="
-                transition:
-                  opacity 0.18s ease,
-                  max-width 0.22s ease;
-              "
-            >
-              <strong class="truncate text-[0.82rem]">{{ formatFeaturedFolderTitle(folder) }}</strong>
-              <small class="truncate text-[0.68rem] text-muted">{{
-                folder.breadcrumb ?? t('nav.folderPosts', { count: folder.imageCount })
-              }}</small>
-            </span>
-          </a>
-        </RouterLink>
-      </div>
     </nav>
 
     <div
@@ -308,7 +234,7 @@
       @click="closeMoreMenu"
     />
 
-    <div class="z-50 mt-auto pt-10 pb-2">
+    <div class="z-50 mt-auto pt-10 pb-1">
       <slot name="activity" />
       <div class="relative">
         <div
@@ -354,7 +280,15 @@
             <span>{{ t('nav.unlockAdmin') }}</span>
           </button>
 
-          <BrowserAppearanceSelect class="flex w-full items-center gap-[0.95rem] px-[1.2rem] py-[1rem] text-[0.98rem] text-text hover:bg-surface-hover" />
+          <button
+            class="flex items-center gap-[0.95rem] w-full px-[1.2rem] py-[1rem] border-0 bg-transparent text-[0.98rem] text-text cursor-pointer text-left transition-colors duration-150 hover:bg-surface-hover"
+            type="button"
+            aria-haspopup="dialog"
+            @click="openDisplayPreferences"
+          >
+            <span class="i-fluent-desktop-20-regular w-[1.18rem] h-[1.18rem] shrink-0" aria-hidden="true" />
+            <span>{{ t('displayPreferences.title') }}</span>
+          </button>
           <button
             v-if="authStore.canSignOut"
             class="flex items-center gap-[0.95rem] w-full px-[1.2rem] py-[1rem] border-0 bg-transparent text-[0.98rem] text-text cursor-pointer text-left transition-colors duration-150 hover:bg-surface-hover disabled:opacity-60 disabled:cursor-wait"
@@ -371,25 +305,20 @@
         </div>
 
         <button
-          class="sidebar-item w-full"
-          :class="moreMenuOpen ? 'bg-[var(--sidebar-active-background)] hover:bg-[var(--sidebar-active-background)] font-semibold' : ''"
+          ref="moreButton"
+          class="sidebar__row sidebar__more sidebar-item w-full"
+          :class="{ 'font-semibold': moreMenuOpen }"
           type="button"
           aria-haspopup="menu"
           :aria-expanded="moreMenuOpen"
           @click="toggleMoreMenu"
         >
           <span
-            class="sidebar__icon flex-shrink-0 w-[1.45rem] h-[1.45rem]"
-            :class="'i-fluent-line-horizontal-3-20-filled'"
+            class="sidebar__icon i-fluent-line-horizontal-3-24-filled shrink-0 w-6 h-6"
             aria-hidden="true"
           />
           <span
-            class="sidebar__label max-w-0 overflow-hidden whitespace-nowrap text-[0.9rem] opacity-0 group-hover:max-w-[12rem] group-hover:opacity-100"
-            style="
-              transition:
-                opacity 0.18s ease,
-                max-width 0.22s ease;
-            "
+            class="sidebar__label min-w-0 flex-1 truncate text-start text-base leading-6 opacity-0 transition-opacity duration-180 group-hover:opacity-100"
             >{{ t('nav.more') }}</span
           >
         </button>
@@ -403,53 +332,25 @@
   import { useI18n } from "vue-i18n"
   import { RouterLink, useRoute } from "vue-router"
 
-  import { useAppStore } from "../stores/app"
   import { useAuthStore } from "../stores/auth"
   import { useLikesStore } from "../stores/likes"
-  import { useFoldersStore } from "../stores/folders"
   import { usePlacesStore } from "../stores/places"
-  import { formatFolderTitle } from "../utils/folder-titles"
-  import { buildLikedCountByFolder } from "../utils/home-recommendations"
-  import { selectSidebarFolders } from "../utils/sidebar-folders"
-  import Avatar from "./Avatar.vue"
   import BrandMark from "./BrandMark.vue"
-  import BrowserAppearanceSelect from "./BrowserAppearanceSelect.vue"
 
   const props = defineProps<{ panelOpen?: boolean }>()
-  const emit = defineEmits<{ openMore: [] }>()
+  const emit = defineEmits<{ openMore: []; openDisplayPreferences: [anchor: HTMLButtonElement] }>()
   const { t } = useI18n()
   const appVersion = __APP_VERSION__
-  const appStore = useAppStore()
   const authStore = useAuthStore()
   const likesStore = useLikesStore()
-  const foldersStore = useFoldersStore()
   const placesStore = usePlacesStore()
   const route = useRoute()
   const moreMenuOpen = ref(false)
+  const moreButton = ref<HTMLButtonElement | null>(null)
 
-  const likedCountByFolder = computed(() =>
-    buildLikedCountByFolder(likesStore.items),
-  )
-  const featuredFolders = computed(() =>
-    selectSidebarFolders(
-      [...foldersStore.items, ...Object.values(foldersStore.summaryBySlug)],
-      likedCountByFolder.value,
-      appStore.recentOpenedFolderSlugs,
-    ),
-  )
-  watch(
-    () => appStore.recentOpenedFolderSlugs.slice(0, 4),
-    (slugs) => {
-      for (const slug of slugs) void foldersStore.ensureSummary(slug).catch(() => {})
-    },
-    { immediate: true },
-  )
   const showPlacesNav = computed(() =>
     placesStore.items.length > 0 && placesStore.listError === null,
   )
-  function formatFeaturedFolderTitle(folder: (typeof featuredFolders.value)[number]) {
-    return formatFolderTitle(folder, appStore.nestedFolderTitleFormat)
-  }
   const isPlacesRoute = computed(() =>
     route.name === "places" || route.name === "place",
   )
@@ -459,11 +360,15 @@
   const signOutLabel = computed(() =>
     authStore.accessMode === "public" ? t("nav.returnToPublicView") : t("nav.signOut"),
   )
-  const sidebarActiveClass =
-    "router-link-active bg-[var(--sidebar-active-background)] hover:bg-[var(--sidebar-active-background)] font-bold"
+  const sidebarActiveClass = "router-link-active font-bold"
 
   function closeMoreMenu() {
     moreMenuOpen.value = false
+  }
+
+  function openDisplayPreferences() {
+    closeMoreMenu()
+    if (moreButton.value) emit('openDisplayPreferences', moreButton.value)
   }
 
   function toggleMoreMenu() {
@@ -515,3 +420,34 @@
     window.removeEventListener("keydown", handleWindowKeydown)
   })
 </script>
+
+<style scoped>
+.sidebar {
+  background: linear-gradient(var(--bg), var(--bg)) left top / var(--desktop-sidebar-width) 100% no-repeat;
+}
+
+@media (orientation: portrait) {
+  .sidebar {
+    background-size: 100% 100%;
+  }
+}
+
+.sidebar__nav {
+  padding-block-end: clamp(0rem, calc(100vh - 40rem), 3.5rem);
+}
+
+.sidebar__row {
+  min-height: 3.5rem;
+  border-radius: 0.75rem;
+}
+
+span.sidebar__icon {
+  mask-size: 110% 110%;
+  mask-position: center;
+}
+
+.sidebar__row:hover,
+.sidebar__more[aria-expanded="true"] {
+  background-color: color-mix(in srgb, var(--text) 10%, transparent);
+}
+</style>

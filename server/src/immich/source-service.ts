@@ -183,9 +183,17 @@ export async function removeSource(id: number): Promise<void> {
 }
 async function verifyVersion(client: ImmichClient): Promise<string> {
     const about = z.object({ version: z.string() }).safeParse(await client.json('/api/server/about'));
-    if (!about.success || !/^v?3\.3\./.test(about.data.version))
-        throw new Error('Unsupported Immich API version. Supported contract: v3.3.x; verified on v3.3.5.');
-    return about.data.version;
+    const version = about.success ? about.data.version : '';
+    const match = /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[a-z0-9-]+(?:\.[a-z0-9-]+)*)?(?:\+[a-z0-9-]+(?:\.[a-z0-9-]+)*)?$/i.exec(version);
+    if (!match)
+        throw new Error('Immich did not report a valid server version. Check the server URL.');
+    const [, majorText, minorText, patchText, prerelease] = match;
+    const major = Number(majorText);
+    const minor = Number(minorText);
+    const isMinimumPrerelease = minor === 2 && patchText === '0' && prerelease;
+    if (major < 3 || (major === 3 && (minor < 2 || isMinimumPrerelease)))
+        throw new Error(`Immich ${version} is below the minimum supported version. Use Immich v3.2.0 or later.`);
+    return version;
 }
 async function verifyConnection(serverUrl: string, apiKey?: string, source?: SourceRecord) {
     const url = validateServerUrl(serverUrl);

@@ -6,13 +6,14 @@ import { appConfig } from '../config/env.js';
 import { imageRepository } from '../db/repositories.js';
 import type { ImageRecord } from '../types/models.js';
 import { log } from '../services/log-service.js';
+import { originalVideoType, resolveCurrentVideoOriginal } from '../services/local-video-source.js';
 import { generatePreviewDerivative, generateThumbnailDerivative } from '../services/derivative-service.js';
 import { scannerService } from '../services/scanner-service.js';
 import { authService } from '../services/auth-service.js';
 import { galleryService } from '../services/gallery-service.js';
 import { indexedHeicSource } from '../services/heic/indexed-source.js';
 import { derivativeWorkLimit, HeicError } from '../services/heic/service.js';
-import { isHeicFile } from '../utils/image-utils.js';
+import { isHeicImage } from '../utils/image-utils.js';
 import { MaintenancePausedError, maintenanceOperationLock } from '../services/maintenance-operation-lock.js';
 import { resolveOriginalPath } from '../utils/media-paths.js';
 import { isImmichSource, isLocalOriginalUnavailable, isSourceVisible } from '../sources/local-source.js';
@@ -23,7 +24,8 @@ import {
   applyProtectedMediaHeaders
 } from '../utils/media-response.js';
 import { isNonemptyDerivative } from '../utils/derivative-cache.js';
-import { safeJoin } from '../utils/path-utils.js';
+import { isSameOrWithinPath, safeJoin } from '../utils/path-utils.js';
+import { beginPreviewRead } from '../services/video-preview-access.js';
 import { resolveVideoPlaybackSource } from '../utils/video-playback-policy.js';
 
 // In-memory map to deduplicate concurrent generation requests for the same derivative path.
@@ -67,7 +69,7 @@ function findCurrentImageRecord(
     return null;
   }
   if (isImmichSource(imageRecord.source_id) || !isSourceVisible(imageRecord.source_id)) return null;
-  if (isHeicFile(imageRecord.relative_path) && (imageRecord.is_deleted || (imageRecord.is_trashed && !allowTrashed))) return null;
+  if (isHeicImage(imageRecord) && (imageRecord.is_deleted || (imageRecord.is_trashed && !allowTrashed))) return null;
   return imageRecord;
 }
 
@@ -112,14 +114,16 @@ function queueLazyGeneration(
   allowTrashed = false
 ): Promise<void> {
   const expectedImageId = initialImage.id;
-  const isHeic = isHeicFile(initialImage.relative_path);
+  const isHeic = isHeicImage(initialImage);
   const key = JSON.stringify([absoluteOutputPath, expectedImageId, initialImage.checksum_or_fingerprint, allowTrashed]);
   const existingGeneration = inflightGenerations.get(key);
   if (existingGeneration) return existingGeneration;
 
   const generate = async () => {
     const imageRecord = findCurrentImageRecord(requestedPath, kind, expectedImageId, allowTrashed);
-    if (!imageRecord) throw new DerivativeRecordNotFoundError('Derivative no longer has an indexed image record');
+    if (!imageRecord || (kind === 'preview' && imageRecord.video_delivery_policy === 'streaming')) {
+      throw new DerivativeRecordNotFoundError('Derivative no longer has an indexed image record');
+    }
 
     // A scan or rebuild may have generated the file while this request waited
     // for the maintenance lock.
@@ -195,8 +199,17 @@ function sendDerivativeFile(
     applyProtectedMediaHeaders(response);
   }
 
+  const preview = path.extname(absolutePath).toLowerCase() === '.mp4' && isSameOrWithinPath(appConfig.previewsDir, absolutePath);
+  const closeRead = preview ? beginPreviewRead(absolutePath) : undefined;
+  if (preview && !closeRead) {
+    applyDerivativeErrorHeaders(response);
+    response.status(409).end();
+    return Promise.resolve('sent');
+  }
+  if (closeRead) response.once('close', closeRead);
   return new Promise((resolve, reject) => {
     response.sendFile(absolutePath, (error) => {
+      closeRead?.();
       if (error) {
         if (response.headersSent || isConnectionTerminationError(error)) {
           resolve('aborted');
@@ -217,6 +230,20 @@ function sendDerivativeFile(
       resolve('sent');
     });
   });
+}
+
+async function serveStreamingPreviewAlias(response: express.Response, image: ImageRecord): Promise<void> {
+  applyNoStoreMediaHeaders(response);
+  if (originalVideoType(image)?.startsWith('video/mp4;')) {
+    try {
+      const original = await resolveCurrentVideoOriginal(image);
+      await sendDerivativeFile(response.type('video/mp4'), original, { noStore: true });
+      return;
+    } catch {
+      if (response.headersSent || response.destroyed) return;
+    }
+  }
+  response.status(410).json({ message: 'This video uses streaming playback. Reload Foldergram to play it.' });
 }
 
 async function serveOrGenerate(
@@ -245,6 +272,10 @@ async function serveOrGenerate(
   if (!initialImageRecord) {
     sendDerivativeNotFound(response);
     return;
+  }
+
+  if (kind === 'preview' && initialImageRecord.video_delivery_policy === 'streaming') {
+    return serveStreamingPreviewAlias(response, initialImageRecord);
   }
 
   if (kind === 'preview' && initialImageRecord.media_type === 'video') {
@@ -289,7 +320,7 @@ async function serveOrGenerate(
     return;
   }
 
-  if ((!generateMissing && !isHeicFile(initialImageRecord.relative_path)) || (kind === 'preview' && isEligibleNormalVideo(initialImageRecord))) {
+  if ((!generateMissing && !isHeicImage(initialImageRecord)) || (kind === 'preview' && isEligibleNormalVideo(initialImageRecord))) {
     sendDerivativeNotFound(response);
     return;
   }
@@ -370,6 +401,10 @@ export async function serveDerivativeForImage(
   if (!initialImageRecord) {
     sendDerivativeNotFound(response);
     return;
+  }
+
+  if (kind === 'preview' && initialImageRecord.video_delivery_policy === 'streaming') {
+    return serveStreamingPreviewAlias(response, initialImageRecord);
   }
 
   if (await isNonemptyDerivative(absoluteOutputPath)) {

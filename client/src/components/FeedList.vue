@@ -6,9 +6,11 @@
       :key="item.id"
       :item="item"
       :context="context"
+      :fit-tall-media="fitTallMedia"
       :has-avatar-story="folderLookup.get(item.folderSlug)?.hasAvatarStory ?? item.folderHasAvatarStory ?? false"
       :avatar-url="folderAvatar(item)"
       :is-active-video="context === 'home' && item.id === activeVideoId"
+      :next-video-playback-url="item.id === activeVideoId ? nextVideoPlaybackUrl : undefined"
       @open-folder-story="emit('openFolderStory', $event)"
       @video-visibility-change="handleVideoVisibilityChange"
     />
@@ -37,9 +39,11 @@ const props = withDefaults(
     items: FeedItem[];
     showSkeleton?: boolean;
     context?: 'default' | 'home';
+    fitTallMedia?: boolean;
   }>(),
   {
-    context: 'default'
+    context: 'default',
+    fitTallMedia: false
   }
 );
 
@@ -65,7 +69,7 @@ const activeVideoId = computed<number | null>(() => {
   let activeRatio = 0;
   let activeCenterOffset = Number.POSITIVE_INFINITY;
 
-  for (const item of props.items) {
+  for (const item of availableItems.value) {
     if (item.mediaType !== 'video') {
       continue;
     }
@@ -83,6 +87,14 @@ const activeVideoId = computed<number | null>(() => {
   }
 
   return activeId;
+});
+
+const nextVideoPlaybackUrl = computed(() => {
+  const items = availableItems.value;
+  const current = items.findIndex(item => item.id === activeVideoId.value);
+  if (current < 0) return;
+  return items.slice(current + 1, current + 4)
+    .find(item => item.mediaType === 'video' && item.postType !== 'carousel')?.videoPlaybackUrl ?? undefined;
 });
 
 function handleVideoVisibilityChange(payload: HomeVideoVisibilityChange) {

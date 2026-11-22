@@ -40,7 +40,7 @@ When enabled:
 - protected thumbnails and previews use private browser caching with `Vary: Cookie`; folder-share media always uses `private, no-store`
 - original media uses `Cache-Control: private, no-cache` with `Vary: Cookie` so browsers can revalidate and seek without making a mutable original shared-cacheable
 - when password protection is disabled, original media uses `public, no-cache` and generated derivatives may use public caching
-- the production service worker skips caching protected thumbnail and preview responses
+- the production service worker skips protected thumbnails, previews, and API playback requests
 - admin-only routes reject `viewer` and `anonymous` sessions with `403` or `401` depending on auth state
 
 Changing either stored password or the viewer-access mode rotates the session
@@ -52,10 +52,10 @@ the stored auth settings.
 Folder shares are narrower than viewer sessions. They grant read-only access to
 one folder through `/share/:slug` and do not unlock Home, feed search, Reels,
 Places, Likes, Collections, Trash, Settings, scans, rebuilds, caption editing, cover
-editing, delete actions, or original-file downloads.
+editing, delete actions, or the library's original-file download route.
 
-Shared visitors can read post captions. Shared responses omit local filesystem
-paths, EXIF and location metadata, and original-file URLs.
+Shared visitors can read post captions. Shared post responses omit local
+filesystem paths, EXIF and location metadata, and library-wide original URLs.
 
 Admins can create:
 
@@ -88,14 +88,15 @@ payloads. Shared folder payloads point to `/api/share/images/:id/thumbnail` and
 `/api/share/images/:id/preview`, and those routes check that the request has a
 grant for the image's folder before serving or lazily generating the derivative.
 
-Some videos that are suitable for direct playback use the ordinary
-`/api/originals/:id` route during normal browsing. This does not expand shared
-access: scoped share preview routes continue to serve or generate their own
-preview media and never redirect to an original path. Previously issued normal
-`/previews/...mp4` URLs are resolved only through the indexed media record and
-the same original-media authorization and cache rules. Original delivery through
-either URL is unavailable while library storage is unavailable or an index
-rebuild is required after a gallery-root change.
+Older videos can use `/api/originals/:id` during normal browsing. A folder
+share can serve its own generated preview for the same video.
+
+For streaming videos, a folder share uses its own playback URL. It can serve a
+compatible original for playback or convert the video into short sections.
+Foldergram checks the folder grant on each request, including requests for
+cached video. Playback responses use `private, no-store` with `Vary: Cookie`.
+Public viewer and demo modes can open and release playback sessions for videos
+they're allowed to watch. Preview cleanup requires admin access.
 
 ## Mutation protection
 
@@ -238,7 +239,7 @@ When proxying, keep these rules:
 - do not ignore or rewrite `Cache-Control` on protected API or media endpoints
 - do not cache API responses by URL alone when cookies, roles, or folder-share grants affect access
 - do not alias `/thumbnails` or `/previews` to the generated directories unless the proxy enforces equivalent authorization, such as a correctly configured `auth_request`
-- keep `/api/originals/:id` behind the same proxy authorization as the rest of the app
+- keep original files and streaming requests behind Foldergram's access checks. Keep the HLS cache directory private.
 - set `CSRF_TRUSTED_ORIGINS` when the browser-visible origin differs from the upstream host seen by Express
 
 A cache or alias that skips Foldergram's authentication is not a supported

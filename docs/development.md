@@ -102,9 +102,9 @@ Run them with:
 pnpm test
 ```
 
-Browser regressions cover panoramic-post details, active navigation in light
-and dark themes, and feed-video playback after exiting fullscreen. Install
-Chromium once, then run the browser suite:
+Browser tests cover navigation, layout, and media playback. The streaming
+tests use generated videos to check covers, Retry, seeking, and Reels swipes.
+Install Chromium once, then run the suite.
 
 ```bash
 pnpm --filter @foldergram/client exec playwright install chromium
@@ -116,6 +116,40 @@ It uses mock API responses, sample images, and a short video fixture with audio,
 so it does not start the backend or read your gallery. Failure screenshots and traces are saved in
 `client/test-results/`. To use an existing Chrome or Chromium installation, set
 `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` to its executable path.
+
+### Video streaming benchmark
+
+With FFmpeg and FFprobe installed, run the benchmark from the repository root.
+
+```bash
+pnpm --filter @foldergram/server exec tsx test/video-streaming-benchmark.ts --smoke
+```
+
+The command makes a temporary library with generated videos and uses one
+encoder. It measures database updates, page requests, preview cleanup, and
+streaming starts and seeks. Omit `--smoke` to test with 50,000 photo records and
+51 videos. Add `--output=/path/to/new-report.json` to save the results to a new file.
+
+An example full run on an Intel Core i7-13700H with four visible CPUs and
+FFmpeg 7.1.4 produced these results.
+
+| What the benchmark measured | Example result |
+| --- | ---: |
+| Database upgrade from migration `000007` | 2.79 s |
+| First feed, folder, and Reels requests | 352 ms, 1.09 s, 500 ms |
+| Repeat requests for those pages, p95 | 412 ms, 626 ms, 519 ms |
+| Check and remove 51 previews | 18.59 s to check, 9.54 s to remove |
+| Time to decode the first frame, median / p95 | 590 ms / 1.44 s |
+| Time to decode a frame after seeking, median / p95 | 546 ms / 645 ms |
+| Finished cache size and peak Node.js memory | 5.16 MiB and 172 MiB |
+
+In one smoke run, the median time to a decodable frame was **419 ms** with an
+empty cache and **94 ms** after warming the first three seconds. Warmup took
+**191 ms** at the median. These timings cover the server request and a frame
+decoded by FFmpeg. Browser startup and real network latency are not included.
+
+The browser suite runs in Chromium. Focused playback tests have also passed in
+Firefox. Safari and physical mobile devices still need separate testing.
 
 ## Schema migrations
 
@@ -134,10 +168,13 @@ Use `pnpm migrate` to apply pending migrations without starting the app.
 
 ## Client behavior worth knowing
 
-- theme selection is stored in `localStorage`
+- More → Display preferences applies browser theme choices immediately for admins and viewers, storing explicit System/Light/Dark overrides in `localStorage`; App default clears the override and follows the instance theme
+- Settings → Appearance saves the instance default theme and accent color to the database; those saves preserve any current browser theme override
 - explicit locale selection is stored in `localStorage`
 - the saved app-language default is stored in the database and applies when no local browser override exists
 - video mute preference is stored in `localStorage`
+- Home's suggested-folders preference is stored in `localStorage` and can be changed immediately from More → Display preferences, including by viewers
+- Home's independent fit-tall-media preference is also stored in `localStorage`, defaults to off, and applies to either desktop layout when enabled; hiding suggested folders only changes the feed width
 - the client disables previously registered service workers in development
 - the client registers `/sw.js` in production when the browser supports service workers
 

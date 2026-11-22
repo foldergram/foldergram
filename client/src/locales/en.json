@@ -1,4 +1,106 @@
 {
+  "streamingVideo": {
+    "loading": "Preparing video…",
+    "unavailable": "This video could not be played.",
+    "retry": "Retry playback",
+    "maintenance": {
+      "title": "Video playback",
+      "streaming": "Streaming",
+      "previews": "Saved previews",
+      "result": "Video maintenance result",
+      "checking": "Checking local videos…",
+      "checkFailed": "Couldn't check video maintenance.",
+      "working": "Video maintenance is in progress.",
+      "needsAttention": "A video maintenance job needs attention.",
+      "skipped": "The last operation skipped some videos.",
+      "videosPending": "Some local videos are still set to streaming.",
+      "noVideosPending": "No videos left to switch to saved previews.",
+      "cleanupPending": "Videos or saved previews are available to assess.",
+      "noCleanupPending": "All indexed local videos use streaming.",
+      "checkRemaining": "Check for remaining previews",
+      "closeCheck": "Close"
+    },
+    "reclamation": {
+      "recoveryTitle": "Video preview cleanup recovery",
+      "action": "Switch to streaming and remove video previews",
+      "description": "Free storage by removing generated video copies.",
+      "preserved": "Foldergram keeps originals, photos, thumbnails, library organization, and Immich data.",
+      "playbackNote": "Some videos may take longer to start or seek while conversion runs. Future imports still follow VIDEO_DELIVERY_MODE.",
+      "confirmTitle": "Switch to streaming?",
+      "confirmAction": "Remove previews",
+      "confirmPending": "Starting cleanup…",
+      "videosToSwitch": "Videos to switch",
+      "previewsToRemove": "Previews to remove",
+      "estimatedSavings": "Estimated savings",
+      "source": "Local source",
+      "allSources": "All local sources",
+      "assess": "Assess previews",
+      "scope": "Sources: {names}",
+      "noEligibleVideos": "No eligible videos or previews found for these sources.",
+      "spaceFreed": "{bytes} freed",
+      "completedChanges": "{files} previews removed · {videos} videos switched to streaming",
+      "dismissResult": "Dismiss cleanup result",
+      "estimate": "Checked {checked} videos. {videos} would switch to streaming. {files} previews could free {bytes}.",
+      "result": "Switched {videos} videos. Removed {files} previews and freed {bytes}.",
+      "cancel": "Cancel operation",
+      "resume": "Resume or retry",
+      "status": {
+        "assessing": "Assessing previews…",
+        "ready": "Assessment ready",
+        "running": "Switching videos and removing previews…",
+        "complete": "Operation complete",
+        "cancelled": "Operation cancelled",
+        "interrupted": "Operation interrupted"
+      },
+      "reason": {
+        "originalUnavailable": "Original unavailable or changed",
+        "unsupported": "Conversion unsupported",
+        "sharedPreview": "Preview shared by another item",
+        "unsafePreview": "Unsafe preview path",
+        "unreadablePreview": "Preview unreadable",
+        "inUse": "Preview in use",
+        "busy": "Library maintenance busy",
+        "removalFailed": "Preview removal failed",
+        "changed": "Video changed since assessment"
+      }
+    },
+    "generation": {
+      "title": "Switch existing videos to saved previews",
+      "description": "New videos use saved previews when needed. {count} existing video is still set to streaming. | New videos use saved previews when needed. {count} existing videos are still set to streaming.",
+      "assess": "Check videos",
+      "previewsToGenerate": "Previews to generate",
+      "confirmTitle": "Switch to saved previews?",
+      "confirmAction": "Generate previews and switch",
+      "confirmNote": "Creating previews takes time and disk space. Videos that need a preview keep streaming until it’s ready.",
+      "noEligibleVideos": "No videos can be switched for these sources.",
+      "assessing": "Checking videos…",
+      "running": "Generating previews and switching videos…",
+      "estimate": "Checked {checked} videos. {videos} would switch and {files} need a preview.",
+      "result": "{videos} videos switched to saved previews · {files} previews generated",
+      "dismissResult": "Dismiss preview generation result",
+      "failed": "Preview generation failed"
+    }
+  },
+  "displayPreferences": {
+    "appearance": {
+      "label": "Appearance",
+      "description": "Choose a theme for this browser. App default follows the theme set in Settings.",
+      "appDefault": "App default"
+    },
+    "done": "Done",
+    "title": "Display preferences",
+    "description": "Changes apply immediately and are saved in this browser.",
+    "suggestedFolders": {
+      "label": "Show suggested folders on desktop",
+      "description": "Show suggested folders beside Home on wider screens. Turning this off gives the feed more room."
+    },
+    "fitTallMedia": {
+      "label": "Fit tall media to screen",
+      "description": "Shrink only media taller than the desktop window. Works with or without suggested folders."
+    },
+    "saved": "Saved in this browser.",
+    "sessionOnly": "Some preferences could not be saved in this browser. Unsaved changes apply only for this session."
+  },
   "appearance": {
   "title": "Appearance",
     "description": "Set the default theme and accent color for this instance.",
@@ -17,7 +119,8 @@
   "save": "Save appearance",
   "saving": "Saving…",
   "saved": "Appearance saved.",
-  "saveError": "Could not save appearance. Please try again."
+  "saveError": "Could not save appearance. Please try again.",
+  "demoReadOnly": "Appearance settings are read-only in the public demo. Use More → Display preferences to change your browser theme."
 },
   "sources": {
     "title": "Sources",
@@ -140,9 +243,6 @@
     "trash": "Trash",
     "settings": "Settings",
     "unlockAdmin": "Unlock admin",
-    "switchAppearance": "Switch appearance",
-    "switchToDarkMode": "Switch to dark mode",
-    "switchToLightMode": "Switch to light mode",
     "signOut": "Sign out",
     "returnToPublicView": "Return to public view",
     "foldersSpotlight": "Folders Spotlight",
@@ -1365,6 +1465,7 @@
     "openIssue": "View scan result in Status",
     "openStatus": "View last scan in Status",
     "acknowledge": "Acknowledge",
+    "acknowledgeError": "Could not save the acknowledgement. Please try again.",
     "acknowledgeResults": "Acknowledge {count} results",
     "earlierIssue": "Earlier scan needs attention",
     "similarResults": "{count} scans reported this issue.",

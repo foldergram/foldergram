@@ -1,5 +1,5 @@
 <template>
-  <article class="reel-player-card">
+  <article class="reel-player-card" :class="{ 'reel-player-card--external-metadata': externalMetadata }">
     <div class="reel-player-card__stage">
       <div
         class="reel-player-card__surface"
@@ -12,7 +12,7 @@
         <media-player
           ref="playerElement"
           class="reel-player-card__player"
-          :src.prop="videoSource"
+          :src.prop="streaming.source.value ?? videoSource"
           :title.prop="item.filename"
           :fullscreenOrientation.prop="'none'"
           :playsInline.prop="true"
@@ -25,8 +25,17 @@
           @media-unmute-request="appStore.setVideoMuted(false)"
           @media-volume-change-request="appStore.setVideoMuted($event.detail === 0)"
         >
-          <media-provider />
+          <media-provider :loaders.prop="streaming.loaders" />
+          <LocalVideoFeedback
+            v-if="streaming.source.value"
+            :poster="item.thumbnailUrl"
+            :active="active"
+            :state="streaming.state.value"
+            :spinner-delay="REEL_LOADING_SPINNER_DELAY_MS"
+            @retry="streaming.play"
+          />
           <media-poster
+            v-else
             :src.prop="item.thumbnailUrl"
             :alt.prop="item.filename"
           />
@@ -48,7 +57,7 @@
         </media-player>
 
         <div
-          v-if="showPausedIndicator"
+          v-if="showPausedIndicator && !streaming.state.value.pending && !streaming.state.value.failed"
           class="reel-player-card__pause-indicator"
           aria-hidden="true"
         >
@@ -61,7 +70,7 @@
           class="reel-player-card__overlay"
           :class="{ 'reel-player-card__overlay--visible': active }"
         >
-          <div class="reel-player-card__copy">
+          <div v-if="!externalMetadata" class="reel-player-card__copy">
             <RouterLink
               class="reel-player-card__folder-row reel-player-card__folder-link"
               :to="{ name: 'folder', params: { slug: item.folderSlug } }"
@@ -128,20 +137,32 @@ import { useNativeVideoMuteSync } from '../composables/useNativeVideoMuteSync';
 import { useAppStore } from '../stores/app';
 import type { FeedItem, FolderSummary } from '../types/api';
 import { formatFolderTitle } from '../utils/folder-titles';
+import type { ReelVideoPreparation } from '../utils/local-video-provider';
 import { getOriginalMediaUrl } from '../utils/original-media';
 import { applyVideoMutePreference, createVideoMuteStorage } from '../utils/video-mute';
 import Avatar from './Avatar.vue';
+import LocalVideoFeedback from './LocalVideoFeedback.vue';
+import { useLocalVideoPlayback } from '../composables/useLocalVideoPlayback';
 
 const props = defineProps<{
   item: FeedItem;
   folder: FolderSummary | null;
   active: boolean;
+  nextVideoPlaybackUrl?: string;
+  videoPreparation?: ReelVideoPreparation;
+  externalMetadata?: boolean;
 }>();
 
 const { t } = useI18n();
 const appStore = useAppStore();
 const videoMuteStorage = createVideoMuteStorage(() => appStore.videoMuted);
 const playerElement = ref<MediaPlayerElement | null>(null);
+const streaming = useLocalVideoPlayback(() => props.item.videoPlaybackUrl, {
+  active: () => props.active, autoplay: () => true,
+  next: () => props.nextVideoPlaybackUrl,
+  reelPreparation: props.videoPreparation,
+  onAutoplayBlocked: () => { isPaused.value = true; }
+});
 useNativeVideoMuteSync(playerElement, () => appStore.videoMuted, (muted) => appStore.setVideoMuted(muted));
 const isPaused = ref(false);
 const isUsingOriginalFallback = ref(false);
@@ -166,6 +187,7 @@ let removePlayerEventListeners: (() => void) | null = null;
 let autoplayRetryAttempts = 0;
 let autoplayRetryTimer = 0;
 
+const REEL_LOADING_SPINNER_DELAY_MS = 650;
 const AUTOPLAY_RETRY_DELAY_MS = 140;
 const MAX_AUTOPLAY_RETRIES = 3;
 
@@ -207,6 +229,7 @@ function syncMuted(player: MediaPlayerElement, muted: boolean) {
 }
 
 async function syncPlayback() {
+  if (streaming.source.value) return;
   const player = playerElement.value;
   if (!player) {
     return;
@@ -251,7 +274,7 @@ function bindPlayerEventListeners(player: MediaPlayerElement | null) {
   }
 
   const handleReady = () => {
-    void syncPlayback();
+    if (!props.item.videoPlaybackUrl) void syncPlayback();
   };
   const handlePlay = () => {
     isPaused.value = false;
@@ -294,7 +317,8 @@ async function toggleSound() {
   syncMuted(player, nextMuted);
 
   if (player.paused) {
-    await syncPlayback();
+    if (streaming.source.value) await streaming.play();
+    else await syncPlayback();
   }
 }
 
@@ -309,7 +333,8 @@ async function handleSurfaceClick(event?: MouseEvent) {
   }
 
   if (player.paused) {
-    await syncPlayback();
+    if (streaming.source.value) await streaming.play();
+    else await syncPlayback();
     return;
   }
 
@@ -402,8 +427,6 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .reel-player-card {
-  --reel-stage-gap: 0.75rem;
-  --reel-stage-inline-gap: 1.25rem;
   --reel-stage-max-width: 24.4rem;
   --reel-stage-max-height: calc(var(--reel-stage-max-width) * 16 / 9);
   display: grid;
@@ -411,7 +434,7 @@ onBeforeUnmount(() => {
   box-sizing: border-box;
   width: 100%;
   height: 100%;
-  padding: calc(var(--reel-stage-gap) / 2) 0;
+  padding: calc(var(--reel-stage-gap, 0.75rem) / 2) 0;
 }
 
 .reel-player-card__stage {
@@ -420,11 +443,11 @@ onBeforeUnmount(() => {
   align-self: center;
   width: min(100%, var(--reels-desktop-stage-width, var(--reel-stage-max-width)));
   height: min(
-    calc(100% - var(--reel-stage-gap)),
+    calc(100% - var(--reel-stage-gap, 0.75rem)),
     var(--reels-desktop-stage-height, var(--reel-stage-max-height))
   );
   max-height: 100%;
-  max-width: calc(100% - var(--reel-stage-inline-gap));
+  max-width: calc(100% - var(--reel-stage-inline-gap, 1.25rem));
   aspect-ratio: 9 / 16;
   overflow: hidden;
   border-radius: 0.6rem;
@@ -497,6 +520,11 @@ onBeforeUnmount(() => {
   pointer-events: none;
 }
 
+.reel-player-card--external-metadata .reel-player-card__bottom-fade {
+  height: 14%;
+  background: linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.38));
+}
+
 .reel-player-card__overlay {
   position: absolute;
   inset-inline: 0;
@@ -523,6 +551,7 @@ onBeforeUnmount(() => {
 
 .reel-player-card__controls {
   position: relative;
+  margin-inline-start: auto;
   z-index: 2;
   display: inline-flex;
   align-items: flex-end;

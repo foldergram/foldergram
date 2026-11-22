@@ -13,6 +13,7 @@ import {
   AVIF_METADATA_REPAIR_VERSION_SETTING_KEY,
   CAROUSELS_APPLIED_MODE_SETTING_KEY,
   EXCLUDED_FOLDERS_SETTING_KEY,
+  HEIC_CONTENT_REPAIR_VERSION_SETTING_KEY,
   LAST_SUCCESSFUL_GALLERY_ROOT_SETTING_KEY,
   LIBRARY_REBUILD_REQUIRED_SETTING_KEY,
   PREVIOUS_GALLERY_ROOT_SETTING_KEY,
@@ -27,7 +28,6 @@ import {
 } from '../sources/local-source.js';
 import {
   appSettingsRepository,
-  createSharedPreviewRequirementLookup,
   folderRepository,
   folderScanStateRepository,
   imageRepository,
@@ -58,7 +58,11 @@ import {
   getMediaTypeFromExtension,
   getMimeTypeFromExtension,
   getStableSortTimestamp,
+  hasHeicContent,
+  HEIC_CONTENT_CHECK_EXTENSIONS,
   isHeicFile,
+  isHeicImage,
+  isHeicMimeType,
   isSupportedMediaFile
 } from '../utils/image-utils.js';
 import { generateAssetKey, getPreviewPathForAssetKey, getThumbnailPathForAssetKey } from '../utils/derivative-paths.js';
@@ -119,6 +123,8 @@ interface ScanSummary {
 interface DerivativeJob {
   sourceId?: number;
   inspectedHeicMetadata?: MediaMetadata;
+  /** HEIC by extension or by content; unset means decide by extension. */
+  heic?: boolean;
   absolutePath: string;
   relativePath: string;
   folderId: number;
@@ -127,6 +133,10 @@ interface DerivativeJob {
   force: boolean;
   kind: 'all' | 'thumbnail';
   videoPlaybackSource?: VideoPlaybackSource | null;
+}
+
+function isHeicJob(job: DerivativeJob): boolean {
+  return job.heic ?? isHeicFile(job.relativePath);
 }
 
 interface ProcessedFileSummary {
@@ -239,6 +249,7 @@ interface ImageProcessingContext {
   galleryRootChanged: boolean;
   hasStoredGalleryRoot: boolean;
   avifMetadataRepairPending: boolean;
+  heicContentRepairPending: boolean;
   moveReconciliationEnabled: boolean;
   claimedMoveImageIds: Set<number>;
   rebuildDerivativeReuseIndex?: RebuildDerivativeReuseIndex;
@@ -320,16 +331,15 @@ function isDiscoverableMediaFile(
   relativePath: string,
   context: Pick<ImageProcessingContext, 'source' | 'heicImportEnabled' | 'rebuildDerivativeReuseIndex'>
 ): boolean {
-  return isSupportedMediaFile(relativePath, context.heicImportEnabled)
-    || (isHeicFile(relativePath) && (
-      context.rebuildDerivativeReuseIndex?.byRelativePath.has(relativePath)
-      || imageRepository.getByRelativePath(relativePath, context.source.id) !== undefined
-    ));
+  // Discover disabled HEIC files so existing photos can still be reconciled
+  // after a move. processImageFile rejects truly new imports.
+  return isSupportedMediaFile(relativePath, context.heicImportEnabled) || isHeicFile(relativePath);
 }
 const HEARTBEAT_INTERVAL_MS = 5000;
 const DERIVATIVE_CACHE_KEEP_FILE = '.gitkeep';
 const ROOT_DISCOVERY_LABEL = '(root)';
 const CURRENT_AVIF_METADATA_REPAIR_VERSION = '1';
+const CURRENT_HEIC_CONTENT_REPAIR_VERSION = '1';
 const MAX_SCAN_ERROR_TEXT_LENGTH = 8000;
 const MAX_SCAN_ERROR_LINE_LENGTH = 2000;
 export const LIBRARY_REBUILD_REQUIRED_MESSAGE =
@@ -1212,6 +1222,10 @@ class ScannerService {
     appSettingsRepository.set(AVIF_METADATA_REPAIR_VERSION_SETTING_KEY, CURRENT_AVIF_METADATA_REPAIR_VERSION);
   }
 
+  private heicContentRepairKey(sourceId: number): string {
+    return `${HEIC_CONTENT_REPAIR_VERSION_SETTING_KEY}.${sourceId}`;
+  }
+
   private async resetDerivativeDirectory(targetDirectory: string): Promise<void> {
     await fs.mkdir(targetDirectory, { recursive: true });
     const entries = await fs.readdir(targetDirectory, { withFileTypes: true });
@@ -1247,7 +1261,7 @@ class ScannerService {
   private async walkMediaSourceFolders(
     context: ImageProcessingContext,
     currentAbsolutePath: string,
-    onSourceFolder: (sourceFolder: SourceFolderCandidate) => Promise<void>,
+    onSourceFolder: (sourceFolder: SourceFolderCandidate) => Promise<boolean>,
     currentRelativePath: string | null = null,
     treatStoriesAsFolders = this.shouldTreatStoriesAsFolders(),
     treatCarouselsAsFolders = this.shouldTreatCarouselsAsFolders(),
@@ -1314,7 +1328,8 @@ class ScannerService {
         discoveredFolders: this.progress.discoveredFolders + 1,
         currentFolder: normalizedRelativePath
       });
-      await onSourceFolder({
+      // Skipped imports must not establish ownership of the stories directory.
+      hasDirectImages = await onSourceFolder({
         absolutePath: currentAbsolutePath,
         relativePath: normalizedRelativePath
       });
@@ -2189,6 +2204,10 @@ class ScannerService {
     const needsAvifMetadataRepair = context.avifMetadataRepairPending && discoveredFiles.some(
       (file) => path.extname(file.relativePath).toLowerCase() === '.avif'
     );
+    const needsHeicContentRepair = context.heicContentRepairPending && discoveredFiles.some(
+      (file) => HEIC_CONTENT_CHECK_EXTENSIONS.has(path.extname(file.relativePath).toLowerCase())
+        && imageRepository.getByRelativePath(file.relativePath, context.source.id) !== undefined
+    );
     const hasMatchingIndexedFiles =
       discoveredFiles.length > 0 &&
       hasCompleteTakenAtMetadata &&
@@ -2202,6 +2221,7 @@ class ScannerService {
     if (
       !folderHadErrors &&
       !needsAvifMetadataRepair &&
+      !needsHeicContentRepair &&
       shouldSkipFolderBySignature({
         currentSignature: folderSignature.signature,
         galleryRootChanged: context.galleryRootChanged,
@@ -2235,6 +2255,9 @@ class ScannerService {
     const scanFile = async (file: IndexedFileCandidate) => {
       try {
         const result = await this.processImageFile(folder, file, options, context);
+        if (!result) {
+          return;
+        }
 
         if (result.status === 'new') {
           newFiles += 1;
@@ -2303,7 +2326,8 @@ class ScannerService {
     return {
       folder,
       sourceFolderPath: normalizedFolderPath,
-      discoveredDirectImages: true,
+      // Preserve ownership on media errors, but not for intentionally skipped imports.
+      discoveredDirectImages: folderHadErrors || newFiles + updatedFiles + unchangedFiles > 0,
       wroteFolder: resolvedFolder.wroteFolder,
       scannedFiles: scannedFileCount,
       newFiles,
@@ -2391,6 +2415,7 @@ class ScannerService {
       );
       const derivativeJobs: DerivativeJob[] = indexedImages.map((image) => ({
         sourceId: image.source_id,
+        heic: isHeicImage(image),
         absolutePath: resolveOriginalPath(image.relative_path, image.source_id, true),
         relativePath: image.relative_path,
         folderId: image.folder_id,
@@ -2483,6 +2508,7 @@ class ScannerService {
     const hasStoredGalleryRoot = storedGalleryRoot !== null;
     const galleryRootChanged = isPrimary && storedGalleryRoot !== currentGalleryRoot;
     const avifMetadataRepairPending = isPrimary && this.isAvifMetadataRepairPending();
+    const heicContentRepairPending = appSettingsRepository.get(this.heicContentRepairKey(source.id)) !== CURRENT_HEIC_CONTENT_REPAIR_VERSION;
     let checkedRoot: string;
     try {
       if (isPrimary && currentGalleryRoot !== normalizePath(appConfig.galleryRoot)) {
@@ -2516,6 +2542,7 @@ class ScannerService {
       galleryRootChanged,
       hasStoredGalleryRoot,
       avifMetadataRepairPending,
+      heicContentRepairPending,
       moveReconciliationEnabled: false,
       claimedMoveImageIds: new Set<number>(),
       rebuildDerivativeReuseIndex: contextOptions.rebuildDerivativeReuseIndex
@@ -2539,6 +2566,7 @@ class ScannerService {
         formatStep('root-changed', formatToggle(galleryRootChanged)),
         formatStep('stored-root', formatToggle(hasStoredGalleryRoot)),
         formatStep('avif-repair', formatToggle(avifMetadataRepairPending)),
+        formatStep('heic-content-repair', formatToggle(heicContentRepairPending)),
         formatStep('media-errors', appConfig.scanMediaErrorMode),
         formatStep('stories-as-folders', formatToggle(treatStoriesAsFolders)),
         formatStep('carousels-as-folders', formatToggle(treatCarouselsAsFolders)),
@@ -2768,6 +2796,7 @@ class ScannerService {
           processedFolders: this.progress.processedFolders + 1
         });
         this.logProgress('folder');
+        return result.discoveredDirectImages;
       }, null, treatStoriesAsFolders, treatCarouselsAsFolders, excludedFolderRules, (excluded, exact) => {
         if (indexedFolderPaths.has(excluded) || (!exact && [...indexedFolderPaths].some(folderPath => folderPath.startsWith(excluded + '/')))) {
           imageProcessingContext.intentionalExclusion = true;
@@ -2815,12 +2844,6 @@ class ScannerService {
 
       // Cleanup operates on a fully discovered source and runs to completion.
       await operation?.sealControls();
-      if (options.repairUnchangedDerivatives && summary.status !== 'failed' && derivativeMigrationService.isMigrationComplete()) {
-        const reclaimedPreviews = await this.reclaimObsoleteVideoPreviews(errors, source.id);
-        if (reclaimedPreviews > 0) {
-          log.table('Obsolete video previews reclaimed', [['Files', reclaimedPreviews]], 'success');
-        }
-      }
 
       if (isPrimary && summary.status !== 'failed' && !errors.hasErrors && derivativeMigrationService.isMigrationComplete()) {
         await derivativeMigrationService.cleanupStaleDerivatives();
@@ -2856,6 +2879,9 @@ class ScannerService {
 
     if (summary.status === 'completed' && avifMetadataRepairPending) {
       this.markAvifMetadataRepairComplete();
+    }
+    if (summary.status === 'completed' && heicContentRepairPending) {
+      appSettingsRepository.set(this.heicContentRepairKey(source.id), CURRENT_HEIC_CONTENT_REPAIR_VERSION);
     }
 
     if (summary.status === 'completed' && eager) appSettingsRepository.remove(repairKey);
@@ -2976,6 +3002,7 @@ class ScannerService {
         galleryRootChanged: false,
         hasStoredGalleryRoot: appSettingsRepository.get(LAST_SUCCESSFUL_GALLERY_ROOT_SETTING_KEY) !== null,
         avifMetadataRepairPending: false,
+        heicContentRepairPending: false,
         moveReconciliationEnabled: false,
         claimedMoveImageIds: new Set<number>()
       };
@@ -3092,109 +3119,6 @@ class ScannerService {
     });
   }
 
-  private async reclaimObsoleteVideoPreviews(errors: ScanErrorCollector, sourceId: number): Promise<number> {
-    const getSharedPreviewFolderIds = createSharedPreviewRequirementLookup();
-    const sharedPreviewFolderIds = getSharedPreviewFolderIds();
-    const previewReferenceCounts = new Map<string, number>();
-    for (const reference of imageRepository.listDerivativeReferences()) {
-      if (!reference.preview_path) {
-        continue;
-      }
-
-      previewReferenceCounts.set(
-        reference.preview_path,
-        (previewReferenceCounts.get(reference.preview_path) ?? 0) + 1
-      );
-    }
-
-    let reclaimed = 0;
-    for (const image of imageRepository.listActive(sourceId)) {
-      if (image.media_type !== 'video' || !image.preview_path) {
-        continue;
-      }
-
-      const playbackSource = resolveVideoPlaybackSource({
-        mediaType: image.media_type,
-        extension: image.extension || path.extname(image.relative_path),
-        fileSize: image.file_size,
-        width: image.width,
-        height: image.height,
-        playbackStrategy: image.playback_strategy
-      });
-      if (playbackSource !== 'original' || sharedPreviewFolderIds.has(image.folder_id)) {
-        continue;
-      }
-
-      if ((previewReferenceCounts.get(image.preview_path) ?? 0) !== 1) {
-        continue;
-      }
-
-      let sourcePath: string;
-      try {
-        sourcePath = resolveOriginalPath(image.relative_path, image.source_id, true);
-      } catch {
-        continue;
-      }
-
-      try {
-        const sourceStats = await fs.stat(sourcePath);
-        const currentFingerprint = createFingerprint(image.relative_path, sourceStats.size, sourceStats.mtimeMs);
-        if (!sourceStats.isFile() || currentFingerprint !== image.checksum_or_fingerprint) {
-          continue;
-        }
-      } catch {
-        continue;
-      }
-
-      let previewAbsolutePath: string;
-      try {
-        previewAbsolutePath = safeJoin(appConfig.previewsDir, image.preview_path);
-      } catch {
-        continue;
-      }
-
-      try {
-        // Share settings can change while the source stat is pending. Nothing
-        // yields between this live check and submitting the removal.
-        if (getSharedPreviewFolderIds().has(image.folder_id)) {
-          continue;
-        }
-        await fs.unlink(previewAbsolutePath);
-        reclaimed += 1;
-        log.info(joinLogParts([
-          'Obsolete video preview removed',
-          formatStep('file', image.relative_path),
-          formatStep('preview', image.preview_path)
-        ]));
-      } catch (error) {
-        const filesystemError = error as NodeJS.ErrnoException;
-        if (filesystemError.code === 'ENOENT') {
-          continue;
-        }
-
-        const message = error instanceof Error ? error.message : String(error);
-        const detail = formatScanError(
-          image.relative_path,
-          `Unable to remove obsolete video preview: ${message}`,
-          { sourcePath: previewAbsolutePath }
-        );
-        await errors.add(detail);
-        log.error(joinLogParts([
-          'Failed to remove obsolete video preview',
-          formatStep('file', image.relative_path),
-          formatStep('preview', image.preview_path),
-          message
-        ]));
-
-        if (appConfig.scanMediaErrorMode === 'fail') {
-          throw new Error(detail);
-        }
-      }
-    }
-
-    return reclaimed;
-  }
-
   private async processDerivativeJobs(
     jobs: DerivativeJob[],
     errors: ScanErrorCollector,
@@ -3250,10 +3174,10 @@ class ScannerService {
           currentFolder: getSourceFolderPathFromRelativePath(job.relativePath)
         });
 
-        const indexedHeic = isHeicFile(job.relativePath)
+        const indexedHeic = isHeicJob(job)
           ? imageRepository.getByRelativePath(job.relativePath, job.sourceId)
           : undefined;
-        if (isHeicFile(job.relativePath) && !indexedHeic) {
+        if (isHeicJob(job) && !indexedHeic) {
           throw new HeicError('stale', 'The indexed HEIC image is no longer available.');
         }
         const heicSource = indexedHeic
@@ -3318,14 +3242,14 @@ class ScannerService {
 
     if (appConfig.scanMediaErrorMode === 'fail') {
       for (const job of jobs) {
-        await this.scanTask(() => isHeicFile(job.relativePath)
+        await this.scanTask(() => isHeicJob(job)
           ? processJob(job)
           : derivativeWorkLimit(() => processJob(job)));
       }
     } else {
       const regularJobs: DerivativeJob[] = [];
       const heicJobs: DerivativeJob[] = [];
-      for (const job of jobs) (isHeicFile(job.relativePath) ? heicJobs : regularJobs).push(job);
+      for (const job of jobs) (isHeicJob(job) ? heicJobs : regularJobs).push(job);
 
       // Pull one job per runner. An entire scan in the shared limiter would
       // make HEIC admission and on-demand work wait behind the scan backlog.
@@ -3552,7 +3476,7 @@ class ScannerService {
     file: IndexedFileCandidate,
     options: FullScanOptions,
     context: ImageProcessingContext
-  ): Promise<ProcessedFileSummary> {
+  ): Promise<ProcessedFileSummary | null> {
     const companionMetadata = file.metadataFilePath
       ? await readCompanionMetadata(file.metadataFilePath)
       : null;
@@ -3561,19 +3485,40 @@ class ScannerService {
     const fingerprint = createFingerprint(file.relativePath, file.stats.size, file.stats.mtimeMs);
     const extension = path.extname(file.absolutePath).toLowerCase();
     const mediaType = getMediaTypeFromExtension(extension);
-    const localHeic = isHeicFile(file.relativePath);
+    const existingByPath = imageRepository.getByRelativePath(file.relativePath, context.source.id);
+    // Recheck unchanged JPEG-extension rows once after upgrading, as older
+    // scans could have saved actual HEIC files under image/jpeg.
+    const contentHeic = HEIC_CONTENT_CHECK_EXTENSIONS.has(extension) && (
+      existingByPath?.checksum_or_fingerprint === fingerprint && !context.heicContentRepairPending
+        ? isHeicMimeType(existingByPath.mime_type)
+        : await hasHeicContent(file.absolutePath)
+    );
+    const moveCandidate = existingByPath ? undefined : await this.findMoveCandidate(file, extension, context);
+    const rebuildDerivativeReuseCandidate = existingByPath || moveCandidate
+      ? undefined
+      : this.findRebuildDerivativeReuseCandidate(file, extension, context);
+    if (
+      (contentHeic || isHeicFile(file.relativePath))
+      && !context.heicImportEnabled
+      && !existingByPath
+      && !moveCandidate
+      && !rebuildDerivativeReuseCandidate
+    ) {
+      // Same rule as discovery applies to `.heic` files: with HEIC imports off,
+      // new HEIC files are not indexed, and indexed ones stay available.
+      return null;
+    }
+    const localHeic = isHeicFile(file.relativePath) || contentHeic;
+    const mimeType = contentHeic ? 'image/heic' : getMimeTypeFromExtension(extension);
     const metadataOptions = {
       fileSize: file.stats.size,
       ...(localHeic ? {
         heicSource: heicScanSource(context.source, context.root, file.relativePath, file.absolutePath, fingerprint)
       } : {})
     };
-    const existingByPath = imageRepository.getByRelativePath(file.relativePath, context.source.id);
-    const moveCandidate = existingByPath ? undefined : await this.findMoveCandidate(file, extension, context);
-    const rebuildDerivativeReuseCandidate = existingByPath || moveCandidate
-      ? undefined
-      : this.findRebuildDerivativeReuseCandidate(file, extension, context);
     const existing = existingByPath ?? moveCandidate ?? rebuildDerivativeReuseCandidate;
+    const streamingVideo = mediaType === 'video' &&
+      ((existingByPath ?? moveCandidate)?.video_delivery_policy ?? appConfig.videoDeliveryMode) === 'streaming';
     const canReuseDerivativeFiles = Boolean(moveCandidate) ||
       (rebuildDerivativeReuseCandidate
         ? this.hasReusableDerivativeSignature(rebuildDerivativeReuseCandidate, file, extension)
@@ -3593,7 +3538,8 @@ class ScannerService {
       && extension === '.avif'
       && existingByPath !== undefined;
 
-    if (existingByPath && existingByPath.checksum_or_fingerprint === fingerprint) {
+    const needsHeicContentRepair = existingByPath && contentHeic && !isHeicMimeType(existingByPath.mime_type);
+    if (existingByPath && existingByPath.checksum_or_fingerprint === fingerprint && !needsHeicContentRepair) {
       const refreshedIndexedRow = shouldRefreshUnchangedImage({
         absolutePathChanged,
         galleryRootChanged: context.galleryRootChanged,
@@ -3609,6 +3555,7 @@ class ScannerService {
       let metadataPlaybackStrategy = existingByPath.playback_strategy ?? 'preview';
       let metadataIsAnimated = existingByPath.is_animated === 1;
       let metadataExifJson = existingByPath.exif_json;
+      let videoMetadataJson: string | null = null;
 
       if (
         needsTakenAtBackfill
@@ -3626,6 +3573,7 @@ class ScannerService {
         metadataHeight = metadata.height;
         metadataDisplayOrientation = mediaType === 'image' ? (metadata.displayOrientation ?? 1) : null;
         metadataPlaybackStrategy = metadata.playbackStrategy;
+        videoMetadataJson = metadata.localVideoMetadata ? JSON.stringify(metadata.localVideoMetadata) : null;
         metadataIsAnimated = metadata.isAnimated;
         metadataExifJson = mediaType === 'image'
           ? serializeImageExifData(metadata.exif ?? null, {
@@ -3711,7 +3659,7 @@ class ScannerService {
           height: metadataHeight,
           displayOrientation: metadataDisplayOrientation,
           mediaType,
-          mimeType: getMimeTypeFromExtension(extension),
+          mimeType,
           durationMs: metadataDurationMs,
           isAnimated: metadataIsAnimated,
           fingerprint,
@@ -3723,7 +3671,8 @@ class ScannerService {
           exifJson: mediaType === 'image' ? (metadataExifJson ?? '{}') : null,
           thumbnailPath,
           previewPath,
-          playbackStrategy: metadataPlaybackStrategy
+          playbackStrategy: metadataPlaybackStrategy,
+          videoMetadataJson
         });
         placeResolutionService.resolveImage(image);
       } else if (existingByPath.place_id === null) {
@@ -3736,13 +3685,14 @@ class ScannerService {
           ? (shouldQueueDerivativeJobForStatus('unchanged', options) || needsPlaybackStrategyBackfill
             ? {
                 sourceId: context.source.id,
+                heic: localHeic,
                 absolutePath: file.absolutePath,
                 relativePath: file.relativePath,
                 folderId: folder.id,
                 thumbnailPath,
                 previewPath,
                 force: false,
-                kind: 'all',
+                kind: streamingVideo ? 'thumbnail' : 'all',
                 videoPlaybackSource
               }
             : null)
@@ -3818,13 +3768,14 @@ class ScannerService {
       } else if (appConfig.derivativeMode !== 'lazy') {
         await Promise.all([
           fs.rm(safeJoin(appConfig.thumbnailsDir, thumbnailPath), { force: true }),
-          fs.rm(safeJoin(appConfig.previewsDir, previewPath), { force: true })
+          streamingVideo ? undefined : fs.rm(safeJoin(appConfig.previewsDir, previewPath), { force: true })
         ]);
-      } else if (mediaType === 'video') {
+      } else if (mediaType === 'video' && !streamingVideo) {
         await fs.rm(safeJoin(appConfig.previewsDir, previewPath), { force: true });
       }
     }
 
+    const videoMetadataJson = metadata.localVideoMetadata ? JSON.stringify(metadata.localVideoMetadata) : null;
     if (moveCandidate) {
       const image = imageRepository.reconcileMove({
         id: moveCandidate.id,
@@ -3838,7 +3789,7 @@ class ScannerService {
         height: metadata.height,
         displayOrientation: mediaType === 'image' ? (metadata.displayOrientation ?? 1) : null,
         mediaType,
-        mimeType: getMimeTypeFromExtension(extension),
+        mimeType,
         durationMs: metadata.durationMs,
         isAnimated: metadata.isAnimated,
         fingerprint,
@@ -3848,7 +3799,8 @@ class ScannerService {
         caption: companionCaption ?? null,
         sortTimestamp,
         exifJson,
-        playbackStrategy: metadata.playbackStrategy
+        playbackStrategy: metadata.playbackStrategy,
+        videoMetadataJson
       });
       placeResolutionService.resolveImage(image);
     } else {
@@ -3864,7 +3816,7 @@ class ScannerService {
         height: metadata.height,
         displayOrientation: mediaType === 'image' ? (metadata.displayOrientation ?? 1) : null,
         mediaType,
-        mimeType: getMimeTypeFromExtension(extension),
+        mimeType,
         durationMs: metadata.durationMs,
         isAnimated: metadata.isAnimated,
         fingerprint,
@@ -3877,7 +3829,8 @@ class ScannerService {
         exifJson,
         thumbnailPath,
         previewPath,
-        playbackStrategy: metadata.playbackStrategy
+        playbackStrategy: metadata.playbackStrategy,
+        videoMetadataJson
       });
       placeResolutionService.resolveImage(image);
     }
@@ -3888,6 +3841,7 @@ class ScannerService {
         ? null
         : {
             sourceId: context.source.id,
+            heic: localHeic,
             inspectedHeicMetadata: localHeic ? metadata : undefined,
             absolutePath: file.absolutePath,
             relativePath: file.relativePath,
@@ -3895,7 +3849,7 @@ class ScannerService {
             thumbnailPath,
             previewPath,
             force: existing ? !canReuseDerivativeFiles : options.forceNewFileDerivatives,
-            kind: 'all',
+            kind: streamingVideo ? 'thumbnail' : 'all',
             videoPlaybackSource
           },
       refreshedIndexedRow: false,

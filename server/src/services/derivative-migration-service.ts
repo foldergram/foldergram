@@ -10,7 +10,7 @@ import {
 import { appConfig } from '../config/env.js';
 import { appSettingsRepository, imageRepository, listFolderIdsRequiringSharedPreviews } from '../db/repositories.js';
 import type { ImageRecord } from '../types/models.js';
-import { getMediaTypeFromExtension, getPreviewRelativePath, getThumbnailRelativePath, isHeicFile } from '../utils/image-utils.js';
+import { getMediaTypeFromExtension, getPreviewRelativePath, getThumbnailRelativePath, isHeicImage } from '../utils/image-utils.js';
 import { resolveOriginalPath } from '../utils/media-paths.js';
 import {
   DERIVATIVE_STORAGE_LAYOUT_VERSION,
@@ -472,7 +472,7 @@ class DerivativeMigrationService {
     }
 
     const mediaType = row.media_type ?? getMediaTypeFromExtension(row.extension || path.extname(row.relative_path));
-    const isHeic = isHeicFile(row.relative_path);
+    const isHeic = isHeicImage(row);
     const nextThumbnailPath = isHeic ? row.thumbnail_path : getThumbnailPathForAssetKey(assetKey);
     const nextPreviewPath = isHeic ? row.preview_path : getPreviewPathForAssetKey(assetKey, mediaType);
 
@@ -609,7 +609,7 @@ class DerivativeMigrationService {
     }
 
     const mediaType = row.media_type ?? getMediaTypeFromExtension(row.extension || path.extname(row.relative_path));
-    const isHeic = isHeicFile(row.relative_path);
+    const isHeic = isHeicImage(row);
     const targetThumbnailPath = isHeic ? row.thumbnail_path : getThumbnailPathForAssetKey(assetKey);
     const targetPreviewPath = isHeic ? row.preview_path : getPreviewPathForAssetKey(assetKey, mediaType);
 
@@ -723,7 +723,8 @@ class DerivativeMigrationService {
       fileSize: row.file_size,
       width: row.width,
       height: row.height,
-      playbackStrategy: row.playback_strategy
+      playbackStrategy: row.playback_strategy,
+      videoDeliveryPolicy: row.video_delivery_policy
     }, sharedPreviewFolderIds.has(row.folder_id) ? 'share' : 'normal');
   }
 

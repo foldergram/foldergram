@@ -1,5 +1,5 @@
 <template>
-  <article class="bg-transparent">
+  <article ref="feedCardElement" class="bg-transparent">
     <div class="feed-card__header flex items-center justify-between gap-4 px-4 py-[0.8rem]">
       <div class="feed-card__folder flex items-center gap-[0.72rem] min-w-0">
         <button
@@ -59,8 +59,10 @@
       v-if="isCarousel"
       v-model="carouselIndex"
       class="rounded-[0.5rem] border border-border"
+      :style="mediaFrameStyle(mediaAspectRatio, true)"
       :items="item.mediaItems!"
       :prefer-preview="isHomeContext"
+      stream-on-play
       :retry-while="appStore.isScanning"
       :loading="isHomeContext ? 'eager' : 'lazy'"
       :muted="appStore.videoMuted"
@@ -95,7 +97,7 @@
     <div
       v-else-if="item.mediaType === 'image'"
       class="relative block overflow-hidden rounded-[0.5rem] border border-border bg-surface-alt select-none"
-      :style="{ aspectRatio: mediaAspectRatio, touchAction: 'manipulation' }"
+      :style="{ ...mediaFrameStyle(mediaAspectRatio), touchAction: 'manipulation' }"
       @click="handleHomeImageClick"
     >
       <ResilientImage
@@ -115,8 +117,8 @@
       v-else
       ref="homeVideoTarget"
       class="feed-card__video-shell relative block overflow-hidden rounded-[0.5rem] border border-border bg-surface-alt"
-      :class="{ 'feed-card__video-shell--interactive': showHomeVideoSurfaceControls }"
-      :style="{ aspectRatio: homeVideoAspectRatio }"
+      :class="{ 'feed-card__video-shell--interactive': showHomeVideoSurfaceControls, 'feed-card__video-shell--fit': fitTallMedia }"
+      :style="mediaFrameStyle(homeVideoAspectRatio, true)"
       :aria-label="showHomeVideoSurfaceControls ? t('post.viewer.togglePlayback') : undefined"
       :role="showHomeVideoSurfaceControls ? 'button' : undefined"
       :tabindex="showHomeVideoSurfaceControls ? 0 : -1"
@@ -126,7 +128,7 @@
       <media-player
         ref="homePlayerElement"
         class="feed-card__player"
-        :src.prop="homeVideoSource"
+        :src.prop="streaming.source.value ?? homeVideoSource"
         :title.prop="item.filename"
         :fullscreenOrientation.prop="'none'"
         :playsInline.prop="true"
@@ -140,8 +142,17 @@
         @media-unmute-request="appStore.setVideoMuted(false)"
         @media-volume-change-request="appStore.setVideoMuted($event.detail === 0)"
       >
-        <media-provider />
+        <media-provider :loaders.prop="streaming.loaders" />
+        <LocalVideoFeedback
+          v-if="streaming.source.value"
+          :poster="item.thumbnailUrl"
+          :cover-fit="fitTallMedia || isHomeVideoFullscreen ? 'contain' : 'cover'"
+          :active="showHomeVideoControls"
+          :state="streaming.state.value"
+          @retry="streaming.play"
+        />
         <media-poster
+          v-else
           :src.prop="item.thumbnailUrl"
           :alt.prop="item.filename"
         />
@@ -200,7 +211,7 @@
         </VideoProgressFooter>
       </media-player>
       <div
-        v-if="showHomeVideoPausedIndicator"
+        v-if="showHomeVideoPausedIndicator && !streaming.state.value.pending && !streaming.state.value.failed"
         class="feed-card__pause-indicator"
         aria-hidden="true"
       >
@@ -455,14 +466,16 @@ import { resolveDisplayCaption } from '../utils/caption';
 import { formatFolderTitle } from '../utils/folder-titles';
 import { formatMediaDuration, formatVideoTimestamp } from '../utils/media';
 import { resolveFeedAspectRatio } from '../utils/media-layout';
-import { getOriginalMediaDownloadUrl, getOriginalMediaUrl, isHeicFilename } from '../utils/original-media';
+import { getOriginalMediaDownloadUrl, getOriginalMediaUrl, isHeicMedia } from '../utils/original-media';
 import { applyVideoMutePreference, createVideoMuteStorage } from '../utils/video-mute';
 import Avatar from './Avatar.vue';
 import CarouselMediaStage from './CarouselMediaStage.vue';
 import CollectionBookmark from './CollectionBookmark.vue';
 import ConfirmDialog from './ConfirmDialog.vue';
 import PostCaptionModal from './PostCaptionModal.vue';
+import LocalVideoFeedback from './LocalVideoFeedback.vue';
 import ResilientImage from './ResilientImage.vue';
+import { useLocalVideoPlayback } from '../composables/useLocalVideoPlayback';
 import VideoProgressFooter from './VideoProgressFooter.vue';
 
 interface HomeVideoVisibilityChange {
@@ -481,11 +494,14 @@ const props = withDefaults(
     hasAvatarStory?: boolean;
     context?: 'default' | 'home';
     isActiveVideo?: boolean;
+    nextVideoPlaybackUrl?: string;
+    fitTallMedia?: boolean;
   }>(),
   {
     hasAvatarStory: false,
     context: 'default',
-    isActiveVideo: false
+    isActiveVideo: false,
+    fitTallMedia: false
   }
 );
 
@@ -509,8 +525,16 @@ const confirmDeleteOpen = ref(false);
 const deleteOriginalFromDisk = ref(false);
 const deleteError = ref<string | null>(null);
 const isEditingCaption = ref(false);
+const feedCardElement = ref<HTMLElement | null>(null);
+const availableMediaWidth = ref(0);
 const homeVideoTarget = ref<HTMLElement | null>(null);
 const homePlayerElement = ref<MediaPlayerElement | null>(null);
+const streaming = useLocalVideoPlayback(() => props.item.videoPlaybackUrl, {
+  active: () => props.isActiveVideo,
+  autoplay: () => true,
+  next: () => props.nextVideoPlaybackUrl,
+  onAutoplayBlocked: () => { isHomeVideoPaused.value = true; }
+});
 useNativeVideoMuteSync(homePlayerElement, () => appStore.videoMuted, (muted) => appStore.setVideoMuted(muted));
 const loadedHomeVideoAspectRatio = ref<string | null>(null);
 const isHomeVideoPaused = ref(false);
@@ -522,7 +546,10 @@ const heartBurstEl = ref<HTMLElement | null>(null);
 const carouselIndex = ref(0);
 
 let homeImageTapResetTimer: ReturnType<typeof setTimeout> | null = null;
+let mediaFrameResizeObserver: ResizeObserver | null = null;
 let homeVideoObserver: IntersectionObserver | null = null;
+let homeVideoResizeObserver: ResizeObserver | null = null;
+let homeVideoMaximumRatio = 1;
 let removeHomePlayerEventListeners: (() => void) | null = null;
 const {
   saving: captionSaving,
@@ -558,6 +585,58 @@ const formattedDate = computed(() =>
 const formattedDuration = computed(() => formatMediaDuration(props.item.durationMs));
 const mediaAspectRatio = computed(() => resolveFeedAspectRatio(props.item.width, props.item.height));
 const homeVideoAspectRatio = computed(() => loadedHomeVideoAspectRatio.value ?? mediaAspectRatio.value);
+const viewportHeight = ref(typeof window === 'undefined' ? 800 : window.innerHeight);
+
+function mediaFrameStyle(aspectRatio: string, keepControlsWidth = false) {
+  if (!props.fitTallMedia || !isHomeContext.value || availableMediaWidth.value <= 0) {
+    return { aspectRatio };
+  }
+
+  const [widthRatio, heightRatio] = aspectRatio.split('/').map(value => Number(value.trim()));
+  const ratio = widthRatio > 0 && heightRatio > 0 ? widthRatio / heightRatio : 1;
+  const naturalHeight = availableMediaWidth.value / ratio;
+  const fitsViewport = naturalHeight <= viewportHeight.value;
+  // Fit the media itself. Leave images that already fit alone, regardless of caption height.
+  const mediaHeight = fitsViewport ? naturalHeight : Math.max(96, viewportHeight.value - 32);
+  if (keepControlsWidth) {
+    // Keep the controls full-width and give percentage-height media a definite frame.
+    return { aspectRatio, width: '100%', height: `${mediaHeight}px` };
+  }
+  if (fitsViewport) return { aspectRatio };
+  const width = Math.min(availableMediaWidth.value, mediaHeight * ratio);
+  return {
+    aspectRatio,
+    width: `${width}px`,
+    maxWidth: '100%',
+    marginInline: 'auto'
+  };
+}
+
+function updateViewportHeight() {
+  viewportHeight.value = window.innerHeight;
+  if (props.fitTallMedia && isHomeContext.value) {
+    availableMediaWidth.value = feedCardElement.value?.getBoundingClientRect().width ?? 0;
+  }
+}
+
+function observeMediaFrameWidth() {
+  mediaFrameResizeObserver?.disconnect();
+  mediaFrameResizeObserver = null;
+  const card = feedCardElement.value;
+  if (!card || !props.fitTallMedia || !isHomeContext.value) return;
+
+  // Measure the full card, so shrinking a photo never changes the available width.
+  availableMediaWidth.value = card.getBoundingClientRect().width;
+  if (typeof ResizeObserver !== 'undefined') {
+    mediaFrameResizeObserver = new ResizeObserver(([entry]) => {
+      if (entry) availableMediaWidth.value = entry.contentRect.width;
+    });
+    mediaFrameResizeObserver.observe(card);
+  }
+}
+
+watch([feedCardElement, isHomeContext, () => props.fitTallMedia], observeMediaFrameWidth, { flush: 'post' });
+
 const homeImageSrc = computed(() => (props.item.isAnimated ? props.item.previewUrl : props.item.thumbnailUrl));
 const activeMediaImageId = computed(() =>
   isCarousel.value
@@ -566,7 +645,7 @@ const activeMediaImageId = computed(() =>
 );
 const originalMediaUrl = computed(() => getOriginalMediaUrl(activeMediaImageId.value));
 const isActiveLocalHeic = computed(() => props.item.sourceKind !== 'immich'
-  && isHeicFilename(props.item.mediaItems?.find(media => media.imageId === activeMediaImageId.value)?.filename ?? props.item.filename));
+  && isHeicMedia(props.item.mediaItems?.find(media => media.imageId === activeMediaImageId.value) ?? { filename: props.item.filename }));
 const downloadOriginalMediaUrl = computed(() => getOriginalMediaDownloadUrl(activeMediaImageId.value));
 const homeVideoSource = computed<PlayerSrc>(() => ({
   src: props.item.previewUrl,
@@ -717,14 +796,55 @@ function syncHomeVideoTimelineState(player: MediaPlayerElement | null = homePlay
 }
 
 function stopHomeVideoObserver(options: { clearVisibility?: boolean } = {}) {
-  if (homeVideoObserver) {
-    homeVideoObserver.disconnect();
-    homeVideoObserver = null;
-  }
+  homeVideoObserver?.disconnect();
+  homeVideoObserver = null;
+  homeVideoResizeObserver?.disconnect();
+  homeVideoResizeObserver = null;
+  window.removeEventListener('resize', updateHomeVideoObserver);
 
   if (options.clearVisibility ?? true) {
     emitHomeVideoVisibility(0);
   }
+}
+
+function updateHomeVideoObserver() {
+  const target = homeVideoTarget.value;
+  if (!target) {
+    return;
+  }
+
+  const { width, height } = target.getBoundingClientRect();
+  const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
+  const viewportHeight = document.documentElement.clientHeight || window.innerHeight;
+  // Oversized videos can fill the viewport while showing very little of their total area.
+  const maximumRatio = width > 0 && height > 0
+    ? Math.min(width, viewportWidth) / width * (Math.min(height, viewportHeight) / height)
+    : 1;
+
+  if (homeVideoObserver && homeVideoMaximumRatio === maximumRatio) {
+    return;
+  }
+
+  homeVideoObserver?.disconnect();
+  homeVideoMaximumRatio = maximumRatio;
+  const observer = new IntersectionObserver(
+    (entries) => {
+      const entry = entries[0];
+      if (!entry || homeVideoObserver !== observer) {
+        return;
+      }
+
+      const centerOffset = Math.abs(entry.boundingClientRect.top + entry.boundingClientRect.height / 2 - window.innerHeight / 2);
+      const visibleRatio = entry.isIntersecting ? Math.min(1, entry.intersectionRatio / maximumRatio) : 0;
+      emitHomeVideoVisibility(visibleRatio, centerOffset);
+    },
+    {
+      threshold: HOME_VIDEO_OBSERVER_THRESHOLDS.map((threshold) => threshold * maximumRatio)
+    }
+  );
+
+  homeVideoObserver = observer;
+  observer.observe(target);
 }
 
 function startHomeVideoObserver() {
@@ -732,22 +852,12 @@ function startHomeVideoObserver() {
     return;
   }
 
-  homeVideoObserver = new IntersectionObserver(
-    (entries) => {
-      const entry = entries[0];
-      if (!entry) {
-        return;
-      }
-
-      const centerOffset = Math.abs(entry.boundingClientRect.top + entry.boundingClientRect.height / 2 - window.innerHeight / 2);
-      emitHomeVideoVisibility(entry.isIntersecting ? entry.intersectionRatio : 0, centerOffset);
-    },
-    {
-      threshold: HOME_VIDEO_OBSERVER_THRESHOLDS
-    }
-  );
-
-  homeVideoObserver.observe(homeVideoTarget.value);
+  updateHomeVideoObserver();
+  window.addEventListener('resize', updateHomeVideoObserver);
+  if (typeof ResizeObserver !== 'undefined') {
+    homeVideoResizeObserver = new ResizeObserver(updateHomeVideoObserver);
+    homeVideoResizeObserver.observe(homeVideoTarget.value);
+  }
 }
 
 function syncHomeVideoMuted(player: MediaPlayerElement, muted: boolean) {
@@ -755,7 +865,7 @@ function syncHomeVideoMuted(player: MediaPlayerElement, muted: boolean) {
 }
 
 async function syncHomeVideoPlayback() {
-  if (!isHomeContext.value || props.item.mediaType !== 'video') {
+  if (!isHomeContext.value || props.item.mediaType !== 'video' || streaming.source.value) {
     return;
   }
 
@@ -839,7 +949,8 @@ async function handleHomeVideoSurfaceClick(event: MouseEvent) {
   }
 
   if (player.paused) {
-    await syncHomeVideoPlayback();
+    if (streaming.source.value) await streaming.play();
+    else await syncHomeVideoPlayback();
     return;
   }
 
@@ -890,7 +1001,7 @@ function bindHomePlayerEventListeners(player: MediaPlayerElement | null) {
   const handleReady = () => {
     syncHomeVideoAspectRatio(player);
     syncHomeVideoTimelineState(player);
-    void syncHomeVideoPlayback();
+    if (!props.item.videoPlaybackUrl) void syncHomeVideoPlayback();
   };
   const handlePlay = () => {
     handleHomeVideoPlay();
@@ -1071,6 +1182,7 @@ watch(
 );
 
 onMounted(() => {
+  window.addEventListener('resize', updateViewportHeight);
   if (!isHomeVideoFullscreen.value) {
     startHomeVideoObserver();
   }
@@ -1078,6 +1190,9 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  window.removeEventListener('resize', updateViewportHeight);
+  mediaFrameResizeObserver?.disconnect();
+  mediaFrameResizeObserver = null;
   clearHomeImageTapResetTimer();
   stopHomeVideoObserver();
   isHomeVideoPaused.value = false;

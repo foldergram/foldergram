@@ -21,6 +21,7 @@ export const useAppearanceStore = defineStore('appearance', {
   state: () => ({
     theme: 'system' as InstanceTheme, accent: 'blue' as Accent,
     browserTheme: 'instance' as BrowserTheme,
+    browserSaveFailed: false,
     ready: false, loading: false, saving: false, error: '', revision: 0
   }),
   actions: {
@@ -39,8 +40,12 @@ export const useAppearanceStore = defineStore('appearance', {
         } else {
           window.localStorage.setItem(THEME_STORAGE_KEY, theme);
         }
-      } catch { /* Keep the selection for this page when storage is unavailable. */ }
+        this.browserSaveFailed = false;
+      } catch {
+        this.browserSaveFailed = true;
+      }
       this.render();
+      return !this.browserSaveFailed;
     },
     apply(value: Appearance) {
       this.revision += 1;
@@ -77,20 +82,29 @@ export const useAppearanceStore = defineStore('appearance', {
         this.loading = false;
       }
     },
-    async save(value: Appearance) {
-      if (!useAuthStore().canAccessSettings || this.saving || !this.ready) return false;
+    async save(value: Appearance | { theme: 'light' | 'dark' }) {
+      const replacesAppearance = 'accent' in value;
+      if (!useAuthStore().canWriteAppearance || this.saving || (replacesAppearance && !this.ready)) return false;
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), APPEARANCE_REQUEST_TIMEOUT_MS);
       this.revision += 1;
       this.saving = true;
       this.error = '';
       try {
         this.apply(await requestJson<Appearance>('/api/admin/settings/appearance', {
-          method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value)
+          method: replacesAppearance ? 'PUT' : 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(value),
+          signal: controller.signal
         }));
         return true;
       } catch {
         this.error = 'appearance.saveError';
         return false;
-      } finally { this.saving = false; }
+      } finally {
+        window.clearTimeout(timeout);
+        this.saving = false;
+      }
     }
   }
 });

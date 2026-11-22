@@ -23,6 +23,8 @@ test('sets up a local folder and keeps its cached media visible during an outage
   });
 
   await page.addInitScript(() => localStorage.setItem('foldergram-locale', 'en'));
+  await page.route('https://fonts.googleapis.com/**', route => route.abort());
+  await page.route('https://fonts.gstatic.com/**', route => route.abort());
   await page.route('**/api/**', async route => {
     const { pathname } = new URL(route.request().url());
     const method = route.request().method();

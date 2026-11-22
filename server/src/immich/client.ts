@@ -96,7 +96,15 @@ export class ImmichClient {
                 const status = response.statusCode ?? 502;
                 if (status !== 200 && status !== 201) {
                     response.resume();
-                    throw new ImmichError(status, status === 401 ? 'Invalid or revoked Immich API key. Update the API key.' : status === 403 ? `Missing Immich permission or account access for ${endpoint.split('?')[0]}. Check asset.read, album.read, asset.view and account ownership.` : status === 400 ? 'Incompatible Immich search API. This integration requires the v3.3.5 structured-filter and nextCursor contract.' : `Immich returned HTTP ${status}.`);
+                    const route = endpoint.split('?')[0];
+                    let message = `Immich returned HTTP ${status} for ${route}.`;
+                    if (status === 401)
+                        message = 'Invalid or revoked Immich API key. Update the API key.';
+                    else if (status === 403)
+                        message = `Missing Immich permission or account access for ${route}. Check the API key permissions and account access.`;
+                    else if (status === 400 && route === '/api/search/metadata')
+                        message = 'Immich rejected the structured metadata search at /api/search/metadata. Check the server version and search API compatibility.';
+                    throw new ImmichError(status, message);
                 }
                 const chunks: Buffer[] = [];
                 let size = 0;
@@ -130,7 +138,7 @@ export class ImmichClient {
                 filter: { ...filter, visibility: { eq: 'timeline' } }, orderBy: { field: 'fileCreatedAt', direction }, ...(cursor ? { cursor } : {}) });
             const parsed = z.object({ assets: z.object({ items: z.array(assetSchema), nextCursor: z.string().nullable() }) }).safeParse(result);
             if (!parsed.success)
-                throw new Error('Incompatible Immich asset search response: expected assets.items and assets.nextCursor (v3.3.5). Previous index retained.');
+                throw new Error('Incompatible response from /api/search/metadata. Expected valid assets.items and assets.nextCursor. Previous index retained.');
             for (const asset of parsed.data.assets.items)
                 if (!asset.isTrashed && (!asset.visibility || asset.visibility === 'timeline'))
                     yield asset;

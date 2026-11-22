@@ -1,34 +1,36 @@
 <template>
-  <label>
-    <span
-      class="h-[1.18rem] w-[1.18rem] shrink-0"
-      :class="app.theme === 'light' ? 'i-fluent-weather-sunny-20-regular' : 'i-fluent-weather-moon-20-regular'"
-      aria-hidden="true"
-    />
-    <span class="min-w-0">{{ t('nav.switchAppearance') }}</span>
+  <div class="grid gap-2">
+    <label :for="id" class="font-semibold">{{ t('displayPreferences.appearance.label') }}</label>
     <select
-      v-model="browserTheme"
-      class="ml-auto min-w-0 max-w-[55%] cursor-pointer rounded-md border border-border bg-surface px-2 py-1 text-sm text-text"
+      :id="id"
+      :value="appearance.browserTheme"
+      :autofocus="autofocus"
+      :aria-describedby="`${id}-help`"
+      class="w-full min-h-11 rounded-[0.75rem] border border-border bg-surface-alt px-3 text-text focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+      @change="changeTheme"
     >
-      <option value="instance">{{ t('appearance.instanceDefault') }}</option>
-      <option value="system">{{ t('appearance.system') }}</option>
-      <option value="light">{{ t('appearance.light') }}</option>
-      <option value="dark">{{ t('appearance.dark') }}</option>
+      <option v-for="theme in themes" :key="theme" :value="theme">
+        {{ theme === 'instance' ? t('displayPreferences.appearance.appDefault') : t('appearance.' + theme) }}
+      </option>
     </select>
-  </label>
+    <p :id="`${id}-help`" class="m-0 text-[0.85rem] text-muted">{{ t('displayPreferences.appearance.description') }}</p>
+  </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { useId } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { useAppStore } from '../stores/app';
 import { useAppearanceStore, type BrowserTheme } from '../stores/appearance';
 
+defineProps<{ autofocus?: boolean }>();
+const emit = defineEmits<{ changed: [saved: boolean] }>();
 const { t } = useI18n();
-const app = useAppStore();
+const id = useId();
 const appearance = useAppearanceStore();
-const browserTheme = computed({
-  get: () => appearance.browserTheme,
-  set: (theme: BrowserTheme) => appearance.setBrowserTheme(theme)
-});
+const themes: BrowserTheme[] = ['instance', 'system', 'light', 'dark'];
+
+function changeTheme(event: Event) {
+  const theme = (event.target as HTMLSelectElement).value as BrowserTheme;
+  if (themes.includes(theme)) emit('changed', appearance.setBrowserTheme(theme));
+}
 </script>

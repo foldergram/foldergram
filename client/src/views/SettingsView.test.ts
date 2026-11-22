@@ -84,6 +84,7 @@ function createAppStats(): AppStats {
     deletedImages: 0,
     thumbnailCount: 18,
     previewCount: 6,
+    videoDeliveryMode: 'streaming',
     excludedFolders: {
       envExcludedFolders: [],
       customExcludedFolders: [],

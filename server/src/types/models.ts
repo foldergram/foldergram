@@ -3,6 +3,36 @@ export type FolderImageOrder = 'newest' | 'oldest';
 export type NestedFolderTitleFormat = 'folder' | 'parent-plus-folder';
 export type TakenAtSource = 'exif' | 'mtime' | 'first_seen' | 'sort_timestamp' | 'metadata';
 export type PlaybackStrategy = 'preview' | 'original';
+export type LocalVideoDeliveryPolicy = 'legacy' | 'streaming' | 'previews';
+
+export interface LocalVideoMetadata {
+  version: 1 | 2;
+  container: string | null;
+  majorBrand: string | null;
+  durationMs: number | null;
+  fileSize: number | null;
+  bitrate: number | null;
+  displayWidth: number;
+  displayHeight: number;
+  rotation: number | null;
+  video: {
+    index: number | null;
+    codec: string | null;
+    profile: string | null;
+    level: number | null;
+    pixelFormat: string | null;
+    bitDepth: number | null;
+    sampleAspectRatio: string | null;
+    colorSpace: string | null;
+    colorTransfer: string | null;
+    colorPrimaries: string | null;
+  } | null;
+  audio: Array<{
+    index: number | null;
+    codec: string | null;
+    channels: number | null;
+  }>;
+}
 export type FolderAvatarSource = 'auto' | 'manual' | 'cover';
 export type FolderRole = 'normal' | 'story_root' | 'story_capsule' | 'carousel_source';
 export type FolderDirectorySort = 'recent-desc' | 'images-desc' | 'name-asc' | 'name-desc' | 'path-asc';
@@ -122,6 +152,8 @@ export interface ImageRecord {
   thumbnail_path: string;
   preview_path: string;
   playback_strategy: PlaybackStrategy | null;
+  video_delivery_policy: LocalVideoDeliveryPolicy | null;
+  video_metadata_json: string | null;
   is_deleted: number;
   deleted_at: string | null;
   is_trashed: number;
@@ -253,6 +285,8 @@ export interface PostMediaItem {
   originalUrl?: string;
   playbackStrategy?: PlaybackStrategy | null;
   videoPlaybackSource?: 'original' | 'preview';
+  videoPlaybackUrl?: string;
+  videoDeliveryPolicy?: LocalVideoDeliveryPolicy | null;
   exif?: ImageExifData | null;
   mimeType?: string;
   fileSize?: number;
@@ -287,6 +321,8 @@ export interface FeedImage {
   previewUrl: string;
   fileSize?: number | null;
   videoPlaybackSource?: 'original' | 'preview';
+  videoPlaybackUrl?: string;
+  videoDeliveryPolicy?: LocalVideoDeliveryPolicy | null;
   sortTimestamp: number;
   takenAt: number | null;
   isSaved: boolean;
@@ -379,6 +415,7 @@ export interface SharedFeedItem {
   thumbnailUrl: string;
   previewUrl: string;
   videoPlaybackSource?: 'original' | 'preview';
+  videoPlaybackUrl?: string;
   sortTimestamp: number;
 
   postType?: PostType;
@@ -403,6 +440,7 @@ export interface SharedImageDetail {
   thumbnailUrl: string;
   previewUrl: string;
   videoPlaybackSource?: 'original' | 'preview';
+  videoPlaybackUrl?: string;
   sortTimestamp: number;
   nextImageId: number | null;
   previousImageId: number | null;

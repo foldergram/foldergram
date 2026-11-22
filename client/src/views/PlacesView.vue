@@ -1,5 +1,5 @@
 <template>
-  <section class="w-[min(100%,72rem)] mx-auto flex flex-col gap-[1.4rem]">
+  <section class="centered-page flex flex-col gap-[1.4rem]">
     <header class="flex items-end justify-between gap-4 max-sm:flex-col max-sm:items-start">
       <div>
         <span class="eyebrow">{{ t("placesPage.eyebrow") }}</span>

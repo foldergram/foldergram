@@ -34,6 +34,32 @@ The Moments or Highlights rail shares the feed's center line. Desktop navigation
 and folder shortcuts are vertically centered between the logo and the More menu.
 Portrait windows use the centered feed layout without the recommendations sidebar.
 
+**More → Display preferences** lets admins and viewers turn **Show suggested folders
+on desktop** on or off. It is enabled by default. Changes apply immediately and
+are saved in the current browser; the dialog confirms the save or explains when
+browser storage is unavailable and the change applies only for the session.
+
+The same dialog includes **Appearance** with App default, System, Light, and Dark.
+All four choices apply only to the current browser, including for admins. App
+default follows the instance theme; System follows the device's light/dark mode.
+Browser overrides survive refreshes and entering or leaving admin mode.
+**Settings → Appearance** keeps its separate Save button for changing the
+instance's default theme and accent color. Saving those defaults preserves any
+personal browser theme choice.
+
+With suggested folders off, the desktop Home feed stays centered and can grow to
+600 px wide. Hiding suggested folders does not shrink tall media to fit the screen.
+
+**Fit tall media to screen** is a separate browser preference, off by default.
+When enabled, it scales tall photos, videos, and carousels down to fit the desktop
+window while preserving their media aspect ratios. Media that already fits the
+viewport keeps its normal size; captions and post actions do not reduce the media's
+height allowance. It works both with suggested
+folders visible and with the wider centered feed. Changing either switch leaves
+the other switch unchanged. With fitting off, tall posts can require scrolling.
+Mobile feed sizing stays the same. These browser preferences are separate from
+General Settings and its Save Changes button.
+
 ### Feed mode behavior
 
 | Mode | What it does |
@@ -68,6 +94,16 @@ It includes:
 For large libraries, Recommended describes its bounded session queue in
 `total`/`hasMore` rather than promising every video in one session. Starting a
 new Reels session with a new seed rotates the discovery sample.
+
+## Video playback
+
+New local videos stream by default, so Foldergram can play them without making
+a saved MP4 preview first. If a video needs conversion, the player shows its
+cover while it gets ready and offers **Retry playback** if it can't start.
+
+Existing local videos keep their current playback. Admins can use
+**Settings → Scan & Library** to see how much space they could free before
+switching videos to streaming. [See the cleanup steps](./media-processing.md#switch-existing-local-videos-to-streaming).
 
 ## Explore
 
@@ -220,8 +256,8 @@ and scroll independently of the media.
 The detail view includes:
 
 - image detail media sourced from either generated previews or originals, depending on `IMAGE_DETAIL_SOURCE`
-- video detail playback that uses the selected ordinary source: the original for qualifying direct-playback videos, or a generated preview otherwise
-- an optional `HD` toggle for compatible higher-resolution MP4 originals that use a generated preview
+- video playback from the original, on-demand streaming, or a saved preview, depending on the video
+- an **HD** toggle when the player can offer a higher-quality original
 - previous and next navigation within the same folder and active media filter
 - folder link and breadcrumb context
 - caption text that uses a saved custom caption when present and otherwise falls back to a readable filename
@@ -350,7 +386,7 @@ Current non-admin behavior:
 | Action | What changes |
 | --- | --- |
 | Scan for changes | Discovers additions, updates, removals, and exclusions without verifying generated media for unchanged assets. In `SCAN_MEDIA_ERROR_MODE=skip`, supported-media failures are reported, skipped, and the run finishes as `completed_with_errors`. |
-| Scan and repair derivatives | Performs the same discovery and also verifies generated media for unchanged assets. This action also reclaims obsolete video previews for qualifying direct-playback videos. |
+| Scan and repair derivatives | Scans for changes and checks thumbnails and previews for unchanged files. |
 | Regenerate Thumbnails | Clears generated thumbnails and video poster images, then rebuilds them from indexed media only. |
 | Rebuild Library Index | Clears indexed folders, posts, likes, folder scan state, and scan history, then rescans the active gallery root and reuses matching cached derivatives when possible. In lazy derivative mode it does not pre-generate missing thumbnails or previews. |
 
@@ -367,7 +403,7 @@ browser preferences interact with the app-wide default.
 The client also persists a few local browser preferences:
 
 - selected language override
-- light or dark theme
+- System, Light, or Dark theme overrides (App default clears the override)
 - whether videos start muted
 - last opened folder
 - recently opened folders

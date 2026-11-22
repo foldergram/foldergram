@@ -1,6 +1,7 @@
 import type express from 'express';
 
 import { appConfig } from '../config/env.js';
+import { isPlaybackSessionMutation } from '../utils/playback-session-request.js';
 
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
@@ -11,7 +12,8 @@ export function blockPublicDemoMutations(
   response: express.Response,
   next: express.NextFunction
 ): void {
-  if (!appConfig.publicDemoMode || !MUTATING_METHODS.has(request.method.toUpperCase())) {
+  if (!appConfig.publicDemoMode || !MUTATING_METHODS.has(request.method.toUpperCase()) ||
+      isPlaybackSessionMutation(request.method, request.path)) {
     next();
     return;
   }

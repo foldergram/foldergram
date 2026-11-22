@@ -1,7 +1,7 @@
 <div align="center">
 
 <a href="https://foldergram.intentdeep.com/">
-  <img src="client/public/github_banner.png?v=f1b7d10" alt="Foldergram" />
+  <img src="docs/media/foldergram-readme.gif" alt="Foldergram demo showing the Home feed, Reels, and Library" />
 </a>
 <br /><br />
 <a href="https://foldergram.intentdeep.com/">
@@ -26,32 +26,15 @@
 
 ---
 
-Foldergram turns your local photo and video folders into a self-hosted gallery with a familiar feed, folder profiles, and a media viewer. It indexes your library in SQLite and uses thumbnails and previews for fast browsing, while keeping your originals untouched.
+Foldergram brings your photos and videos together in a self-hosted gallery with a familiar feed, folder profiles, and a media viewer. Browse multiple local galleries, connect Immich, or use both, with originals kept where they are.
 
-## Additional local folders
+## Multiple local galleries
 
-Your existing gallery appears automatically in **Settings → Sources** as **Primary gallery**. Its root is set by `GALLERY_ROOT` or defaults to the `gallery` folder in `DATA_ROOT`. Choose **Add local folder**, enter a name and an absolute server path, then choose **Validate path** and **Save & Sync**. Foldergram indexes files in subfolders and skips media files directly in the selected root. Each enabled source contributes to the combined feeds. You can sync one location from Sources or run **Scan library** to scan all enabled local sources.
+Keep photos and videos across several folders or drives and browse them together in Foldergram. Manage each location in **Settings → Sources**, with your existing gallery included automatically and originals kept in place. [Set up local galleries →](docs/local-galleries.md)
 
-On a native installation, use a path the Foldergram process can read. The path is resolved on the server running Foldergram. Photos on a different computer must first be made available to that server. In Docker, add a bind mount for each location alongside the existing volumes:
+## Immich integration
 
-```yaml
-      - /home/alex/Pictures:/sources/pictures:ro
-      - /mnt/external/Photos:/sources/external:ro
-```
-
-The left side is the host path. The right side is the container path to enter in Sources, such as `/sources/pictures`. After changing mounts, run `docker compose up -d`. Docker Desktop users may need to share the host drive or folder with Docker first. Mount external drives before starting or syncing Foldergram. Your existing `GALLERY_ROOT` and database settings can remain in place. Keep SQLite and the derivative directories writable. A read-only photo mount is sufficient for indexing.
-
-New locations default to read-only originals. This setting still allows Foldergram metadata edits and moving an indexed post to Trash. Disabling a source hides its content and shares while retaining its index and saved state. Removing a source clears its index, saved associations, shares, and derivatives. Original files stay on disk.
-
-A disconnected drive retains its index and cached derivatives. If a previously populated location appears completely empty, check the mount and sync again. Use **Confirm empty location** only after intentionally clearing the folder. Foldergram cannot reliably detect every filesystem replacement or disappearing nested mount. Local and Immich connections to the same files can produce duplicate posts.
-
-### Upgrading an existing installation
-
-Back up the SQLite database and application state before upgrading, including the Immich encryption key if used. The upgrade assigns existing records to the primary gallery while preserving IDs, saved state, shares, and derivative paths. Deploy the updated server and client together. To roll back, restore the pre-upgrade backup with the matching older version.
-
-## Optional Immich integration
-
-Connect your Immich v3.3.x server in **Settings → Sources** for read-only browsing of external directories and albums alongside local folders, or use an empty local gallery for Immich-only browsing. Every selected album membership is preserved while each asset appears once in Home. Media uses Immich derivatives through Foldergram's authenticated, bounded cache and streaming proxy. See the [setup, permissions, Docker networking and cache policy](docs/immich.md). Choose one source for an overlapping dataset to avoid duplicate posts.
+Connect your Immich folders and albums to enjoy Foldergram's browsing experience alongside local media, or use it with Immich alone. The connection is read-only, and your Foldergram likes and saved collections stay local. [Connect Immich →](docs/immich.md)
 
 ## Features
 
@@ -62,7 +45,7 @@ Connect your Immich v3.3.x server in **Settings → Sources** for read-only brow
 - Library browsing with App Folder search, sorting, and delete actions.
 - App Folder pages with a posts grid and a folder-specific `Reels` tab when videos exist.
 - Shared likes in SQLite for signed-in admin/viewer sessions, plus browser-local favorites in public mode.
-- Image and video support with configurable eager or lazy derivative generation for fast browsing.
+- Photo thumbnails and previews, plus [on-demand streaming for local videos](#video-playback).
 - [Carousel posts](docs/carousel-posts.md) with 2–20 images, animated images, and videos in one swipeable post.
 - Original-media download controls on home feed cards, post detail, and stories, alongside open-original actions.
 - Optional role-based local access with admin, viewer, and public browse modes.
@@ -82,7 +65,7 @@ For local sources, Foldergram maps directly to your filesystem:
 4. **Root files are ignored:** Files placed directly in `GALLERY_ROOT` are ignored.
 5. **Folder markers:** A regular file named exactly `.nofoldergram` excludes its containing folder and all descendants. A marker directly in `GALLERY_ROOT` is ignored.
 
-Runtime reads come from SQLite and generated derivatives, not from live filesystem scans on every request.
+Foldergram uses its SQLite index to list your library and reads originals or generated files when you open media.
 
 ### Supported Formats
 
@@ -93,6 +76,18 @@ Runtime reads come from SQLite and generated derivatives, not from live filesyst
 Animated image files keep animation in the post viewer preview and home feed cards. Folder/profile grids and other thumbnail surfaces remain static. Static AVIF files stay on the normal image pipeline; animated AVIF image sequences generate static WebP thumbnails and animated WebP previews.
 
 For source installs, video support and animated AVIF image-sequence processing require `ffmpeg` and `ffprobe`. The Docker image installs them inside the container.
+
+### Video playback
+
+New local videos use streaming by default. Foldergram plays the original when
+the browser can handle it. Otherwise, it converts short sections as you watch.
+This saves space on MP4 previews, though starting or seeking in a video can take
+longer when it needs conversion.
+
+Videos already in your library keep their current playback after an upgrade. To free space,
+open **Settings → Scan & Library → Switch to streaming and remove video
+previews** and review the estimate before you confirm. Immich playback works as
+before. [See how to switch existing videos](docs/media-processing.md#switch-existing-local-videos-to-streaming).
 
 ## Installation
 
@@ -137,8 +132,9 @@ For the default Docker Compose setup, the container uses the image's built-in
 production defaults plus the mounted `./data/...` volumes. The source-install
 `.env` file is not read inside the container unless you wire that in yourself.
 
-The shipped Compose file includes `IMAGE_DETAIL_SOURCE: preview` and
-`DERIVATIVE_MODE: eager`.
+The shipped Compose file uses streaming for new local videos and stores the
+temporary cache in `./data/hls-cache`. It also sets
+`IMAGE_DETAIL_SOURCE: preview` and `DERIVATIVE_MODE: eager`.
 
 If you want lazy derivatives or original-backed image detail pages in Docker,
 edit those values in `docker-compose.yml` before starting the container.
@@ -249,12 +245,13 @@ data/
   ├─ gallery/       # Original source media
   ├─ db/
   │   └─ gallery.sqlite
-  ├─ thumbnails/    # Generated thumbnails and poster images, sharded by asset key
-  └─ previews/      # Generated previews, sharded by asset key
+  ├─ thumbnails/    # Thumbnails and video posters
+  ├─ previews/      # Saved previews
+  └─ hls-cache/     # Temporary video segments
 ```
 
-`GALLERY_ROOT` only needs read access. `DB_DIR`, `THUMBNAILS_DIR`, and
-`PREVIEWS_DIR` must be writable. `<DATA_ROOT>/scan-errors` is created on
+`GALLERY_ROOT` only needs read access. Foldergram needs write access to
+`DB_DIR`, `THUMBNAILS_DIR`, `PREVIEWS_DIR`, and the streaming cache. `<DATA_ROOT>/scan-errors` is created on
 demand and must be writable when skip mode produces scan reports.
 
 | Variable                      | Default             | Description                                                               |
@@ -269,20 +266,22 @@ demand and must be writable when skip mode produces scan reports.
 | `DB_DIR`                      | `./data/db`         | SQLite database directory. Startup migrations target `<DB_DIR>/gallery.sqlite`. |
 | `THUMBNAILS_DIR`              | `./data/thumbnails` | Generated thumbnail output directory.                                     |
 | `PREVIEWS_DIR`                | `./data/previews`   | Generated preview output directory.                                       |
+| `VIDEO_DELIVERY_MODE`         | `streaming`         | Use `previews` to keep saving MP4 previews when new local videos need them. |
+| `HLS_CACHE_DIR`               | `<DATA_ROOT>/hls-cache` | Temporary video segments. See the [video playback settings](docs/configuration.md#video-playback). |
 | `IMAGE_DETAIL_SOURCE`         | `preview`           | For image detail pages, use generated previews or stream originals.       |
 | `DERIVATIVE_MODE`             | `eager`             | Generate derivatives during scans or lazily on first request.             |
 | `LOG_VERBOSE`                 | `0`                 | Truthy values are `1`, `true`, `yes`, and `on`.                           |
 | `SCAN_MEDIA_ERROR_MODE`       | `skip`              | Use `skip` to report supported-media failures and continue, or `fail`.    |
 | `SCAN_DISCOVERY_CONCURRENCY`  | `4`                 | Folder discovery concurrency.                                             |
 | `SCAN_DERIVATIVE_CONCURRENCY` | `4`                 | Derivative generation concurrency.                                        |
-| `PUBLIC_DEMO_MODE`            | `0`                 | When enabled, all API mutations become read-only and return `403`.        |
+| `PUBLIC_DEMO_MODE`            | `0`                 | Blocks library changes in public demos and allows video playback.        |
 | `CSRF_TRUSTED_ORIGINS`        | empty               | Comma-separated extra browser origins allowed for mutating API requests.  |
 
 `DATA_ROOT` is the base path for the app's local storage layout. If you set
 only `DATA_ROOT`, Foldergram will default the other storage paths to
-`<DATA_ROOT>/gallery`, `<DATA_ROOT>/db`, `<DATA_ROOT>/thumbnails`, and
-`<DATA_ROOT>/previews`. Set `GALLERY_ROOT`, `DB_DIR`, `THUMBNAILS_DIR`, or
-`PREVIEWS_DIR` separately only when you need a non-standard layout.
+`<DATA_ROOT>/gallery`, `<DATA_ROOT>/db`, `<DATA_ROOT>/thumbnails`,
+`<DATA_ROOT>/previews`, and `<DATA_ROOT>/hls-cache`. Override individual paths
+if you use a different layout.
 Per-run full scan error reports are written under `<DATA_ROOT>/scan-errors/`
 when a scan records supported-media failures.
 
@@ -327,19 +326,17 @@ derivatives follow the usual retention and cleanup rules.
 
 - `IMAGE_DETAIL_SOURCE=preview` keeps image detail pages on generated previews.
 - `IMAGE_DETAIL_SOURCE=original` makes image detail pages stream `/api/originals/:id`.
-- `DERIVATIVE_MODE=eager` generates required thumbnails and previews during scans. Qualifying direct-playback videos receive posters but skip the playable preview.
-- `DERIVATIVE_MODE=lazy` indexes metadata during scans, then generates missing required files the first time `/thumbnails/...` or `/previews/...` is requested and caches them on disk.
+- `DERIVATIVE_MODE=eager` generates thumbnails and any required previews during scans.
+- `DERIVATIVE_MODE=lazy` generates those files when first requested and saves them for later.
 - `SCAN_MEDIA_ERROR_MODE=skip` reports supported image and video processing failures, skips those files, and lets the scan finish as `completed_with_errors`.
 - `SCAN_MEDIA_ERROR_MODE=fail` preserves fail-fast behavior for those same scan-time media errors.
 - When a scan records skipped media failures, Foldergram stores a short sample in SQLite, writes the full per-run report under `<DATA_ROOT>/scan-errors/`, and shows that report path in the admin Settings view.
 
-These flags are independent:
-
-- feed cards, folder grids, avatars, and other list surfaces use the selected playback source; qualifying videos use the indexed original
-- `IMAGE_DETAIL_SOURCE` affects images only; video playback follows the direct-playback policy (`.mp4`, H.264, `yuv420p`, AAC or silent, at most 24 MiB, at most 1500 display pixels wide)
-- `Rebuild Library Index` refreshes the SQLite-backed index; in lazy mode it does not pre-generate missing derivatives
-- **Scan for changes** skips unchanged derivative verification; **Scan and repair derivatives** also checks generated media and reclaims obsolete qualifying-video previews
-- `Regenerate Thumbnails` remains a manual thumbnail and video-poster rebuild only; it does not rebuild previews
+**Scan for changes** checks for new, changed, and missing files. **Scan and
+repair derivatives** also checks thumbnails and previews for unchanged files.
+To free space by removing video previews, use the separate [streaming
+cleanup](docs/media-processing.md#switch-existing-local-videos-to-streaming).
+**Regenerate Thumbnails** rebuilds thumbnails and video posters.
 
 ### Access Protection
 
@@ -366,9 +363,9 @@ PUBLIC_DEMO_MODE=1
 CSRF_TRUSTED_ORIGINS=https://foldergram.intentdeep.com
 ```
 
-`PUBLIC_DEMO_MODE=1` blocks every `POST`, `PUT`, `PATCH`, and `DELETE` request
-under `/api`, including future routes. `CSRF_TRUSTED_ORIGINS` is
-only needed when the browser-visible origin differs from the upstream Node host seen by Express, such as behind a reverse proxy or HTTPS terminator.
+In demo mode, people can browse and stream videos without changing the library.
+Set `CSRF_TRUSTED_ORIGINS` if the public URL differs from the origin Foldergram
+sees, such as when you use a reverse proxy.
 
 ## Tech Stack
 

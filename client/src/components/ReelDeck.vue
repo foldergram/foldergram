@@ -6,7 +6,7 @@
     @scroll="handleScroll"
   >
     <div
-      v-for="item in items"
+      v-for="(item, index) in items"
       :key="item.id"
       :ref="setPanelRef(item.id)"
       class="reel-deck__panel"
@@ -15,6 +15,9 @@
         :item="item"
         :folder="folderLookup.get(item.folderSlug) ?? null"
         :active="item.id === activeReelId"
+        :video-preparation="videoPreparation"
+        :next-video-playback-url="item.id === activeReelId ? items[index + 1]?.videoPlaybackUrl ?? undefined : undefined"
+        :external-metadata="externalMetadata"
       >
         <template v-if="item.id === activeReelId" #mobile-action-rail>
           <slot
@@ -37,6 +40,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type Compon
 import { useI18n } from 'vue-i18n';
 
 import type { FeedItem, FolderSummary } from '../types/api';
+import { ReelVideoPreparation } from '../utils/local-video-provider';
 import { getActiveReelId, shouldPrefetchReels } from '../utils/reels';
 import ReelPlayerCard from './ReelPlayerCard.vue';
 
@@ -47,6 +51,7 @@ const props = defineProps<{
   folders: FolderSummary[];
   activeReelId: number | null;
   loading?: boolean;
+  externalMetadata?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -56,6 +61,7 @@ const emit = defineEmits<{
 
 const scrollerElement = ref<HTMLElement | null>(null);
 const panelElements = new Map<number, HTMLElement>();
+const videoPreparation = new ReelVideoPreparation();
 const folderLookup = computed(() => new Map(props.folders.map((folder) => [folder.slug, folder])));
 
 let resizeObserver: ResizeObserver | null = null;
@@ -88,6 +94,9 @@ function updateActiveReel() {
     return;
   }
 
+  const { scrollPaddingTop, scrollPaddingBottom } = getComputedStyle(scroller);
+  const topInset = parseFloat(scrollPaddingTop) || 0;
+  const bottomInset = parseFloat(scrollPaddingBottom) || 0;
   const activeReelId = getActiveReelId(
     props.items
       .map((item) => {
@@ -103,8 +112,8 @@ function updateActiveReel() {
         };
       })
       .filter((panel): panel is { id: number; offsetTop: number; offsetHeight: number } => panel !== null),
-    scroller.scrollTop,
-    scroller.clientHeight
+    scroller.scrollTop + topInset,
+    scroller.clientHeight - topInset - bottomInset
   );
   if (activeReelId === null) {
     return;
@@ -186,8 +195,9 @@ function scrollToIndex(index: number) {
     return;
   }
 
+  const topInset = parseFloat(getComputedStyle(scroller).scrollPaddingTop) || 0;
   scroller.scrollTo({
-    top: panel.offsetTop,
+    top: panel.offsetTop - topInset,
     behavior: 'smooth'
   });
 }
@@ -331,10 +341,13 @@ defineExpose({
 
 <style scoped>
 .reel-deck {
+  position: relative;
   height: 100%;
+  padding-block: var(--reel-deck-top-inset, 0px) var(--reel-deck-bottom-inset, 0px);
   overflow-y: auto;
   overscroll-behavior-y: contain;
   scroll-snap-type: y mandatory;
+  scroll-padding-block: var(--reel-deck-top-inset, 0px) var(--reel-deck-bottom-inset, 0px);
   scroll-behavior: smooth;
   scrollbar-width: none;
 }
@@ -346,9 +359,14 @@ defineExpose({
 .reel-deck__panel {
   display: grid;
   place-items: center;
-  min-height: 100%;
+  height: var(--reel-deck-panel-height, auto);
+  min-height: var(--reel-deck-panel-height, 100%);
   scroll-snap-align: start;
   scroll-snap-stop: always;
+}
+
+.reel-deck__panel + .reel-deck__panel {
+  margin-block-start: var(--reel-deck-panel-gap, 0px);
 }
 
 .reel-deck__status {

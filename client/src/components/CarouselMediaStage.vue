@@ -17,6 +17,7 @@
         v-if="item.mediaType === 'video' && index === activeIndex"
         class="h-full w-full object-contain bg-black"
         :src="item.previewUrl"
+        :playback-url="item.videoPlaybackUrl"
         :original-url="item.originalUrl"
         :playback-strategy="item.playbackStrategy"
         :video-playback-source="item.videoPlaybackSource"
@@ -26,6 +27,7 @@
         :alt="item.filename"
         :muted="appStore.videoMuted"
         :autoplay="autoplay"
+        :stream-on-play="streamOnPlay"
         variant="viewer"
         @mute-change="appStore.setVideoMuted"
       />
@@ -106,6 +108,7 @@ const props = withDefaults(
     loading?: 'eager' | 'lazy';
     muted?: boolean;
     autoplay?: boolean;
+    streamOnPlay?: boolean;
     fitContainer?: boolean;
   }>(),
   {

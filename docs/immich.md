@@ -34,11 +34,11 @@ External filesystem moves can produce **new Immich asset IDs**. Foldergram prese
 
 ## Permissions and supported versions
 
-The integration targets the **Immich v3.3.x** API contract and was developed against the verified **v3.3.5** contract. Other major/minor versions are rejected with an actionable error. API responses and pagination cursors are checked; incompatible responses retain the previous index.
+The integration requires **Immich v3.2.0 or later**, which provides the structured search filters and cursor pagination Foldergram uses. Foldergram attempts to connect to newer versions, including new major releases. Compatibility depends on the read APIs used by the integration. If an API response or pagination cursor fails validation, Foldergram stops the sync and retains the previous index.
 
 | Permission | Purpose |
 | --- | --- |
-| `server.about` | Required version check |
+| `server.about` | Required to verify the minimum server version |
 | `asset.read` | Required metadata search |
 | `asset.view` | Required thumbnails, image previews, video posters and playback |
 | `album.read` | Album discovery and album selections |

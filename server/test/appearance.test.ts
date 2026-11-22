@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type express from 'express';
+import { requestTestApp } from './http-test-utils.js';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 describe.sequential('instance appearance persistence and permissions', () => {
@@ -12,6 +13,7 @@ describe.sequential('instance appearance persistence and permissions', () => {
       DATA_ROOT: 'data', GALLERY_ROOT: 'gallery', DB_DIR: 'db', THUMBNAILS_DIR: 'thumbnails', PREVIEWS_DIR: 'previews'
     })) vi.stubEnv(key, path.join(tempRoot, directory));
     vi.stubEnv('NODE_ENV', 'test');
+    vi.stubEnv('PUBLIC_DEMO_MODE', '0');
     vi.resetModules();
   });
   afterAll(async () => {
@@ -48,5 +50,46 @@ describe.sequential('instance appearance persistence and permissions', () => {
     requireCapability('canAccessSettings')(request, response as unknown as express.Response, next);
     expect(next).not.toHaveBeenCalled();
     expect(response.status).toHaveBeenCalledWith(401);
+  });
+  it('allows only admins to persist light or dark without replacing the saved accent', async () => {
+    const { createApp } = await import('../src/app.js');
+    const { authService } = await import('../src/services/auth-service.js');
+    const { databaseManager } = await import('../src/db/database.js');
+    const app = createApp();
+    const path = '/api/admin/settings/appearance';
+    const intent = { 'x-foldergram-intent': '1' };
+    const password = 'fixture-admin-password';
+    const viewerPassword = 'fixture-viewer-password';
+    authService.setAdminPassword(password);
+    authService.setViewerAccess('password', viewerPassword);
+
+    async function signIn(password: string) {
+      const response = await requestTestApp(app, 'POST', '/api/auth/login', intent, { password });
+      expect(response.status).toBe(200);
+      return { ...intent, Cookie: response.headers.get('set-cookie')!.split(';', 1)[0] };
+    }
+
+    const viewer = await signIn(viewerPassword);
+    expect((await requestTestApp(app, 'PATCH', path, viewer, { theme: 'dark' })).status).toBe(403);
+
+    const admin = await signIn(password);
+    expect(await requestTestApp(app, 'GET', '/api/auth/status', admin)).toMatchObject({
+      status: 200, body: { publicDemoMode: false, capabilities: { canAccessSettings: true } }
+    });
+    expect((await requestTestApp(app, 'PATCH', path, { Cookie: admin.Cookie }, { theme: 'light' })).status).toBe(403);
+    expect((await requestTestApp(app, 'PUT', path, admin, { theme: 'system', accent: 'rose' })).status).toBe(200);
+    expect((await requestTestApp(app, 'PATCH', path, admin, { theme: 'system' })).status).toBe(400);
+    expect((await requestTestApp(app, 'PATCH', path, admin, { theme: 'light', accent: 'blue' })).status).toBe(400);
+    expect(await requestTestApp(app, 'PATCH', path, admin, { theme: 'light' }))
+      .toMatchObject({ status: 200, body: { theme: 'light', accent: 'rose' } });
+    databaseManager.close();
+    expect(await requestTestApp(app, 'GET', '/api/appearance'))
+      .toMatchObject({ status: 200, body: { theme: 'light', accent: 'rose' } });
+
+    expect(await requestTestApp(app, 'PUT', path, admin, { theme: 'dark', accent: 'rose' }))
+      .toMatchObject({ status: 200, body: { theme: 'dark', accent: 'rose' } });
+    databaseManager.close();
+    expect(await requestTestApp(app, 'GET', '/api/appearance'))
+      .toMatchObject({ status: 200, body: { theme: 'dark', accent: 'rose' } });
   });
 });

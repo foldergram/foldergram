@@ -4,6 +4,7 @@
     :class="[
       'home-layout grid gap-[4rem] items-start justify-center mx-auto',
       { 'home-layout--compact': isSingleColumnLayout },
+      { 'home-layout--wide-feed': isWideHomeFeed },
       isSingleColumnLayout
         ? 'grid-cols-1 w-full'
         : 'grid-cols-[minmax(0,39.375rem)_19.9375rem] w-[min(100%,63.3125rem)] md:relative',
@@ -22,7 +23,7 @@
         :name="source.name"
         :kind="source.kind"
         :variant="showSourceOutageState ? 'panel' : 'banner'"
-        class="mx-auto mb-5 w-full max-w-[29.375rem]"
+        class="home-layout__feed-width mx-auto mb-5 w-full max-w-[29.375rem]"
         :class="{ 'mt-[clamp(1rem,6vh,4rem)]': showSourceOutageState }"
       />
       <section
@@ -48,8 +49,8 @@
         </div>
       </section>
 
-      <section v-if="!appStore.isLibraryUnavailable && !showSourceOutageState" class="home-layout__header grid min-w-0 gap-[0.6875rem] mb-5 mx-auto w-full max-w-[39.375rem]">
-        <section v-if="displayMomentItems.length" class="mb-2 min-w-0">
+      <section v-if="!appStore.isLibraryUnavailable && !showSourceOutageState" class="home-layout__header home-layout__feed-width grid min-w-0 gap-[0.6875rem] mb-5 mx-auto w-full max-w-[39.375rem]">
+        <section v-if="displayMomentItems.length" class="home-layout__stories mb-2 min-w-0">
           <div class="story-rail-shell">
             <div class="stories-bar story-rail pb-5 pt-[0.12rem]" :aria-label="momentsStore.displayRailTitle">
               <div class="story-rail__track">
@@ -123,7 +124,7 @@
       <EmptyState v-if="appStore.isLibraryUnavailable" :title="t('common.libraryUnavailableTitle')" :description="appStore.libraryUnavailableReason" />
       <ErrorState v-else-if="feedStore.error && !showSourceOutageState" :title="t('home.feed.loadErrorTitle')" :message="feedStore.error" />
       <template v-else-if="showSourceOutageState" />
-      <div v-else-if="showFeedSkeleton && !showInitialScanState" class="mx-auto w-full max-w-[29.375rem]" data-test="home-feed-skeleton">
+      <div v-else-if="showFeedSkeleton && !showInitialScanState" class="home-layout__feed-width mx-auto w-full max-w-[29.375rem]" data-test="home-feed-skeleton">
         <FeedList :items="[]" context="home" show-skeleton />
       </div>
 
@@ -161,7 +162,7 @@
 
       <section
         v-else-if="showHomeSetupNotice"
-        class="grid gap-[0.85rem] px-5 py-5 mb-[1.1rem] border rounded-[1rem] shadow-[var(--shadow)]"
+        class="home-layout__feed-width mx-auto w-full max-w-[29.375rem] grid gap-[0.85rem] px-5 py-5 mb-[1.1rem] border rounded-[1rem] shadow-[var(--shadow)]"
         :style="homeSetupNoticeStyle"
       >
         <span class="text-[0.75rem] font-bold tracking-[0.08em] uppercase" :class="homeSetupNoticeEyebrowClass">
@@ -190,7 +191,7 @@
       <template v-else>
         <div
           v-if="feedStoryError"
-          class="mx-auto mb-[1.1rem] grid w-full max-w-[29.375rem] gap-[0.75rem] rounded-[1rem] border border-[rgba(214,48,49,0.24)] bg-[rgba(214,48,49,0.08)] px-4 py-[0.95rem] text-[#c0392b]"
+          class="home-layout__feed-width mx-auto mb-[1.1rem] grid w-full max-w-[29.375rem] gap-[0.75rem] rounded-[1rem] border border-[rgba(214,48,49,0.24)] bg-[rgba(214,48,49,0.08)] px-4 py-[0.95rem] text-[#c0392b]"
           role="alert"
         >
           <p class="m-0 text-[0.92rem]">{{ feedStoryError }}</p>
@@ -207,19 +208,20 @@
         </div>
 
         <!-- Feed cards in home-layout context: transparent card, no shadow -->
-        <div class="w-full max-w-[29.375rem] mx-auto flex flex-col gap-[1.2rem]">
+        <div class="home-layout__feed-width w-full max-w-[29.375rem] mx-auto flex flex-col gap-[1.2rem]">
           <FeedList
             :items="visibleFeedItems"
             context="home"
+            :fit-tall-media="fitTallMediaOnDesktop"
             @open-folder-story="openFeedFolderStory"
           />
         </div>
-        <div class="w-full max-w-[29.375rem] mx-auto">
+        <div class="home-layout__feed-width w-full max-w-[29.375rem] mx-auto">
           <InfiniteLoader v-if="feedStore.hasMore || feedStore.loading || !sourcesStore.unavailable.length" :loading="feedStore.loading" :has-more="feedStore.hasMore" @load-more="feedStore.loadMore" />
         </div>
       </template>
 
-      <p v-if="scanCompletion" class="mx-auto mt-4 max-w-[29.375rem] text-accent-strong" role="status">{{ getScanResultLabel(scanCompletion) }}</p>
+      <p v-if="scanCompletion" class="home-layout__feed-width mx-auto mt-4 max-w-[29.375rem] text-accent-strong" role="status">{{ getScanResultLabel(scanCompletion) }}</p>
 
       <StoriesModal
         v-if="activeRailViewerId && displayMomentItems.length"
@@ -246,7 +248,7 @@
         homeSummaryFolder &&
         !isSingleColumnLayout
       "
-      class="grid gap-[1.15rem] w-[19rem] text-muted mt-5"
+      class="grid gap-[1.15rem] w-full min-w-0 px-4 text-muted mt-5"
       :aria-label="t('home.sidebar.ariaLabel')"
     >
       <div class="flex items-center gap-[0.8rem]">
@@ -315,6 +317,8 @@ import { useFolderStoriesStore } from '../stores/folder-stories';
 import { useLikesStore } from '../stores/likes';
 import { useFoldersStore } from '../stores/folders';
 import { useMomentsStore } from '../stores/moments';
+import { useSuggestedFoldersPreference } from '../composables/useSuggestedFoldersPreference';
+import { useFitTallMediaPreference } from '../composables/useFitTallMediaPreference';
 import type { FeedMode } from '../types/api';
 import { formatFolderTitle } from '../utils/folder-titles';
 import { buildLikedCountByFolder, selectHomeRecommendations } from '../utils/home-recommendations';
@@ -330,6 +334,8 @@ const likesStore = useLikesStore();
 const foldersStore = useFoldersStore();
 const momentsStore = useMomentsStore();
 const sourcesStore = useSourcesStore();
+const suggestedFoldersPreference = useSuggestedFoldersPreference();
+const fitTallMediaPreference = useFitTallMediaPreference();
 const visibleFeedItems = computed(() => feedStore.items.filter(item =>
   item.sourceKind === 'local' ? sourcesStore.canBrowse(item.sourceId) : !item.sourceId || (sourcesStore.initialized && sourcesStore.canBrowse(item.sourceId))
 ));
@@ -368,7 +374,10 @@ const activeFeedStoryId = ref<string | null>(null);
 const feedStoryRetrySlug = ref<string | null>(null);
 const homeLayoutElement = ref<HTMLElement | null>(null);
 const isCompactHomeLayout = ref(false);
-const isSingleColumnLayout = computed(() => isCompactHomeLayout.value || showSourceOutageState.value);
+const isDesktopHomeLayout = ref(window.innerWidth >= 768);
+const fitTallMediaOnDesktop = computed(() => isDesktopHomeLayout.value && fitTallMediaPreference.enabled.value);
+const isWideHomeFeed = computed(() => isDesktopHomeLayout.value && !suggestedFoldersPreference.enabled.value && !showSourceOutageState.value);
+const isSingleColumnLayout = computed(() => isCompactHomeLayout.value || !suggestedFoldersPreference.enabled.value || showSourceOutageState.value);
 const requestingHomeScan = ref(false);
 const scanCompletion = computed(() => appStore.scanCompletion?.surface === (router?.currentRoute.value.fullPath ?? '/')
   ? appStore.scanCompletion.result : null);
@@ -568,6 +577,7 @@ async function retryFeedFolderStory() {
 }
 
 function updateHomeLayout() {
+  isDesktopHomeLayout.value = window.innerWidth >= 768;
   const layoutWidth = homeLayoutElement.value?.clientWidth ?? window.innerWidth;
   isCompactHomeLayout.value = layoutWidth <= HOME_RIGHT_RAIL_BREAKPOINT || window.innerHeight > window.innerWidth;
 }
@@ -709,3 +719,40 @@ onUnmounted(() => {
   window.removeEventListener('resize', updateHomeLayout);
 });
 </script>
+
+<style scoped>
+@media (width > 768px) {
+  .home-layout__header {
+    row-gap: 1.5rem;
+  }
+
+  .home-layout__stories {
+    margin-bottom: 0;
+  }
+
+  .home-layout__stories .story-rail {
+    padding-block: 0.28125rem 0.875rem;
+  }
+
+  .home-layout__stories .story-rail__track {
+    gap: 0.875rem;
+    padding-inline: 0.5625rem;
+  }
+
+  .home-layout__stories .story-rail__button {
+    width: 5.625rem;
+    min-width: 0;
+    gap: 0.03125rem;
+  }
+
+  .home-layout__stories .story-rail__ring,
+  .home-layout__stories .story-rail__ring-inner {
+    padding: 0.234375rem;
+  }
+
+  .home-layout__stories .story-rail__label {
+    max-width: 100%;
+    line-height: 1rem;
+  }
+}
+</style>
