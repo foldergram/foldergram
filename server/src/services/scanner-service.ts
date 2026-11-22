@@ -28,7 +28,6 @@ import {
 } from '../sources/local-source.js';
 import {
   appSettingsRepository,
-  createSharedPreviewRequirementLookup,
   folderRepository,
   folderScanStateRepository,
   imageRepository,
@@ -2723,12 +2722,6 @@ class ScannerService {
 
       // Cleanup operates on a fully discovered source and runs to completion.
       await operation?.sealControls();
-      if (options.repairUnchangedDerivatives && summary.status !== 'failed' && derivativeMigrationService.isMigrationComplete()) {
-        const reclaimedPreviews = await this.reclaimObsoleteVideoPreviews(errors, source.id);
-        if (reclaimedPreviews > 0) {
-          log.table('Obsolete video previews reclaimed', [['Files', reclaimedPreviews]], 'success');
-        }
-      }
 
       if (isPrimary && summary.status !== 'failed' && !errors.hasErrors && derivativeMigrationService.isMigrationComplete()) {
         await derivativeMigrationService.cleanupStaleDerivatives();
@@ -3002,109 +2995,6 @@ class ScannerService {
       force: existing.force || job.force,
       kind: existing.kind === 'all' || job.kind === 'all' ? 'all' : 'thumbnail'
     });
-  }
-
-  private async reclaimObsoleteVideoPreviews(errors: ScanErrorCollector, sourceId: number): Promise<number> {
-    const getSharedPreviewFolderIds = createSharedPreviewRequirementLookup();
-    const sharedPreviewFolderIds = getSharedPreviewFolderIds();
-    const previewReferenceCounts = new Map<string, number>();
-    for (const reference of imageRepository.listDerivativeReferences()) {
-      if (!reference.preview_path) {
-        continue;
-      }
-
-      previewReferenceCounts.set(
-        reference.preview_path,
-        (previewReferenceCounts.get(reference.preview_path) ?? 0) + 1
-      );
-    }
-
-    let reclaimed = 0;
-    for (const image of imageRepository.listActive(sourceId)) {
-      if (image.media_type !== 'video' || !image.preview_path) {
-        continue;
-      }
-
-      const playbackSource = resolveVideoPlaybackSource({
-        mediaType: image.media_type,
-        extension: image.extension || path.extname(image.relative_path),
-        fileSize: image.file_size,
-        width: image.width,
-        height: image.height,
-        playbackStrategy: image.playback_strategy
-      });
-      if (playbackSource !== 'original' || sharedPreviewFolderIds.has(image.folder_id)) {
-        continue;
-      }
-
-      if ((previewReferenceCounts.get(image.preview_path) ?? 0) !== 1) {
-        continue;
-      }
-
-      let sourcePath: string;
-      try {
-        sourcePath = resolveOriginalPath(image.relative_path, image.source_id, true);
-      } catch {
-        continue;
-      }
-
-      try {
-        const sourceStats = await fs.stat(sourcePath);
-        const currentFingerprint = createFingerprint(image.relative_path, sourceStats.size, sourceStats.mtimeMs);
-        if (!sourceStats.isFile() || currentFingerprint !== image.checksum_or_fingerprint) {
-          continue;
-        }
-      } catch {
-        continue;
-      }
-
-      let previewAbsolutePath: string;
-      try {
-        previewAbsolutePath = safeJoin(appConfig.previewsDir, image.preview_path);
-      } catch {
-        continue;
-      }
-
-      try {
-        // Share settings can change while the source stat is pending. Nothing
-        // yields between this live check and submitting the removal.
-        if (getSharedPreviewFolderIds().has(image.folder_id)) {
-          continue;
-        }
-        await fs.unlink(previewAbsolutePath);
-        reclaimed += 1;
-        log.info(joinLogParts([
-          'Obsolete video preview removed',
-          formatStep('file', image.relative_path),
-          formatStep('preview', image.preview_path)
-        ]));
-      } catch (error) {
-        const filesystemError = error as NodeJS.ErrnoException;
-        if (filesystemError.code === 'ENOENT') {
-          continue;
-        }
-
-        const message = error instanceof Error ? error.message : String(error);
-        const detail = formatScanError(
-          image.relative_path,
-          `Unable to remove obsolete video preview: ${message}`,
-          { sourcePath: previewAbsolutePath }
-        );
-        await errors.add(detail);
-        log.error(joinLogParts([
-          'Failed to remove obsolete video preview',
-          formatStep('file', image.relative_path),
-          formatStep('preview', image.preview_path),
-          message
-        ]));
-
-        if (appConfig.scanMediaErrorMode === 'fail') {
-          throw new Error(detail);
-        }
-      }
-    }
-
-    return reclaimed;
   }
 
   private async processDerivativeJobs(
@@ -3500,6 +3390,8 @@ class ScannerService {
       } : {})
     };
     const existing = existingByPath ?? moveCandidate ?? rebuildDerivativeReuseCandidate;
+    const streamingVideo = mediaType === 'video' &&
+      ((existingByPath ?? moveCandidate)?.video_delivery_policy ?? appConfig.videoDeliveryMode) === 'streaming';
     const canReuseDerivativeFiles = Boolean(moveCandidate) ||
       (rebuildDerivativeReuseCandidate
         ? this.hasReusableDerivativeSignature(rebuildDerivativeReuseCandidate, file, extension)
@@ -3536,6 +3428,7 @@ class ScannerService {
       let metadataPlaybackStrategy = existingByPath.playback_strategy ?? 'preview';
       let metadataIsAnimated = existingByPath.is_animated === 1;
       let metadataExifJson = existingByPath.exif_json;
+      let videoMetadataJson: string | null = null;
 
       if (
         needsTakenAtBackfill
@@ -3553,6 +3446,7 @@ class ScannerService {
         metadataHeight = metadata.height;
         metadataDisplayOrientation = mediaType === 'image' ? (metadata.displayOrientation ?? 1) : null;
         metadataPlaybackStrategy = metadata.playbackStrategy;
+        videoMetadataJson = metadata.localVideoMetadata ? JSON.stringify(metadata.localVideoMetadata) : null;
         metadataIsAnimated = metadata.isAnimated;
         metadataExifJson = mediaType === 'image'
           ? serializeImageExifData(metadata.exif ?? null, {
@@ -3620,7 +3514,8 @@ class ScannerService {
           exifJson: mediaType === 'image' ? (metadataExifJson ?? '{}') : null,
           thumbnailPath,
           previewPath,
-          playbackStrategy: metadataPlaybackStrategy
+          playbackStrategy: metadataPlaybackStrategy,
+          videoMetadataJson
         });
         placeResolutionService.resolveImage(image);
       } else if (existingByPath.place_id === null) {
@@ -3640,7 +3535,7 @@ class ScannerService {
                 thumbnailPath,
                 previewPath,
                 force: false,
-                kind: 'all',
+                kind: streamingVideo ? 'thumbnail' : 'all',
                 videoPlaybackSource
               }
             : null)
@@ -3704,13 +3599,14 @@ class ScannerService {
       } else if (appConfig.derivativeMode !== 'lazy') {
         await Promise.all([
           fs.rm(safeJoin(appConfig.thumbnailsDir, thumbnailPath), { force: true }),
-          fs.rm(safeJoin(appConfig.previewsDir, previewPath), { force: true })
+          streamingVideo ? undefined : fs.rm(safeJoin(appConfig.previewsDir, previewPath), { force: true })
         ]);
-      } else if (mediaType === 'video') {
+      } else if (mediaType === 'video' && !streamingVideo) {
         await fs.rm(safeJoin(appConfig.previewsDir, previewPath), { force: true });
       }
     }
 
+    const videoMetadataJson = metadata.localVideoMetadata ? JSON.stringify(metadata.localVideoMetadata) : null;
     if (moveCandidate) {
       const image = imageRepository.reconcileMove({
         id: moveCandidate.id,
@@ -3732,7 +3628,8 @@ class ScannerService {
         takenAt: resolvedTakenAt.takenAt,
         takenAtSource: resolvedTakenAt.source,
         exifJson,
-        playbackStrategy: metadata.playbackStrategy
+        playbackStrategy: metadata.playbackStrategy,
+        videoMetadataJson
       });
       placeResolutionService.resolveImage(image);
     } else {
@@ -3760,7 +3657,8 @@ class ScannerService {
         exifJson,
         thumbnailPath,
         previewPath,
-        playbackStrategy: metadata.playbackStrategy
+        playbackStrategy: metadata.playbackStrategy,
+        videoMetadataJson
       });
       placeResolutionService.resolveImage(image);
     }
@@ -3779,7 +3677,7 @@ class ScannerService {
             thumbnailPath,
             previewPath,
             force: existing ? !canReuseDerivativeFiles : options.forceNewFileDerivatives,
-            kind: 'all',
+            kind: streamingVideo ? 'thumbnail' : 'all',
             videoPlaybackSource
           },
       refreshedIndexedRow: false,

@@ -1,6 +1,6 @@
 import { authorizedImage, imageFolderIds, serveRemoteMedia } from '../immich/media.js';
 import { isImmichSource, isSourceVisible, isLocalOriginalUnavailable } from '../sources/local-source.js';
-import { appSettingsRepository, imageRepository, folderRepository, postRepository } from '../db/repositories.js';
+import { appSettingsRepository, imageRepository, folderRepository, postRepository, scanRunRepository } from '../db/repositories.js';
 import { HEIC_IMPORT_ENABLED_SETTING_KEY } from '../constants/app-setting-keys.js';
 import { getHeicImportSetting } from '../services/heic/import-setting.js';
 import express from 'express';
@@ -22,6 +22,8 @@ import { watcherService } from '../services/watcher-service.js';
 import { applyOriginalMediaHeaders } from '../utils/media-response.js';
 import { REEL_CURSOR_MAX_LENGTH } from '../utils/reels-utils.js';
 import { serveDerivativeForImage } from './lazy-derivatives.js';
+import { registerVideoPlaybackRoutes } from './video-playback.js';
+import { videoPreviewReclamation } from '../services/video-preview-reclamation.js';
 
 const router = express.Router();
 
@@ -127,6 +129,13 @@ const collectionBodySchema = z.object({
 export const manualRescanBodySchema = z.object({
   repairDerivatives: z.boolean().optional()
 });
+const acknowledgeScanIssuesBodySchema = z.object({
+  results: z.array(z.object({
+    id: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+    started_at: z.string().datetime({ offset: true }),
+    finished_at: z.string().datetime({ offset: true })
+  }).strict()).min(1).max(10)
+}).strict();
 
 const slugSchema = z.object({
   slug: z.string().min(1).max(240)
@@ -974,6 +983,15 @@ router.get('/share/posts/:id', (request, response) => {
   response.json(image);
 });
 
+registerVideoPlaybackRoutes(router, (request, response, image) => {
+  const derivative = galleryService.getShareDerivativeImage(image.id);
+  if (!derivative) {
+    response.status(404).json({ message: 'Shared video not found.' });
+    return false;
+  }
+  return ensureShareFolderAccess(request, response, derivative.folder_id);
+});
+
 router.get('/share/images/:id/thumbnail', async (request, response) => {
   const params = imageIdSchema.parse(request.params);
   const image = galleryService.getShareDerivativeImage(params.id);
@@ -1364,6 +1382,17 @@ const adminMutationRateLimiter = createRateLimiter({
   message: 'Too many administrative requests. Please try again in a minute.'
 });
 
+router.post(
+  '/admin/scan-issues/acknowledge',
+  requireCapability('canAccessSettings', 'Admin access is required.'),
+  adminMutationRateLimiter,
+  (request, response) => {
+    const { results } = acknowledgeScanIssuesBodySchema.parse(request.body);
+    scanRunRepository.acknowledgeIssues(results);
+    response.json({ ok: true });
+  }
+);
+
 router.get(
   '/admin/settings/heic-import',
   requireCapability('canAccessSettings', 'Admin access is required.'),
@@ -1561,6 +1590,35 @@ router.post('/admin/settings/carousels-migration-decision', requireCapability('c
     response.status(500).json({ message });
   }
 });
+
+const previewMaintenanceCapability = requireCapability('canManageLibrary', 'Admin access is required.');
+const previewMaintenanceParams = z.object({ id: z.string().uuid() });
+const previewMaintenanceScope = z.object({ sourceId: z.number().int().positive().optional() });
+
+for (const [operation, targetMode] of [['reclamation', 'streaming'], ['generation', 'previews']] as const) {
+  const route = '/admin/video-previews/' + operation;
+  router.get(route, previewMaintenanceCapability, async (_request, response) => {
+    response.json(await videoPreviewReclamation.list(targetMode));
+  });
+  router.get(route + '/:id', previewMaintenanceCapability, (request, response) => {
+    const job = videoPreviewReclamation.get(previewMaintenanceParams.parse(request.params).id, targetMode);
+    if (!job) { response.status(404).json({ message: 'Preview operation was not found.' }); return; }
+    response.json(videoPreviewReclamation.summarize(job));
+  });
+  router.post(route, previewMaintenanceCapability, adminMutationRateLimiter, (request, response) => {
+    const { sourceId } = previewMaintenanceScope.parse(request.body);
+    const job = videoPreviewReclamation.assess(sourceId, targetMode);
+    if (!job) { response.status(409).json({ message: 'Preview assessment is unavailable for the selected source or current playback mode.' }); return; }
+    response.status(202).json(job);
+  });
+  for (const action of ['confirm', 'cancel', 'retry'] as const) {
+    router.post(route + '/:id/' + action, previewMaintenanceCapability, adminMutationRateLimiter, (request, response) => {
+      const job = videoPreviewReclamation[action](previewMaintenanceParams.parse(request.params).id, targetMode);
+      if (!job) { response.status(409).json({ message: 'This preview operation is unavailable in its current state.' }); return; }
+      response.status(202).json(videoPreviewReclamation.summarize(job));
+    });
+  }
+}
 
 router.get('/admin/stats', requireCapability('canAccessSettings', 'Admin access is required.'), (_request, response) => {
   response.json(galleryService.getStats());

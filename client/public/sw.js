@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'foldergram-v3';
+const CACHE_VERSION = 'foldergram-v4';
 const APP_SHELL_CACHE = `${CACHE_VERSION}-app-shell`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 const IS_LOCALHOST = self.location.hostname === 'localhost' || self.location.hostname === '127.0.0.1';

@@ -39,6 +39,20 @@
               prefer-preview
               loading="eager"
             />
+            <VideoMediaPlayer
+              v-else-if="shareStore.image.videoPlaybackUrl"
+              class="max-h-[78vh] w-full"
+              :style="{ aspectRatio: `${shareStore.image.width} / ${shareStore.image.height}` }"
+              :src="shareStore.image.previewUrl"
+              :playback-url="shareStore.image.videoPlaybackUrl"
+              :title="shareStore.image.filename"
+              :poster="shareStore.image.thumbnailUrl"
+              :muted="appStore.videoMuted"
+              :loop="false"
+              load="visible"
+              preload="metadata"
+              @mute-change="appStore.setVideoMuted"
+            />
             <video
               v-else-if="shareStore.image.mediaType === 'video'"
               ref="videoElement"
@@ -94,6 +108,7 @@ import { RouterLink, useRoute } from 'vue-router';
 
 import ErrorState from '../components/ErrorState.vue';
 import CarouselMediaStage from '../components/CarouselMediaStage.vue';
+import VideoMediaPlayer from '../components/VideoMediaPlayer.vue';
 import ResilientImage from '../components/ResilientImage.vue';
 import { useAppStore } from '../stores/app';
 import { useShareStore } from '../stores/share';

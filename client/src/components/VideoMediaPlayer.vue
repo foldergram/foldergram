@@ -10,13 +10,13 @@
       ref="playerElement"
       class="video-media-player__player h-full w-full object-contain"
       :class="`video-media-player__player--${variant}`"
-      :src.prop="computedSource"
+      :src.prop="streaming.source.value ?? computedSource"
       :title.prop="title || alt || ''"
       :fullscreenOrientation.prop="'none'"
       :playsInline.prop="playsinline"
       :muted.prop="muted"
       :storage.prop="videoMuteStorage"
-      :autoPlay.prop="autoplay"
+      :autoPlay.prop="autoplay && !streaming.source.value"
       :loop.prop="loop"
       :load="load"
       :preload="preload"
@@ -26,9 +26,15 @@
       @media-unmute-request="emit('mute-change', false)"
       @media-volume-change-request="emit('mute-change', $event.detail === 0)"
     >
-      <media-provider />
+      <media-provider :loaders.prop="streaming.loaders" />
+      <LocalVideoFeedback
+        v-if="streaming.source.value"
+        :poster="poster"
+        :state="streaming.state.value"
+        @retry="streaming.play"
+      />
       <media-poster
-        v-if="poster"
+        v-else-if="poster"
         class="video-media-player__poster"
         :src.prop="poster"
         :alt.prop="alt || title || ''"
@@ -113,7 +119,7 @@
     </media-player>
 
     <div
-      v-if="showPausedIndicator"
+      v-if="showPausedIndicator && !streaming.state.value.pending && !streaming.state.value.failed"
       class="video-media-player__pause-indicator absolute inset-0 m-auto flex h-14 w-14 items-center justify-center rounded-full bg-black/60 text-white pointer-events-none transition-opacity"
       aria-hidden="true"
     >
@@ -129,13 +135,16 @@ import type { MediaPlayerElement } from 'vidstack/elements';
 import type { MediaFullscreenChangeEvent, MediaLoadingStrategy, PlayerSrc } from 'vidstack';
 
 import { useNativeVideoMuteSync } from '../composables/useNativeVideoMuteSync';
+import { useLocalVideoPlayback } from '../composables/useLocalVideoPlayback';
 import { videoPreviewWouldDownscale } from '../utils/media';
 import { applyVideoMutePreference, createVideoMuteStorage } from '../utils/video-mute';
 import VideoProgressFooter from './VideoProgressFooter.vue';
+import LocalVideoFeedback from './LocalVideoFeedback.vue';
 
 const props = withDefaults(
   defineProps<{
     src: string | PlayerSrc;
+    playbackUrl?: string;
     originalUrl?: string;
     playbackStrategy?: 'preview' | 'original' | null;
     videoPlaybackSource?: 'original' | 'preview' | null;
@@ -152,6 +161,7 @@ const props = withDefaults(
     preload?: 'none' | 'metadata' | 'auto';
     variant?: 'feed' | 'viewer';
     showControls?: boolean;
+    streamOnPlay?: boolean;
     timeLabel?: string;
   }>(),
   {
@@ -193,6 +203,12 @@ const currentTimeSec = ref(0);
 const isPaused = ref(false);
 const showPausedIndicator = ref(false);
 const isHd = ref(false);
+const streaming = useLocalVideoPlayback(() => props.playbackUrl, {
+  active: props.streamOnPlay ? () => true : undefined,
+  loadOnPlay: props.streamOnPlay,
+  autoplay: () => props.autoplay, original: () => isHd.value,
+  onAutoplayBlocked: handleAutoplayFail
+});
 let pendingRestoreState: { currentTime: number; wasPaused: boolean } | null = null;
 let hidePausedTimer: NodeJS.Timeout | null = null;
 let removeEventListeners: (() => void) | null = null;
@@ -259,6 +275,11 @@ function handleAutoplayFail() {
 }
 
 async function toggleHd() {
+  if (props.playbackUrl) {
+    isHd.value = !isHd.value;
+    emit('toggle-hd', isHd.value);
+    return;
+  }
   const player = playerElement.value;
   const current = player?.currentTime ?? 0;
   const wasPaused = player?.paused ?? true;
@@ -300,7 +321,8 @@ async function togglePlayback() {
   if (!player) return;
 
   if (player.paused) {
-    await player.play().catch(() => {});
+    if (streaming.source.value) await streaming.play();
+    else await player.play().catch(() => {});
     isPaused.value = false;
     showPausedIndicator.value = false;
     if (hidePausedTimer) clearTimeout(hidePausedTimer);

@@ -31,7 +31,9 @@ cached on disk.
 
 ## Output sizes
 
-Image sizing values are defined in `server/src/utils/image-utils.ts`. Video direct-playback limits are defined in `server/src/utils/video-playback-policy.ts`.
+Image sizing values come from `server/src/utils/image-utils.ts`. The video
+limits below apply to the older preview policy and come from
+`server/src/utils/video-playback-policy.ts`.
 
 | Constant | Value | Used for |
 | --- | --- | --- |
@@ -46,18 +48,12 @@ Image sizing values are defined in `server/src/utils/image-utils.ts`. Video dire
 
 | Mode | Behavior |
 | --- | --- |
-| `eager` | Scans queue required thumbnails and previews during indexing. Qualifying direct-playback videos still receive posters but skip the playable preview. |
+| `eager` | Scans create thumbnails, video posters, and any saved previews the item needs. |
 | `lazy` | Scans index metadata only. Missing thumbnails and required previews are generated when `/thumbnails/...` or `/previews/...` is first requested. |
 
-Lazy mode still writes the generated files to the configured derivative
-directories, so subsequent requests use the cached file on disk. It also uses
-the same media-specific generation rules as eager mode, including animated AVIF
-preview generation and the direct-playback video policy.
-
-For an eligible direct-playback video, a request to a previously issued
-`/previews/...mp4` URL resolves to the indexed original instead of recreating a
-preview. Folder-share preview routes remain scoped to generated media and can
-create a shared preview on authorized first access.
+Lazy mode saves generated files on disk so Foldergram can reuse them.
+Both modes follow the same playback rules. Videos set to streaming need a
+poster and prepare any required conversions when you play them.
 
 ## Scan-time media failures
 
@@ -87,14 +83,14 @@ characters of `asset_key`.
 | Source media | Thumbnail output | Preview output |
 | --- | --- | --- |
 | Image | `.webp` | `.webp` |
-| Video | `.webp` | `.mp4` or direct original playback |
+| Video | `.webp` | `.mp4` if the video needs a saved preview |
 
 Examples:
 
 | Source | Thumbnail | Preview |
 | --- | --- | --- |
 | `trips/oslo/IMG_0001.jpg` | `ab/abcd1234....webp` | `ab/abcd1234....webp` |
-| `trips/oslo/clip-01.mov` | `ef/ef01abcd....webp` | `ef/ef01abcd....mp4` |
+| `trips/oslo/clip-01.mov` | `ef/ef01abcd....webp` | `ef/ef01abcd....mp4` in preview mode |
 
 Existing libraries are migrated in place on the next full scan after upgrade.
 Old mirrored derivative paths keep working until that migration completes. If a
@@ -192,14 +188,10 @@ playback behavior.
 
 ## Video metadata
 
-Videos are probed with `ffprobe`.
-
-Foldergram reads:
-
-- width and height
-- duration
-- creation timestamps when present
-- container and codec details used to decide playback strategy
+Foldergram uses `ffprobe` to read local video duration, dimensions, rotation,
+and creation time when available. It also records the format, video codec,
+audio tracks, and color information so it can choose how to play the video.
+Immich supplies its own metadata and playback.
 
 ## Video thumbnail generation
 
@@ -211,9 +203,9 @@ Video thumbnails are generated with `ffmpeg`:
 
 ## Video preview generation
 
-A video needs a derived preview when it is not eligible for direct playback
-under the policy below, or when an active folder share requires a scoped
-preview. Foldergram transcodes that preview with `ffmpeg` to:
+For videos using the preview policy, Foldergram makes an MP4 preview when the
+original needs conversion or an active folder share needs a copy. FFmpeg
+generates previews with the following settings:
 
 - H.264 video
 - AAC audio when audio is present
@@ -243,7 +235,72 @@ media on every request. Nonempty legacy files are trusted; a nonempty corrupt
 or truncated legacy preview requires forced regeneration. The publication probe
 checks container and stream metadata, rather than decoding the full output.
 
-## Direct-original video playback
+## Streaming for new local videos
+
+New local videos stream by default. Foldergram plays the original when the
+browser and connection can handle it. Otherwise, FFmpeg prepares short sections
+as you watch. Foldergram keeps those sections in a temporary cache so it can
+reuse them the next time you play or seek in the same video.
+
+You see the cover while playback starts. If the video can't play, select
+**Retry playback** in the player. The first play or a jump to a new part of
+the video may take longer and use more CPU when conversion is needed.
+
+Existing local videos keep their current playback after an upgrade. Immich
+continues to use its own playback. To use saved MP4 previews for future local
+imports, see the [video playback settings](./configuration.md#video-playback).
+
+**Settings → Scan & Library → Video playback** shows the configured mode and
+whether indexed videos still need switching. This quick status does not scan
+preview files on disk. In streaming mode, use **Check for remaining previews**
+to look for leftover files even when every indexed video already uses streaming.
+After an operation, its result stays visible in the browser until you dismiss
+it. When there is no known work left, only the status row remains.
+
+### Switch existing local videos to streaming
+
+The cleanup card appears in `streaming` mode when there are local videos to
+switch or saved previews to assess.
+
+1. Open **Settings → Scan & Library → Switch to streaming and remove video previews**.
+2. Pick a local source or **All local sources**, then select **Assess previews**.
+3. Review the estimated space savings, the number of previews to remove, and the number of videos that will switch to streaming.
+4. Select **Switch to streaming and remove video previews**, then confirm with **Remove previews**.
+
+Foldergram tests parts of each original before removing its preview. Videos
+whose originals are missing, have changed, or fail the check keep their
+existing previews. Your originals, photos, thumbnails, library organization, and Immich
+data stay in place. Future imports still follow your existing video playback
+setting.
+
+The cleanup result shows how many previews were removed and how much space was
+freed. You can dismiss it when you're done. Use **Cancel operation** to stop
+between videos, or **Resume or retry** if the app reports unfinished work.
+
+### Switch existing local videos to saved previews
+
+When `VIDEO_DELIVERY_MODE=previews`, **Settings → Scan & Library** shows how
+many existing local videos still use streaming. Open **Switch existing videos
+to saved previews**, choose a local source or **All local sources**, and select
+**Check videos**. Review the estimate, then select **Generate previews and
+switch**.
+
+Eligible originals can play directly. For other videos and videos that need a
+copy for an active folder share, Foldergram generates a full MP4 preview before
+switching playback. This also works in lazy mode. A video keeps streaming if
+generation fails. You can cancel between videos and resume or retry unfinished
+work. The job leaves your original files and library index in place.
+
+If you change the setting while a job is unfinished, **Scan & Library** still
+shows its progress and recovery controls. New jobs follow the configured mode.
+
+### Playback URLs from older clients
+
+An old preview URL can serve a compatible MP4 original through the same
+access checks. If Foldergram can't serve it, the URL returns HTTP 410 and asks
+the user to reload. Update the client and server together.
+
+## Direct-original video playback for legacy and preview policies
 
 Foldergram can use the original video as the ordinary playback source when all
 of these are true:
@@ -304,19 +361,13 @@ revalidation-friendly caching (`private, no-cache` with `Vary: Cookie` when
 password protection is enabled, or `public, no-cache` otherwise) while preserving
 `ETag`, `Last-Modified`, and byte-range behavior.
 
-**Scan and repair derivatives** reclaims obsolete video previews for
-already-indexed qualifying videos. It validates the current source, checks live
-derivative references and active share requirements, and removes only the
-generated preview file. Thumbnails and originals are preserved. Quick scans do
-not perform this bulk cleanup.
+**Scan and repair derivatives** keeps existing previews for videos that
+qualify for direct playback and can generate a preview needed by an active
+share. Use [preview cleanup](#switch-existing-local-videos-to-streaming) to
+switch these videos to streaming and free the space.
 
-When a source video changes, both scan modes invalidate its previous generated
-preview, including when the replacement qualifies for direct playback. A folder
-share enabled afterward generates a preview from the replacement. Repair scans
-also recheck share requirements immediately before removing an obsolete preview,
-so links or passwords enabled during source validation retain the cached file.
-
-During derivative-layout migration and repair, an intentionally absent normal
+When a source video changes, the scanner invalidates the previous generated
+preview so that later playback and sharing use the current source. An absent
 video preview is treated as expected rather than as corruption, so it does not
 trigger repeated transcoding or prevent migration completion.
 

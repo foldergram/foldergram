@@ -68,6 +68,10 @@ describe.sequential('admin stats derivative counts', () => {
     await fsPromises.rm(tempRoot, { recursive: true, force: true });
   });
 
+  it('reports the configured video delivery mode in admin stats', () => {
+    expect(galleryService.getStats().videoDeliveryMode).toBe(appConfig.videoDeliveryMode);
+  });
+
   it('counts indexed derivative references without traversing derivative directories', async () => {
     const folder = folderRepository.upsert({ slug: 'clips', name: 'Clips', folderPath: 'clips' });
     createIndexedMedia(folder, 'photo-1.jpg', 1_000);

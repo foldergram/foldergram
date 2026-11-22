@@ -196,6 +196,7 @@ describe.sequential('DERIVATIVE_MODE lazy behavior', () => {
 
       const response = {
         headersSent: false,
+        once() { return this; },
         json(payload: unknown) {
           responseState.body = payload;
           responseState.jsonCalls += 1;

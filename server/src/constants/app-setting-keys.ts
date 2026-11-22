@@ -1,6 +1,7 @@
 export const LAST_SUCCESSFUL_GALLERY_ROOT_SETTING_KEY = 'scanner.last_successful_gallery_root';
 export const LIBRARY_REBUILD_REQUIRED_SETTING_KEY = 'scanner.library_rebuild_required';
 export const PREVIOUS_GALLERY_ROOT_SETTING_KEY = 'scanner.previous_gallery_root';
+export const SCAN_ACKNOWLEDGEMENT_SETTING_PREFIX = 'scanner.acknowledged_scan.';
 export const DERIVATIVE_STORAGE_LAYOUT_VERSION_SETTING_KEY = 'derivatives.storage_layout_version';
 export const DERIVATIVE_STORAGE_MIGRATION_CURSOR_SETTING_KEY = 'derivatives.storage_migration_cursor';
 export const DERIVATIVE_STORAGE_MIGRATION_COMPLETE_AT_SETTING_KEY = 'derivatives.storage_migration_complete_at';

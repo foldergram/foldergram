@@ -7,11 +7,13 @@ import { useAppStore } from './app';
 import { useAuthStore } from './auth';
 
 const {
+  acknowledgeScanIssuesMock,
   fetchAdminScanProgressMock,
   fetchAdminStatsMock,
   fetchScanProgressMock,
   fetchStatusMock
 } = vi.hoisted(() => ({
+  acknowledgeScanIssuesMock: vi.fn(),
   fetchAdminScanProgressMock: vi.fn(),
   fetchAdminStatsMock: vi.fn(),
   fetchScanProgressMock: vi.fn(),
@@ -19,6 +21,7 @@ const {
 }));
 
 vi.mock('../api/gallery', () => ({
+  acknowledgeScanIssues: acknowledgeScanIssuesMock,
   fetchAdminScanProgress: fetchAdminScanProgressMock,
   fetchAdminStats: fetchAdminStatsMock,
   fetchScanProgress: fetchScanProgressMock,
@@ -251,30 +254,124 @@ describe('scan issue acknowledgements', () => {
 
   beforeEach(() => {
     setActivePinia(createPinia());
+    window.localStorage.clear();
     window.sessionStorage.clear();
+    acknowledgeScanIssuesMock.mockReset().mockResolvedValue({ ok: true });
   });
 
-  it('groups matching failures without acknowledging another error or source', () => {
+  it('waits for persistence before dismissing an issue and ignores duplicate clicks', async () => {
+    const store = useAppStore();
+    const status = createAppStatus();
+    store.stats = { ...status, scan: { ...status.scan, recentIssues: [issue, older] } };
+    const saved = Promise.withResolvers<{ ok: boolean }>();
+    acknowledgeScanIssuesMock.mockReturnValue(saved.promise);
+    const request = store.acknowledgeScanResults(store.unacknowledgedScanResults);
+    expect(store.scanAcknowledgementPending).toBe(true);
+    expect(store.unacknowledgedScanResults).toHaveLength(2);
+    await store.acknowledgeScanResults(store.unacknowledgedScanResults);
+    expect(acknowledgeScanIssuesMock).toHaveBeenCalledTimes(1);
+    expect(acknowledgeScanIssuesMock).toHaveBeenCalledWith([issue, older]);
+    saved.resolve({ ok: true });
+    await request;
+    expect(store.scanAcknowledgementPending).toBe(false);
+    expect(store.unacknowledgedScanResults).toEqual([]);
+    store.updateScanProgress({ ...store.stats.scan, recentIssues: [issue, older] });
+    expect(store.unacknowledgedScanResults).toEqual([]);
+  });
+
+  it('uses server acknowledgements rather than browser storage after reopening', async () => {
+    const issueKey = [issue.id, issue.started_at, issue.finished_at].join('/');
+    window.localStorage.setItem('foldergram-scan-acknowledgements', JSON.stringify([issueKey]));
+    const status = createAppStatus();
+    const store = useAppStore();
+    store.stats = { ...status, scan: { ...status.scan, recentIssues: [issue, older] } };
+    expect(store.unacknowledgedScanResults).toHaveLength(2);
+    await store.acknowledgeScanResults(store.unacknowledgedScanResults);
+    expect(store.unacknowledgedScanResults).toEqual([]);
+
+    window.localStorage.clear();
+    window.sessionStorage.clear();
+    setActivePinia(createPinia());
+    const reopened = useAppStore();
+    reopened.stats = { ...status, scan: { ...status.scan, recentIssues: [] } };
+    expect(reopened.unacknowledgedScanResults).toEqual([]);
+  });
+
+  it.each(['localStorage', 'sessionStorage'] as const)('migrates existing %s dismissals after saving them to the server', async storage => {
+    const store = useAppStore();
+    const status = createAppStatus();
+    const progress = { ...status.scan, recentIssues: [issue, older] };
+    store.stats = { ...status, scan: progress };
+    window[storage].setItem('foldergram-scan-acknowledgements', JSON.stringify([
+      [issue.id, issue.started_at, issue.finished_at].join('/')
+    ]));
+    fetchAdminScanProgressMock.mockResolvedValue(progress);
+    await store.refreshScanProgress();
+    expect(acknowledgeScanIssuesMock).toHaveBeenCalledWith([issue]);
+    expect(store.unacknowledgedScanResults.map(result => result.id)).toEqual([older.id]);
+  });
+
+  it('keeps an issue visible when saving fails and supports retry', async () => {
+    acknowledgeScanIssuesMock.mockRejectedValueOnce(new Error('Save failed'));
+    const store = useAppStore();
+    const status = createAppStatus();
+    store.stats = { ...status, scan: { ...status.scan, recentIssues: [issue] } };
+    await store.acknowledgeScanResult(issue);
+    expect(store.scanAcknowledgementPending).toBe(false);
+    expect(store.scanAcknowledgementError).toBe(true);
+    expect(store.unacknowledgedScanResults.map(result => result.id)).toEqual([2]);
+    await store.acknowledgeScanResult(issue);
+    expect(store.scanAcknowledgementError).toBe(false);
+    expect(store.unacknowledgedScanResults).toEqual([]);
+  });
+
+  it('ignores a response from an earlier access context', async () => {
+    const store = useAppStore();
+    const status = createAppStatus();
+    store.stats = { ...status, scan: { ...status.scan, recentIssues: [issue] } };
+    const saved = Promise.withResolvers<{ ok: boolean }>();
+    acknowledgeScanIssuesMock.mockReturnValue(saved.promise);
+    const request = store.acknowledgeScanResult(issue);
+    store.resetScanCapability();
+    saved.resolve({ ok: true });
+    await request;
+    expect(store.unacknowledgedScanResults.map(result => result.id)).toEqual([2]);
+    expect(store.scanAcknowledgementPending).toBe(false);
+  });
+
+  it.each(['viewer', 'demo'])('does not send acknowledgement mutations for %s access', async access => {
+    const auth = useAuthStore();
+    if (access === 'viewer') auth.capabilities.canAccessSettings = false;
+    else auth.publicDemoMode = true;
+    await useAppStore().acknowledgeScanResult(issue);
+    expect(acknowledgeScanIssuesMock).not.toHaveBeenCalled();
+  });
+
+  it('groups matching failures without acknowledging another error or source', async () => {
     const store = useAppStore();
     const status = createAppStatus();
     store.stats = { ...status, scan: { ...status.scan, recentIssues: [issue, older,
       { ...older, id: 3, error_text: 'A different failure' }, { ...older, id: 4, source_id: 3 }
     ] } };
     expect(store.unacknowledgedScanResults.map(result => result.id)).toEqual([2, 1]);
-    store.acknowledgeScanResults(store.unacknowledgedScanResults);
+    await store.acknowledgeScanResults(store.unacknowledgedScanResults);
     expect(store.unacknowledgedScanResult?.id).toBe(3);
-    store.acknowledgeScanResult(store.unacknowledgedScanResult!);
+    await store.acknowledgeScanResult(store.unacknowledgedScanResult!);
     expect(store.unacknowledgedScanResult?.id).toBe(4);
   });
 
-  it('keeps a newly arrived matching failure unacknowledged', () => {
+  it('keeps a matching failure that arrives while saving unacknowledged', async () => {
     const store = useAppStore();
     const status = createAppStatus();
     store.stats = { ...status, scan: { ...status.scan, recentIssues: [issue, older] } };
     const displayed = store.unacknowledgedScanResults;
+    const saved = Promise.withResolvers<{ ok: boolean }>();
+    acknowledgeScanIssuesMock.mockReturnValue(saved.promise);
+    const request = store.acknowledgeScanResults(displayed);
     const newer = { ...issue, id: 3, started_at: '2026-11-16T14:00:00Z' };
     store.updateScanProgress({ ...store.stats.scan, recentIssues: [newer, issue, older] });
-    store.acknowledgeScanResults(displayed);
+    saved.resolve({ ok: true });
+    await request;
     expect(store.unacknowledgedScanResults.map(result => result.id)).toEqual([3]);
   });
 });
