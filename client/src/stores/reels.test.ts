@@ -192,6 +192,71 @@ describe('reels store', () => {
     expect(reelsStore.hasMore).toBe(false);
   });
 
+  it('opens a deep-linked Reel that is outside the current page without duplicating its post', async () => {
+    const reelsStore = useReelsStore();
+    reelsStore.$patch({ initialized: true, items: [createFeedItem(11), createFeedItem(12)], activeReelId: 11 });
+    const fetchImageSpy = vi.spyOn(galleryApi, 'fetchImage').mockResolvedValue({
+      ...createFeedItem(99),
+      id: 99
+    } as Awaited<ReturnType<typeof galleryApi.fetchImage>>);
+
+    await reelsStore.openReel(99);
+    expect(fetchImageSpy).toHaveBeenCalledWith(99, 'video');
+    expect(reelsStore.items.map((item) => item.id)).toEqual([99, 11, 12]);
+    expect(reelsStore.activeReelId).toBe(99);
+
+    await reelsStore.openReel(99);
+    expect(fetchImageSpy).toHaveBeenCalledTimes(1);
+    expect(reelsStore.items.map((item) => item.id)).toEqual([99, 11, 12]);
+  });
+
+  it('never lets an older deep-link request override a newer Reel', async () => {
+    const reelsStore = useReelsStore();
+    reelsStore.$patch({ initialized: true, items: [createFeedItem(11)], activeReelId: 11, error: 'Stale error' });
+
+    let resolveOld: ((item: Awaited<ReturnType<typeof galleryApi.fetchImage>>) => void) | undefined;
+    const oldRequest = new Promise<Awaited<ReturnType<typeof galleryApi.fetchImage>>>(resolve => { resolveOld = resolve; });
+    const fetchImageSpy = vi.spyOn(galleryApi, 'fetchImage').mockImplementation(id => id === 99
+      ? oldRequest
+      : Promise.resolve(createFeedItem(100) as Awaited<ReturnType<typeof galleryApi.fetchImage>>));
+
+    const oldOpen = reelsStore.openReel(99);
+    const newOpen = reelsStore.openReel(100);
+    expect(await newOpen).toBe(true);
+    expect(reelsStore.activeReelId).toBe(100);
+    expect(reelsStore.error).toBeNull();
+
+    resolveOld?.(createFeedItem(99) as Awaited<ReturnType<typeof galleryApi.fetchImage>>);
+    expect(await oldOpen).toBe(false);
+    expect(reelsStore.items.map(item => item.id)).toEqual([100, 11]);
+    expect(reelsStore.activeReelId).toBe(100);
+    expect(fetchImageSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('cancels an outstanding deep link when a new route is invalid', async () => {
+    const reelsStore = useReelsStore();
+    reelsStore.$patch({ initialized: true, items: [createFeedItem(11)], activeReelId: 11 });
+    let resolvePending: ((item: Awaited<ReturnType<typeof galleryApi.fetchImage>>) => void) | undefined;
+    vi.spyOn(galleryApi, 'fetchImage').mockImplementation(() => new Promise(resolve => { resolvePending = resolve; }));
+    const pending = reelsStore.openReel(99);
+    reelsStore.invalidatePendingOpenReel();
+    resolvePending?.(createFeedItem(99) as Awaited<ReturnType<typeof galleryApi.fetchImage>>);
+    expect(await pending).toBe(false);
+    expect(reelsStore.activeReelId).toBe(11);
+  });
+
+  it('rejects invalid and non-video deep links', async () => {
+    const reelsStore = useReelsStore();
+    reelsStore.$patch({ initialized: true, items: [createFeedItem(11)] });
+    await expect(reelsStore.openReel(-1)).rejects.toThrow('Invalid Reel ID');
+    vi.spyOn(galleryApi, 'fetchImage').mockResolvedValue({
+      ...createFeedItem(88),
+      mediaType: 'image'
+    } as Awaited<ReturnType<typeof galleryApi.fetchImage>>);
+    await expect(reelsStore.openReel(88)).rejects.toThrow('not a Reel');
+    expect(reelsStore.items.map((item) => item.id)).toEqual([11]);
+  });
+
   it('resets pagination and ignores a stale response after the mode changes', async () => {
     const appStore = useAppStore();
     appStore.$patch({

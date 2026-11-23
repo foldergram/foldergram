@@ -5,6 +5,7 @@
     class="app-shell flex min-h-screen overflow-x-clip"
     :class="{
       'app-shell--standalone': isStandaloneDisplay,
+      'app-shell--home': route.name === 'home',
       'app-shell--explore': isExploreShell,
       'app-shell--reels': isReelsShell
     }"
@@ -210,6 +211,33 @@ onUnmounted(() => media.removeEventListener?.('change', onLayoutChange));
 
 .app-shell--reels .app-shell__main {
   overflow: hidden;
+}
+
+/* The mobile nav ends at 768px, but UnoCSS md starts at 980px.
+   Keep desktop navigation and its content gutter available on every route
+   throughout the intermediate portrait/tablet viewport range. */
+@media (min-width: 768px) and (max-width: 979.98px) {
+  .app-shell :deep(> .sidebar) {
+    display: flex;
+  }
+
+  .app-shell .app-shell__content {
+    margin-left: var(--desktop-sidebar-width);
+  }
+
+  .app-shell :deep(.mobile-nav) {
+    display: none;
+  }
+
+  /* The expanded sidebar overlays the page at tablet widths. Reserve its
+     full hover width for Home so media controls cannot sit underneath it. */
+  .app-shell--home .app-shell__main {
+    padding-left: calc(var(--desktop-sidebar-expanded-width) - var(--desktop-sidebar-width) + 1rem);
+  }
+
+  .app-shell--home :deep(.home-layout--compact) {
+    left: 0;
+  }
 }
 
 @media (max-width: 767.98px) {

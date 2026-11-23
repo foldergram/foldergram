@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 
-import { fetchReels } from '../api/gallery';
+import { fetchImage, fetchReels } from '../api/gallery';
 import { i18n } from '../locales';
 import type { FeedItem, ReelsFeedMode } from '../types/api';
 import { updateCaptionInItems } from '../utils/caption';
@@ -22,6 +22,7 @@ interface ReelsState {
   affinitySnapshot: ReelsAffinitySnapshot | null;
   activeReelId: number | null;
   requestId: number;
+  openReelRequestId: number;
 }
 
 function createReelsSeed(): number {
@@ -48,7 +49,8 @@ export const useReelsStore = defineStore('reels', {
     seed: null,
     affinitySnapshot: null,
     activeReelId: null,
-    requestId: 0
+    requestId: 0,
+    openReelRequestId: 0
   }),
   getters: {
     activeItem: (state) => state.items.find((item) => item.id === state.activeReelId) ?? state.items[0] ?? null
@@ -83,6 +85,10 @@ export const useReelsStore = defineStore('reels', {
       this.activeReelId = id;
     },
 
+    invalidatePendingOpenReel() {
+      this.openReelRequestId += 1;
+    },
+
     reset() {
       this.mode = 'random';
       this.loadedMode = null;
@@ -97,6 +103,7 @@ export const useReelsStore = defineStore('reels', {
       this.affinitySnapshot = null;
       this.activeReelId = null;
       this.requestId += 1;
+      this.invalidatePendingOpenReel();
     },
 
     async loadInitial(force = false) {
@@ -183,6 +190,36 @@ export const useReelsStore = defineStore('reels', {
           this.loading = false;
         }
       }
+    },
+
+    async openReel(id: number): Promise<boolean> {
+      const openRequestId = ++this.openReelRequestId;
+      this.error = null;
+      if (!Number.isSafeInteger(id) || id <= 0) {
+        throw new Error('Invalid Reel ID');
+      }
+
+      if (!this.initialized) {
+        await this.loadInitial();
+        if (openRequestId !== this.openReelRequestId) return false;
+      }
+
+      let item = this.items.find((reel) => reel.id === id);
+      if (!item) {
+        const detail = await fetchImage(id, 'video');
+        // A completed older request must never replace a newer URL's active Reel.
+        if (openRequestId !== this.openReelRequestId) return false;
+        if (detail.mediaType !== 'video') {
+          throw new Error('This post is not a Reel');
+        }
+        item = detail;
+        // Keep the requested Reel in the current queue without changing its original identity.
+        this.items = [item, ...this.items.filter((reel) => reel.id !== id)];
+      }
+      if (openRequestId !== this.openReelRequestId) return false;
+      this.activeReelId = item.id;
+      this.error = null;
+      return true;
     },
 
     async prefetchIfNeeded(activeIndex: number) {

@@ -308,6 +308,30 @@ async function mockPortraitFeed(page: Page, width = 600, height = 3000) {
   await page.route('**/api/feed?*', route => route.fulfill({ json: { items: [photo, video, carousel], page: 1, limit: 24, total: 3, hasMore: false } }));
 }
 
+test('Home video controls clear the expanded sidebar at tablet widths', async ({ page }) => {
+  await mockGallery(page);
+  await page.addInitScript(() => {
+    localStorage.setItem('foldergram-show-suggested-folders-on-desktop', 'false');
+    localStorage.setItem('foldergram-fit-tall-media-to-screen', 'true');
+  });
+  await page.setViewportSize({ width: 900, height: 1200 });
+  await mockPortraitFeed(page);
+  await page.goto('/');
+
+  const sidebar = page.locator('aside.sidebar');
+  const shell = page.locator('.feed-card__video-shell');
+  await shell.scrollIntoViewIfNeeded();
+  const playButton = shell.locator('media-play-button');
+  await expect(shell.locator('media-player')).toHaveAttribute('data-playing', '');
+  await sidebar.hover();
+  await expect(sidebar).toHaveCSS('width', '240px');
+  const sidebarBox = (await sidebar.boundingBox())!;
+  const playBox = (await playButton.boundingBox())!;
+  expect(playBox.x).toBeGreaterThanOrEqual(sidebarBox.x + sidebarBox.width);
+  await playButton.click();
+  await expect(shell.locator('video')).toHaveJSProperty('paused', true);
+});
+
 for (const showSuggestedFolders of [true, false]) {
   for (const viewport of [{ width: 1280, height: 720 }, { width: 1024, height: 600 }, { width: 900, height: 1200 }]) {
     test(`Home fits portrait media at ${viewport.width}×${viewport.height} with suggested folders ${showSuggestedFolders ? 'on' : 'off'}`, async ({ page }) => {
@@ -1646,6 +1670,26 @@ for (const theme of ['light', 'dark'] as const) {
   });
 }
 
+test('Home keeps desktop sidebar across portrait and tablet breakpoints', async ({ page }) => {
+  await mockGallery(page, 'dark');
+  await page.goto('/');
+  const sidebar = page.locator('.app-shell > aside.sidebar');
+  const mobileNav = page.locator('.mobile-nav');
+  const content = page.locator('.app-shell__content');
+
+  for (const width of [768, 900, 960, 979, 980]) {
+    await page.setViewportSize({ width, height: 1500 });
+    await expect(sidebar, `Desktop sidebar missing at ${width}px`).toBeVisible();
+    await expect(mobileNav).toBeHidden();
+    const bounds = (await content.boundingBox())!;
+    expect(bounds.x, `Home content should reserve sidebar space at ${width}px`).toBeGreaterThan(70);
+  }
+
+  await page.setViewportSize({ width: 767, height: 1500 });
+  await expect(sidebar).toBeHidden();
+  await expect(mobileNav).toBeVisible();
+});
+
 test('very tall home videos play at their original aspect ratio', async ({ page }) => {
   await mockGallery(page, 'light');
   await page.setViewportSize({ width: 1280, height: 720 });
@@ -1671,12 +1715,16 @@ test('very tall home videos play at their original aspect ratio', async ({ page 
   const player = shell.locator('media-player');
   await expect(player).toHaveAttribute('data-playing', '');
 
+  await page.route('**/api/reels?*', route => route.fulfill({
+    json: { items: [video], page: 1, limit: 6, total: 1, hasMore: false }
+  }));
   const x = bounds.x + bounds.width / 2;
   const y = viewportHeight / 2;
   await page.mouse.click(x, y);
-  await expect(media).toHaveJSProperty('paused', true);
-  await page.mouse.click(x, y);
-  await expect(player).toHaveAttribute('data-playing', '');
+  await expect(page).toHaveURL(new RegExp(`/reels/${video.id}\\?from=home`));
+  await expect(page.getByRole('button', { name: 'Close' })).toBeVisible();
+  await page.getByRole('button', { name: 'Close' }).click();
+  await expect(page).toHaveURL('/');
 });
 
 async function mockReels(page: Page) {
@@ -1691,6 +1739,173 @@ async function mockReels(page: Page) {
     json: { items, page: 1, limit: 24, total: items.length, hasMore: false }
   }));
 }
+
+test('Reels share the desktop navigation breakpoint at exactly 768px', async ({ page }) => {
+  await mockReels(page);
+  await page.setViewportSize({ width: 768, height: 1200 });
+  await page.goto('/reels/1');
+  await expect(page.locator('.app-shell > aside.sidebar')).toBeVisible();
+  await expect(page.locator('.mobile-nav')).toBeHidden();
+  await expect(page.locator('.reels-view__action-rail--desktop')).toBeVisible();
+  await expect(page.locator('.reels-view__action-rail--mobile')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Next reel' }).click();
+  await expect(page).toHaveURL(/\/reels\/2$/);
+
+  await page.setViewportSize({ width: 767, height: 1200 });
+  await expect(page.locator('.app-shell > aside.sidebar')).toBeHidden();
+  await expect(page.locator('.mobile-nav')).toBeVisible();
+  await expect(page.locator('.reels-view__action-rail--desktop')).toHaveCount(0);
+  await expect(page.locator('.reels-view__action-rail--mobile')).toHaveCount(1);
+});
+
+test('the Reels entry route resolves to a post URL and scrolling updates the URL', async ({ page }) => {
+  await mockReels(page);
+  await page.goto('/reels');
+  await expect(page).toHaveURL(/\/reels\/1$/);
+  await page.getByRole('button', { name: 'Next reel' }).click();
+  await expect(page).toHaveURL(/\/reels\/2$/);
+});
+
+test('landscape Reels resize to their source aspect ratio without exposing the next card', async ({ page }) => {
+  await mockReels(page);
+  await page.setViewportSize({ width: 1080, height: 1778 });
+  const landscapes = [1, 2, 3].map(id => ({
+    ...panorama, id, filename: `landscape-${id}.mp4`, mediaType: 'video',
+    width: 1920, height: 1080, durationMs: 1000, previewUrl: '/previews/feed-video.mp4'
+  }));
+  await page.route('**/api/reels?*', route => route.fulfill({
+    json: { items: landscapes, page: 1, limit: 6, total: 3, hasMore: false }
+  }));
+  await page.goto('/reels/2');
+  const stages = page.locator('.reel-player-card__stage');
+  await expect(page.locator('.reel-player-card__overlay--visible')).toHaveCount(1);
+  await expect.poll(async () => (await stages.nth(1).boundingBox())?.width).toBeGreaterThan(600);
+  const active = (await stages.nth(1).boundingBox())!;
+  expect(active.width / active.height).toBeCloseTo(16 / 9, 1);
+  const next = (await stages.nth(2).boundingBox())!;
+  expect(next.y).toBeGreaterThanOrEqual(1770);
+  await expect(page).toHaveURL(/\/reels\/2$/);
+
+  await page.setViewportSize({ width: 1600, height: 900 });
+  const desktopStage = (await stages.nth(1).boundingBox())!;
+  const actionRail = (await page.locator('.reels-view__action-rail--desktop').boundingBox())!;
+  const arrows = (await page.locator('.reels-view__nav-controls').boundingBox())!;
+  expect(desktopStage.x + desktopStage.width).toBeLessThan(actionRail.x);
+  expect(actionRail.x + actionRail.width).toBeLessThan(arrows.x);
+});
+
+test('mixed aspect ratios preserve all Reel panel positions during fast navigation', async ({ page }) => {
+  await mockReels(page);
+  await page.setViewportSize({ width: 1600, height: 900 });
+  const mixedItems = [
+    { id: 1, width: 1080, height: 1920 },
+    { id: 2, width: 1080, height: 1080 },
+    { id: 3, width: 1920, height: 1080 },
+    { id: 4, width: 1080, height: 1920 }
+  ].map(({ id, width, height }) => ({
+    ...panorama, id, filename: `mixed-${id}.mp4`, mediaType: 'video',
+    width, height, durationMs: 1000, previewUrl: '/previews/feed-video.mp4'
+  }));
+  await page.route('**/api/reels?*', route => route.fulfill({
+    json: { items: mixedItems, page: 1, limit: 6, total: 4, hasMore: false }
+  }));
+  await page.goto('/reels/1');
+  const panels = page.locator('.reel-deck__panel');
+  await expect(panels).toHaveCount(4);
+  const initial = await panels.evaluateAll(elements => elements.map(element => ({
+    top: (element as HTMLElement).offsetTop, height: (element as HTMLElement).offsetHeight
+  })));
+  const next = page.getByRole('button', { name: 'Next reel' });
+  for (const id of [2, 3, 4]) {
+    await next.click();
+    await expect(page).toHaveURL(new RegExp(`/reels/${id}$`));
+    const positions = await panels.evaluateAll(elements => elements.map(element => ({
+      top: (element as HTMLElement).offsetTop, height: (element as HTMLElement).offsetHeight
+    })));
+    expect(positions).toEqual(initial);
+    // The deck deliberately locks navigation while smooth scrolling settles.
+    // A further click should occur after that lock, not during it.
+    await page.waitForTimeout(480);
+  }
+
+  // Stress input during the transition back toward portrait media.
+  await page.mouse.wheel(0, -280);
+  await page.mouse.wheel(0, -280);
+  const afterRapidWheel = await panels.evaluateAll(elements => elements.map(element => ({
+    top: (element as HTMLElement).offsetTop, height: (element as HTMLElement).offsetHeight
+  })));
+  expect(afterRapidWheel).toEqual(initial);
+});
+
+test('portrait desktop keeps the sidebar, stage gutters, and hides previews for square and wide Reels', async ({ page }) => {
+  await mockReels(page);
+  const viewport = { width: 960, height: 1600 };
+  await page.setViewportSize(viewport);
+  const items = [
+    { id: 1, width: 1080, height: 1920 },
+    { id: 2, width: 1080, height: 1080 },
+    { id: 3, width: 1920, height: 1080 },
+    { id: 4, width: 1080, height: 1920 }
+  ].map(({ id, width, height }) => ({
+    ...panorama, id, filename: `mixed-${id}.mp4`, mediaType: 'video',
+    width, height, durationMs: 1000, previewUrl: '/previews/feed-video.mp4'
+  }));
+  await page.route('**/api/reels?*', route => route.fulfill({
+    json: { items, page: 1, limit: 6, total: items.length, hasMore: false }
+  }));
+  await page.goto('/reels/1');
+  const sidebar = page.locator('.app-shell > aside.sidebar');
+  const stages = page.locator('.reel-player-card__stage');
+  const panels = page.locator('.reel-deck__panel');
+  const nextButton = page.getByRole('button', { name: 'Next reel' });
+  await expect(sidebar).toBeVisible();
+  const dockedSidebarWidth = await sidebar.evaluate(element =>
+    parseFloat(getComputedStyle(element).getPropertyValue('--desktop-sidebar-width')) *
+    (parseFloat(getComputedStyle(document.documentElement).fontSize) || 16)
+  );
+  const portraitBox = (await stages.nth(0).boundingBox())!;
+  expect(portraitBox.x).toBeGreaterThanOrEqual(dockedSidebarWidth);
+  expect(portraitBox.y).toBeGreaterThanOrEqual(12);
+  // The portrait panel is shorter, but the incoming square stage remains centered
+  // in its full-height panel and must not peek into the current Reel's viewport.
+  expect((await panels.nth(1).boundingBox())!.y).toBeLessThan(viewport.height);
+  expect((await stages.nth(1).boundingBox())!.y).toBeGreaterThanOrEqual(viewport.height);
+
+  for (const id of [2, 3]) {
+    await nextButton.click();
+    await expect(page).toHaveURL(new RegExp(`/reels/${id}$`));
+    await expect.poll(async () => (await panels.nth(id - 1).boundingBox())?.y).toBeCloseTo(16, -1);
+    const current = (await stages.nth(id - 1).boundingBox())!;
+    const following = (await stages.nth(id).boundingBox())!;
+    expect(current.x).toBeGreaterThanOrEqual(dockedSidebarWidth);
+    expect(current.y).toBeGreaterThanOrEqual(12);
+    expect(current.y + current.height).toBeLessThanOrEqual(viewport.height - 12);
+    expect(following.y).toBeGreaterThanOrEqual(viewport.height);
+    // The action rail belongs beside the Reel, not on top of the navigation arrows.
+    const rail = (await page.locator('.reels-view__action-rail--desktop').boundingBox())!;
+    const arrows = (await page.locator('.reels-view__nav-controls').boundingBox())!;
+    expect(rail.x, `Reel ${id}: action rail should follow stage ending at ${current.x + current.width}`).toBeGreaterThan(current.x + current.width);
+    expect(rail.x + rail.width, `Reel ${id}: action rail must clear arrows starting at ${arrows.x}`).toBeLessThan(arrows.x);
+    await nextButton.click({ trial: true });
+    await page.waitForTimeout(480);
+  }
+
+  // Confirm the same two independent control lanes at the screenshot's
+  // approximate desktop widths, not only at the 960px breakpoint edge.
+  for (const width of [984, 1080]) {
+    await page.setViewportSize({ width, height: viewport.height });
+    for (const id of [2, 3]) {
+      await page.goto(`/reels/${id}`);
+      await expect(page).toHaveURL(new RegExp(`/reels/${id}$`));
+      const stage = (await stages.nth(id - 1).boundingBox())!;
+      const rail = (await page.locator('.reels-view__action-rail--desktop').boundingBox())!;
+      const arrows = (await page.locator('.reels-view__nav-controls').boundingBox())!;
+      expect(rail.x, `${width}px Reel ${id}: rail should clear video`).toBeGreaterThan(stage.x + stage.width);
+      expect(rail.x + rail.width, `${width}px Reel ${id}: rail should clear arrows`).toBeLessThan(arrows.x);
+      await nextButton.click({ trial: true });
+    }
+  }
+});
 
 test('portrait Reels keep the next card in view and separate the two control columns', async ({ page }) => {
   await mockReels(page);

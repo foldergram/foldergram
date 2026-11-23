@@ -1,5 +1,6 @@
 <template>
   <section class="reels-view">
+    <button v-if="route.params.id" class="reels-view__close" type="button" :aria-label="t('common.close')" @click="closeViewer">×</button>
     <section v-if="appStore.isLibraryUnavailable" class="reels-view__message-card">
       <p class="reels-view__eyebrow">{{ t('nav.reels') }}</p>
       <h1 class="reels-view__title">{{ t('reels.view.libraryUnavailableTitle') }}</h1>
@@ -24,7 +25,12 @@
       <p class="reels-view__message">{{ t('reels.view.emptyDescription') }}</p>
     </section>
 
-    <div v-else class="reels-view__layout">
+    <div
+      v-else
+      class="reels-view__layout"
+      :class="{ 'reels-view__layout--active-portrait': activeItem && activeItem.height > activeItem.width }"
+      :style="{ '--reels-active-stage-ratio': activeItem && activeItem.width > 0 && activeItem.height > 0 ? activeItem.width / activeItem.height : 9 / 16 }"
+    >
       <div class="reels-view__deck-shell">
         <ReelDeck
           ref="deckElement"
@@ -167,9 +173,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { RouterLink } from 'vue-router';
+import { RouterLink, useRoute, useRouter } from 'vue-router';
 
 import Avatar from '../components/Avatar.vue';
 import ReelActionRail from '../components/ReelActionRail.vue';
@@ -180,6 +186,8 @@ import { useFoldersStore } from '../stores/folders';
 import { useReelsStore } from '../stores/reels';
 import { formatFolderTitle } from '../utils/folder-titles';
 
+const route = useRoute();
+const router = useRouter();
 const appStore = useAppStore();
 const foldersStore = useFoldersStore();
 const reelsStore = useReelsStore();
@@ -188,7 +196,7 @@ const deckElement = ref<InstanceType<typeof ReelDeck> | null>(null);
 const isInfoSidebarOpen = ref(false);
 const viewportWidth = ref(typeof window !== 'undefined' ? window.innerWidth : 0);
 const viewportHeight = ref(typeof window !== 'undefined' ? window.innerHeight : 0);
-const isMobileViewport = computed(() => viewportWidth.value <= 768);
+const isMobileViewport = computed(() => viewportWidth.value < 768);
 const metadataGutter = ref<HTMLElement | null>(null);
 const detailsGutter = ref<HTMLElement | null>(null);
 const metadataFits = ref(false);
@@ -224,10 +232,85 @@ const activeIndex = computed(() => reelsStore.items.findIndex((item) => item.id 
 const canGoPrevious = computed(() => activeIndex.value > 0);
 const canGoNext = computed(() => activeIndex.value >= 0 && activeIndex.value < reelsStore.items.length - 1);
 const showLoadingState = computed(() => reelsStore.loading && !reelsStore.initialized);
+let pendingDeckRouteId: string | null = null;
+let latestRouteRequest = 0;
+let loadingLinkedReel = false;
 
 function handleActiveChange(id: number) {
+  // An in-flight explicit URL navigation takes precedence over stale scroll events.
+  if (loadingLinkedReel) return;
+  latestRouteRequest += 1;
+  reelsStore.invalidatePendingOpenReel();
   reelsStore.setActiveReel(id);
+  if (route.params.id !== String(id)) {
+    pendingDeckRouteId = String(id);
+    void router.replace({ name: 'reels', params: { id: String(id) }, query: route.query });
+  }
 }
+
+function closeViewer() {
+  if (route.query.from === 'home' && window.history.state?.back) {
+    router.back();
+  } else {
+    void router.push({ name: 'home' });
+  }
+}
+
+async function openLinkedReel(value: string) {
+  const request = ++latestRouteRequest;
+  loadingLinkedReel = true;
+  reelsStore.error = null;
+  const id = Number(value);
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    reelsStore.invalidatePendingOpenReel();
+    reelsStore.error = 'Invalid Reel ID';
+    loadingLinkedReel = false;
+    return;
+  }
+
+  try {
+    const applied = await reelsStore.openReel(id);
+    if (!applied || request !== latestRouteRequest || route.params.id !== value) return;
+    await nextTick();
+    if (request === latestRouteRequest && route.params.id === value) {
+      deckElement.value?.scrollToReel(id);
+    }
+  } catch (error) {
+    if (request === latestRouteRequest && route.params.id === value) {
+      reelsStore.error = error instanceof Error ? error.message : 'Unable to load Reel';
+    }
+  } finally {
+    if (request === latestRouteRequest) loadingLinkedReel = false;
+  }
+}
+
+async function openReelsEntry() {
+  const request = ++latestRouteRequest;
+  // A cancelled deep-link load must not keep scroll-to-URL updates disabled.
+  loadingLinkedReel = false;
+  reelsStore.invalidatePendingOpenReel();
+  reelsStore.error = null;
+  await reelsStore.loadInitial();
+  if (request !== latestRouteRequest || route.params.id) return;
+  if (reelsStore.activeReelId !== null) {
+    const id = String(reelsStore.activeReelId);
+    pendingDeckRouteId = id;
+    await router.replace({ name: 'reels', params: { id }, query: route.query });
+  }
+}
+
+watch(() => route.params.id, (value) => {
+  if (value === pendingDeckRouteId) {
+    pendingDeckRouteId = null;
+    return;
+  }
+  pendingDeckRouteId = null;
+  if (typeof value === 'string' && value.length > 0) {
+    void openLinkedReel(value);
+  } else {
+    void openReelsEntry();
+  }
+});
 
 async function handlePrefetch(activeIndex: number) {
   await reelsStore.prefetchIfNeeded(activeIndex);
@@ -288,10 +371,17 @@ onMounted(async () => {
   updateViewportMode();
   window.addEventListener('resize', updateViewportMode);
   window.addEventListener('wheel', handleGlobalWheel, { passive: false });
-  await reelsStore.loadInitial();
+  const requestedId = route.params.id;
+  if (typeof requestedId === 'string' && requestedId.length > 0) {
+    await openLinkedReel(requestedId);
+  } else {
+    await openReelsEntry();
+  }
 });
 
 onBeforeUnmount(() => {
+  latestRouteRequest += 1;
+  reelsStore.invalidatePendingOpenReel();
   window.removeEventListener('resize', updateViewportMode);
   window.removeEventListener('wheel', handleGlobalWheel);
 });
@@ -339,10 +429,26 @@ watch(activeItem, (item) => {
 
 <style scoped>
 .reels-view {
+  position: relative;
   height: 100%;
   min-height: 100%;
   background: var(--bg);
   color: var(--text);
+}
+
+.reels-view__close {
+  position: absolute;
+  z-index: 10;
+  top: 0.75rem;
+  right: 0.75rem;
+  width: 2.5rem;
+  height: 2.5rem;
+  border: 0;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--text) 12%, var(--bg));
+  color: var(--text);
+  font-size: 1.8rem;
+  cursor: pointer;
 }
 
 .reels-view__layout {
@@ -350,7 +456,7 @@ watch(activeItem, (item) => {
   --reels-desktop-column-gap: 0.5rem;
   --reel-stage-block-gap: 0.75rem;
   --reel-stage-inline-gap: 1.25rem;
-  --reels-nav-clearance: 7rem;
+  --reels-nav-clearance: 13rem;
   --reels-nav-inset: 1.5rem;
   --reels-nav-button-size: 2.75rem;
   --reels-details-offset: 2.05rem;
@@ -358,7 +464,10 @@ watch(activeItem, (item) => {
   --reels-metadata-gap: 3.5rem;
   --reels-metadata-width: 0px;
   --reels-desktop-stage-width: 24.4rem;
-  --reels-desktop-stage-height: calc(var(--reels-desktop-stage-width) * 16 / 9);
+  --reels-active-block-limit: calc(100cqh - var(--reel-stage-block-gap));
+  --reels-rail-adjustment: 2rem;
+  --reels-active-stage-width: min(var(--reels-desktop-stage-width), calc(var(--reels-active-block-limit) * var(--reels-active-stage-ratio)));
+  --reels-active-stage-height: calc(var(--reels-active-stage-width) / var(--reels-active-stage-ratio));
   position: relative;
   display: grid;
   grid-template-columns: minmax(0, var(--reels-desktop-stage-width)) var(--reels-desktop-rail-width);
@@ -374,16 +483,16 @@ watch(activeItem, (item) => {
 
 @supports (width: 1cqw) {
   .reels-view__layout {
+    /* Keep the deck width fixed while individual Reels choose their own aspect ratio. */
     --reels-desktop-stage-width: min(
-      calc((100cqh - var(--reel-stage-block-gap)) * 9 / 16),
+      calc((100cqh - var(--reel-stage-block-gap)) * 16 / 9),
       calc(100cqw - var(--reels-desktop-rail-width) - var(--reels-desktop-column-gap) - var(--reels-nav-clearance))
     );
-    --reels-desktop-stage-height: calc(var(--reels-desktop-stage-width) * 16 / 9);
     --reels-metadata-width: clamp(
       0px,
       calc(
-        (100cqw - var(--reels-desktop-stage-width) - var(--reels-desktop-rail-width) - var(--reels-desktop-column-gap)) / 2
-        - var(--reels-metadata-gap) - (var(--desktop-sidebar-expanded-width) - var(--desktop-sidebar-width))
+        (100cqw - var(--reels-active-stage-width) - var(--reels-desktop-rail-width) - var(--reels-desktop-column-gap)) / 2
+        - var(--reels-metadata-gap) - (var(--desktop-sidebar-expanded-width) - var(--desktop-sidebar-width)) - 0.75rem
       ),
       15.5rem
     );
@@ -398,7 +507,7 @@ watch(activeItem, (item) => {
 }
 
 @supports (width: 1cqw) {
-  @media (width > 768px) and (orientation: portrait) {
+  @media (min-width: 768px) and (orientation: portrait) {
     .reels-view {
       container-type: size;
     }
@@ -406,24 +515,34 @@ watch(activeItem, (item) => {
     .reels-view__layout {
       --reel-deck-top-inset: 1rem;
       --reel-deck-panel-gap: 2rem;
+      --reels-active-block-limit: calc(100cqh - var(--reel-stage-block-gap));
       --reel-stage-gap: 0px;
       --reel-stage-inline-gap: 0px;
       --reels-action-rail-align: start;
       --reels-action-rail-start: 0.62;
-      --reels-portrait-left-inset: 0.5rem;
+      --reels-portrait-left-inset: 0.75rem;
+      /* Square and wide videos need their action rail between the stage and arrow lane. */
+      --reels-rail-adjustment: -1.5rem;
       --reels-portrait-arrow-gutter: calc(var(--reels-nav-inset) + var(--reels-nav-button-size) + 0.5rem);
       --reels-desktop-stage-width: min(
-        calc((88cqh - var(--reel-deck-top-inset) - var(--reel-deck-panel-gap)) * 9 / 16),
+        calc((100cqh - var(--reel-stage-block-gap)) * 16 / 9),
         calc(
           100cqw - var(--reels-portrait-left-inset) - var(--reels-portrait-arrow-gutter)
           - var(--reels-desktop-rail-width) - var(--reels-desktop-column-gap)
         )
       );
-      --reel-deck-panel-height: var(--reels-desktop-stage-height);
-      --reel-deck-bottom-inset: calc(100cqh - var(--reel-deck-top-inset) - var(--reel-deck-panel-height));
       container-type: normal;
+      /* Preserve the docked sidebar and center the content in the remaining space. */
+      justify-content: center;
       padding-inline: var(--reels-portrait-left-inset) var(--reels-portrait-arrow-gutter);
     }
+
+    /* A portrait Reel may reveal the next panel; this only positions its external rail. */
+    .reels-view__layout--active-portrait {
+      --reels-rail-adjustment: -2.25rem;
+      --reels-active-block-limit: calc(88cqh - var(--reel-deck-top-inset) - var(--reel-deck-panel-gap));
+    }
+
   }
 }
 
@@ -436,8 +555,8 @@ watch(activeItem, (item) => {
 
 .reels-view__metadata-gutter {
   position: absolute;
-  right: calc(100% + var(--reels-metadata-gap));
-  bottom: calc((100% - var(--reels-desktop-stage-height)) / 2 + 1.625rem);
+  right: calc((var(--reels-desktop-stage-width) + var(--reels-active-stage-width)) / 2 + var(--reels-metadata-gap));
+  bottom: calc((100% - var(--reels-active-stage-height)) / 2 + 1.625rem);
   width: var(--reels-metadata-width);
 }
 
@@ -559,22 +678,30 @@ watch(activeItem, (item) => {
 }
 
 .reels-view__right-column {
-  position: relative;
+  position: absolute;
+  top: 50%;
+  left: calc(
+    (100% - var(--reels-desktop-stage-width) - var(--reels-desktop-rail-width) - var(--reels-desktop-column-gap)) / 2
+    + (var(--reels-desktop-stage-width) + var(--reels-active-stage-width)) / 2
+    + var(--reels-desktop-column-gap) + var(--reels-rail-adjustment)
+  );
+  transform: translateY(-50%);
+  pointer-events: none;
   display: grid;
   justify-items: center;
   align-self: var(--reels-action-rail-align, center);
   width: var(--reels-desktop-rail-width);
-  height: var(--reels-desktop-stage-height);
-  margin-top: var(--reel-deck-top-inset, 0px);
+  height: var(--reels-active-stage-height);
   padding-top: clamp(
     0px,
-    calc(var(--reels-desktop-stage-height) * var(--reels-action-rail-start, 0.43)),
-    calc(var(--reels-desktop-stage-height) - 17.5rem)
+    calc(var(--reels-active-stage-height) * var(--reels-action-rail-start, 0.43)),
+    calc(var(--reels-active-stage-height) - 17.5rem)
   );
   padding-bottom: 1rem;
 }
 
 .reels-view__action-rail--desktop {
+  pointer-events: auto;
   --collection-bookmark-icon-size: 1.6rem;
   align-self: start;
   gap: 1.25rem;
@@ -724,7 +851,7 @@ watch(activeItem, (item) => {
   color: var(--muted);
 }
 
-@media (max-width: 768px) {
+@media (max-width: 767.98px) {
   .reels-view__layout {
     display: block;
     padding: 0;

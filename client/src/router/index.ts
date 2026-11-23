@@ -67,7 +67,7 @@ export const router = createRouter({
       }
     },
     {
-      path: '/reels',
+      path: '/reels/:id?',
       name: 'reels',
       component: ReelsView,
       meta: {

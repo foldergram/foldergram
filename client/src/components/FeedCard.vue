@@ -119,7 +119,7 @@
       class="feed-card__video-shell relative block overflow-hidden rounded-[0.5rem] border border-border bg-surface-alt"
       :class="{ 'feed-card__video-shell--interactive': showHomeVideoSurfaceControls, 'feed-card__video-shell--fit': fitTallMedia }"
       :style="mediaFrameStyle(homeVideoAspectRatio, true)"
-      :aria-label="showHomeVideoSurfaceControls ? t('post.viewer.togglePlayback') : undefined"
+      :aria-label="showHomeVideoSurfaceControls ? (isHomeVideoFullscreen ? t('post.viewer.togglePlayback') : openMediaLabel) : undefined"
       :role="showHomeVideoSurfaceControls ? 'button' : undefined"
       :tabindex="showHomeVideoSurfaceControls ? 0 : -1"
       @click="handleHomeVideoSurfaceClick"
@@ -448,7 +448,7 @@ import 'vidstack/bundle';
 
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { RouterLink, useRoute } from 'vue-router';
+import { RouterLink, useRoute, useRouter } from 'vue-router';
 import type { MediaFullscreenChangeEvent, PlayerSrc } from 'vidstack';
 import type { MediaPlayerElement } from 'vidstack/elements';
 
@@ -518,6 +518,7 @@ const likesStore = useLikesStore();
 const foldersStore = useFoldersStore();
 const momentsStore = useMomentsStore();
 const route = useRoute();
+const router = useRouter();
 const { t, locale } = useI18n();
 const menuOpen = ref(false);
 const deleting = ref(false);
@@ -558,11 +559,10 @@ const {
   clearError: clearCaptionError
 } = useImageCaptionEditor();
 
-const imageRoute = computed(() => ({
-  name: 'image',
-  params: { id: String(props.item.id) },
-  query: route.query
-}));
+const imageRoute = computed(() => props.item.mediaType === 'video'
+  ? { name: 'reels', params: { id: String(props.item.id) }, query: { from: props.context === 'home' ? 'home' : undefined } }
+  : { name: 'image', params: { id: String(props.item.id) }, query: route.query }
+);
 const isHomeContext = computed(() => props.context === 'home');
 const isCarousel = computed(() => props.item.postType === 'carousel' && (props.item.mediaItems?.length ?? 0) > 1);
 const showHomeStoryAvatar = computed(() => isHomeContext.value && props.hasAvatarStory);
@@ -721,7 +721,10 @@ function handleImageNavigation(event: MouseEvent, navigate: () => void) {
 
   event.preventDefault();
 
-  if (shouldOpenPostInModal.value) {
+  if (props.item.mediaType === 'video') {
+    // Reel routes are full-page navigation, not image modals.
+    appStore.clearImageModalBackground();
+  } else if (shouldOpenPostInModal.value) {
     appStore.setImageModalBackground(route.fullPath);
   }
 
@@ -940,6 +943,12 @@ function handleHomeVideoEnded() {
 
 async function handleHomeVideoSurfaceClick(event: MouseEvent) {
   if (!showHomeVideoSurfaceControls.value || !isPrimaryPlainClick(event) || isInteractiveTarget(event.target)) {
+    return;
+  }
+
+  if (isHomeContext.value && !isHomeVideoFullscreen.value) {
+    appStore.clearImageModalBackground();
+    await router.push(imageRoute.value);
     return;
   }
 

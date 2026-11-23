@@ -12,6 +12,8 @@ import FeedList from './FeedList.vue';
 import CarouselMediaStage from './CarouselMediaStage.vue';
 import ReelPlayerCard from './ReelPlayerCard.vue';
 
+const navigationMocks = vi.hoisted(() => ({ push: vi.fn() }));
+
 vi.mock('vidstack/bundle', () => ({}));
 vi.mock('vue-router', async () => {
   const actual = await vi.importActual<typeof import('vue-router')>('vue-router');
@@ -21,7 +23,8 @@ vi.mock('vue-router', async () => {
     useRoute: () => ({
       fullPath: '/',
       query: {}
-    })
+    }),
+    useRouter: () => ({ push: navigationMocks.push })
   };
 });
 
@@ -150,11 +153,12 @@ const globalStubs = {
     template: '<img data-test="resilient-image" />'
   },
   RouterLink: {
-    props: ['custom', 'to'],
+    props: { custom: Boolean, to: [String, Object] },
+    setup: () => ({ navigate: () => {} }),
     template: `
       <template v-if="custom">
         <span class="router-link-stub" :data-to="typeof to === 'string' ? to : JSON.stringify(to)">
-          <slot href="#" :navigate="() => {}" />
+          <slot href="#" :navigate="navigate" />
         </span>
       </template>
       <a v-else v-bind="$attrs" :data-to="typeof to === 'string' ? to : JSON.stringify(to)"><slot /></a>
@@ -371,7 +375,8 @@ describe('FeedCard', () => {
     expect(container.style.aspectRatio).toBe('1080 / 1920');
   });
 
-  it('toggles playback from home-feed video clicks and shows the paused indicator', async () => {
+  it('opens the immersive Reel viewer when clicking a Home-feed video', async () => {
+    navigationMocks.push.mockReset();
     const wrapper = mount(FeedCard, {
       props: {
         item: createVideoItem(805),
@@ -394,16 +399,40 @@ describe('FeedCard', () => {
     await wrapper.get('.feed-card__video-shell').trigger('click');
     await flushPromises();
 
-    expect(player.pauseCallCount).toBe(1);
-    expect(player.paused).toBe(true);
-    expect(wrapper.find('.feed-card__pause-indicator').exists()).toBe(true);
+    expect(navigationMocks.push).toHaveBeenCalledWith({
+      name: 'reels',
+      params: { id: '805' },
+      query: { from: 'home' }
+    });
+  });
 
-    await wrapper.get('.feed-card__video-shell').trigger('click');
-    await flushPromises();
+  it('clears Moments modal background when opening a Reel but preserves image modal navigation', async () => {
+    const appStore = useAppStore();
+    appStore.setImageModalBackground('/moments');
+    const video = mount(FeedCard, {
+      props: { item: createVideoItem(806), avatarUrl: null, context: 'default' },
+      global: { stubs: globalStubs }
+    });
+    await video.get('a.relative.block').trigger('click');
+    expect(appStore.imageModalBackgroundPath).toBeNull();
+    video.unmount();
 
-    expect(player.playCallCount).toBeGreaterThanOrEqual(2);
-    expect(player.paused).toBe(false);
-    expect(wrapper.find('.feed-card__pause-indicator').exists()).toBe(false);
+    const image = mount(FeedCard, {
+      props: { item: createImageItem(807), avatarUrl: null, context: 'default' },
+      global: { stubs: globalStubs }
+    });
+    await image.get('a.relative.block').trigger('click');
+    expect(appStore.imageModalBackgroundPath).toBe('/');
+    image.unmount();
+  });
+
+  it('labels Home Reel surfaces according to their navigation action', async () => {
+    const wrapper = mount(FeedCard, {
+      props: { item: createVideoItem(808), avatarUrl: null, context: 'home', isActiveVideo: true },
+      global: { stubs: globalStubs }
+    });
+    expect(wrapper.get('.feed-card__video-shell').attributes('aria-label')).toBe('Open reel');
+    wrapper.unmount();
   });
 
   it.each([-1000, 1000])('pauses an audible video scrolled out of view at %ipx after leaving fullscreen', async (offscreenTop) => {
@@ -562,7 +591,7 @@ describe('FeedCard', () => {
     expect(wrapper.get('button[aria-label="Like post"]').attributes('title')).toBe('Like post');
     expect(wrapper.get('a[aria-label="Open post"]').attributes('title')).toBe('Open post');
     const postRouteLink = wrapper
-      .findAll('a[data-to]')
+      .findAll('[data-to]')
       .find((candidate) => candidate.attributes('data-to')?.includes('"name":"image"'));
 
     expect(postRouteLink?.attributes('data-to')).toContain('"name":"image"');
