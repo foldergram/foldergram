@@ -156,9 +156,9 @@ describe.sequential('production mutation origin checks', () => {
     const middleware = await import('../src/middleware/csrf-protection.js');
     const request = createRequest('DELETE', {
       [middleware.CSRF_INTENT_HEADER]: middleware.CSRF_INTENT_VALUE,
-      'x-forwarded-host': 'foldergram.intentdeep.com',
+      'x-forwarded-host': 'demo.foldergram.app',
       'x-forwarded-proto': 'https',
-      origin: 'https://foldergram.intentdeep.com'
+      origin: 'https://demo.foldergram.app'
     });
     const response = createResponse();
     const next = vi.fn();
@@ -174,13 +174,13 @@ describe.sequential('production mutation origin checks', () => {
     vi.resetModules();
     vi.stubEnv('NODE_ENV', 'production');
     vi.stubEnv('SERVER_PORT', '4141');
-    vi.stubEnv('CSRF_TRUSTED_ORIGINS', 'https://foldergram.intentdeep.com');
+    vi.stubEnv('CSRF_TRUSTED_ORIGINS', 'https://demo.foldergram.app');
 
     const middleware = await import('../src/middleware/csrf-protection.js');
     const request = createRequest('DELETE', {
       [middleware.CSRF_INTENT_HEADER]: middleware.CSRF_INTENT_VALUE,
       host: '127.0.0.1:4141',
-      origin: 'https://foldergram.intentdeep.com'
+      origin: 'https://demo.foldergram.app'
     });
     const response = createResponse();
     const next = vi.fn();

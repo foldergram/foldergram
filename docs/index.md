@@ -18,7 +18,7 @@ hero:
       link: /how-it-works
     - theme: alt
       text: Live Demo
-      link: https://foldergram.intentdeep.com/
+      link: https://demo.foldergram.app/
 features:
   - icon:
       src: /icons/local-first.svg

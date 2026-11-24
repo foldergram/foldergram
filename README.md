@@ -1,10 +1,10 @@
 <div align="center">
 
-<a href="https://foldergram.intentdeep.com/">
+<a href="https://demo.foldergram.app/">
   <img src="docs/media/foldergram-readme.gif" alt="Foldergram demo showing the Home feed, Reels, and Library" />
 </a>
 <br /><br />
-<a href="https://foldergram.intentdeep.com/">
+<a href="https://foldergram.app/">
   <img src="client/public/favicon.svg" width="80" alt="Foldergram Logo" />
 </a>
 
@@ -13,14 +13,14 @@
 **Local-first photo and video gallery for your folders, with Instagram-inspired browsing and optional read-only Immich integration.**
 
 [![Available on GHCR](https://img.shields.io/badge/GHCR-foldergram-blue?style=flat-square&logo=docker)](https://github.com/foldergram/foldergram/pkgs/container/foldergram)
-[![LIVE DEMO](https://img.shields.io/badge/LIVE%20DEMO-FOLDERGRAM-a951ab?style=flat-square&logo=googlechrome&logoColor=white)](https://foldergram.intentdeep.com/)
+[![LIVE DEMO](https://img.shields.io/badge/LIVE%20DEMO-FOLDERGRAM-a951ab?style=flat-square&logo=googlechrome&logoColor=white)](https://demo.foldergram.app/)
 [![Node.js Version](https://img.shields.io/badge/Node.js-22%20LTS-green?style=flat-square&logo=nodedotjs)](https://nodejs.org/)
 [![Vue 3](https://img.shields.io/badge/Vue.js-3-4fc08d?style=flat-square&logo=vuedotjs)](https://vuejs.org/)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg?style=flat-square)](https://www.gnu.org/licenses/agpl-3.0)
 
-[Live Demo](https://foldergram.intentdeep.com/) • [Features](#features) • [Installation](#installation) • [Configuration](#configuration) • [Tech Stack](#tech-stack) • [Contributing](CONTRIBUTING.md)
+[Website](https://foldergram.app/) • [Documentation](https://docs.foldergram.app/) • [Live Demo](https://demo.foldergram.app/) • [Features](#features) • [Installation](#installation) • [Configuration](#configuration) • [Tech Stack](#tech-stack) • [Contributing](CONTRIBUTING.md)
 
-**Try the public demo:** [foldergram.intentdeep.com](https://foldergram.intentdeep.com/)
+**Try the public demo:** [demo.foldergram.app](https://demo.foldergram.app/)
 
 </div>
 
@@ -360,7 +360,7 @@ To run Foldergram as a public read-only demo, set the following in `.env`:
 ```env
 NODE_ENV=production
 PUBLIC_DEMO_MODE=1
-CSRF_TRUSTED_ORIGINS=https://foldergram.intentdeep.com
+CSRF_TRUSTED_ORIGINS=https://demo.foldergram.app
 ```
 
 In demo mode, people can browse and stream videos without changing the library.
@@ -429,3 +429,7 @@ Start contribution branches from the latest `develop` and target `develop` in yo
 For major features or changes to core behavior such as scanning, indexing, access, or storage, please open an issue or discussion first so we can agree on the approach before you invest time in an implementation.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for local setup, project guidelines, and tips for preparing a pull request.
+
+---
+
+Hosting sponsored by [Simafri](https://www.simafri.com/en/managed-vps/) (managed VPS)

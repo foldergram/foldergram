@@ -54,7 +54,8 @@ export default defineConfig({
       { text: 'How It Works', link: '/how-it-works' },
       { text: 'API', link: '/api' },
       { text: 'Security', link: '/security' },
-      { text: 'Demo', link: 'https://foldergram.intentdeep.com/' }
+      { text: 'Website', link: 'https://foldergram.app/' },
+      { text: 'Demo', link: 'https://demo.foldergram.app/' }
     ],
     socialLinks: [
       { icon: 'github', link: 'https://github.com/foldergram/foldergram' }
@@ -78,7 +79,8 @@ export default defineConfig({
       label: 'On this page'
     },
     footer: {
-      message: 'Released under the AGPL-3.0 License.',
+      message: 'Released under the AGPL-3.0 License.<br>'
+        + 'Hosting sponsored by <a href="https://www.simafri.com/en/managed-vps/" rel="sponsored">Simafri</a> (managed VPS)',
       copyright: 'Copyright © 2026 Sajjad Ali'
     }
   }
