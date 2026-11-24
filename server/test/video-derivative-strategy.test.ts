@@ -137,7 +137,7 @@ describe.sequential('video derivative strategy', () => {
     expect(result.generatedPreview).toBe(false);
   });
 
-  it('invalidates a previous preview when forced processing now skips preview encoding', async () => {
+  it('preserves an existing preview when forced processing skips preview encoding', async () => {
     execFileAsyncMock.mockImplementation(createExecFileAsyncMock({
       format: { duration: '4.0', format_name: 'mov,mp4,m4a,3gp,3g2,mj2' },
       streams: [{ codec_type: 'video', codec_name: 'h264', width: 1080, height: 1920, pix_fmt: 'yuv420p' }]
@@ -154,7 +154,7 @@ describe.sequential('video derivative strategy', () => {
 
     expect(result.generatedThumbnail).toBe(true);
     expect(result.generatedPreview).toBe(false);
-    await expect(fs.stat(previewPath)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(fs.readFile(previewPath, 'utf8')).resolves.toBe('previous-source-preview');
     expect(execFileAsyncMock.mock.calls.filter(([command, args]) => command === 'ffmpeg' && args.includes('libx264'))).toHaveLength(0);
   });
 

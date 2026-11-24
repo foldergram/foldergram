@@ -155,8 +155,33 @@
           />
 
           <div class="story-stage__surface" :style="activeStageTransitionStyle">
+            <media-player
+              v-if="displayImage?.videoPlaybackUrl"
+              :key="displayImage.videoPlaybackUrl"
+              ref="streamingVideo"
+              class="story-stage__video"
+              :src.prop="streaming.source.value"
+              :title.prop="displayImage.filename"
+              :muted.prop="appStore.videoMuted"
+              :storage.prop="videoMuteStorage"
+              :playsInline.prop="true"
+              :loop.prop="false"
+              load="eager"
+              preload="metadata"
+              @time-update="syncStreamingStoryTiming"
+              @ended="handleStoryVideoEnded"
+              @play="handleStreamingStoryPlay"
+              @pause="handleStreamingStoryPause"
+            >
+              <media-provider :loaders.prop="streaming.loaders" />
+              <LocalVideoFeedback
+                :poster="displayImage.thumbnailUrl"
+                :state="streaming.state.value"
+                @retry="retryStreamingStory"
+              />
+            </media-player>
             <video
-              v-if="displayImage?.mediaType === 'video'"
+              v-else-if="displayImage?.mediaType === 'video'"
               :key="`video-${displayImage.id}`"
               ref="videoElement"
               class="story-stage__video"
@@ -266,6 +291,13 @@ import { formatFolderTitle } from '../utils/folder-titles';
 import { getOriginalMediaDownloadUrl } from '../utils/original-media';
 import Avatar from './Avatar.vue';
 import ResilientImage from './ResilientImage.vue';
+import 'vidstack/bundle';
+import type { MediaPlayerElement } from 'vidstack/elements';
+import type { MediaPauseEvent, MediaPlayEvent, MediaTimeUpdateEvent } from 'vidstack';
+import { useLocalVideoPlayback } from '../composables/useLocalVideoPlayback';
+import { useNativeVideoMuteSync } from '../composables/useNativeVideoMuteSync';
+import { createVideoMuteStorage } from '../utils/video-mute';
+import LocalVideoFeedback from './LocalVideoFeedback.vue';
 
 const STORY_IMAGE_AUTO_ADVANCE_MS = 4200;
 const CAPSULE_SWITCH_ANIMATION_MS = 360;
@@ -325,6 +357,9 @@ const activeCapsuleTransitionId = ref<string | null>(null);
 const transitionPending = ref(false);
 const isCapsuleSwitching = ref(false);
 const videoElement = ref<HTMLVideoElement | null>(null);
+const streamingVideo = ref<MediaPlayerElement | null>(null);
+const videoMuteStorage = createVideoMuteStorage(() => appStore.videoMuted);
+useNativeVideoMuteSync(streamingVideo, () => appStore.videoMuted, muted => appStore.setVideoMuted(muted));
 
 let previousBodyOverflow = '';
 let animationFrameId = 0;
@@ -342,6 +377,10 @@ const activeImages = computed(() =>
   props.store.currentCapsule?.id === activeCapsuleId.value ? props.store.currentImages : []
 );
 const displayImage = computed<FeedItem | null>(() => activeImages.value[activeImageIndex.value] ?? activeCapsule.value?.coverImage ?? null);
+const streaming = useLocalVideoPlayback(() => displayImage.value?.videoPlaybackUrl, {
+  autoplay: () => !isPaused.value,
+  onAutoplayBlocked: () => { isPaused.value = true; }
+});
 const displayFolderTitle = computed(() =>
   displayImage.value ? formatFolderTitle(displayImage.value, appStore.nestedFolderTitleFormat) : ''
 );
@@ -530,7 +569,7 @@ function togglePaused() {
 
   if (isPaused.value) {
     stopAutoplay();
-    syncMediaPlayback();
+    syncMediaPlayback(true);
     return;
   }
 
@@ -538,7 +577,7 @@ function togglePaused() {
     startImageAutoplay();
   }
 
-  syncMediaPlayback();
+  syncMediaPlayback(true);
 }
 
 function canStartStageSwipe(event: PointerEvent) {
@@ -724,7 +763,27 @@ async function handleKeydown(event: KeyboardEvent) {
   }
 }
 
-function syncMediaPlayback() {
+function syncStreamingStoryTiming(event: MediaTimeUpdateEvent) {
+  if (!isCurrentStreamingPlayer(event)) return;
+  const position = event.detail.currentTime;
+  const duration = streamingVideo.value?.duration ?? 0;
+  if (duration > 0) activeSlideDurationMs.value = duration * 1000;
+  activeSlideElapsedMs.value = position * 1000;
+}
+
+function retryStreamingStory() {
+  isPaused.value = false;
+  void streaming.play();
+}
+
+function syncMediaPlayback(explicit = false) {
+  if (streaming.source.value) {
+    if (explicit) {
+      if (isPaused.value) streaming.pause();
+      else void streaming.play();
+    }
+    return;
+  }
   const player = videoElement.value;
   if (!player || displayImage.value?.mediaType !== 'video') {
     return;
@@ -760,12 +819,29 @@ function handleStoryVideoPause() {
     return;
   }
 
-  if (videoElement.value?.ended) {
+  if (videoElement.value?.ended || streamingVideo.value?.state.ended) {
     return;
   }
 
   isPaused.value = true;
   syncStoryVideoTiming();
+}
+
+function handleStreamingStoryPause(event: MediaPauseEvent) {
+  if (!isCurrentStreamingPlayer(event)) return;
+  // Vidstack dispatches its terminal pause just before setting `state.ended`.
+  // It must not turn the next story into an intentionally paused video.
+  if (event.triggers.hasType('end') || event.triggers.hasType('foldergram-suspend')) return;
+  handleStoryVideoPause();
+}
+
+function handleStreamingStoryPlay(event: MediaPlayEvent) {
+  if (isCurrentStreamingPlayer(event)) handleStoryVideoPlay();
+}
+
+function isCurrentStreamingPlayer(event: Event) {
+  return event.currentTarget === streamingVideo.value &&
+    streamingVideo.value?.state.source.src === displayImage.value?.videoPlaybackUrl;
 }
 
 async function handleStoryVideoEnded() {
@@ -971,6 +1047,23 @@ onUnmounted(() => {
 }
 
 .story-stage__video {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.story-stage__video :deep(media-provider) {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.story-stage__video :deep(video) {
+  display: block;
   width: 100%;
   height: 100%;
   object-fit: contain;

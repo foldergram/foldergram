@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 
 import {
+  acknowledgeScanIssues,
   controlScanOperation,
   fetchAdminScanProgress,
   fetchScanProgress,
@@ -27,12 +28,15 @@ interface AppState {
   lastOpenedFolderSlug: string | null;
   recentOpenedFolderSlugs: string[];
   imageModalBackgroundPath: string | null;
+  reelModalBackgroundPath: string | null;
   statsPollFailures: number;
   statsPollTimer: number | null;
   scanStatusUnavailable: boolean;
   scanControlPending: boolean;
   scanControlError: boolean;
   acknowledgedScanResults: string[];
+  scanAcknowledgementPending: boolean;
+  scanAcknowledgementError: boolean;
   scanCompletion: { result: ScanRunSummary; surface: string | null } | null;
 }
 
@@ -43,16 +47,21 @@ const RECENT_OPENED_FOLDERS_STORAGE_KEY = 'foldergram-recent-opened-folders';
 const RECENT_OPENED_FOLDERS_LIMIT = 24;
 const SCAN_PROGRESS_POLL_INTERVAL_MS = 1000;
 const IDLE_SCAN_POLL_INTERVAL_MS = 5000;
-const SCAN_ACKNOWLEDGEMENTS_KEY = 'foldergram-scan-acknowledgements';
 const SCAN_COMPLETION_DURATION_MS = 6000;
 
-function readAcknowledgedScanResults(): string[] {
-  try {
-    const saved: unknown = JSON.parse(window.sessionStorage.getItem(SCAN_ACKNOWLEDGEMENTS_KEY) ?? '[]');
-    return Array.isArray(saved) ? saved.filter((value): value is string => typeof value === 'string').slice(-50) : [];
-  } catch {
-    return [];
+function readLegacyScanAcknowledgements(): Set<string> {
+  const keys = new Set<string>();
+  for (const storage of ['localStorage', 'sessionStorage'] as const) {
+    try {
+      const saved: unknown = JSON.parse(window[storage].getItem('foldergram-scan-acknowledgements') ?? '[]');
+      if (Array.isArray(saved)) {
+        for (const key of saved.slice(-50)) if (typeof key === 'string') keys.add(key);
+      }
+    } catch {
+      // Browser storage is only needed to migrate acknowledgements from older clients.
+    }
   }
+  return keys;
 }
 
 function scanResultKey(result: ScanRunSummary): string {
@@ -123,12 +132,15 @@ export const useAppStore = defineStore('app', {
     lastOpenedFolderSlug: null,
     recentOpenedFolderSlugs: [],
     imageModalBackgroundPath: null,
+    reelModalBackgroundPath: null,
     statsPollFailures: 0,
     statsPollTimer: null,
     scanStatusUnavailable: false,
     scanControlPending: false,
     scanControlError: false,
-    acknowledgedScanResults: readAcknowledgedScanResults(),
+    acknowledgedScanResults: [],
+    scanAcknowledgementPending: false,
+    scanAcknowledgementError: false,
     scanCompletion: null
   }),
   getters: {
@@ -273,6 +285,14 @@ export const useAppStore = defineStore('app', {
       this.imageModalBackgroundPath = null;
     },
 
+    setReelModalBackground(path: string) {
+      this.reelModalBackgroundPath = path;
+    },
+
+    clearReelModalBackground() {
+      this.reelModalBackgroundPath = null;
+    },
+
     markLibraryRebuildStarted() {
       if (!this.stats) {
         return;
@@ -315,18 +335,26 @@ export const useAppStore = defineStore('app', {
     },
 
     acknowledgeScanResult(result: ScanRunSummary) {
-      this.acknowledgeScanResults([result]);
+      return this.acknowledgeScanResults([result]);
     },
 
-    acknowledgeScanResults(results: readonly ScanRunSummary[]) {
+    async acknowledgeScanResults(results: readonly ScanRunSummary[]) {
+      if (!this.shouldUseAdminScanProgress() || useAuthStore().publicDemoMode || this.scanAcknowledgementPending) return;
       const keys = results.map(scanResultKey);
       if (keys.every(key => this.acknowledgedScanResults.includes(key))) return;
 
-      this.acknowledgedScanResults = [...new Set([...this.acknowledgedScanResults, ...keys])].slice(-50);
+      const requestGeneration = scanCapabilityGeneration;
+      this.scanAcknowledgementPending = true;
+      this.scanAcknowledgementError = false;
       try {
-        window.sessionStorage.setItem(SCAN_ACKNOWLEDGEMENTS_KEY, JSON.stringify(this.acknowledgedScanResults));
+        await acknowledgeScanIssues(results);
+        if (requestGeneration !== scanCapabilityGeneration) return;
+        // Keep an older in-flight poll from restoring issues already saved as acknowledged.
+        this.acknowledgedScanResults = [...new Set([...this.acknowledgedScanResults, ...keys])].slice(-50);
       } catch {
-        // The acknowledgement still applies for the current page lifetime.
+        if (requestGeneration === scanCapabilityGeneration) this.scanAcknowledgementError = true;
+      } finally {
+        if (requestGeneration === scanCapabilityGeneration) this.scanAcknowledgementPending = false;
       }
     },
 
@@ -404,6 +432,9 @@ export const useAppStore = defineStore('app', {
       this.scanCompletion = null;
       this.scanControlPending = false;
       this.scanControlError = false;
+      this.acknowledgedScanResults = [];
+      this.scanAcknowledgementPending = false;
+      this.scanAcknowledgementError = false;
       if (this.stats && !this.shouldUseAdminScanProgress()) {
         const { lastCompletedScan, operation } = this.stats.scan;
         this.updateScanProgress({
@@ -429,6 +460,7 @@ export const useAppStore = defineStore('app', {
       this.loadingStats = false;
       this.error = null;
       this.imageModalBackgroundPath = null;
+      this.reelModalBackgroundPath = null;
     },
 
     shouldUseAdminScanProgress() {
@@ -574,6 +606,11 @@ export const useAppStore = defineStore('app', {
           this.updateScanProgress(progress);
           this.statsPollFailures = 0;
           this.scanStatusUnavailable = false;
+          if (admin && !this.scanAcknowledgementError) {
+            const legacyKeys = readLegacyScanAcknowledgements();
+            const legacyIssues = progress.recentIssues?.filter(result => legacyKeys.has(scanResultKey(result))) ?? [];
+            if (legacyIssues.length) await this.acknowledgeScanResults(legacyIssues);
+          }
           if ((previous?.isScanning && !progress.isScanning) ||
               previous?.lastCompletedScan?.id !== progress.lastCompletedScan?.id) {
             await this.fetchStats({ background: true });

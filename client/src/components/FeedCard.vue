@@ -62,6 +62,7 @@
       :style="mediaFrameStyle(mediaAspectRatio, true)"
       :items="item.mediaItems!"
       :prefer-preview="isHomeContext"
+      stream-on-play
       :retry-while="appStore.isScanning"
       :loading="isHomeContext ? 'eager' : 'lazy'"
       :muted="appStore.videoMuted"
@@ -117,8 +118,8 @@
       ref="homeVideoTarget"
       class="feed-card__video-shell relative block overflow-hidden rounded-[0.5rem] border border-border bg-surface-alt"
       :class="{ 'feed-card__video-shell--interactive': showHomeVideoSurfaceControls, 'feed-card__video-shell--fit': fitTallMedia }"
-      :style="mediaFrameStyle(homeVideoAspectRatio, true)"
-      :aria-label="showHomeVideoSurfaceControls ? t('post.viewer.togglePlayback') : undefined"
+      :style="homeVideoFrameStyle"
+      :aria-label="showHomeVideoSurfaceControls ? (isHomeVideoFullscreen ? t('post.viewer.togglePlayback') : openMediaLabel) : undefined"
       :role="showHomeVideoSurfaceControls ? 'button' : undefined"
       :tabindex="showHomeVideoSurfaceControls ? 0 : -1"
       @click="handleHomeVideoSurfaceClick"
@@ -127,7 +128,7 @@
       <media-player
         ref="homePlayerElement"
         class="feed-card__player"
-        :src.prop="homeVideoSource"
+        :src.prop="streaming.source.value ?? homeVideoSource"
         :title.prop="item.filename"
         :fullscreenOrientation.prop="'none'"
         :playsInline.prop="true"
@@ -141,8 +142,17 @@
         @media-unmute-request="appStore.setVideoMuted(false)"
         @media-volume-change-request="appStore.setVideoMuted($event.detail === 0)"
       >
-        <media-provider />
+        <media-provider :loaders.prop="streaming.loaders" />
+        <LocalVideoFeedback
+          v-if="streaming.source.value"
+          :poster="item.thumbnailUrl"
+          :cover-fit="fitTallMedia || isHomeVideoFullscreen ? 'contain' : 'cover'"
+          :active="showHomeVideoControls"
+          :state="streaming.state.value"
+          @retry="streaming.play"
+        />
         <media-poster
+          v-else
           :src.prop="item.thumbnailUrl"
           :alt.prop="item.filename"
         />
@@ -201,7 +211,7 @@
         </VideoProgressFooter>
       </media-player>
       <div
-        v-if="showHomeVideoPausedIndicator"
+        v-if="showHomeVideoPausedIndicator && !streaming.state.value.pending && !streaming.state.value.failed"
         class="feed-card__pause-indicator"
         aria-hidden="true"
       >
@@ -438,7 +448,7 @@ import 'vidstack/bundle';
 
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { RouterLink, useRoute } from 'vue-router';
+import { RouterLink, useRoute, useRouter } from 'vue-router';
 import type { MediaFullscreenChangeEvent, PlayerSrc } from 'vidstack';
 import type { MediaPlayerElement } from 'vidstack/elements';
 
@@ -456,14 +466,16 @@ import { resolveDisplayCaption } from '../utils/caption';
 import { formatFolderTitle } from '../utils/folder-titles';
 import { formatMediaDuration, formatVideoTimestamp } from '../utils/media';
 import { resolveFeedAspectRatio } from '../utils/media-layout';
-import { getOriginalMediaDownloadUrl, getOriginalMediaUrl, isHeicFilename } from '../utils/original-media';
+import { getOriginalMediaDownloadUrl, getOriginalMediaUrl, isHeicMedia } from '../utils/original-media';
 import { applyVideoMutePreference, createVideoMuteStorage } from '../utils/video-mute';
 import Avatar from './Avatar.vue';
 import CarouselMediaStage from './CarouselMediaStage.vue';
 import CollectionBookmark from './CollectionBookmark.vue';
 import ConfirmDialog from './ConfirmDialog.vue';
 import PostCaptionModal from './PostCaptionModal.vue';
+import LocalVideoFeedback from './LocalVideoFeedback.vue';
 import ResilientImage from './ResilientImage.vue';
+import { useLocalVideoPlayback } from '../composables/useLocalVideoPlayback';
 import VideoProgressFooter from './VideoProgressFooter.vue';
 
 interface HomeVideoVisibilityChange {
@@ -475,6 +487,12 @@ interface HomeVideoVisibilityChange {
 const HOME_IMAGE_DOUBLE_TAP_WINDOW_MS = 320;
 const HOME_VIDEO_OBSERVER_THRESHOLDS = [0, 0.2, 0.4, 0.6, 0.8, 1];
 
+function createHomeReelSessionKey(): string {
+  // getRandomValues also works when self-hosted over plain HTTP on a LAN.
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return `home:${Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')}`;
+}
+
 const props = withDefaults(
   defineProps<{
     item: FeedItem;
@@ -482,6 +500,7 @@ const props = withDefaults(
     hasAvatarStory?: boolean;
     context?: 'default' | 'home';
     isActiveVideo?: boolean;
+    nextVideoPlaybackUrl?: string;
     fitTallMedia?: boolean;
   }>(),
   {
@@ -505,6 +524,7 @@ const likesStore = useLikesStore();
 const foldersStore = useFoldersStore();
 const momentsStore = useMomentsStore();
 const route = useRoute();
+const router = useRouter();
 const { t, locale } = useI18n();
 const menuOpen = ref(false);
 const deleting = ref(false);
@@ -516,6 +536,12 @@ const feedCardElement = ref<HTMLElement | null>(null);
 const availableMediaWidth = ref(0);
 const homeVideoTarget = ref<HTMLElement | null>(null);
 const homePlayerElement = ref<MediaPlayerElement | null>(null);
+const streaming = useLocalVideoPlayback(() => props.item.videoPlaybackUrl, {
+  active: () => props.isActiveVideo,
+  autoplay: () => true,
+  next: () => props.nextVideoPlaybackUrl,
+  onAutoplayBlocked: () => { isHomeVideoPaused.value = true; }
+});
 useNativeVideoMuteSync(homePlayerElement, () => appStore.videoMuted, (muted) => appStore.setVideoMuted(muted));
 const loadedHomeVideoAspectRatio = ref<string | null>(null);
 const isHomeVideoPaused = ref(false);
@@ -539,11 +565,10 @@ const {
   clearError: clearCaptionError
 } = useImageCaptionEditor();
 
-const imageRoute = computed(() => ({
-  name: 'image',
-  params: { id: String(props.item.id) },
-  query: route.query
-}));
+const imageRoute = computed(() => props.item.mediaType === 'video'
+  ? { name: 'reels', params: { id: String(props.item.id) }, query: { from: props.context === 'home' ? 'home' : undefined } }
+  : { name: 'image', params: { id: String(props.item.id) }, query: route.query }
+);
 const isHomeContext = computed(() => props.context === 'home');
 const isCarousel = computed(() => props.item.postType === 'carousel' && (props.item.mediaItems?.length ?? 0) > 1);
 const showHomeStoryAvatar = computed(() => isHomeContext.value && props.hasAvatarStory);
@@ -566,6 +591,18 @@ const formattedDate = computed(() =>
 const formattedDuration = computed(() => formatMediaDuration(props.item.durationMs));
 const mediaAspectRatio = computed(() => resolveFeedAspectRatio(props.item.width, props.item.height));
 const homeVideoAspectRatio = computed(() => loadedHomeVideoAspectRatio.value ?? mediaAspectRatio.value);
+// Instagram's desktop Home Reel frame is 468 × 585 (4:5). Keep that
+// crop independently of the source video's portrait, square or landscape ratio.
+// Narrow feed columns scale proportionally instead of stretching the video.
+const homeVideoFrameStyle = computed(() => ({
+  // Keep the 4:5 preview geometry, but shrink it proportionally when the
+  // user opts into viewport fitting on shorter screens.
+  width: props.fitTallMedia
+    ? 'min(100%, 468px, calc((100dvh - 32px) * 4 / 5))'
+    : 'min(100%, 468px)',
+  aspectRatio: '4 / 5',
+  marginInline: 'auto'
+}));
 const viewportHeight = ref(typeof window === 'undefined' ? 800 : window.innerHeight);
 
 function mediaFrameStyle(aspectRatio: string, keepControlsWidth = false) {
@@ -626,7 +663,7 @@ const activeMediaImageId = computed(() =>
 );
 const originalMediaUrl = computed(() => getOriginalMediaUrl(activeMediaImageId.value));
 const isActiveLocalHeic = computed(() => props.item.sourceKind !== 'immich'
-  && isHeicFilename(props.item.mediaItems?.find(media => media.imageId === activeMediaImageId.value)?.filename ?? props.item.filename));
+  && isHeicMedia(props.item.mediaItems?.find(media => media.imageId === activeMediaImageId.value) ?? { filename: props.item.filename }));
 const downloadOriginalMediaUrl = computed(() => getOriginalMediaDownloadUrl(activeMediaImageId.value));
 const homeVideoSource = computed<PlayerSrc>(() => ({
   src: props.item.previewUrl,
@@ -702,7 +739,10 @@ function handleImageNavigation(event: MouseEvent, navigate: () => void) {
 
   event.preventDefault();
 
-  if (shouldOpenPostInModal.value) {
+  if (props.item.mediaType === 'video') {
+    // Reel routes are full-page navigation, not image modals.
+    appStore.clearImageModalBackground();
+  } else if (shouldOpenPostInModal.value) {
     appStore.setImageModalBackground(route.fullPath);
   }
 
@@ -846,7 +886,7 @@ function syncHomeVideoMuted(player: MediaPlayerElement, muted: boolean) {
 }
 
 async function syncHomeVideoPlayback() {
-  if (!isHomeContext.value || props.item.mediaType !== 'video') {
+  if (!isHomeContext.value || props.item.mediaType !== 'video' || streaming.source.value) {
     return;
   }
 
@@ -924,13 +964,31 @@ async function handleHomeVideoSurfaceClick(event: MouseEvent) {
     return;
   }
 
+  if (isHomeContext.value && !isHomeVideoFullscreen.value) {
+    // Make the clicked Reel surface the return-focus target for its modal.
+    // Keyboard activation already focuses the surface before Enter/Space.
+    if (event.currentTarget instanceof HTMLElement) {
+      event.currentTarget.focus({ preventScroll: true });
+    }
+    appStore.clearImageModalBackground();
+    appStore.setReelModalBackground(route.fullPath);
+    // The history entry, not the scrolling URL, identifies this opening.
+    // Returning Forward to that entry restores its original queue and cursor.
+    await router.push({
+      ...imageRoute.value,
+      state: { reelSessionKey: createHomeReelSessionKey() }
+    });
+    return;
+  }
+
   const player = homePlayerElement.value;
   if (!player) {
     return;
   }
 
   if (player.paused) {
-    await syncHomeVideoPlayback();
+    if (streaming.source.value) await streaming.play();
+    else await syncHomeVideoPlayback();
     return;
   }
 
@@ -981,7 +1039,7 @@ function bindHomePlayerEventListeners(player: MediaPlayerElement | null) {
   const handleReady = () => {
     syncHomeVideoAspectRatio(player);
     syncHomeVideoTimelineState(player);
-    void syncHomeVideoPlayback();
+    if (!props.item.videoPlaybackUrl) void syncHomeVideoPlayback();
   };
   const handlePlay = () => {
     handleHomeVideoPlay();

@@ -28,6 +28,11 @@ yourself.
 | `DB_DIR` | `./data/db` | SQLite directory. Database file is `gallery.sqlite`, and startup Dbmate migrations run against it automatically when the directory is available. |
 | `THUMBNAILS_DIR` | `./data/thumbnails` | Generated thumbnail output root. |
 | `PREVIEWS_DIR` | `./data/previews` | Generated preview output root. |
+| `VIDEO_DELIVERY_MODE` | `streaming` | How new local videos play. Use `previews` to save MP4 previews when needed. |
+| `HLS_CACHE_DIR` | `<DATA_ROOT>/hls-cache` | Where Foldergram keeps temporary video segments. |
+| `HLS_CACHE_MAX_BYTES` | `2147483648` (2 GiB) | Total space set aside for cached segments and conversions in progress. |
+| `HLS_CACHE_MAX_AGE_HOURS` | `24` | How long unused segments can stay in the cache. |
+| `HLS_TRANSCODE_CONCURRENCY` | `1` | How many video conversions can run at once. |
 | `IMAGE_DETAIL_SOURCE` | `preview` | For image details, use generated previews or stream originals. Local HEIC/HEIF always uses WebP for viewing. Videos follow their playback policy. |
 | `HEIC_ENABLED` | unset | Optional override for experimental local HEIC/HEIF imports. Either `true` or `false` takes precedence over the saved setting and locks the toggle. |
 | `DERIVATIVE_MODE` | `eager` | Generate derivatives during scans or lazily on the first protected derivative request. |
@@ -35,7 +40,7 @@ yourself.
 | `SCAN_MEDIA_ERROR_MODE` | `skip` | `skip` reports supported-media scan failures and continues. `fail` aborts on the first such error. |
 | `SCAN_DISCOVERY_CONCURRENCY` | `4` | Discovery concurrency, validated from `1` to `32`. |
 | `SCAN_DERIVATIVE_CONCURRENCY` | `4` | Derivative concurrency, validated from `1` to `32`. |
-| `PUBLIC_DEMO_MODE` | `0` | When enabled, mutating API routes return `403` for read-only demo deployments. |
+| `PUBLIC_DEMO_MODE` | `0` | Blocks API writes for read-only demos. Streaming can still open and close playback sessions. |
 | `CSRF_TRUSTED_ORIGINS` | unset | Comma-separated extra browser origins allowed for mutating API requests. Useful behind reverse proxies or HTTPS terminators. |
 
 ### Local HEIC and HEIF imports
@@ -294,8 +299,8 @@ variable.
 ## Path resolution rules
 
 - `DATA_ROOT` is the common fallback parent for the app's storage directories.
-- If you set only `DATA_ROOT=/mnt/foldergram`, the default paths become `/mnt/foldergram/gallery`, `/mnt/foldergram/db`, `/mnt/foldergram/thumbnails`, and `/mnt/foldergram/previews`.
-- Setting `GALLERY_ROOT`, `DB_DIR`, `THUMBNAILS_DIR`, or `PREVIEWS_DIR` overrides only that specific path.
+- If you set only `DATA_ROOT=/mnt/foldergram`, Foldergram uses the `gallery`, `db`, `thumbnails`, `previews`, and `hls-cache` subdirectories.
+- Setting an individual path such as `GALLERY_ROOT` or `HLS_CACHE_DIR` overrides only that path.
 - `DATA_DIR` is a legacy alias. It is used only when `DATA_ROOT` is unset.
 - Relative paths are resolved from the repository root.
 - Absolute paths are used as-is.
@@ -340,16 +345,15 @@ Accepted values:
 
 Behavior:
 
-- `eager` generates required thumbnails and previews during scans. Qualifying
-  direct-playback videos still receive posters but skip the playable preview.
+- `eager` generates thumbnails, video posters, and any required previews during scans.
 - `lazy` still indexes metadata during scans, but missing required files are
   generated on the first request to `/thumbnails/...` or `/previews/...` and
   then cached on disk
 - lazy mode applies to thumbnails and required previews
 - lazy mode keeps derivative URLs deterministic because the stored asset-key
   derivative paths are still persisted in SQLite
-- old normal video preview URLs resolve to the indexed original when the asset
-  qualifies for direct playback
+- for videos that qualify for direct playback under the preview policy, old
+  preview URLs can still serve the original
 
 ### Recommended combinations
 
@@ -401,22 +405,36 @@ Content-Type: application/json
 Omitting the body preserves the existing repair-default behavior. The
 `pnpm rescan` script keeps that default.
 
+## Video playback
+
+`VIDEO_DELIVERY_MODE` applies to new videos from the primary gallery and other
+local sources.
+
+| Value | What happens |
+| --- | --- |
+| `streaming` (default) | Plays a compatible original or prepares short video segments as you watch. |
+| `previews` | Saves MP4 previews for videos that need them. Smaller compatible MP4s can play directly. |
+
+For a source install, set the value in `.env` and restart Foldergram. For
+Docker, set it under the service's `environment` block and recreate the
+container with `docker compose up -d`.
+
+Changing the setting leaves existing videos on their current playback mode.
+In **Settings → Scan & Library**, you can switch existing local videos to the
+configured mode. Use [preview cleanup](./media-processing.md#switch-existing-local-videos-to-streaming)
+for `streaming` or [preview generation](./media-processing.md#switch-existing-local-videos-to-saved-previews)
+for `previews`. Immich playback uses its own settings.
+
+Use a writable location for `HLS_CACHE_DIR`. Keep it separate from your
+galleries, database, thumbnails, previews, and other app storage. In Docker,
+the path points inside the container. If you change it, mount that directory
+to keep the cache across container replacements.
+
 ### Direct-playback video previews
 
-A video plays from its indexed original during normal browsing only when it is
-an `.mp4` with compatible container, H.264 video, `yuv420p` pixels, AAC or no
-audio, a known size of at most `24 MiB`, and a known display width of at most
-`1500` pixels. Posters are always generated. Other videos continue to use
-generated previews.
-
-Active folder-share links and configured share passwords can require a
-generated preview for shared delivery even when normal playback uses the
-original. Those previews are created during eager processing of new or repaired
-media, or on authorized shared first access.
-
-Run **Scan and repair derivatives** to reclaim obsolete previews for
-already-indexed qualifying videos. Quick scans do not perform bulk preview
-cleanup.
+Videos imported under `previews` and existing videos from before streaming can
+still play eligible MP4 originals directly. Active folder shares may need a
+saved preview for these videos. See the [MP4 playback rules](./media-processing.md#direct-original-video-playback-for-legacy-and-preview-policies).
 
 ## Derivative layout upgrade
 

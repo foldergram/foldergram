@@ -1,4 +1,4 @@
-name: Publish GHCR Image
+name: Publish release and deploy
 
 on:
   push:
@@ -7,13 +7,52 @@ on:
 
 concurrency:
   group: publish-ghcr-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   REGISTRY: ghcr.io
 
 jobs:
+  checks:
+    name: Verify release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out release
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.4
+          cache: pnpm
+
+      - name: Install verification tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg rsync
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Test release and deployment recovery
+        run: |
+          pnpm test
+          bash scripts/test-deploy-vps.sh
+
+      - name: Build application and documentation
+        run: |
+          pnpm build
+          pnpm build:docs
+
   docker:
+    needs: checks
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -40,11 +79,20 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          registry: docker.io
+          username: sajjadalis
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
       - name: Generate Docker metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}
+          images: |
+            ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}
+            docker.io/sajjadalis/foldergram
           flavor: |
             latest=auto
           tags: |
@@ -53,7 +101,7 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
 
-      - name: Build and optionally push image
+      - name: Build and push images
         # This workflow only runs for version tag pushes, so every build is publishable.
         uses: docker/build-push-action@v6
         with:
@@ -67,39 +115,49 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  docs:
-    name: Deploy release docs
-    needs: docker
+  deploy:
+    name: Deploy demo and docs
+    needs: [checks, docker]
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: foldergram-vps-production
+      cancel-in-progress: false
     permissions:
       contents: read
 
     steps:
-      - name: Check out repository
+      - name: Check out release
         uses: actions/checkout@v4
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10.28.0
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build VitePress site
-        run: pnpm build:docs
-
-      - name: Publish to foldergram.github.io
-        uses: peaceiris/actions-gh-pages@v4
-        with:
-          personal_token: ${{ secrets.FOLDERGRAM_DOCS_DEPLOY_TOKEN }}
-          external_repository: foldergram/foldergram.github.io
-          publish_branch: main
-          publish_dir: ./docs/.vitepress/dist
-          force_orphan: true
+      - name: Deploy tagged commit over SSH
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          VPS_HOST: ${{ vars.VPS_HOST }}
+          VPS_PORT: ${{ vars.VPS_PORT }}
+          VPS_USER: ${{ vars.VPS_USER }}
+          VPS_KNOWN_HOSTS: ${{ vars.VPS_KNOWN_HOSTS }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in VPS_HOST VPS_PORT VPS_USER VPS_KNOWN_HOSTS VPS_SSH_KEY; do
+            if [[ -z ${!name} ]]; then
+              printf '::error::Missing repository Actions setting: %s\n' "$name"
+              exit 1
+            fi
+          done
+          [[ $RELEASE_TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$ ]]
+          [[ $VPS_PORT =~ ^[0-9]+$ ]]
+          commit=$(git rev-parse HEAD)
+          ssh_dir=$(mktemp -d "$RUNNER_TEMP/foldergram-ssh.XXXXXX")
+          trap 'rm -rf -- "$ssh_dir"' EXIT
+          chmod 0700 "$ssh_dir"
+          printf '%s\n' "$VPS_SSH_KEY" > "$ssh_dir/key"
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
+          chmod 0600 "$ssh_dir/key" "$ssh_dir/known_hosts"
+          ssh -F /dev/null -i "$ssh_dir/key" \
+            -o IdentitiesOnly=yes -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$ssh_dir/known_hosts" \
+            -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=6 \
+            -p "$VPS_PORT" "$VPS_USER@$VPS_HOST" "deploy $RELEASE_TAG $commit"

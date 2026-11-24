@@ -13,6 +13,7 @@ import {
   AVIF_METADATA_REPAIR_VERSION_SETTING_KEY,
   CAROUSELS_APPLIED_MODE_SETTING_KEY,
   EXCLUDED_FOLDERS_SETTING_KEY,
+  HEIC_CONTENT_REPAIR_VERSION_SETTING_KEY,
   LAST_SUCCESSFUL_GALLERY_ROOT_SETTING_KEY,
   LIBRARY_REBUILD_REQUIRED_SETTING_KEY,
   PREVIOUS_GALLERY_ROOT_SETTING_KEY,
@@ -27,7 +28,6 @@ import {
 } from '../sources/local-source.js';
 import {
   appSettingsRepository,
-  createSharedPreviewRequirementLookup,
   folderRepository,
   folderScanStateRepository,
   imageRepository,
@@ -58,7 +58,11 @@ import {
   getMediaTypeFromExtension,
   getMimeTypeFromExtension,
   getStableSortTimestamp,
+  hasHeicContent,
+  HEIC_CONTENT_CHECK_EXTENSIONS,
   isHeicFile,
+  isHeicImage,
+  isHeicMimeType,
   isSupportedMediaFile
 } from '../utils/image-utils.js';
 import { generateAssetKey, getPreviewPathForAssetKey, getThumbnailPathForAssetKey } from '../utils/derivative-paths.js';
@@ -74,6 +78,7 @@ import {
   normalizePath,
   safeJoin
 } from '../utils/path-utils.js';
+import { readCompanionMetadata, isSupportedMetadataExtension } from '../utils/metadata-file.js';
 import {
   getEffectiveExcludedFolderRules,
   matchesExcludedFolder,
@@ -118,6 +123,8 @@ interface ScanSummary {
 interface DerivativeJob {
   sourceId?: number;
   inspectedHeicMetadata?: MediaMetadata;
+  /** HEIC by extension or by content; unset means decide by extension. */
+  heic?: boolean;
   absolutePath: string;
   relativePath: string;
   folderId: number;
@@ -126,6 +133,10 @@ interface DerivativeJob {
   force: boolean;
   kind: 'all' | 'thumbnail';
   videoPlaybackSource?: VideoPlaybackSource | null;
+}
+
+function isHeicJob(job: DerivativeJob): boolean {
+  return job.heic ?? isHeicFile(job.relativePath);
 }
 
 interface ProcessedFileSummary {
@@ -139,6 +150,8 @@ interface IndexedFileCandidate {
   absolutePath: string;
   relativePath: string;
   stats: Stats;
+  metadataFilePath?: string;
+  metadataStats?: Stats;
 }
 
 interface SourceFolderCandidate {
@@ -174,6 +187,7 @@ interface IndexedFolderScanOptions {
   storyOwnerFolderId?: number | null;
   carouselOwnerFolderId?: number | null;
   folderHadErrors?: boolean;
+  extraMetadataEntries?: Array<{ relativePath: string; fileSize: number; mtimeMs: number }>;
 }
 
 interface ReservedCarouselScanResult {
@@ -184,7 +198,8 @@ interface ReservedCarouselScanResult {
 interface PendingCarouselPost {
   folderId: number;
   sourcePath: string;
-  images: Array<Pick<ImageRecord, 'id' | 'place_id' | 'taken_at' | 'taken_at_source' | 'sort_timestamp'>>;
+  metadataFilePath?: string;
+  images: Array<Pick<ImageRecord, 'id' | 'place_id' | 'taken_at' | 'taken_at_source' | 'sort_timestamp' | 'caption'>>;
 }
 
 interface CarouselDiscovery {
@@ -201,6 +216,7 @@ class SourcePathAccessError extends Error {
 interface IndexedFileReference {
   absolutePath: string;
   relativePath: string;
+  metadataFilePath?: string;
 }
 
 interface StatIndexedFilesResult {
@@ -233,6 +249,7 @@ interface ImageProcessingContext {
   galleryRootChanged: boolean;
   hasStoredGalleryRoot: boolean;
   avifMetadataRepairPending: boolean;
+  heicContentRepairPending: boolean;
   moveReconciliationEnabled: boolean;
   claimedMoveImageIds: Set<number>;
   rebuildDerivativeReuseIndex?: RebuildDerivativeReuseIndex;
@@ -314,16 +331,15 @@ function isDiscoverableMediaFile(
   relativePath: string,
   context: Pick<ImageProcessingContext, 'source' | 'heicImportEnabled' | 'rebuildDerivativeReuseIndex'>
 ): boolean {
-  return isSupportedMediaFile(relativePath, context.heicImportEnabled)
-    || (isHeicFile(relativePath) && (
-      context.rebuildDerivativeReuseIndex?.byRelativePath.has(relativePath)
-      || imageRepository.getByRelativePath(relativePath, context.source.id) !== undefined
-    ));
+  // Discover disabled HEIC files so existing photos can still be reconciled
+  // after a move. processImageFile rejects truly new imports.
+  return isSupportedMediaFile(relativePath, context.heicImportEnabled) || isHeicFile(relativePath);
 }
 const HEARTBEAT_INTERVAL_MS = 5000;
 const DERIVATIVE_CACHE_KEEP_FILE = '.gitkeep';
 const ROOT_DISCOVERY_LABEL = '(root)';
 const CURRENT_AVIF_METADATA_REPAIR_VERSION = '1';
+const CURRENT_HEIC_CONTENT_REPAIR_VERSION = '1';
 const MAX_SCAN_ERROR_TEXT_LENGTH = 8000;
 const MAX_SCAN_ERROR_LINE_LENGTH = 2000;
 export const LIBRARY_REBUILD_REQUIRED_MESSAGE =
@@ -1206,6 +1222,10 @@ class ScannerService {
     appSettingsRepository.set(AVIF_METADATA_REPAIR_VERSION_SETTING_KEY, CURRENT_AVIF_METADATA_REPAIR_VERSION);
   }
 
+  private heicContentRepairKey(sourceId: number): string {
+    return `${HEIC_CONTENT_REPAIR_VERSION_SETTING_KEY}.${sourceId}`;
+  }
+
   private async resetDerivativeDirectory(targetDirectory: string): Promise<void> {
     await fs.mkdir(targetDirectory, { recursive: true });
     const entries = await fs.readdir(targetDirectory, { withFileTypes: true });
@@ -1241,7 +1261,7 @@ class ScannerService {
   private async walkMediaSourceFolders(
     context: ImageProcessingContext,
     currentAbsolutePath: string,
-    onSourceFolder: (sourceFolder: SourceFolderCandidate) => Promise<void>,
+    onSourceFolder: (sourceFolder: SourceFolderCandidate) => Promise<boolean>,
     currentRelativePath: string | null = null,
     treatStoriesAsFolders = this.shouldTreatStoriesAsFolders(),
     treatCarouselsAsFolders = this.shouldTreatCarouselsAsFolders(),
@@ -1308,7 +1328,8 @@ class ScannerService {
         discoveredFolders: this.progress.discoveredFolders + 1,
         currentFolder: normalizedRelativePath
       });
-      await onSourceFolder({
+      // Skipped imports must not establish ownership of the stories directory.
+      hasDirectImages = await onSourceFolder({
         absolutePath: currentAbsolutePath,
         relativePath: normalizedRelativePath
       });
@@ -1371,6 +1392,24 @@ class ScannerService {
       return this.clearIndexedFolder(sourceFolderPath);
     }
 
+    const metadataFiles = new Map<string, string>();
+    for (const entry of entries) {
+      if (entry.isFile() && !entry.name.startsWith('.')) {
+        const ext = path.extname(entry.name);
+        if (isSupportedMetadataExtension(ext)) {
+          const baseName = path.basename(entry.name, ext).toLowerCase();
+          const fullName = entry.name.toLowerCase();
+          const absPath = path.join(sourceFolder.absolutePath, entry.name);
+          if (!metadataFiles.has(baseName) || ext.toLowerCase() === '.txt') {
+            metadataFiles.set(baseName, absPath);
+          }
+          if (!metadataFiles.has(fullName) || ext.toLowerCase() === '.txt') {
+            metadataFiles.set(fullName, absPath);
+          }
+        }
+      }
+    }
+
     const imageFiles = entries.filter(entry =>
       entry.isFile() && !entry.name.startsWith('.')
       && isDiscoverableMediaFile(normalizePath(`${sourceFolderPath}/${entry.name}`), context)
@@ -1388,9 +1427,14 @@ class ScannerService {
     const statResult = await this.statIndexedFiles(
       imageFiles.map((entry) => {
         const absolutePath = path.join(sourceFolder.absolutePath, entry.name);
+        const mediaExt = path.extname(entry.name);
+        const mediaBase = path.basename(entry.name, mediaExt).toLowerCase();
+        const mediaFullName = entry.name.toLowerCase();
+        const metadataFilePath = metadataFiles.get(mediaFullName) ?? metadataFiles.get(mediaBase);
         return {
           absolutePath,
-          relativePath: getRelativeGalleryPath(context.root, absolutePath)
+          relativePath: getRelativeGalleryPath(context.root, absolutePath),
+          metadataFilePath
         };
       }),
       errors,
@@ -1441,10 +1485,20 @@ class ScannerService {
       try {
         const absolutePath = resolveLocalPath(context.source, normalizedRelativePath, { scanRoot: context.root });
         const stats = await fs.stat(absolutePath);
+        let metadataStats: Stats | undefined;
+        if (file.metadataFilePath) {
+          try {
+            metadataStats = await fs.stat(file.metadataFilePath);
+          } catch {
+            // Ignore missing metadata file stat
+          }
+        }
         discoveredFiles.push({
           absolutePath: file.absolutePath,
           relativePath: normalizedRelativePath,
-          stats
+          stats,
+          metadataFilePath: file.metadataFilePath,
+          metadataStats
         });
       } catch (error) {
         folderHadErrors = true;
@@ -1561,14 +1615,39 @@ class ScannerService {
       return [];
     }
 
+    const storyMetadataFiles = new Map<string, string>();
+    for (const entry of storiesEntries) {
+      if (entry.isFile() && !entry.name.startsWith('.')) {
+        const ext = path.extname(entry.name);
+        if (isSupportedMetadataExtension(ext)) {
+          const baseName = path.basename(entry.name, ext).toLowerCase();
+          const fullName = entry.name.toLowerCase();
+          const absPath = path.join(storiesAbsolutePath, entry.name);
+          if (!storyMetadataFiles.has(baseName) || ext.toLowerCase() === '.txt') {
+            storyMetadataFiles.set(baseName, absPath);
+          }
+          if (!storyMetadataFiles.has(fullName) || ext.toLowerCase() === '.txt') {
+            storyMetadataFiles.set(fullName, absPath);
+          }
+        }
+      }
+    }
+
     const storyResults: SourceFolderScanResult[] = [];
     const directStoryFiles = storiesEntries
       .filter(entry => entry.isFile() && !entry.name.startsWith('.')
         && isDiscoverableMediaFile(normalizePath(`${storiesRelativePath}/${entry.name}`), context))
-      .map((entry) => ({
-        absolutePath: path.join(storiesAbsolutePath, entry.name),
-        relativePath: normalizePath(`${storiesRelativePath}/${entry.name}`)
-      }));
+      .map((entry) => {
+        const mediaExt = path.extname(entry.name);
+        const mediaBase = path.basename(entry.name, mediaExt).toLowerCase();
+        const mediaFullName = entry.name.toLowerCase();
+        const metadataFilePath = storyMetadataFiles.get(mediaFullName) ?? storyMetadataFiles.get(mediaBase);
+        return {
+          absolutePath: path.join(storiesAbsolutePath, entry.name),
+          relativePath: normalizePath(`${storiesRelativePath}/${entry.name}`),
+          metadataFilePath
+        };
+      });
 
     if (directStoryFiles.length > 0) {
       const startedAt = performance.now();
@@ -1816,11 +1895,40 @@ class ScannerService {
         ownerFolder = this.resolveFolder(context.source.id, existingFolders, usedSlugs, sourceFolder.relativePath).folder;
       }
 
+      const carouselMetaEntry = postDirEntries.find((e) =>
+        e.isFile() && !e.name.startsWith('.') &&
+        ['metadata.txt', 'metadata.nfo', 'post.txt', 'post.nfo', `${postEntry.name.toLowerCase()}.txt`, `${postEntry.name.toLowerCase()}.nfo`].includes(e.name.toLowerCase())
+      );
+      const carouselMetadataPath = carouselMetaEntry ? path.join(postAbsolutePath, carouselMetaEntry.name) : undefined;
+
+      const slideMetadataFiles = new Map<string, string>();
+      for (const entry of postDirEntries) {
+        if (entry.isFile() && !entry.name.startsWith('.')) {
+          const ext = path.extname(entry.name);
+          if (isSupportedMetadataExtension(ext)) {
+            const baseName = path.basename(entry.name, ext).toLowerCase();
+            const fullName = entry.name.toLowerCase();
+            const absPath = path.join(postAbsolutePath, entry.name);
+            if (!slideMetadataFiles.has(baseName) || ext.toLowerCase() === '.txt') {
+              slideMetadataFiles.set(baseName, absPath);
+            }
+            if (!slideMetadataFiles.has(fullName) || ext.toLowerCase() === '.txt') {
+              slideMetadataFiles.set(fullName, absPath);
+            }
+          }
+        }
+      }
+
       const directFiles = validEntries.map((e) => {
         const abs = path.join(postAbsolutePath, e.name);
+        const mediaExt = path.extname(e.name);
+        const mediaBase = path.basename(e.name, mediaExt).toLowerCase();
+        const mediaFullName = e.name.toLowerCase();
+        const metadataFilePath = slideMetadataFiles.get(mediaFullName) ?? slideMetadataFiles.get(mediaBase);
         return {
           absolutePath: abs,
-          relativePath: normalizePath(`${postRelativePath}/${e.name}`)
+          relativePath: normalizePath(`${postRelativePath}/${e.name}`),
+          metadataFilePath
         };
       });
 
@@ -1831,6 +1939,15 @@ class ScannerService {
 
       const statResult = await this.statIndexedFiles(directFiles, errors, context);
       await this.validateCarouselDestination(postRelativePath, statResult.discoveredFiles, context);
+      let carouselMetadataStats: Stats | undefined;
+      if (carouselMetadataPath) {
+        try {
+          carouselMetadataStats = await fs.stat(carouselMetadataPath);
+        } catch {
+          // Ignore missing carousel metadata file
+        }
+      }
+
       const result = await this.scanIndexedFolderFiles({
         folderPath: postRelativePath,
         scannedFileCount: directFiles.length,
@@ -1846,7 +1963,12 @@ class ScannerService {
         logLabel: 'Carousel item indexed',
         role: 'carousel_source',
         carouselOwnerFolderId: ownerFolder.id,
-        folderHadErrors: statResult.folderHadErrors
+        folderHadErrors: statResult.folderHadErrors,
+        extraMetadataEntries: carouselMetadataStats && carouselMetadataPath ? [{
+          relativePath: getRelativeGalleryPath(context.root, carouselMetadataPath),
+          fileSize: carouselMetadataStats.size,
+          mtimeMs: carouselMetadataStats.mtimeMs
+        }] : undefined
       });
 
       const indexedImageRecords: ImageRecord[] = [];
@@ -1861,8 +1983,9 @@ class ScannerService {
         discovery.posts.push({
           folderId: ownerFolder.id,
           sourcePath: postRelativePath,
-          images: indexedImageRecords.map(({ id, place_id, taken_at, taken_at_source, sort_timestamp }) => (
-            { id, place_id, taken_at, taken_at_source, sort_timestamp }
+          metadataFilePath: carouselMetadataPath,
+          images: indexedImageRecords.map(({ id, place_id, taken_at, taken_at_source, sort_timestamp, caption }) => (
+            { id, place_id, taken_at, taken_at_source, sort_timestamp, caption }
           ))
         });
       }
@@ -1975,6 +2098,24 @@ class ScannerService {
     await this.activeOperation?.checkpoint();
     for (const { pending, existingPost } of plans) {
       const firstItem = pending.images[0];
+      const carouselMetadata = pending.metadataFilePath
+        ? await readCompanionMetadata(pending.metadataFilePath)
+        : null;
+      const metadataCaption = carouselMetadata?.caption ?? firstItem.caption ?? null;
+      // A first-slide companion date also defines the carousel's display order
+      // when there is no separate carousel-level date.
+      const metadataTakenAt = carouselMetadata?.takenAt ?? (
+        firstItem.taken_at_source === 'metadata' ? firstItem.taken_at : null
+      );
+      const captionEditedAt = existingPost?.caption_edited_at ? Date.parse(existingPost.caption_edited_at) : 0;
+      const companionMtime = pending.metadataFilePath
+        ? (await fs.stat(pending.metadataFilePath).catch(() => null))?.mtimeMs ?? 0 : 0;
+      const canImportCaption = !existingPost?.caption_edited_at || companionMtime > captionEditedAt;
+      const importedCaptionChanged = !existingPost || existingPost.companion_caption !== metadataCaption;
+      const selectedCaption = importedCaptionChanged && canImportCaption
+        ? metadataCaption : (existingPost ? existingPost.caption : metadataCaption);
+      const effectiveDate = metadataTakenAt ?? firstItem.taken_at;
+      const hadImportedDate = existingPost?.taken_at_source === 'metadata' && metadataTakenAt === null;
       postRepository.upsertPostWithItems({
         existingPostId: existingPost?.id,
         id: !existingPost && pending.images.length === 1 ? firstItem.id : undefined,
@@ -1982,10 +2123,14 @@ class ScannerService {
         placeId: firstItem.place_id,
         postType: pending.images.length > 1 ? 'carousel' : 'single',
         sourcePath: pending.sourcePath,
-        caption: existingPost?.caption ?? null,
-        takenAt: firstItem.taken_at ?? null,
-        takenAtSource: firstItem.taken_at_source,
-        sortTimestamp: existingPost?.sort_timestamp ?? Math.max(...pending.images.map(image => image.sort_timestamp)),
+        caption: selectedCaption,
+        companionCaption: metadataCaption,
+        clearCaptionEdit: importedCaptionChanged && canImportCaption,
+        takenAt: effectiveDate,
+        takenAtSource: metadataTakenAt !== null ? 'metadata' : firstItem.taken_at_source,
+        sortTimestamp: metadataTakenAt !== null ? metadataTakenAt : (hadImportedDate
+          ? Math.max(...pending.images.map(image => image.sort_timestamp))
+          : (existingPost?.sort_timestamp ?? Math.max(...pending.images.map(image => image.sort_timestamp)))),
         isDeleted: 0,
         isTrashed: 0
       }, pending.images.map((image, index) => ({ imageId: image.id, position: index + 1 })));
@@ -2010,7 +2155,8 @@ class ScannerService {
     role = 'normal',
     storyOwnerFolderId = null,
     carouselOwnerFolderId = null,
-    folderHadErrors = false
+    folderHadErrors = false,
+    extraMetadataEntries
   }: IndexedFolderScanOptions): Promise<SourceFolderScanResult> {
     const normalizedFolderPath = normalizePath(folderPath);
 
@@ -2054,18 +2200,30 @@ class ScannerService {
     let skippedUnchangedRows = 0;
     let usedFolderShortcut = false;
 
-    const folderSignature = createFolderScanSignature(
-      discoveredFiles.map((file) => ({
-        relativePath: file.relativePath,
-        fileSize: file.stats.size,
-        mtimeMs: file.stats.mtimeMs
-      }))
-    );
+    const folderSignature = createFolderScanSignature([
+      ...discoveredFiles.flatMap((file) => [
+        {
+          relativePath: file.relativePath,
+          fileSize: file.stats.size,
+          mtimeMs: file.stats.mtimeMs
+        },
+        ...(file.metadataStats && file.metadataFilePath ? [{
+          relativePath: getRelativeGalleryPath(context.root, file.metadataFilePath),
+          fileSize: file.metadataStats.size,
+          mtimeMs: file.metadataStats.mtimeMs
+        }] : [])
+      ]),
+      ...(extraMetadataEntries ?? [])
+    ]);
     const storedFolderState = folderScanStates.get(normalizedFolderPath);
     const hasCompleteTakenAtMetadata = imageRepository.countMissingTimestampMetadataByFolder(folder.id) === 0;
     const hasCompletePlaybackStrategyMetadata = imageRepository.countMissingPlaybackStrategyByFolder(folder.id) === 0;
     const needsAvifMetadataRepair = context.avifMetadataRepairPending && discoveredFiles.some(
       (file) => path.extname(file.relativePath).toLowerCase() === '.avif'
+    );
+    const needsHeicContentRepair = context.heicContentRepairPending && discoveredFiles.some(
+      (file) => HEIC_CONTENT_CHECK_EXTENSIONS.has(path.extname(file.relativePath).toLowerCase())
+        && imageRepository.getByRelativePath(file.relativePath, context.source.id) !== undefined
     );
     const hasMatchingIndexedFiles =
       discoveredFiles.length > 0 &&
@@ -2080,6 +2238,7 @@ class ScannerService {
     if (
       !folderHadErrors &&
       !needsAvifMetadataRepair &&
+      !needsHeicContentRepair &&
       shouldSkipFolderBySignature({
         currentSignature: folderSignature.signature,
         galleryRootChanged: context.galleryRootChanged,
@@ -2113,6 +2272,9 @@ class ScannerService {
     const scanFile = async (file: IndexedFileCandidate) => {
       try {
         const result = await this.processImageFile(folder, file, options, context);
+        if (!result) {
+          return;
+        }
 
         if (result.status === 'new') {
           newFiles += 1;
@@ -2181,7 +2343,8 @@ class ScannerService {
     return {
       folder,
       sourceFolderPath: normalizedFolderPath,
-      discoveredDirectImages: true,
+      // Preserve ownership on media errors, but not for intentionally skipped imports.
+      discoveredDirectImages: folderHadErrors || newFiles + updatedFiles + unchangedFiles > 0,
       wroteFolder: resolvedFolder.wroteFolder,
       scannedFiles: scannedFileCount,
       newFiles,
@@ -2269,6 +2432,7 @@ class ScannerService {
       );
       const derivativeJobs: DerivativeJob[] = indexedImages.map((image) => ({
         sourceId: image.source_id,
+        heic: isHeicImage(image),
         absolutePath: resolveOriginalPath(image.relative_path, image.source_id, true),
         relativePath: image.relative_path,
         folderId: image.folder_id,
@@ -2361,6 +2525,7 @@ class ScannerService {
     const hasStoredGalleryRoot = storedGalleryRoot !== null;
     const galleryRootChanged = isPrimary && storedGalleryRoot !== currentGalleryRoot;
     const avifMetadataRepairPending = isPrimary && this.isAvifMetadataRepairPending();
+    const heicContentRepairPending = appSettingsRepository.get(this.heicContentRepairKey(source.id)) !== CURRENT_HEIC_CONTENT_REPAIR_VERSION;
     let checkedRoot: string;
     try {
       if (isPrimary && currentGalleryRoot !== normalizePath(appConfig.galleryRoot)) {
@@ -2394,6 +2559,7 @@ class ScannerService {
       galleryRootChanged,
       hasStoredGalleryRoot,
       avifMetadataRepairPending,
+      heicContentRepairPending,
       moveReconciliationEnabled: false,
       claimedMoveImageIds: new Set<number>(),
       rebuildDerivativeReuseIndex: contextOptions.rebuildDerivativeReuseIndex
@@ -2417,6 +2583,7 @@ class ScannerService {
         formatStep('root-changed', formatToggle(galleryRootChanged)),
         formatStep('stored-root', formatToggle(hasStoredGalleryRoot)),
         formatStep('avif-repair', formatToggle(avifMetadataRepairPending)),
+        formatStep('heic-content-repair', formatToggle(heicContentRepairPending)),
         formatStep('media-errors', appConfig.scanMediaErrorMode),
         formatStep('stories-as-folders', formatToggle(treatStoriesAsFolders)),
         formatStep('carousels-as-folders', formatToggle(treatCarouselsAsFolders)),
@@ -2646,6 +2813,7 @@ class ScannerService {
           processedFolders: this.progress.processedFolders + 1
         });
         this.logProgress('folder');
+        return result.discoveredDirectImages;
       }, null, treatStoriesAsFolders, treatCarouselsAsFolders, excludedFolderRules, (excluded, exact) => {
         if (indexedFolderPaths.has(excluded) || (!exact && [...indexedFolderPaths].some(folderPath => folderPath.startsWith(excluded + '/')))) {
           imageProcessingContext.intentionalExclusion = true;
@@ -2693,12 +2861,6 @@ class ScannerService {
 
       // Cleanup operates on a fully discovered source and runs to completion.
       await operation?.sealControls();
-      if (options.repairUnchangedDerivatives && summary.status !== 'failed' && derivativeMigrationService.isMigrationComplete()) {
-        const reclaimedPreviews = await this.reclaimObsoleteVideoPreviews(errors, source.id);
-        if (reclaimedPreviews > 0) {
-          log.table('Obsolete video previews reclaimed', [['Files', reclaimedPreviews]], 'success');
-        }
-      }
 
       if (isPrimary && summary.status !== 'failed' && !errors.hasErrors && derivativeMigrationService.isMigrationComplete()) {
         await derivativeMigrationService.cleanupStaleDerivatives();
@@ -2734,6 +2896,9 @@ class ScannerService {
 
     if (summary.status === 'completed' && avifMetadataRepairPending) {
       this.markAvifMetadataRepairComplete();
+    }
+    if (summary.status === 'completed' && heicContentRepairPending) {
+      appSettingsRepository.set(this.heicContentRepairKey(source.id), CURRENT_HEIC_CONTENT_REPAIR_VERSION);
     }
 
     if (summary.status === 'completed' && eager) appSettingsRepository.remove(repairKey);
@@ -2787,7 +2952,8 @@ class ScannerService {
         continue;
       }
 
-      if (!isDiscoverableMediaFile(relativePath, discoveryContext)) {
+      if (!isDiscoverableMediaFile(relativePath, discoveryContext) &&
+          !isSupportedMetadataExtension(path.extname(relativePath))) {
         continue;
       }
 
@@ -2797,13 +2963,17 @@ class ScannerService {
         continue;
       }
 
-      if (!treatStoriesAsFolders && findReservedStoriesOwnerPath(relativePath)) {
+      if (findReservedStoriesOwnerPath(relativePath) && (
+        !treatStoriesAsFolders || isSupportedMetadataExtension(path.extname(relativePath))
+      )) {
         fallbackReason = `${reason}:fallback`;
         break;
       }
 
       const treatCarouselsAsFolders = this.shouldTreatCarouselsAsFolders();
-      if (!treatCarouselsAsFolders && findReservedCarouselsOwnerPath(relativePath)) {
+      if (findReservedCarouselsOwnerPath(relativePath) && (
+        !treatCarouselsAsFolders || isSupportedMetadataExtension(path.extname(relativePath))
+      )) {
         fallbackReason = `${reason}:fallback`;
         break;
       }
@@ -2854,6 +3024,7 @@ class ScannerService {
         galleryRootChanged: false,
         hasStoredGalleryRoot: appSettingsRepository.get(LAST_SUCCESSFUL_GALLERY_ROOT_SETTING_KEY) !== null,
         avifMetadataRepairPending: false,
+        heicContentRepairPending: false,
         moveReconciliationEnabled: false,
         claimedMoveImageIds: new Set<number>()
       };
@@ -2970,109 +3141,6 @@ class ScannerService {
     });
   }
 
-  private async reclaimObsoleteVideoPreviews(errors: ScanErrorCollector, sourceId: number): Promise<number> {
-    const getSharedPreviewFolderIds = createSharedPreviewRequirementLookup();
-    const sharedPreviewFolderIds = getSharedPreviewFolderIds();
-    const previewReferenceCounts = new Map<string, number>();
-    for (const reference of imageRepository.listDerivativeReferences()) {
-      if (!reference.preview_path) {
-        continue;
-      }
-
-      previewReferenceCounts.set(
-        reference.preview_path,
-        (previewReferenceCounts.get(reference.preview_path) ?? 0) + 1
-      );
-    }
-
-    let reclaimed = 0;
-    for (const image of imageRepository.listActive(sourceId)) {
-      if (image.media_type !== 'video' || !image.preview_path) {
-        continue;
-      }
-
-      const playbackSource = resolveVideoPlaybackSource({
-        mediaType: image.media_type,
-        extension: image.extension || path.extname(image.relative_path),
-        fileSize: image.file_size,
-        width: image.width,
-        height: image.height,
-        playbackStrategy: image.playback_strategy
-      });
-      if (playbackSource !== 'original' || sharedPreviewFolderIds.has(image.folder_id)) {
-        continue;
-      }
-
-      if ((previewReferenceCounts.get(image.preview_path) ?? 0) !== 1) {
-        continue;
-      }
-
-      let sourcePath: string;
-      try {
-        sourcePath = resolveOriginalPath(image.relative_path, image.source_id, true);
-      } catch {
-        continue;
-      }
-
-      try {
-        const sourceStats = await fs.stat(sourcePath);
-        const currentFingerprint = createFingerprint(image.relative_path, sourceStats.size, sourceStats.mtimeMs);
-        if (!sourceStats.isFile() || currentFingerprint !== image.checksum_or_fingerprint) {
-          continue;
-        }
-      } catch {
-        continue;
-      }
-
-      let previewAbsolutePath: string;
-      try {
-        previewAbsolutePath = safeJoin(appConfig.previewsDir, image.preview_path);
-      } catch {
-        continue;
-      }
-
-      try {
-        // Share settings can change while the source stat is pending. Nothing
-        // yields between this live check and submitting the removal.
-        if (getSharedPreviewFolderIds().has(image.folder_id)) {
-          continue;
-        }
-        await fs.unlink(previewAbsolutePath);
-        reclaimed += 1;
-        log.info(joinLogParts([
-          'Obsolete video preview removed',
-          formatStep('file', image.relative_path),
-          formatStep('preview', image.preview_path)
-        ]));
-      } catch (error) {
-        const filesystemError = error as NodeJS.ErrnoException;
-        if (filesystemError.code === 'ENOENT') {
-          continue;
-        }
-
-        const message = error instanceof Error ? error.message : String(error);
-        const detail = formatScanError(
-          image.relative_path,
-          `Unable to remove obsolete video preview: ${message}`,
-          { sourcePath: previewAbsolutePath }
-        );
-        await errors.add(detail);
-        log.error(joinLogParts([
-          'Failed to remove obsolete video preview',
-          formatStep('file', image.relative_path),
-          formatStep('preview', image.preview_path),
-          message
-        ]));
-
-        if (appConfig.scanMediaErrorMode === 'fail') {
-          throw new Error(detail);
-        }
-      }
-    }
-
-    return reclaimed;
-  }
-
   private async processDerivativeJobs(
     jobs: DerivativeJob[],
     errors: ScanErrorCollector,
@@ -3128,10 +3196,10 @@ class ScannerService {
           currentFolder: getSourceFolderPathFromRelativePath(job.relativePath)
         });
 
-        const indexedHeic = isHeicFile(job.relativePath)
+        const indexedHeic = isHeicJob(job)
           ? imageRepository.getByRelativePath(job.relativePath, job.sourceId)
           : undefined;
-        if (isHeicFile(job.relativePath) && !indexedHeic) {
+        if (isHeicJob(job) && !indexedHeic) {
           throw new HeicError('stale', 'The indexed HEIC image is no longer available.');
         }
         const heicSource = indexedHeic
@@ -3196,14 +3264,14 @@ class ScannerService {
 
     if (appConfig.scanMediaErrorMode === 'fail') {
       for (const job of jobs) {
-        await this.scanTask(() => isHeicFile(job.relativePath)
+        await this.scanTask(() => isHeicJob(job)
           ? processJob(job)
           : derivativeWorkLimit(() => processJob(job)));
       }
     } else {
       const regularJobs: DerivativeJob[] = [];
       const heicJobs: DerivativeJob[] = [];
-      for (const job of jobs) (isHeicFile(job.relativePath) ? heicJobs : regularJobs).push(job);
+      for (const job of jobs) (isHeicJob(job) ? heicJobs : regularJobs).push(job);
 
       // Pull one job per runner. An entire scan in the shared limiter would
       // make HEIC admission and on-demand work wait behind the scan backlog.
@@ -3430,23 +3498,62 @@ class ScannerService {
     file: IndexedFileCandidate,
     options: FullScanOptions,
     context: ImageProcessingContext
-  ): Promise<ProcessedFileSummary> {
+  ): Promise<ProcessedFileSummary | null> {
+    const companionMetadata = file.metadataFilePath
+      ? await readCompanionMetadata(file.metadataFilePath)
+      : null;
+    const companionCaption = companionMetadata?.caption ?? null;
+    const companionTakenAt = companionMetadata?.takenAt ?? null;
     const fingerprint = createFingerprint(file.relativePath, file.stats.size, file.stats.mtimeMs);
     const extension = path.extname(file.absolutePath).toLowerCase();
     const mediaType = getMediaTypeFromExtension(extension);
-    const localHeic = isHeicFile(file.relativePath);
+    const existingByPath = imageRepository.getByRelativePath(file.relativePath, context.source.id);
+    // Recheck unchanged JPEG-extension rows once after upgrading, as older
+    // scans could have saved actual HEIC files under image/jpeg.
+    const contentHeic = HEIC_CONTENT_CHECK_EXTENSIONS.has(extension) && (
+      existingByPath?.checksum_or_fingerprint === fingerprint && !context.heicContentRepairPending
+        ? isHeicMimeType(existingByPath.mime_type)
+        : await hasHeicContent(file.absolutePath)
+    );
+    const moveCandidate = existingByPath ? undefined : await this.findMoveCandidate(file, extension, context);
+    const rebuildDerivativeReuseCandidate = existingByPath || moveCandidate
+      ? undefined
+      : this.findRebuildDerivativeReuseCandidate(file, extension, context);
+    if (
+      (contentHeic || isHeicFile(file.relativePath))
+      && !context.heicImportEnabled
+      && !existingByPath
+      && !moveCandidate
+      && !rebuildDerivativeReuseCandidate
+    ) {
+      // Same rule as discovery applies to `.heic` files: with HEIC imports off,
+      // new HEIC files are not indexed, and indexed ones stay available.
+      return null;
+    }
+    const localHeic = isHeicFile(file.relativePath) || contentHeic;
+    const mimeType = contentHeic ? 'image/heic' : getMimeTypeFromExtension(extension);
     const metadataOptions = {
       fileSize: file.stats.size,
       ...(localHeic ? {
         heicSource: heicScanSource(context.source, context.root, file.relativePath, file.absolutePath, fingerprint)
       } : {})
     };
-    const existingByPath = imageRepository.getByRelativePath(file.relativePath, context.source.id);
-    const moveCandidate = existingByPath ? undefined : await this.findMoveCandidate(file, extension, context);
-    const rebuildDerivativeReuseCandidate = existingByPath || moveCandidate
-      ? undefined
-      : this.findRebuildDerivativeReuseCandidate(file, extension, context);
     const existing = existingByPath ?? moveCandidate ?? rebuildDerivativeReuseCandidate;
+    const existingPost = existing ? postRepository.findByImageId(existing.id) : undefined;
+    const manualCaptionTime = existingPost?.caption_edited_at ? Date.parse(existingPost.caption_edited_at) : 0;
+    const companionChangedAfterManualEdit = (file.metadataStats?.mtimeMs ?? 0) > manualCaptionTime;
+    const canReplaceCaption = !existingPost?.caption_edited_at || companionChangedAfterManualEdit;
+    const previousImportedCaption = existing?.companion_caption ?? null;
+    const captionWasImported = !existingPost?.caption_edited_at && (
+      existingPost?.caption === previousImportedCaption ||
+      (previousImportedCaption === null && existingPost?.caption === existing?.caption)
+    );
+    const captionRemoved = previousImportedCaption !== null && companionCaption === null;
+    const captionToImport = (companionCaption !== previousImportedCaption || captionRemoved) &&
+      (canReplaceCaption || captionWasImported)
+      ? companionCaption : undefined;
+    const streamingVideo = mediaType === 'video' &&
+      ((existingByPath ?? moveCandidate)?.video_delivery_policy ?? appConfig.videoDeliveryMode) === 'streaming';
     const canReuseDerivativeFiles = Boolean(moveCandidate) ||
       (rebuildDerivativeReuseCandidate
         ? this.hasReusableDerivativeSignature(rebuildDerivativeReuseCandidate, file, extension)
@@ -3466,7 +3573,9 @@ class ScannerService {
       && extension === '.avif'
       && existingByPath !== undefined;
 
-    if (existingByPath && existingByPath.checksum_or_fingerprint === fingerprint) {
+    const needsHeicContentRepair = existingByPath && contentHeic && !isHeicMimeType(existingByPath.mime_type);
+    const companionDateRemoved = existingByPath?.taken_at_source === 'metadata' && companionTakenAt === null;
+    if (existingByPath && existingByPath.checksum_or_fingerprint === fingerprint && !needsHeicContentRepair) {
       const refreshedIndexedRow = shouldRefreshUnchangedImage({
         absolutePathChanged,
         galleryRootChanged: context.galleryRootChanged,
@@ -3482,6 +3591,7 @@ class ScannerService {
       let metadataPlaybackStrategy = existingByPath.playback_strategy ?? 'preview';
       let metadataIsAnimated = existingByPath.is_animated === 1;
       let metadataExifJson = existingByPath.exif_json;
+      let videoMetadataJson: string | null = null;
 
       if (
         needsTakenAtBackfill
@@ -3491,6 +3601,7 @@ class ScannerService {
         || needsAnimatedBackfill
         || needsExifBackfill
         || needsAvifMetadataRepair
+        || companionDateRemoved
       ) {
         const metadata = await readMediaMetadata(file.absolutePath, mediaType, metadataOptions);
         metadataTakenAt = metadata.takenAt;
@@ -3499,6 +3610,7 @@ class ScannerService {
         metadataHeight = metadata.height;
         metadataDisplayOrientation = mediaType === 'image' ? (metadata.displayOrientation ?? 1) : null;
         metadataPlaybackStrategy = metadata.playbackStrategy;
+        videoMetadataJson = metadata.localVideoMetadata ? JSON.stringify(metadata.localVideoMetadata) : null;
         metadataIsAnimated = metadata.isAnimated;
         metadataExifJson = mediaType === 'image'
           ? serializeImageExifData(metadata.exif ?? null, {
@@ -3522,6 +3634,15 @@ class ScannerService {
         && metadataIsAnimated
         && metadataTakenAt !== existingByPath.taken_at;
 
+      const shouldApplyMetadataTakenAt = companionTakenAt !== null;
+      const metadataTakenAtChanged = companionDateRemoved || (
+        companionTakenAt !== null && (
+          existingByPath.taken_at_source !== 'metadata' || companionTakenAt !== existingByPath.taken_at
+        )
+      );
+      const metadataCaptionChanged = captionToImport !== undefined || companionCaption !== previousImportedCaption;
+      const needsMetadataRefresh = metadataCaptionChanged || metadataTakenAtChanged;
+
       if (
         refreshedIndexedRow
         || needsTakenAtBackfill
@@ -3531,18 +3652,24 @@ class ScannerService {
         || needsAnimatedBackfill
         || needsExifBackfill
         || needsAvifMetadataRepair
+        || needsMetadataRefresh
       ) {
-        const resolvedTakenAt = resolveTakenAt({
-          exifTakenAt: metadataTakenAt,
-          existingTakenAt: shouldResetLegacyAnimatedAvifTakenAt ? null : existingByPath.taken_at,
-          existingTakenAtSource: shouldResetLegacyAnimatedAvifTakenAt ? null : existingByPath.taken_at_source,
-          existingSortTimestamp: existingByPath.sort_timestamp,
-          existingFirstSeenAt: existingByPath.first_seen_at,
-          existingMtimeMs: existingByPath.mtime_ms,
-          fileMtimeMs: file.stats.mtimeMs,
-          firstSeenAt: existingByPath.first_seen_at,
-          stableFallbackTimestamp: existingByPath.sort_timestamp
-        });
+        const resolvedTakenAt = (companionTakenAt !== null && shouldApplyMetadataTakenAt)
+          ? { takenAt: companionTakenAt, source: 'metadata' as const }
+          : resolveTakenAt({
+              exifTakenAt: metadataTakenAt,
+              existingTakenAt: (companionDateRemoved || shouldResetLegacyAnimatedAvifTakenAt) ? null : existingByPath.taken_at,
+              existingTakenAtSource: (companionDateRemoved || shouldResetLegacyAnimatedAvifTakenAt) ? null : existingByPath.taken_at_source,
+              existingSortTimestamp: companionDateRemoved ? null : existingByPath.sort_timestamp,
+              existingFirstSeenAt: existingByPath.first_seen_at,
+              existingMtimeMs: existingByPath.mtime_ms,
+              fileMtimeMs: file.stats.mtimeMs,
+              firstSeenAt: existingByPath.first_seen_at,
+              stableFallbackTimestamp: companionDateRemoved ? Math.round(file.stats.mtimeMs) : existingByPath.sort_timestamp
+            });
+
+        const nextCaption = captionToImport === undefined && !existingPost && companionCaption !== null
+          ? companionCaption : captionToImport;
 
         const image = imageRepository.refreshIndexed({
           folderId: folder.id,
@@ -3556,17 +3683,21 @@ class ScannerService {
           height: metadataHeight,
           displayOrientation: metadataDisplayOrientation,
           mediaType,
-          mimeType: getMimeTypeFromExtension(extension),
+          mimeType,
           durationMs: metadataDurationMs,
           isAnimated: metadataIsAnimated,
           fingerprint,
           mtimeMs: file.stats.mtimeMs,
+          caption: nextCaption,
+          companionCaption,
+          sortTimestamp: resolvedTakenAt.source === 'metadata' ? resolvedTakenAt.takenAt : (companionDateRemoved ? resolvedTakenAt.takenAt : existingByPath.sort_timestamp),
           takenAt: resolvedTakenAt.takenAt,
           takenAtSource: resolvedTakenAt.source,
           exifJson: mediaType === 'image' ? (metadataExifJson ?? '{}') : null,
           thumbnailPath,
           previewPath,
-          playbackStrategy: metadataPlaybackStrategy
+          playbackStrategy: metadataPlaybackStrategy,
+          videoMetadataJson
         });
         placeResolutionService.resolveImage(image);
       } else if (existingByPath.place_id === null) {
@@ -3574,18 +3705,19 @@ class ScannerService {
       }
 
       return {
-        status: 'unchanged',
+        status: needsMetadataRefresh ? 'updated' : 'unchanged',
         derivativeJob: !appConfig.derivativeMode || appConfig.derivativeMode === 'eager'
           ? (shouldQueueDerivativeJobForStatus('unchanged', options) || needsPlaybackStrategyBackfill
             ? {
                 sourceId: context.source.id,
+                heic: localHeic,
                 absolutePath: file.absolutePath,
                 relativePath: file.relativePath,
                 folderId: folder.id,
                 thumbnailPath,
                 previewPath,
                 force: false,
-                kind: 'all',
+                kind: streamingVideo ? 'thumbnail' : 'all',
                 videoPlaybackSource
               }
             : null)
@@ -3596,15 +3728,6 @@ class ScannerService {
     }
 
     const metadata = await readMediaMetadata(file.absolutePath, mediaType, metadataOptions);
-    const sortTimestamp = getStableSortTimestamp(
-      existing
-        ? {
-            sortTimestamp: existing.sort_timestamp,
-            firstSeenAt: existing.first_seen_at
-          }
-        : null,
-      file.stats.mtimeMs
-    );
     const firstSeenAt = existing?.first_seen_at ?? new Date().toISOString();
     const shouldResetLegacyAnimatedAvifTakenAt = context.avifMetadataRepairPending
       && mediaType === 'image'
@@ -3612,17 +3735,39 @@ class ScannerService {
       && existing?.taken_at_source === 'exif'
       && metadata.isAnimated
       && metadata.takenAt !== existing.taken_at;
-    const resolvedTakenAt = resolveTakenAt({
-      exifTakenAt: metadata.takenAt,
-      existingTakenAt: shouldResetLegacyAnimatedAvifTakenAt ? null : existing?.taken_at,
-      existingTakenAtSource: shouldResetLegacyAnimatedAvifTakenAt ? null : existing?.taken_at_source,
-      existingSortTimestamp: existing?.sort_timestamp,
-      existingFirstSeenAt: existing?.first_seen_at,
-      existingMtimeMs: existing?.mtime_ms,
-      fileMtimeMs: file.stats.mtimeMs,
-      firstSeenAt,
-      stableFallbackTimestamp: sortTimestamp
-    });
+    const removedCompanionDate = existing?.taken_at_source === 'metadata' && companionTakenAt === null;
+    const resolvedTakenAt = companionTakenAt !== null
+      ? { takenAt: companionTakenAt, source: 'metadata' as const }
+      : resolveTakenAt({
+          exifTakenAt: metadata.takenAt,
+          existingTakenAt: (removedCompanionDate || shouldResetLegacyAnimatedAvifTakenAt) ? null : existing?.taken_at,
+          existingTakenAtSource: (removedCompanionDate || shouldResetLegacyAnimatedAvifTakenAt) ? null : existing?.taken_at_source,
+          existingSortTimestamp: removedCompanionDate ? null : existing?.sort_timestamp,
+          existingFirstSeenAt: existing?.first_seen_at,
+          existingMtimeMs: existing?.mtime_ms,
+          fileMtimeMs: file.stats.mtimeMs,
+          firstSeenAt,
+          stableFallbackTimestamp: removedCompanionDate ? Math.round(file.stats.mtimeMs) : getStableSortTimestamp(
+            existing
+              ? {
+                  sortTimestamp: existing.sort_timestamp,
+                  firstSeenAt: existing.first_seen_at
+                }
+              : null,
+            file.stats.mtimeMs
+          )
+        });
+    const sortTimestamp = resolvedTakenAt.source === 'metadata' || removedCompanionDate
+      ? resolvedTakenAt.takenAt
+      : getStableSortTimestamp(
+          existing
+            ? {
+                sortTimestamp: existing.sort_timestamp,
+                firstSeenAt: existing.first_seen_at
+              }
+            : null,
+          file.stats.mtimeMs
+        );
 
     const exifJson = mediaType === 'image'
       ? serializeImageExifData(metadata.exif ?? null, {
@@ -3649,13 +3794,14 @@ class ScannerService {
       } else if (appConfig.derivativeMode !== 'lazy') {
         await Promise.all([
           fs.rm(safeJoin(appConfig.thumbnailsDir, thumbnailPath), { force: true }),
-          fs.rm(safeJoin(appConfig.previewsDir, previewPath), { force: true })
+          streamingVideo ? undefined : fs.rm(safeJoin(appConfig.previewsDir, previewPath), { force: true })
         ]);
-      } else if (mediaType === 'video') {
+      } else if (mediaType === 'video' && !streamingVideo) {
         await fs.rm(safeJoin(appConfig.previewsDir, previewPath), { force: true });
       }
     }
 
+    const videoMetadataJson = metadata.localVideoMetadata ? JSON.stringify(metadata.localVideoMetadata) : null;
     if (moveCandidate) {
       const image = imageRepository.reconcileMove({
         id: moveCandidate.id,
@@ -3669,15 +3815,19 @@ class ScannerService {
         height: metadata.height,
         displayOrientation: mediaType === 'image' ? (metadata.displayOrientation ?? 1) : null,
         mediaType,
-        mimeType: getMimeTypeFromExtension(extension),
+        mimeType,
         durationMs: metadata.durationMs,
         isAnimated: metadata.isAnimated,
         fingerprint,
         mtimeMs: file.stats.mtimeMs,
         takenAt: resolvedTakenAt.takenAt,
         takenAtSource: resolvedTakenAt.source,
+        caption: existing ? captionToImport : companionCaption,
+        companionCaption,
+        sortTimestamp,
         exifJson,
-        playbackStrategy: metadata.playbackStrategy
+        playbackStrategy: metadata.playbackStrategy,
+        videoMetadataJson
       });
       placeResolutionService.resolveImage(image);
     } else {
@@ -3693,19 +3843,22 @@ class ScannerService {
         height: metadata.height,
         displayOrientation: mediaType === 'image' ? (metadata.displayOrientation ?? 1) : null,
         mediaType,
-        mimeType: getMimeTypeFromExtension(extension),
+        mimeType,
         durationMs: metadata.durationMs,
         isAnimated: metadata.isAnimated,
         fingerprint,
         mtimeMs: file.stats.mtimeMs,
         firstSeenAt,
         sortTimestamp,
+        caption: existing ? captionToImport : companionCaption,
+        companionCaption,
         takenAt: resolvedTakenAt.takenAt,
         takenAtSource: resolvedTakenAt.source,
         exifJson,
         thumbnailPath,
         previewPath,
-        playbackStrategy: metadata.playbackStrategy
+        playbackStrategy: metadata.playbackStrategy,
+        videoMetadataJson
       });
       placeResolutionService.resolveImage(image);
     }
@@ -3716,6 +3869,7 @@ class ScannerService {
         ? null
         : {
             sourceId: context.source.id,
+            heic: localHeic,
             inspectedHeicMetadata: localHeic ? metadata : undefined,
             absolutePath: file.absolutePath,
             relativePath: file.relativePath,
@@ -3723,7 +3877,7 @@ class ScannerService {
             thumbnailPath,
             previewPath,
             force: existing ? !canReuseDerivativeFiles : options.forceNewFileDerivatives,
-            kind: 'all',
+            kind: streamingVideo ? 'thumbnail' : 'all',
             videoPlaybackSource
           },
       refreshedIndexedRow: false,

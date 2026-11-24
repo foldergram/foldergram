@@ -5,19 +5,20 @@
     class="app-shell flex min-h-screen overflow-x-clip"
     :class="{
       'app-shell--standalone': isStandaloneDisplay,
+      'app-shell--home': isHomeShell,
       'app-shell--explore': isExploreShell,
       'app-shell--reels': isReelsShell
     }"
   >
     <!-- Sidebar: fixed on desktop, hidden on mobile -->
-    <SidebarNav class="hidden md:flex fixed top-0 left-0 h-screen z-30" :panel-open="Boolean(activityAnchor)" @open-more="dismissActivity(false)" @open-display-preferences="openDisplayPreferences">
+    <SidebarNav :inert="isHomeReelOverlay" :aria-hidden="isHomeReelOverlay ? 'true' : undefined" class="hidden md:flex fixed top-0 left-0 h-screen z-30" :panel-open="Boolean(activityAnchor)" @open-more="dismissActivity(false)" @open-display-preferences="openDisplayPreferences">
       <template #activity>
         <ScanActivityTrigger v-if="showActivity" v-bind="activityTrigger" @activate="toggleActivity" />
       </template>
     </SidebarNav>
     <!-- Content: margin-left matches sidebar width on desktop -->
     <div class="app-shell__content flex flex-1 min-h-screen min-w-0 flex-col md:ml-[4.85rem]">
-      <TopNav :has-activity="showActivity" :panel-open="Boolean(activityAnchor)" @open-more="dismissActivity(false)" @open-display-preferences="openDisplayPreferences">
+      <TopNav :inert="isHomeReelOverlay" :aria-hidden="isHomeReelOverlay ? 'true' : undefined" :has-activity="showActivity" :panel-open="Boolean(activityAnchor)" @open-more="dismissActivity(false)" @open-display-preferences="openDisplayPreferences">
         <template #activity>
           <ScanActivityTrigger v-if="showActivity" v-bind="activityTrigger" mobile @activate="toggleActivity" />
         </template>
@@ -90,8 +91,10 @@ const authStore = useAuthStore();
 const sourcesStore = useSourcesStore();
 const route = useRoute();
 const isStandaloneDisplay = ref(false);
+const isHomeReelOverlay = computed(() => route.name === 'reels' && route.query.from === 'home' && Boolean(appStore.reelModalBackgroundPath));
+const isHomeShell = computed(() => route.name === 'home' || isHomeReelOverlay.value);
 const isExploreShell = computed(() => route.meta.shell === 'explore');
-const isReelsShell = computed(() => route.meta.shell === 'reels');
+const isReelsShell = computed(() => route.meta.shell === 'reels' && !isHomeReelOverlay.value);
 const isImmersiveShell = computed(() => isExploreShell.value || isReelsShell.value);
 const scan = computed(() => appStore.stats?.scan ?? null);
 const remoteSync = computed(() => sourcesStore.items.some(source => source.kind === 'immich' && source.syncing));
@@ -210,6 +213,33 @@ onUnmounted(() => media.removeEventListener?.('change', onLayoutChange));
 
 .app-shell--reels .app-shell__main {
   overflow: hidden;
+}
+
+/* The mobile nav ends at 768px, but UnoCSS md starts at 980px.
+   Keep desktop navigation and its content gutter available on every route
+   throughout the intermediate portrait/tablet viewport range. */
+@media (min-width: 768px) and (max-width: 979.98px) {
+  .app-shell :deep(> .sidebar) {
+    display: flex;
+  }
+
+  .app-shell .app-shell__content {
+    margin-left: var(--desktop-sidebar-width);
+  }
+
+  .app-shell :deep(.mobile-nav) {
+    display: none;
+  }
+
+  /* Keep Home playback controls at the video's bottom-left by default.
+     Only shift them while the desktop navigation is expanded over the feed.
+     Previously the clearance was applied permanently, displacing Play + time
+     on portrait monitors even when the navigation was collapsed. */
+  .app-shell--home:has(> .sidebar:is(:hover, :focus-within))
+    :deep(.home-layout--compact .feed-card__video-shell .video-progress-footer__slot--leading) {
+    margin-left: max(0px, calc(var(--desktop-sidebar-expanded-width) + 15.1875rem - 50vw));
+  }
+
 }
 
 @media (max-width: 767.98px) {

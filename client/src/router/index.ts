@@ -26,6 +26,11 @@ type RouteCapability = keyof AuthCapabilities;
 function shouldPreserveModalScroll(to: RouteLocationNormalized, from: RouteLocationNormalized) {
   const appStore = useAppStore(pinia);
   const backgroundPath = appStore.imageModalBackgroundPath;
+  const reelBackground = appStore.reelModalBackgroundPath;
+  if (reelBackground && (
+    (to.name === 'reels' && (from.fullPath === reelBackground || from.name === 'reels')) ||
+    (from.name === 'reels' && (to.fullPath === reelBackground || to.name === 'reels'))
+  )) return true;
 
   if (!backgroundPath) {
     return false;
@@ -67,7 +72,7 @@ export const router = createRouter({
       }
     },
     {
-      path: '/reels',
+      path: '/reels/:id?',
       name: 'reels',
       component: ReelsView,
       meta: {
@@ -212,7 +217,25 @@ export function canAccessRoute(route: Pick<RouteLocationNormalized, 'meta'>): bo
   return true;
 }
 
-router.beforeEach((to) => {
+router.beforeEach((to, from) => {
+  const appStore = useAppStore(pinia);
+  // Opening or refreshing a bookmarked Home-origin Reel starts a new session:
+  // without the mounted Home background it is a standalone Reels route.
+  if (to.name === 'reels' && to.query.from === 'home' && !appStore.reelModalBackgroundPath) {
+    return {
+      name: 'reels',
+      params: to.params,
+      query: { ...to.query, from: undefined },
+      hash: to.hash,
+      replace: true
+    };
+  }
+  // A fresh visit from the sidebar is a standalone Reels page, not a
+  // resurrection of an earlier Home overlay. Back/Forward retains the
+  // from=home URL that was created when the Home media surface was opened.
+  if (to.name === 'reels' && from.name === 'home' && to.query.from !== 'home') {
+    appStore.clearReelModalBackground();
+  }
   const authStore = useAuthStore(pinia);
   if (!authStore.ready) {
     return true;

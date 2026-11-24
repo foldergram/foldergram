@@ -2,19 +2,27 @@
   <section
     ref="scrollerElement"
     class="reel-deck"
+    :class="{ 'reel-deck--tail-portrait': lastItem && lastItem.height > lastItem.width }"
+    :style="{ '--reel-last-ratio': lastRatio }"
     :aria-label="t('reels.view.feedAria')"
     @scroll="handleScroll"
   >
     <div
-      v-for="item in items"
+      v-for="(item, index) in items"
       :key="item.id"
       :ref="setPanelRef(item.id)"
       class="reel-deck__panel"
+      :data-reel-id="item.id"
+      :class="{ 'reel-deck__panel--portrait': item.height > item.width }"
+      :style="{ '--reel-item-ratio': item.width > 0 && item.height > 0 ? item.width / item.height : 9 / 16 }"
     >
       <ReelPlayerCard
+        v-if="Math.abs(index - renderedActiveIndex) <= 2"
         :item="item"
         :folder="folderLookup.get(item.folderSlug) ?? null"
         :active="item.id === activeReelId"
+        :video-preparation="videoPreparation"
+        :next-video-playback-url="item.id === activeReelId ? items[index + 1]?.videoPlaybackUrl ?? undefined : undefined"
         :external-metadata="externalMetadata"
       >
         <template v-if="item.id === activeReelId" #mobile-action-rail>
@@ -38,6 +46,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type Compon
 import { useI18n } from 'vue-i18n';
 
 import type { FeedItem, FolderSummary } from '../types/api';
+import { ReelVideoPreparation } from '../utils/local-video-provider';
 import { getActiveReelId, shouldPrefetchReels } from '../utils/reels';
 import ReelPlayerCard from './ReelPlayerCard.vue';
 
@@ -58,7 +67,18 @@ const emit = defineEmits<{
 
 const scrollerElement = ref<HTMLElement | null>(null);
 const panelElements = new Map<number, HTMLElement>();
+const videoPreparation = new ReelVideoPreparation();
 const folderLookup = computed(() => new Map(props.folders.map((folder) => [folder.slug, folder])));
+// Keep all panels' snap geometry, but mount media players only near the
+// active panel. Full-library Random/Recent paging must not mount 1,000 videos.
+const renderedActiveIndex = computed(() => {
+  const index = props.items.findIndex(item => item.id === props.activeReelId);
+  return index >= 0 ? index : 0;
+});
+const lastItem = computed(() => props.items.at(-1) ?? null);
+const lastRatio = computed(() => lastItem.value && lastItem.value.width > 0 && lastItem.value.height > 0
+  ? lastItem.value.width / lastItem.value.height
+  : 9 / 16);
 
 let resizeObserver: ResizeObserver | null = null;
 let scrollFrame = 0;
@@ -179,7 +199,7 @@ function handleScroll() {
   scheduleActiveUpdate();
 }
 
-function scrollToIndex(index: number) {
+function scrollToIndex(index: number, behavior: ScrollBehavior = 'smooth') {
   const nextItem = props.items[index];
   const scroller = scrollerElement.value;
   if (!nextItem || !scroller) {
@@ -194,7 +214,7 @@ function scrollToIndex(index: number) {
   const topInset = parseFloat(getComputedStyle(scroller).scrollPaddingTop) || 0;
   scroller.scrollTo({
     top: panel.offsetTop - topInset,
-    behavior: 'smooth'
+    behavior
   });
 }
 
@@ -211,6 +231,9 @@ function navigateByOffset(offset: number) {
   const nextIndex = Math.min(props.items.length - 1, Math.max(0, activeIndex + offset));
   if (nextIndex === activeIndex) {
     wheelDeltaAccumulator = 0;
+    // A bounded overlap batch can add no panels. Allow a deliberate Next
+    // interaction at the tail to resume fetching from its advanced cursor.
+    if (offset > 0) emit('prefetch', activeIndex);
     return;
   }
 
@@ -218,6 +241,14 @@ function navigateByOffset(offset: number) {
   wheelDeltaAccumulator = 0;
   scheduleNavigationFallbackUnlock();
   scrollToIndex(nextIndex);
+}
+
+function scrollToReel(id: number) {
+  const index = props.items.findIndex((item) => item.id === id);
+  if (index >= 0) {
+    scrollToIndex(index, 'instant');
+    scheduleActiveUpdate();
+  }
 }
 
 function goToPrevious() {
@@ -313,7 +344,11 @@ onMounted(async () => {
   }
 
   window.addEventListener('keydown', handleKeydown);
-  scheduleActiveUpdate();
+  if (props.activeReelId !== null) {
+    scrollToReel(props.activeReelId);
+  } else {
+    scheduleActiveUpdate();
+  }
 });
 
 onBeforeUnmount(() => {
@@ -331,7 +366,8 @@ onBeforeUnmount(() => {
 defineExpose({
   goToPrevious,
   goToNext,
-  navigateByWheel
+  navigateByWheel,
+  scrollToReel
 });
 </script>
 
@@ -355,14 +391,39 @@ defineExpose({
 .reel-deck__panel {
   display: grid;
   place-items: center;
-  height: var(--reel-deck-panel-height, auto);
-  min-height: var(--reel-deck-panel-height, 100%);
+  /* Square and landscape panels always occupy a full scrolling viewport.
+     Only portrait panels on portrait desktop viewports may be shorter. */
+  height: 100cqh;
+  min-height: 100cqh;
   scroll-snap-align: start;
   scroll-snap-stop: always;
 }
 
 .reel-deck__panel + .reel-deck__panel {
   margin-block-start: var(--reel-deck-panel-gap, 0px);
+}
+
+/* The snap geometry belongs to each item and never changes when another Reel becomes active. */
+@media (min-width: 768px) and (orientation: portrait) {
+  .reel-deck__panel--portrait {
+    --reel-portrait-panel-height: min(
+      calc(88cqh - var(--reel-deck-top-inset, 1rem) - var(--reel-deck-panel-gap, 2rem)),
+      calc(var(--reels-desktop-stage-width) / var(--reel-item-ratio))
+    );
+    height: var(--reel-portrait-panel-height);
+    min-height: var(--reel-portrait-panel-height);
+  }
+
+  /* Give the last portrait Reel enough room to snap into view, without affecting earlier panels. */
+  .reel-deck--tail-portrait {
+    --reel-deck-bottom-inset: max(
+      0px,
+      calc(100cqh - var(--reel-deck-top-inset, 1rem) - min(
+        calc(88cqh - var(--reel-deck-top-inset, 1rem) - var(--reel-deck-panel-gap, 2rem)),
+        calc(var(--reels-desktop-stage-width) / var(--reel-last-ratio))
+      ))
+    );
+  }
 }
 
 .reel-deck__status {

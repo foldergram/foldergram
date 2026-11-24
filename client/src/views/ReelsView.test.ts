@@ -1,4 +1,4 @@
-import { defineComponent, h } from 'vue';
+import { defineComponent, h, reactive } from 'vue';
 import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
@@ -9,15 +9,25 @@ import { useFoldersStore } from '../stores/folders';
 import { useReelsStore } from '../stores/reels';
 import ReelsView from './ReelsView.vue';
 
+const routeMocks = vi.hoisted(() => ({
+  route: { params: {} as Record<string, string>, query: {} as Record<string, string> },
+  push: vi.fn(),
+  replace: vi.fn(),
+  back: vi.fn()
+}));
+
 vi.mock('vue-router', async (importOriginal) => ({
   ...(await importOriginal<typeof import('vue-router')>()),
-  RouterLink: (await import('@vue/test-utils')).RouterLinkStub
+  RouterLink: (await import('@vue/test-utils')).RouterLinkStub,
+  useRoute: () => routeMocks.route,
+  useRouter: () => ({ push: routeMocks.push, replace: routeMocks.replace, back: routeMocks.back })
 }));
 
 const deckControls = vi.hoisted(() => ({
   goToPrevious: vi.fn(),
   goToNext: vi.fn(),
-  navigateByWheel: vi.fn()
+  navigateByWheel: vi.fn(),
+  scrollToReel: vi.fn()
 }));
 
 vi.mock('../components/ReelDeck.vue', async () => {
@@ -49,7 +59,8 @@ vi.mock('../components/ReelDeck.vue', async () => {
         expose({
           goToPrevious: deckControls.goToPrevious,
           goToNext: deckControls.goToNext,
-          navigateByWheel: deckControls.navigateByWheel
+          navigateByWheel: deckControls.navigateByWheel,
+          scrollToReel: deckControls.scrollToReel
         });
 
         const activeItem = () =>
@@ -235,9 +246,17 @@ describe('ReelsView', () => {
       writable: true,
       value: 720
     });
+    routeMocks.route = reactive({
+      params: {} as Record<string, string>,
+      query: {} as Record<string, string>
+    });
+    routeMocks.push.mockReset();
+    routeMocks.replace.mockReset();
+    routeMocks.back.mockReset();
     deckControls.goToPrevious.mockReset();
     deckControls.goToNext.mockReset();
     deckControls.navigateByWheel.mockReset();
+    deckControls.scrollToReel.mockReset();
 
     const appStore = useAppStore();
     const foldersStore = useFoldersStore();
@@ -263,6 +282,141 @@ describe('ReelsView', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it('loads a directly linked Reel as a standalone page without a Close button', async () => {
+    routeMocks.route.params = { id: '202' };
+    const reelsStore = useReelsStore();
+    const openSpy = vi.spyOn(reelsStore, 'openReel').mockImplementation(async (id) => {
+      reelsStore.setActiveReel(id);
+      return true;
+    });
+
+    const wrapper = mount(ReelsView);
+    await flushPromises();
+
+    expect(openSpy).toHaveBeenCalledWith(202);
+    expect(deckControls.scrollToReel).toHaveBeenCalledWith(202);
+    expect(wrapper.get('.reels-view__action-rail--desktop').text()).toContain('202');
+
+    expect(wrapper.find('.reels-view__close').exists()).toBe(false);
+    expect(routeMocks.push).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it('shows the minimal Close button only for a Home-backed Reel overlay', async () => {
+    routeMocks.route.params = { id: '101' };
+    routeMocks.route.query = { from: 'home' };
+    useAppStore().setReelModalBackground('/');
+    const wrapper = mount(ReelsView);
+    await flushPromises();
+
+    const close = wrapper.get('.reels-view__close');
+    expect(close.find('svg').exists()).toBe(true);
+    await close.trigger('click');
+    expect(routeMocks.replace).toHaveBeenCalledWith('/');
+    wrapper.unmount();
+  });
+
+  it('recovers from an invalid deep link without remounting the viewer', async () => {
+    routeMocks.route.params = { id: 'invalid' };
+    const reelsStore = useReelsStore();
+    const wrapper = mount(ReelsView);
+    await flushPromises();
+
+    expect(reelsStore.error).toBe('Invalid Reel ID');
+    expect(wrapper.find('.reels-view__message-card').exists()).toBe(true);
+
+    routeMocks.route.params = { id: '202' };
+    await flushPromises();
+    expect(reelsStore.error).toBeNull();
+    expect(reelsStore.activeReelId).toBe(202);
+    expect(wrapper.find('.reels-view__message-card').exists()).toBe(false);
+    expect(deckControls.scrollToReel).toHaveBeenCalledWith(202);
+    wrapper.unmount();
+  });
+
+  it('ignores a failed older Reel URL after a successful newer navigation', async () => {
+    routeMocks.route.params = { id: '101' };
+    const reelsStore = useReelsStore();
+    const wrapper = mount(ReelsView);
+    await flushPromises();
+
+    let rejectOlder: ((error: Error) => void) | undefined;
+    vi.spyOn(reelsStore, 'openReel').mockImplementation((id) => id === 999
+      ? new Promise<boolean>((_resolve, reject) => { rejectOlder = reject; })
+      : Promise.resolve(true));
+
+    routeMocks.route.params = { id: '999' };
+    await flushPromises();
+    routeMocks.route.params = { id: '202' };
+    await flushPromises();
+    rejectOlder?.(new Error('Old video failed'));
+    await flushPromises();
+
+    expect(reelsStore.error).toBeNull();
+    expect(wrapper.find('.reels-view__message-card').exists()).toBe(false);
+    expect(deckControls.scrollToReel).toHaveBeenCalledWith(202);
+    wrapper.unmount();
+  });
+
+  it('restores scroll URL updates when returning to /reels during a pending deep link', async () => {
+    routeMocks.route.params = { id: '101' };
+    const reelsStore = useReelsStore();
+    const wrapper = mount(ReelsView);
+    await flushPromises();
+
+    let resolvePending: ((applied: boolean) => void) | undefined;
+    vi.spyOn(reelsStore, 'openReel').mockImplementation(id => id === 99
+      ? new Promise<boolean>(resolve => { resolvePending = resolve; })
+      : Promise.resolve(true));
+    vi.spyOn(reelsStore, 'loadInitial').mockResolvedValue(undefined);
+
+    routeMocks.route.params = { id: '99' };
+    await flushPromises();
+    routeMocks.route.params = {};
+    await flushPromises();
+
+    routeMocks.replace.mockClear();
+    await wrapper.get('[data-test="emit-active-change"]').trigger('click');
+    expect(reelsStore.activeReelId).toBe(202);
+    expect(routeMocks.replace).toHaveBeenCalledWith({
+      name: 'reels', params: { id: '202' }, query: {}
+    });
+
+    resolvePending?.(false);
+    await flushPromises();
+    expect(reelsStore.activeReelId).toBe(202);
+    wrapper.unmount();
+  });
+
+  it('updates the deep-link URL when the active Reel changes', async () => {
+    routeMocks.route.params = { id: '101' };
+    const reelsStore = useReelsStore();
+    vi.spyOn(reelsStore, 'openReel').mockResolvedValue(true);
+    const wrapper = mount(ReelsView);
+    await flushPromises();
+
+    await wrapper.get('[data-test="emit-active-change"]').trigger('click');
+    expect(routeMocks.replace).toHaveBeenCalledWith({
+      name: 'reels', params: { id: '202' }, query: {}
+    });
+  });
+
+  it('canonicalizes the Reels feed URL and updates it on navigation', async () => {
+    const reelsStore = useReelsStore();
+    vi.spyOn(reelsStore, 'loadInitial').mockResolvedValue(undefined);
+    const wrapper = mount(ReelsView);
+    await flushPromises();
+
+    expect(routeMocks.replace).toHaveBeenCalledWith({
+      name: 'reels', params: { id: '101' }, query: {}
+    });
+    routeMocks.replace.mockClear();
+    await wrapper.get('[data-test="emit-active-change"]').trigger('click');
+    expect(routeMocks.replace).toHaveBeenCalledWith({
+      name: 'reels', params: { id: '202' }, query: {}
+    });
   });
 
   it('loads the route view and shows the right rail for the active reel', async () => {

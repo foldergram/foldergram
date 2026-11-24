@@ -7,8 +7,9 @@ const completed = {
 };
 
 type ScanResult = typeof completed & { source_id?: number | null };
+const resultKey = (result: ScanResult) => [result.id, result.started_at, result.finished_at].join('/');
 
-async function mockActivity(page: Page, admin: boolean, initiallyScanning = true, recentIssues: ScanResult[] = []) {
+async function mockActivity(page: Page, admin: boolean, initiallyScanning = true, recentIssues: ScanResult[] = [], acknowledged = new Set<string>()) {
   let failed = false;
   let scan = {
     isScanning: initiallyScanning, scanReason: 'manual', phase: initiallyScanning ? 'derivatives' : 'idle', runId: 3,
@@ -22,10 +23,18 @@ async function mockActivity(page: Page, admin: boolean, initiallyScanning = true
   await page.route('https://fonts.gstatic.com/**', route => route.abort());
   await page.route('**/api/**', async route => {
     const path = new URL(route.request().url()).pathname;
+    const progress = () => ({ ...scan, recentIssues: scan.recentIssues.filter(result => !acknowledged.has(resultKey(result))) });
+    if (path === '/api/admin/scan-issues/acknowledge') {
+      expect(route.request().method()).toBe('POST');
+      expect(route.request().headers()['x-foldergram-intent']).toBe('1');
+      const { results } = route.request().postDataJSON() as { results: ScanResult[] };
+      for (const result of results) acknowledged.add(resultKey(result));
+      return route.fulfill({ json: { ok: true } });
+    }
     if (path.endsWith('/scan-progress')) {
       if (!admin && path.startsWith('/api/admin/')) throw new Error('Viewer requested privileged scan progress');
       if (failed) return route.fulfill({ status: 503, json: { message: 'Status offline' } });
-      return route.fulfill({ json: scan });
+      return route.fulfill({ json: progress() });
     }
     if (path.endsWith('/pause')) {
       scan = { ...scan, operation: { ...scan.operation, state: 'paused', controls: ['resume', 'cancel'] } };
@@ -47,7 +56,7 @@ async function mockActivity(page: Page, admin: boolean, initiallyScanning = true
           canUseSharedLikes: false, canUseLocalCollections: true
         }
       },
-      '/api/status': { folders: 0, indexedImages: 0, indexedVideos: 0, scan,
+      '/api/status': { folders: 0, indexedImages: 0, indexedVideos: 0, scan: progress(),
         storage: { available: true, reason: null }, libraryIndex: { rebuildRequired: false },
         preferences: { defaultHomeFeedMode: 'recent' },
         storiesMigration: { decisionPending: false } },
@@ -158,11 +167,12 @@ for (const newerResult of [false, true]) {
   });
 }
 
-test('historical repeated failures do not replace a successful scan or require repeated acknowledgement', async ({ page }) => {
+test('historical failures stay acknowledged in a fresh browser with no site data while new failures appear', async ({ page, browser }) => {
   const interrupted = { ...completed, source_id: 1, id: 2,
     started_at: '2026-09-03T14:06:46.139Z', finished_at: '2026-11-16T03:06:21.582Z', status: 'failed',
     error_text: 'Scan interrupted by server restart. Run a scan to continue.' };
-  const scan = await mockActivity(page, true, false, [interrupted, { ...interrupted, id: 1 }]);
+  const acknowledged = new Set<string>();
+  const scan = await mockActivity(page, true, false, [interrupted, { ...interrupted, id: 1 }], acknowledged);
   scan.complete();
   await page.goto('/settings#library');
   await expect(page.getByText('Scan completed.', { exact: true })).toBeVisible();
@@ -174,15 +184,54 @@ test('historical repeated failures do not replace a successful scan or require r
   await expect(page.getByText('Scan completed.', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: /Acknowledge/ })).toHaveCount(0);
 
-  const failure = { ...interrupted, id: 4, started_at: '2026-11-16T14:10:00Z' };
-  await page.route('**/api/admin/rescan', async route => {
-    scan.fail(failure);
-    await route.fulfill({ json: { ok: true, lastScan: failure } });
+  const reopenedContext = await browser.newContext({
+    baseURL: new URL(page.url()).origin,
+    serviceWorkers: 'block'
   });
-  await page.getByRole('button', { name: 'Scan for changes', exact: true }).click();
-  await expect(page.getByText('Scan could not finish.', { exact: true })).toHaveCount(1);
-  await expect(page.getByRole('button', { name: 'Acknowledge', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Acknowledge 2 results', exact: true })).toHaveCount(0);
+  try {
+    const reopenedPage = await reopenedContext.newPage();
+    const restartedScan = await mockActivity(reopenedPage, true, false, [interrupted, { ...interrupted, id: 1 }], acknowledged);
+    restartedScan.complete();
+    await reopenedPage.goto('/library');
+    await expect(reopenedPage.getByRole('link', { name: 'Library', exact: true })).toBeVisible();
+    await expect(reopenedPage.getByRole('button', { name: 'Library scan needs attention. Show details', exact: true })).toHaveCount(0);
+    await reopenedPage.goto('/settings#library');
+    await expect(reopenedPage.getByText('Scan completed.', { exact: true })).toBeVisible();
+    await expect(reopenedPage.getByRole('button', { name: /Acknowledge/ })).toHaveCount(0);
+
+    const failure = { ...interrupted, id: 4, started_at: '2026-11-16T14:10:00Z' };
+    await reopenedPage.route('**/api/admin/rescan', async route => {
+      restartedScan.fail(failure);
+      await route.fulfill({ json: { ok: true, lastScan: failure } });
+    });
+    await reopenedPage.getByRole('button', { name: 'Scan for changes', exact: true }).click();
+    await expect(reopenedPage.getByText('Scan could not finish.', { exact: true })).toHaveCount(1);
+    await expect(reopenedPage.getByRole('button', { name: 'Acknowledge', exact: true })).toBeVisible();
+    await expect(reopenedPage.getByRole('button', { name: 'Acknowledge 2 results', exact: true })).toHaveCount(0);
+    await reopenedPage.getByRole('link', { name: 'Library', exact: true }).click();
+    await expect(reopenedPage.getByRole('button', { name: 'Library scan needs attention. Show details', exact: true })).toBeVisible();
+  } finally {
+    await reopenedContext.close();
+  }
+});
+
+test('a failed acknowledgement remains visible and can be retried', async ({ page }) => {
+  const interrupted = { ...completed, id: 2, status: 'failed' };
+  const scan = await mockActivity(page, true, false, [interrupted]);
+  scan.complete();
+  await page.route('**/api/admin/scan-issues/acknowledge', route =>
+    route.fulfill({ status: 503, json: { message: 'Database unavailable' } }));
+  await page.goto('/settings#library');
+  await page.getByRole('button', { name: 'Acknowledge', exact: true }).click();
+  await expect(page.getByRole('alert')).toHaveText('Could not save the acknowledgement. Please try again.');
+  await expect(page.getByText('Earlier scan needs attention', { exact: true })).toBeVisible();
+  await page.unroute('**/api/admin/scan-issues/acknowledge');
+  await page.getByRole('button', { name: 'Acknowledge', exact: true }).click();
+  await expect(page.getByText('Earlier scan needs attention', { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByText('Scan completed.', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Acknowledge/ })).toHaveCount(0);
 });
 
 test('a failed progress connection leaves the last scan visible and can retry', async ({ page }) => {

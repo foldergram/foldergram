@@ -109,6 +109,9 @@ The current GitHub workflow publishes tagged releases and deploys docs; it does 
 
 ## Commits and pull requests
 
+- Start ordinary contribution branches from the latest upstream `develop` and target `develop` when creating PRs. Pass `--base develop` to `gh pr create`; GitHub's default selection is `main`, which remains the stable release branch and public README. PRs against `main` are reserved for maintainer-managed releases, explicitly coordinated hotfixes, or contributor-guidance updates. Synchronize guidance/template changes to `main` without promoting unreleased application features, and bring those commits back into `develop`.
+- Fetch and merge upstream `develop` into the contribution branch when updating it. Push new work to the contribution branch; push review fixes to the existing PR's head branch. Do not push routine contribution commits directly to `develop` or `main`. Follow the fork/remote examples in [CONTRIBUTING.md](CONTRIBUTING.md).
+- Preserve shared history when promoting `develop` to `main` with a merge commit. Do not squash the long-lived development branch into the release branch. Merge release-only or hotfix commits from `main` back into `develop`.
 - Use short descriptive branches such as `fix/...`, `docs/...`, `feat/...`, `refactor/...`, or `test/...`. Keep one concern per PR.
 - Follow the Conventional Commit style used in project history: `type: imperative summary` or `type(scope): imperative summary`. Common types are `feat`, `fix`, `perf`, `refactor`, `test`, `docs`, `ci`, and `chore`. Keep subjects concise and explain non-obvious reasons in the body.
 
@@ -118,6 +121,7 @@ The current GitHub workflow publishes tagged releases and deploys docs; it does 
   test(auth): cover viewer mutation rejection
   ```
 
+- Use a one lowercase Conventional Commit subject line.
 - Use the same style for PR titles so a squash commit has a useful subject. Link actual issues/discussions; use `Closes #...` only when the change resolves that issue.
 - Before committing, inspect `git diff`, stage only intended files, then inspect `git diff --cached` and run `git diff --cached --check`. Check for accidental files, secrets, generated output, debugging code, and unrelated lockfile changes. Do not use blanket staging in a dirty worktree.
 - PR descriptions should state the concrete problem, resulting behavior, tests run and their outcomes, and any unverified areas. Include screenshots or short recordings for UI changes and compatibility, security, or data-migration implications when applicable. The contributor remains responsible for reviewing LLM-generated code and explanations.

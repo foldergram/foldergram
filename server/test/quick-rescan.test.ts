@@ -432,113 +432,28 @@ describe.sequential('quick rescans and selective video previews', () => {
     expect(appSettingsRepository.get(AVIF_METADATA_REPAIR_VERSION_SETTING_KEY)).toBe('1');
   });
 
-  it.each(['link', 'password'] as const)('retains a preview when a %s share is enabled during source validation', async (kind) => {
-    const image = await scan(false);
-    const previewPath = path.join(appConfig.previewsDir, image.preview_path);
-    await fs.mkdir(path.dirname(previewPath), { recursive: true });
-    await fs.writeFile(previewPath, 'shared-preview');
-    const { folderShareService } = await import('../src/services/folder-share-service.js');
-    const sourcePath = path.join(appConfig.galleryRoot, image.relative_path);
-    const originalStat = fs.stat.bind(fs);
-    let enabled = false;
-    const statSpy = vi.spyOn(fs, 'stat').mockImplementation(async (...args: Parameters<typeof fs.stat>) => {
-      const result = await originalStat(...args);
-      if (String(args[0]) === sourcePath && !enabled) {
-        if (kind === 'link') folderShareService.createLink('album', { expiresAt: null });
-        else folderShareService.setPassword('album', 'shared12345');
-        enabled = true;
-      }
-      return result;
-    });
-    try {
-      // Exercise the reclamation phase directly to interleave configuration
-      // changes after its batched share snapshot and before removal.
-      const reclaimer = scannerService as unknown as {
-        reclaimObsoleteVideoPreviews(errors: { add: ReturnType<typeof vi.fn> }): Promise<number>;
-      };
-      expect(await reclaimer.reclaimObsoleteVideoPreviews({ add: vi.fn() })).toBe(0);
-      expect(enabled).toBe(true);
-      await expect(fs.readFile(previewPath, 'utf8')).resolves.toBe('shared-preview');
-    } finally {
-      statSpy.mockRestore();
-    }
-  });
-
-  it('leaves an obsolete preview alone during quick scans but reclaims it during repair', async () => {
-    const image = await scan(false);
-    const previewPath = path.join(appConfig.previewsDir, image.preview_path);
-    await fs.mkdir(path.dirname(previewPath), { recursive: true });
-    await fs.writeFile(previewPath, 'stale-preview');
-
-    await scan(false);
-    await expect(fs.readFile(previewPath, 'utf8')).resolves.toBe('stale-preview');
-
-    generateDerivativesMock.mockClear();
-    await scan(true);
-    expect(generateDerivativesMock).toHaveBeenCalledOnce();
-    expect(generateDerivativesMock.mock.calls[0]?.[3]).toMatchObject({
-      videoPreviewPolicy: 'skip'
-    });
-    await expect(fs.stat(previewPath)).rejects.toMatchObject({ code: 'ENOENT' });
-    await expect(fs.stat(path.join(appConfig.thumbnailsDir, image.thumbnail_path))).resolves.toBeDefined();
-  });
-
-  it('reports preview removal failures without deleting unrelated data and retries later', async () => {
-    const image = await scan(false);
-    const previewPath = path.join(appConfig.previewsDir, image.preview_path);
-    await fs.mkdir(path.dirname(previewPath), { recursive: true });
-    await fs.mkdir(previewPath);
-
-    const failedScan = await scannerService.scanAll('manual', { repairUnchangedDerivatives: true });
-
-    expect(failedScan?.status).toBe('completed_with_errors');
-    expect(failedScan?.error_text).toContain('Unable to remove obsolete video preview');
-    await expect(fs.stat(previewPath)).resolves.toBeDefined();
-
-    await fs.rmdir(previewPath);
-    const retryScan = await scannerService.scanAll('manual', { repairUnchangedDerivatives: true });
-    expect(retryScan?.status).toBe('completed');
-    await expect(fs.stat(previewPath)).rejects.toMatchObject({ code: 'ENOENT' });
-  });
-
-  it('does not restore a preview on later quick or repair scans after reclamation', async () => {
-    const image = await scan(false);
-    const previewPath = path.join(appConfig.previewsDir, image.preview_path);
-    await fs.mkdir(path.dirname(previewPath), { recursive: true });
-    await fs.writeFile(previewPath, 'stale-preview');
-    await scan(true);
-    await expect(fs.stat(previewPath)).rejects.toMatchObject({ code: 'ENOENT' });
-
-    generateDerivativesMock.mockClear();
-    await scan(true);
-    await scan(false);
-
-    await expect(fs.stat(previewPath)).rejects.toMatchObject({ code: 'ENOENT' });
-    const previewWrites = generateDerivativesMock.mock.results
-      .filter((result) => result.type === 'return')
-      .some((result) => result.value && typeof result.value === 'object' && 'generatedPreview' in result.value && result.value.generatedPreview);
-    expect(previewWrites).toBe(false);
-    await expect(fs.stat(previewPath)).rejects.toMatchObject({ code: 'ENOENT' });
-  });
-
-  it('retains an eligible preview while a folder share is active and reclaims it after revocation', async () => {
+  it('preserves existing video previews during quick scans, repairs, and share revocation', async () => {
     const image = await scan(false);
     const { folderShareService } = await import('../src/services/folder-share-service.js');
     const link = folderShareService.createLink('album', { expiresAt: null })!;
     const previewPath = path.join(appConfig.previewsDir, image.preview_path);
     await fs.mkdir(path.dirname(previewPath), { recursive: true });
-    await fs.writeFile(previewPath, 'shared-preview');
+    await fs.writeFile(previewPath, 'existing-preview');
+
+    await scan(false);
+    await expect(fs.readFile(previewPath, 'utf8')).resolves.toBe('existing-preview');
 
     generateDerivativesMock.mockClear();
     await scan(true);
-    expect(generateDerivativesMock.mock.calls[0]?.[3]).toMatchObject({
-      videoPreviewPolicy: 'required'
-    });
-    await expect(fs.readFile(previewPath, 'utf8')).resolves.toBe('shared-preview');
+    expect(generateDerivativesMock.mock.calls[0]?.[3]).toMatchObject({ videoPreviewPolicy: 'required' });
+    await expect(fs.readFile(previewPath, 'utf8')).resolves.toBe('existing-preview');
 
     folderShareService.revokeLink('album', link.link.id);
+    generateDerivativesMock.mockClear();
     await scan(true);
-    await expect(fs.stat(previewPath)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(generateDerivativesMock.mock.calls[0]?.[3]).toMatchObject({ videoPreviewPolicy: 'skip' });
+    await expect(fs.readFile(previewPath, 'utf8')).resolves.toBe('existing-preview');
+    await expect(fs.stat(path.join(appConfig.thumbnailsDir, image.thumbnail_path))).resolves.toBeDefined();
   });
 
   it('does not count an intentionally absent normal video preview as a migration gap', async () => {

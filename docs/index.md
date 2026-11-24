@@ -18,7 +18,7 @@ hero:
       link: /how-it-works
     - theme: alt
       text: Live Demo
-      link: https://foldergram.intentdeep.com/
+      link: https://demo.foldergram.app/
 features:
   - icon:
       src: /icons/local-first.svg
@@ -102,8 +102,8 @@ features:
 
 <div class="cs-feature">
 <div class="cs-feature-step">3</div>
-<h3>Generate derivatives</h3>
-<p>Create 640 px thumbnails, up to 1500 px image previews, and 720p-class video previews. Derivatives can be generated eagerly during scans or lazily on first request.</p>
+<h3>Prepare thumbnails and previews</h3>
+<p>Foldergram prepares thumbnails and any needed previews during a scan or on first request. New local videos stream by default.</p>
 </div>
 
 <div class="cs-feature">

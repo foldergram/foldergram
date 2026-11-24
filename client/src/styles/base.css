@@ -152,7 +152,7 @@ img[data-loaded="true"] {
 @media (min-width: 768px) {
   .home-layout--compact {
     position: relative;
-    left: calc(var(--desktop-sidebar-width) * -0.5);
+    left: calc(0px - var(--desktop-content-compensation));
   }
 
   .home-layout--compact .home-layout__header {
