@@ -284,7 +284,7 @@ describe('ReelsView', () => {
     vi.restoreAllMocks();
   });
 
-  it('loads a directly linked Reel and closes back to Home', async () => {
+  it('loads a directly linked Reel as a standalone page without a Close button', async () => {
     routeMocks.route.params = { id: '202' };
     const reelsStore = useReelsStore();
     const openSpy = vi.spyOn(reelsStore, 'openReel').mockImplementation(async (id) => {
@@ -299,8 +299,23 @@ describe('ReelsView', () => {
     expect(deckControls.scrollToReel).toHaveBeenCalledWith(202);
     expect(wrapper.get('.reels-view__action-rail--desktop').text()).toContain('202');
 
-    await wrapper.get('.reels-view__close').trigger('click');
-    expect(routeMocks.push).toHaveBeenCalledWith({ name: 'home' });
+    expect(wrapper.find('.reels-view__close').exists()).toBe(false);
+    expect(routeMocks.push).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it('shows the minimal Close button only for a Home-backed Reel overlay', async () => {
+    routeMocks.route.params = { id: '101' };
+    routeMocks.route.query = { from: 'home' };
+    useAppStore().setReelModalBackground('/');
+    const wrapper = mount(ReelsView);
+    await flushPromises();
+
+    const close = wrapper.get('.reels-view__close');
+    expect(close.find('svg').exists()).toBe(true);
+    await close.trigger('click');
+    expect(routeMocks.replace).toHaveBeenCalledWith('/');
+    wrapper.unmount();
   });
 
   it('recovers from an invalid deep link without remounting the viewer', async () => {

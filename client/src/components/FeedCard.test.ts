@@ -338,7 +338,7 @@ describe('FeedCard', () => {
     wrapper.unmount();
   });
 
-  it('updates the home video aspect ratio from the loaded video element when metadata disagrees with indexed dimensions', async () => {
+  it('keeps the Home Reel preview at 4:5 when loaded video dimensions differ from indexed dimensions', async () => {
     const wrapper = mount(FeedCard, {
       props: {
         item: createVideoItem(804),
@@ -356,7 +356,7 @@ describe('FeedCard', () => {
     const player = wrapper.get('media-player').element as unknown as FakeMediaPlayerElement;
     const container = player.parentElement as HTMLElement;
 
-    expect(container.style.aspectRatio).toBe('1920 / 1080');
+    expect(container.style.aspectRatio).toBe('4 / 5');
 
     const video = document.createElement('video');
     Object.defineProperty(video, 'videoWidth', {
@@ -372,7 +372,7 @@ describe('FeedCard', () => {
 
     await flushPromises();
 
-    expect(container.style.aspectRatio).toBe('1080 / 1920');
+    expect(container.style.aspectRatio).toBe('4 / 5');
   });
 
   it('opens the immersive Reel viewer when clicking a Home-feed video', async () => {
@@ -402,7 +402,8 @@ describe('FeedCard', () => {
     expect(navigationMocks.push).toHaveBeenCalledWith({
       name: 'reels',
       params: { id: '805' },
-      query: { from: 'home' }
+      query: { from: 'home' },
+      state: { reelSessionKey: expect.stringMatching(/^home:[0-9a-f]{32}$/) }
     });
   });
 

@@ -12,7 +12,7 @@
     :style="
       isSingleColumnLayout
         ? undefined
-        : { left: 'calc(var(--desktop-content-compensation) * -1)' }
+        : { left: 'calc(0px - var(--desktop-content-compensation))' }
     "
   >
     <!-- Main feed column -->

@@ -13,7 +13,21 @@
   <RouterView v-else-if="isPublicShareRoute" />
   <AuthGate v-else-if="authStore.requiresLogin" />
   <AppShell v-else>
-    <RouterView :key="displayRoute?.name === 'settings' ? 'settings' : sourcesStore.contentRevision" :route="displayRoute" />
+    <div class="app__background-route" :inert="showReelModal" :aria-hidden="showReelModal ? 'true' : undefined">
+      <RouterView :key="displayRoute?.name === 'settings' ? 'settings' : sourcesStore.contentRevision" :route="displayRoute" />
+    </div>
+    <div
+      v-if="showReelModal"
+      ref="reelModalElement"
+      class="app__reel-modal-layer"
+      role="dialog"
+      aria-modal="true"
+      :aria-label="t('nav.reels')"
+      tabindex="-1"
+      @keydown="trapReelModalFocus"
+    >
+      <ReelsView :key="sourcesStore.contentRevision" />
+    </div>
     <div v-if="showImageModal" class="app__image-modal-layer" @click.self="closeImageModal">
       <PostView :key="sourcesStore.contentRevision" :id="String(route.params.id ?? '')" modal @close="closeImageModal" />
     </div>
@@ -22,7 +36,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { RouterView, useRoute, useRouter, type RouteLocationNormalizedLoaded } from 'vue-router';
 
@@ -31,6 +45,7 @@ import AdminUnlockDialog from './components/AdminUnlockDialog.vue';
 import AuthGate from './components/AuthGate.vue';
 import { canAccessRoute, routeAllowsPublicShareAccess } from './router';
 import PostView from './views/PostView.vue';
+import ReelsView from './views/ReelsView.vue';
 import { useAppStore } from './stores/app';
 import { useAuthStore } from './stores/auth';
 import { useCollectionsStore } from './stores/collections';
@@ -62,6 +77,39 @@ const sourcesStore = useSourcesStore();
 let lockedScrollX = 0;
 let lockedScrollY = 0;
 let modalScrollLocked = false;
+const reelModalElement = ref<HTMLElement | null>(null);
+let reelModalOpener: HTMLElement | null = null;
+
+function focusReelModal() {
+  const dialog = reelModalElement.value;
+  if (!dialog) return;
+  (dialog.querySelector<HTMLElement>('.reels-view__close') ?? dialog).focus({ preventScroll: true });
+}
+
+function trapReelModalFocus(event: KeyboardEvent) {
+  if (event.key !== 'Tab' || !reelModalElement.value) return;
+
+  const focusable = Array.from(reelModalElement.value.querySelectorAll<HTMLElement>(
+    'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+  )).filter(element => element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden');
+
+  if (!focusable.length) {
+    event.preventDefault();
+    reelModalElement.value.focus();
+    return;
+  }
+
+  const first = focusable[0]!;
+  const last = focusable[focusable.length - 1]!;
+  const active = document.activeElement;
+  if (event.shiftKey && (active === first || !reelModalElement.value.contains(active))) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && (active === last || !reelModalElement.value.contains(active))) {
+    event.preventDefault();
+    first.focus();
+  }
+}
 const previousBodyStyles = {
   position: '',
   top: '',
@@ -96,9 +144,13 @@ const modalBackgroundRoute = computed<RouteLocationNormalizedLoaded | null>(() =
 const showImageModal = computed(
   () => route.name === 'image' && modalBackgroundRoute.value !== null && modalBackgroundRoute.value.fullPath !== route.fullPath
 );
+const reelBackgroundRoute = computed<RouteLocationNormalizedLoaded | null>(() =>
+  appStore.reelModalBackgroundPath ? resolveDisplayRoute(appStore.reelModalBackgroundPath) : null
+);
+const showReelModal = computed(() => route.name === 'reels' && route.query.from === 'home' && reelBackgroundRoute.value?.name === 'home');
 const isPublicShareRoute = computed(() => routeAllowsPublicShareAccess(route));
 const displayRoute = computed<RouteLocationNormalizedLoaded | undefined>(() =>
-  showImageModal.value ? modalBackgroundRoute.value ?? undefined : route
+  showReelModal.value ? reelBackgroundRoute.value ?? undefined : showImageModal.value ? modalBackgroundRoute.value ?? undefined : route
 );
 const showAuthLoading = computed(() => !authStore.ready && authStore.loading);
 
@@ -309,8 +361,43 @@ watch(
   }
 );
 
+watch(showReelModal, async (isVisible, wasVisible) => {
+  if (isVisible) {
+    reelModalOpener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    await nextTick();
+    if (showReelModal.value) focusReelModal();
+    return;
+  }
+
+  if (!wasVisible) return;
+  const opener = reelModalOpener;
+  reelModalOpener = null;
+  await nextTick();
+  requestAnimationFrame(() => {
+    if (route.name !== 'home') return;
+    // Source refreshes can replace the original card while the viewer is open.
+    // Prefer the exact opener; otherwise return focus to a current Home control.
+    const target = opener?.isConnected
+      ? opener
+      : document.querySelector<HTMLElement>(
+        '.app__background-route .feed-card__video-shell[role="button"], .app__background-route .home-layout button:not([disabled]), .sidebar a[href="/"]'
+      );
+    target?.focus({ preventScroll: true });
+  });
+}, { flush: 'sync' });
+
+// A source revision replaces the keyed Reel view while the overlay remains open.
+watch(() => sourcesStore.contentRevision, async () => {
+  // Source replacement invalidates saved Reels queues, including a mounted
+  // modal's cursor. Its keyed replacement must fetch the new generation.
+  reelsStore.reset();
+  if (!showReelModal.value) return;
+  await nextTick();
+  if (showReelModal.value) focusReelModal();
+}, { flush: 'post' });
+
 watch(
-  showImageModal,
+  () => showImageModal.value || showReelModal.value,
   async (isVisible, wasVisible) => {
     if (isVisible) {
       lockModalScroll();
@@ -325,9 +412,9 @@ watch(
     unlockModalScroll();
 
     requestAnimationFrame(() => {
-      if (route.name !== 'image') {
-        appStore.clearImageModalBackground();
-      }
+      if (route.name !== 'image') appStore.clearImageModalBackground();
+      // Keep the Reel background for Forward navigation back to the viewer.
+      if (route.name !== 'home' && route.name !== 'reels') appStore.clearReelModalBackground();
     });
   },
   {
@@ -342,6 +429,29 @@ async function closeImageModal() {
 </script>
 
 <style scoped>
+/* The wrapper has no layout box: Home retains its DOM and exact geometry
+   while inert keeps its controls outside the modal's focus/navigation tree. */
+.app__background-route {
+  display: contents;
+}
+
+.app__reel-modal-layer {
+  position: fixed;
+  inset: 0;
+  /* Full-viewport Home viewer: cover the mounted Home sidebar without
+     unmounting Home or changing the standalone Reels page. */
+  z-index: 45;
+  height: 100dvh;
+  overflow: hidden;
+  background: var(--bg);
+  container-type: size;
+  overscroll-behavior: contain;
+}
+
+.app__reel-modal-layer :deep(.reels-view) {
+  height: 100%;
+}
+
 .app__image-modal-layer {
   position: fixed;
   inset: 0;

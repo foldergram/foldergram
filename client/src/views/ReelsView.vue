@@ -1,6 +1,8 @@
 <template>
-  <section class="reels-view">
-    <button v-if="route.params.id" class="reels-view__close" type="button" :aria-label="t('common.close')" @click="closeViewer">×</button>
+  <section class="reels-view" :class="{ 'reels-view--home-overlay': isHomeOverlay }">
+    <button v-if="isHomeOverlay" class="reels-view__close" type="button" :aria-label="t('common.close')" @click="closeViewer">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4L20 20M20 4L4 20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" /></svg>
+    </button>
     <section v-if="appStore.isLibraryUnavailable" class="reels-view__message-card">
       <p class="reels-view__eyebrow">{{ t('nav.reels') }}</p>
       <h1 class="reels-view__title">{{ t('reels.view.libraryUnavailableTitle') }}</h1>
@@ -197,6 +199,7 @@ const isInfoSidebarOpen = ref(false);
 const viewportWidth = ref(typeof window !== 'undefined' ? window.innerWidth : 0);
 const viewportHeight = ref(typeof window !== 'undefined' ? window.innerHeight : 0);
 const isMobileViewport = computed(() => viewportWidth.value < 768);
+const isHomeOverlay = computed(() => route.query.from === 'home' && Boolean(appStore.reelModalBackgroundPath));
 const metadataGutter = ref<HTMLElement | null>(null);
 const detailsGutter = ref<HTMLElement | null>(null);
 const metadataFits = ref(false);
@@ -230,11 +233,41 @@ const activeFolderTitle = computed(() => {
 });
 const activeIndex = computed(() => reelsStore.items.findIndex((item) => item.id === reelsStore.activeReelId));
 const canGoPrevious = computed(() => activeIndex.value > 0);
-const canGoNext = computed(() => activeIndex.value >= 0 && activeIndex.value < reelsStore.items.length - 1);
+const canGoNext = computed(() => activeIndex.value >= 0 && (activeIndex.value < reelsStore.items.length - 1 || reelsStore.hasMore));
 const showLoadingState = computed(() => reelsStore.loading && !reelsStore.initialized);
 let pendingDeckRouteId: string | null = null;
 let latestRouteRequest = 0;
 let loadingLinkedReel = false;
+
+function activateHistorySession(historyState: unknown = window.history.state): boolean {
+  const historyKey = (historyState as { reelSessionKey?: unknown } | null)?.reelSessionKey;
+  const key = isHomeOverlay.value && typeof historyKey === 'string' && historyKey.startsWith('home:')
+    ? historyKey
+    : 'standalone';
+  if (key === reelsStore.sessionKey) return false;
+
+  // A history jump may reuse this component even when the URL is identical.
+  // Invalidate work belonging to the old session before changing its queue.
+  latestRouteRequest += 1;
+  loadingLinkedReel = false;
+  pendingDeckRouteId = null;
+  reelsStore.activateSession(key);
+  isInfoSidebarOpen.value = false;
+  return true;
+}
+
+function handleHistoryPopstate(event: PopStateEvent) {
+  // Ignore exits to Home/folders: onBeforeUnmount snapshots that session.
+  if (!window.location.pathname.startsWith('/reels/') ||
+      new URLSearchParams(window.location.search).get('from') !== 'home' ||
+      !isHomeOverlay.value ||
+      !activateHistorySession(event.state)) return;
+
+  const incomingId = window.location.pathname.match(/^\/reels\/(\d+)\/?$/)?.[1];
+  // Different URLs are handled by the route watcher after Vue Router updates.
+  // Same-URL jumps don't trigger that watcher, so restore the active panel now.
+  if (incomingId && route.params.id === incomingId) void openLinkedReel(incomingId);
+}
 
 function handleActiveChange(id: number) {
   // An in-flight explicit URL navigation takes precedence over stale scroll events.
@@ -244,15 +277,22 @@ function handleActiveChange(id: number) {
   reelsStore.setActiveReel(id);
   if (route.params.id !== String(id)) {
     pendingDeckRouteId = String(id);
-    void router.replace({ name: 'reels', params: { id: String(id) }, query: route.query });
+    void router.replace({
+      name: 'reels',
+      params: { id: String(id) },
+      query: route.query,
+      ...(isHomeOverlay.value ? { state: { reelSessionKey: reelsStore.sessionKey } } : {})
+    });
   }
 }
 
 function closeViewer() {
-  if (route.query.from === 'home' && window.history.state?.back) {
+  if (!isHomeOverlay.value) return;
+  const backgroundPath = appStore.reelModalBackgroundPath;
+  if (window.history.state?.back === backgroundPath) {
     router.back();
   } else {
-    void router.push({ name: 'home' });
+    void router.replace(backgroundPath ?? { name: 'home' });
   }
 }
 
@@ -295,11 +335,15 @@ async function openReelsEntry() {
   if (reelsStore.activeReelId !== null) {
     const id = String(reelsStore.activeReelId);
     pendingDeckRouteId = id;
-    await router.replace({ name: 'reels', params: { id }, query: route.query });
+    await router.replace({
+      name: 'reels', params: { id }, query: route.query,
+      ...(isHomeOverlay.value ? { state: { reelSessionKey: reelsStore.sessionKey } } : {})
+    });
   }
 }
 
 watch(() => route.params.id, (value) => {
+  activateHistorySession();
   if (value === pendingDeckRouteId) {
     pendingDeckRouteId = null;
     return;
@@ -368,6 +412,8 @@ function handleGlobalWheel(event: WheelEvent) {
 }
 
 onMounted(async () => {
+  activateHistorySession();
+  window.addEventListener('popstate', handleHistoryPopstate);
   updateViewportMode();
   window.addEventListener('resize', updateViewportMode);
   window.addEventListener('wheel', handleGlobalWheel, { passive: false });
@@ -381,7 +427,8 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   latestRouteRequest += 1;
-  reelsStore.invalidatePendingOpenReel();
+  reelsStore.pauseSession();
+  window.removeEventListener('popstate', handleHistoryPopstate);
   window.removeEventListener('resize', updateViewportMode);
   window.removeEventListener('wheel', handleGlobalWheel);
 });
@@ -439,16 +486,54 @@ watch(activeItem, (item) => {
 .reels-view__close {
   position: absolute;
   z-index: 10;
-  top: 0.75rem;
+  top: 0.5rem;
   right: 0.75rem;
-  width: 2.5rem;
-  height: 2.5rem;
+  display: grid;
+  place-items: center;
+  width: 3rem;
+  height: 3rem;
+  padding: 0.375rem;
   border: 0;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--text) 12%, var(--bg));
+  background: transparent;
   color: var(--text);
-  font-size: 1.8rem;
   cursor: pointer;
+}
+
+.reels-view__close svg {
+  width: 2.125rem;
+  height: 2.125rem;
+}
+
+.reels-view__close:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
+  border-radius: 0.25rem;
+}
+
+/* In a Home-opened viewer the sidebar is covered, so the Close button and
+   navigation arrows share a dedicated lane near the right viewport edge. */
+@media (min-width: 768px) {
+  .reels-view--home-overlay .reels-view__close {
+    top: calc(0.75rem + 5px);
+    right: calc(clamp(1rem, 3.5vw, 2.5rem) - 0.125rem);
+  }
+
+  .reels-view--home-overlay .reels-view__close svg {
+    width: 2rem;
+    height: 2rem;
+  }
+
+  .reels-view--home-overlay .reels-view__layout {
+    --reels-nav-inset: clamp(1rem, 3.5vw, 2.5rem);
+  }
+}
+
+/* Only portrait monitors retain the wider video-to-action spacing.
+   On landscape desktop, bring the action rail 10px closer than before. */
+@media (min-width: 768px) and (orientation: landscape) {
+  .reels-view--home-overlay .reels-view__layout {
+    --reels-rail-adjustment: calc(1.5rem - 10px);
+  }
 }
 
 .reels-view__layout {
@@ -537,10 +622,24 @@ watch(activeItem, (item) => {
       padding-inline: var(--reels-portrait-left-inset) var(--reels-portrait-arrow-gutter);
     }
 
+    /* Instagram's Home overlay is full-bleed (no sidebar). Balance its
+       video, action rail and arrows in three distinct horizontal lanes.
+       Standalone /reels/:id retains the original sidebar-aware geometry. */
+    .reels-view--home-overlay .reels-view__layout {
+      --reels-portrait-left-inset: clamp(1.25rem, 8vw, 5.5rem);
+      --reels-portrait-arrow-gutter: calc(var(--reels-nav-inset) + var(--reels-nav-button-size) + 1rem);
+      --reels-metadata-width: 0px;
+      --reels-rail-adjustment: -1rem;
+    }
+
     /* A portrait Reel may reveal the next panel; this only positions its external rail. */
     .reels-view__layout--active-portrait {
       --reels-rail-adjustment: -2.25rem;
       --reels-active-block-limit: calc(88cqh - var(--reel-deck-top-inset) - var(--reel-deck-panel-gap));
+    }
+
+    .reels-view--home-overlay .reels-view__layout--active-portrait {
+      --reels-rail-adjustment: -1rem;
     }
 
   }

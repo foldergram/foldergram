@@ -257,6 +257,126 @@ describe('reels store', () => {
     expect(reelsStore.items.map((item) => item.id)).toEqual([11]);
   });
 
+  it('continues random pagination when the opening Reel reappears on page two, including duplicate-only pages', async () => {
+    useAppStore().$patch({ stats: createAppStatus('random') });
+    const pages = [
+      [1, 2, 3, 4, 5, 6],
+      [7, 8, 9, 10, 11, 12],
+      [8, 9, 10, 11, 12, 7],
+      [13, 14, 15, 16, 17, 18],
+      [19, 20, 21, 22, 23, 24]
+    ];
+    const fetchSpy = vi.spyOn(galleryApi, 'fetchReels').mockImplementation(async (page, limit, mode, seed, options) => ({
+      mode,
+      items: (pages[page - 1] ?? []).map(createFeedItem),
+      page,
+      limit,
+      total: 1000,
+      hasMore: page < pages.length,
+      nextCursor: page < pages.length ? `cursor-${page + 1}` : null
+    }));
+    vi.spyOn(galleryApi, 'fetchImage').mockResolvedValue(createFeedItem(8) as Awaited<ReturnType<typeof galleryApi.fetchImage>>);
+
+    const store = useReelsStore();
+    await store.openReel(8);
+    expect(store.items.map(item => item.id)).toEqual([8, 1, 2, 3, 4, 5, 6]);
+    const stableSeed = store.seed;
+    await store.loadMore();
+    expect(store.items.map(item => item.id)).toEqual([8, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12]);
+    await store.loadMore(); // page three is entirely duplicate IDs; must fetch page four
+    expect(store.items.map(item => item.id)).toEqual([8, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]);
+    await store.loadMore();
+    expect(store.items).toHaveLength(24);
+    expect(new Set(store.items.map(item => item.id)).size).toBe(24);
+    expect(fetchSpy).toHaveBeenCalledTimes(5);
+    expect(fetchSpy.mock.calls.every(call => call[1] === 6 && call[3] === stableSeed)).toBe(true);
+    expect(store.hasMore).toBe(false);
+  });
+
+  it('pages through every Reel in a 1,000-video random library without an artificial page or window limit', async () => {
+    useAppStore().$patch({ stats: createAppStatus('random') });
+    const fetchSpy = vi.spyOn(galleryApi, 'fetchReels').mockImplementation(async (page, limit, mode, seed) => {
+      const start = (page - 1) * limit + 1;
+      const ids = Array.from({ length: Math.max(0, Math.min(limit, 1001 - start)) }, (_, index) => start + index);
+      return {
+        mode, page, limit, total: 1000, items: ids.map(createFeedItem),
+        hasMore: start + ids.length <= 1000,
+        nextCursor: start + ids.length <= 1000 ? `random-${page + 1}` : null
+      };
+    });
+    vi.spyOn(galleryApi, 'fetchImage').mockResolvedValue(
+      createFeedItem(8) as Awaited<ReturnType<typeof galleryApi.fetchImage>>
+    );
+    const store = useReelsStore();
+    await store.openReel(8);
+    while (store.hasMore && fetchSpy.mock.calls.length < 200) await store.loadMore();
+
+    const ids = store.items.map(item => item.id);
+    expect(ids).toHaveLength(1000);
+    expect(new Set(ids).size).toBe(1000);
+    expect(ids.filter(id => id === 8)).toEqual([8]);
+    expect(store.hasMore).toBe(false);
+    expect(fetchSpy).toHaveBeenCalledTimes(167);
+    expect(fetchSpy.mock.calls.every(call => call[1] === 6 && call[3] === store.seed)).toBe(true);
+  });
+
+  it('ends a recommended queue on the final bounded page, without rolling over', async () => {
+    useAppStore().$patch({ stats: createAppStatus('recommended') });
+    const fetchSpy = vi.spyOn(galleryApi, 'fetchReels').mockImplementation(async (page, limit, mode, seed) => ({
+      mode,
+      page,
+      limit,
+      total: 10,
+      items: (page === 1 ? [1, 2, 3, 4, 5, 6] : [5, 6, 7, 8, 9, 10]).map(createFeedItem),
+      hasMore: page === 1,
+      nextCursor: page === 1 ? 'recommended-2' : null
+    }));
+    const store = useReelsStore();
+    await store.loadInitial();
+    const stableSeed = store.seed;
+    await store.loadMore();
+    await store.prefetchIfNeeded(store.items.length - 1);
+    expect(store.items.map(item => item.id)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    expect(store.hasMore).toBe(false);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(fetchSpy.mock.calls.map(call => call[3])).toEqual([stableSeed, stableSeed]);
+  });
+
+  it('isolates Home sessions, restores old queues, and rejects late requests after a rapid reopen', async () => {
+    useAppStore().$patch({ stats: createAppStatus('random') });
+    const oldPage = Promise.withResolvers<Awaited<ReturnType<typeof galleryApi.fetchReels>>>();
+    const fetchSpy = vi.spyOn(galleryApi, 'fetchReels')
+      .mockResolvedValueOnce({ mode: 'random', items: [createFeedItem(1), createFeedItem(2)], page: 1, limit: 6, total: 1000, hasMore: true, nextCursor: 'A-2' })
+      .mockImplementationOnce(() => oldPage.promise)
+      .mockResolvedValueOnce({ mode: 'random', items: [createFeedItem(24), createFeedItem(26)], page: 1, limit: 6, total: 1000, hasMore: false, nextCursor: null });
+    vi.spyOn(galleryApi, 'fetchImage').mockImplementation(async id =>
+      createFeedItem(id) as Awaited<ReturnType<typeof galleryApi.fetchImage>>);
+    const store = useReelsStore();
+    store.activateSession('home-A');
+    await store.openReel(8);
+    const seedA = store.seed;
+    store.setActiveReel(2);
+    const lateLoad = store.loadMore();
+    store.pauseSession();
+    store.activateSession('home-B');
+    await store.openReel(25);
+    const seedB = store.seed;
+    expect(seedB).not.toBe(seedA);
+    expect(store.items.map(item => item.id)).toEqual([25, 24, 26]);
+    oldPage.resolve({ mode: 'random', items: [createFeedItem(8), createFeedItem(9)], page: 2, limit: 6, total: 1000, hasMore: false, nextCursor: null });
+    await lateLoad;
+    expect(store.items.map(item => item.id)).toEqual([25, 24, 26]);
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    store.pauseSession();
+    store.activateSession('home-A');
+    expect(store.items.map(item => item.id)).toEqual([8, 1, 2]);
+    expect(store.activeReelId).toBe(2);
+    expect(store.seed).toBe(seedA);
+    store.activateSession('home-B');
+    expect(store.items.map(item => item.id)).toEqual([25, 24, 26]);
+    expect(store.seed).toBe(seedB);
+  });
+
   it('resets pagination and ignores a stale response after the mode changes', async () => {
     const appStore = useAppStore();
     appStore.$patch({

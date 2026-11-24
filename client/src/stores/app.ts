@@ -28,6 +28,7 @@ interface AppState {
   lastOpenedFolderSlug: string | null;
   recentOpenedFolderSlugs: string[];
   imageModalBackgroundPath: string | null;
+  reelModalBackgroundPath: string | null;
   statsPollFailures: number;
   statsPollTimer: number | null;
   scanStatusUnavailable: boolean;
@@ -131,6 +132,7 @@ export const useAppStore = defineStore('app', {
     lastOpenedFolderSlug: null,
     recentOpenedFolderSlugs: [],
     imageModalBackgroundPath: null,
+    reelModalBackgroundPath: null,
     statsPollFailures: 0,
     statsPollTimer: null,
     scanStatusUnavailable: false,
@@ -281,6 +283,14 @@ export const useAppStore = defineStore('app', {
 
     clearImageModalBackground() {
       this.imageModalBackgroundPath = null;
+    },
+
+    setReelModalBackground(path: string) {
+      this.reelModalBackgroundPath = path;
+    },
+
+    clearReelModalBackground() {
+      this.reelModalBackgroundPath = null;
     },
 
     markLibraryRebuildStarted() {
@@ -450,6 +460,7 @@ export const useAppStore = defineStore('app', {
       this.loadingStats = false;
       this.error = null;
       this.imageModalBackgroundPath = null;
+      this.reelModalBackgroundPath = null;
     },
 
     shouldUseAdminScanProgress() {

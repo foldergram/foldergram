@@ -12,10 +12,12 @@
       :key="item.id"
       :ref="setPanelRef(item.id)"
       class="reel-deck__panel"
+      :data-reel-id="item.id"
       :class="{ 'reel-deck__panel--portrait': item.height > item.width }"
       :style="{ '--reel-item-ratio': item.width > 0 && item.height > 0 ? item.width / item.height : 9 / 16 }"
     >
       <ReelPlayerCard
+        v-if="Math.abs(index - renderedActiveIndex) <= 2"
         :item="item"
         :folder="folderLookup.get(item.folderSlug) ?? null"
         :active="item.id === activeReelId"
@@ -67,6 +69,12 @@ const scrollerElement = ref<HTMLElement | null>(null);
 const panelElements = new Map<number, HTMLElement>();
 const videoPreparation = new ReelVideoPreparation();
 const folderLookup = computed(() => new Map(props.folders.map((folder) => [folder.slug, folder])));
+// Keep all panels' snap geometry, but mount media players only near the
+// active panel. Full-library Random/Recent paging must not mount 1,000 videos.
+const renderedActiveIndex = computed(() => {
+  const index = props.items.findIndex(item => item.id === props.activeReelId);
+  return index >= 0 ? index : 0;
+});
 const lastItem = computed(() => props.items.at(-1) ?? null);
 const lastRatio = computed(() => lastItem.value && lastItem.value.width > 0 && lastItem.value.height > 0
   ? lastItem.value.width / lastItem.value.height
@@ -223,6 +231,9 @@ function navigateByOffset(offset: number) {
   const nextIndex = Math.min(props.items.length - 1, Math.max(0, activeIndex + offset));
   if (nextIndex === activeIndex) {
     wheelDeltaAccumulator = 0;
+    // A bounded overlap batch can add no panels. Allow a deliberate Next
+    // interaction at the tail to resume fetching from its advanced cursor.
+    if (offset > 0) emit('prefetch', activeIndex);
     return;
   }
 
