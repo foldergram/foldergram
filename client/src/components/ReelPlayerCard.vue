@@ -1,5 +1,5 @@
 <template>
-  <article class="reel-player-card" :class="{ 'reel-player-card--external-metadata': externalMetadata }">
+  <article class="reel-player-card" :class="{ 'reel-player-card--external-metadata': externalMetadata, 'reel-player-card--portrait': item.height > item.width }" :style="{ '--reel-item-ratio': item.width > 0 && item.height > 0 ? item.width / item.height : 9 / 16 }">
     <div class="reel-player-card__stage">
       <div
         class="reel-player-card__surface"
@@ -441,14 +441,15 @@ onBeforeUnmount(() => {
   position: relative;
   justify-self: center;
   align-self: center;
-  width: min(100%, var(--reels-desktop-stage-width, var(--reel-stage-max-width)));
-  height: min(
-    calc(100% - var(--reel-stage-gap, 0.75rem)),
-    var(--reels-desktop-stage-height, var(--reel-stage-max-height))
+  /* This Reel, not the active Reel, controls its own stage dimensions. */
+  width: min(
+    calc(100% - var(--reel-stage-inline-gap, 1.25rem)),
+    calc(var(--reel-item-block-limit, calc(100cqh - 2rem)) * var(--reel-item-ratio))
   );
-  max-height: 100%;
-  max-width: calc(100% - var(--reel-stage-inline-gap, 1.25rem));
-  aspect-ratio: 9 / 16;
+  height: auto;
+  max-height: min(100%, var(--reel-item-block-limit, calc(100cqh - 2rem)));
+  max-width: 100%;
+  aspect-ratio: var(--reel-item-ratio, 9 / 16);
   overflow: hidden;
   border-radius: 0.6rem;
   background: #000;
@@ -649,7 +650,13 @@ onBeforeUnmount(() => {
   height: 1rem;
 }
 
-@media (max-width: 768px) {
+@media (min-width: 768px) and (orientation: portrait) {
+  .reel-player-card--portrait {
+    --reel-item-block-limit: calc(88cqh - var(--reel-deck-top-inset, 1rem) - var(--reel-deck-panel-gap, 2rem));
+  }
+}
+
+@media (max-width: 767.98px) {
   .reel-player-card {
     --reel-stage-gap: 0;
     padding: 0;

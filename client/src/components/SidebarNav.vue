@@ -23,7 +23,7 @@
         <a
           :href="href"
           class="sidebar__link sidebar__row sidebar-item"
-          :class="isActive ? sidebarActiveClass : ''"
+          :class="isActive || isHomeReelOverlay ? sidebarActiveClass : ''"
           @click="navigate"
         >
           <svg
@@ -33,7 +33,7 @@
           >
             <path
               d="M2 11.2a2.5 2.5 0 0 1 .8-1.83l7.5-6.97a2.5 2.5 0 0 1 3.4 0l7.5 6.97a2.5 2.5 0 0 1 .8 1.83V19a3 3 0 0 1-3 3h-4v-5a3 3 0 0 0-6 0v5H5a3 3 0 0 1-3-3z"
-              :fill="isActive ? 'currentColor' : 'none'"
+              :fill="isActive || isHomeReelOverlay ? 'currentColor' : 'none'"
               stroke="currentColor"
               stroke-width="2"
               stroke-linejoin="round"
@@ -54,7 +54,7 @@
         <a
           :href="href"
           class="sidebar__link sidebar__row sidebar-item"
-          :class="isActive ? sidebarActiveClass : ''"
+          :class="isActive && !isHomeReelOverlay ? sidebarActiveClass : ''"
           @click="navigate"
         >
           <svg
@@ -63,7 +63,7 @@
             aria-hidden="true"
           >
             <path
-              v-if="isActive"
+              v-if="isActive && !isHomeReelOverlay"
               d="M7 1h10a6 6 0 0 1 6 6v10a6 6 0 0 1-6 6H7a6 6 0 0 1-6-6V7a6 6 0 0 1 6-6ZM10 7.5a1 1 0 0 0-1 1v7a1 1 0 0 0 1.5.87l6-3.5a1 1 0 0 0 0-1.74l-6-3.5A1 1 0 0 0 10 7.5Z"
               fill="currentColor"
               fill-rule="evenodd"
@@ -332,6 +332,7 @@
   import { useI18n } from "vue-i18n"
   import { RouterLink, useRoute } from "vue-router"
 
+  import { useAppStore } from "../stores/app"
   import { useAuthStore } from "../stores/auth"
   import { useLikesStore } from "../stores/likes"
   import { usePlacesStore } from "../stores/places"
@@ -341,6 +342,7 @@
   const emit = defineEmits<{ openMore: []; openDisplayPreferences: [anchor: HTMLButtonElement] }>()
   const { t } = useI18n()
   const appVersion = __APP_VERSION__
+  const appStore = useAppStore()
   const authStore = useAuthStore()
   const likesStore = useLikesStore()
   const placesStore = usePlacesStore()
@@ -350,6 +352,10 @@
 
   const showPlacesNav = computed(() =>
     placesStore.items.length > 0 && placesStore.listError === null,
+  )
+  // Until reload, opening a Reel from Home retains Home navigation context.
+  const isHomeReelOverlay = computed(() =>
+    route.name === 'reels' && route.query.from === 'home' && Boolean(appStore.reelModalBackgroundPath),
   )
   const isPlacesRoute = computed(() =>
     route.name === "places" || route.name === "place",

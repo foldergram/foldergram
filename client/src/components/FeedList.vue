@@ -19,6 +19,7 @@
 
 <script setup lang="ts">
 import { computed, reactive, watch } from 'vue';
+import { useRoute } from 'vue-router';
 
 import { useFoldersStore } from '../stores/folders';
 import { useSourcesStore } from '../stores/sources';
@@ -53,6 +54,7 @@ const emit = defineEmits<{
 
 const foldersStore = useFoldersStore();
 const sourcesStore = useSourcesStore();
+const route = useRoute();
 const availableItems = computed(() => props.items.filter(item => sourcesStore.canBrowse(item.sourceId)));
 const folderLookup = computed(() => new Map([...foldersStore.items, ...Object.values(foldersStore.summaryBySlug)].map((folder) => [folder.slug, folder])));
 function folderAvatar(item: FeedItem) {
@@ -61,7 +63,7 @@ function folderAvatar(item: FeedItem) {
 }
 const videoVisibilityById = reactive(new Map<number, Omit<HomeVideoVisibilityChange, 'id'>>());
 const activeVideoId = computed<number | null>(() => {
-  if (props.context !== 'home') {
+  if (props.context !== 'home' || route.name === 'reels') {
     return null;
   }
 

@@ -308,6 +308,92 @@ async function mockPortraitFeed(page: Page, width = 600, height = 3000) {
   await page.route('**/api/feed?*', route => route.fulfill({ json: { items: [photo, video, carousel], page: 1, limit: 24, total: 3, hasMore: false } }));
 }
 
+test('Home feed remains viewport-centered on portrait desktops', async ({ page }) => {
+  await mockGallery(page);
+
+  for (const suggestedFolders of [true, false]) {
+    await page.addInitScript(enabled => {
+      localStorage.setItem('foldergram-show-suggested-folders-on-desktop', String(enabled));
+    }, suggestedFolders);
+
+    for (const width of [900, 960, 1040]) {
+      await page.setViewportSize({ width, height: 1500 });
+      await page.goto('/');
+      await expect(page.locator('.home-layout--compact')).toBeVisible();
+      await expect(page.locator('main article').first()).toBeVisible();
+
+      const feed = (await page.locator('main article').first().boundingBox())!;
+      expect(
+        Math.abs(feed.x + feed.width / 2 - width / 2),
+        `Feed should stay centered at ${width}px with suggested folders ${suggestedFolders ? 'on' : 'off'}`
+      ).toBeLessThanOrEqual(3);
+    }
+  }
+});
+
+for (const viewport of [
+  { width: 900, height: 1200 },
+  { width: 1080, height: 1778 },
+  { width: 1440, height: 786 }
+]) {
+  test(`Home Play and time stay at the video bottom-left at ${viewport.width}×${viewport.height}`, async ({ page }) => {
+    await mockGallery(page);
+    await mockPortraitFeed(page);
+    await page.setViewportSize(viewport);
+    await page.goto('/');
+    const video = page.locator('.feed-card__video-shell');
+    await video.scrollIntoViewIfNeeded();
+    await expect(video.locator('media-player')).toHaveAttribute('data-playing', '');
+    const videoBox = (await video.boundingBox())!;
+    await page.mouse.move(videoBox.x + videoBox.width / 2, videoBox.y + videoBox.height / 2);
+    const playBox = (await video.locator('media-play-button').boundingBox())!;
+    const timeBox = (await video.locator('.video-progress-footer__time').boundingBox())!;
+    expect(playBox.x - videoBox.x, 'Play should hug the left video edge').toBeLessThan(40);
+    expect(timeBox.x - videoBox.x, 'Time should follow Play at the left video edge').toBeLessThan(95);
+    expect(timeBox.x - (playBox.x + playBox.width)).toBeLessThan(20);
+  });
+}
+
+test('Home video controls clear the expanded sidebar at tablet widths', async ({ page }) => {
+  await mockGallery(page);
+  await page.addInitScript(() => {
+    localStorage.setItem('foldergram-show-suggested-folders-on-desktop', 'false');
+    localStorage.setItem('foldergram-fit-tall-media-to-screen', 'true');
+  });
+  await page.setViewportSize({ width: 900, height: 1200 });
+  await mockPortraitFeed(page);
+  await page.goto('/');
+
+  const sidebar = page.locator('aside.sidebar');
+  const shell = page.locator('.feed-card__video-shell');
+  await shell.scrollIntoViewIfNeeded();
+  const playButton = shell.locator('media-play-button');
+  const timeLabel = shell.locator('.video-progress-footer__time');
+  await expect(shell.locator('media-player')).toHaveAttribute('data-playing', '');
+  const videoBox = (await shell.boundingBox())!;
+  await page.mouse.move(videoBox.x + videoBox.width / 2, videoBox.y + videoBox.height / 2);
+  await expect(shell.locator('.video-progress-footer__slot--leading')).toHaveCSS('margin-left', '0px');
+  const initialPlayBox = (await playButton.boundingBox())!;
+  const initialTimeBox = (await timeLabel.boundingBox())!;
+  // Collapsed navigation must never displace Play or the timestamp toward
+  // the middle of the portrait video.
+  expect(initialPlayBox.x - videoBox.x).toBeLessThan(40);
+  expect(initialTimeBox.x - videoBox.x).toBeLessThan(95);
+  await sidebar.hover();
+  await expect(sidebar).toHaveCSS('width', '240px');
+  const sidebarBox = (await sidebar.boundingBox())!;
+  const playBox = (await playButton.boundingBox())!;
+  expect(playBox.x).toBeGreaterThanOrEqual(sidebarBox.x + sidebarBox.width);
+  await playButton.click();
+  await expect(shell.locator('video')).toHaveJSProperty('paused', true);
+  // Returning to the player collapses the sidebar and returns both controls
+  // to their original bottom-left position.
+  const restoredPlayBox = (await playButton.boundingBox())!;
+  const restoredTimeBox = (await timeLabel.boundingBox())!;
+  expect(restoredPlayBox.x).toBeCloseTo(initialPlayBox.x, 0);
+  expect(restoredTimeBox.x).toBeCloseTo(initialTimeBox.x, 0);
+});
+
 for (const showSuggestedFolders of [true, false]) {
   for (const viewport of [{ width: 1280, height: 720 }, { width: 1024, height: 600 }, { width: 900, height: 1200 }]) {
     test(`Home fits portrait media at ${viewport.width}×${viewport.height} with suggested folders ${showSuggestedFolders ? 'on' : 'off'}`, async ({ page }) => {
@@ -324,14 +410,17 @@ for (const showSuggestedFolders of [true, false]) {
       await expect(cards).toHaveCount(3);
       expect((await cards.first().boundingBox())!.width).toBeCloseTo(expectedWidth);
       await expect(page.locator('.home-layout > aside')).toHaveCount(showSuggestedFolders && viewport.width === 1280 ? 1 : 0);
-      for (const card of await cards.all()) {
+      for (const [index, card] of (await cards.all()).entries()) {
         const bounds = await card.locator(':scope > :nth-child(2)').boundingBox();
-        expect(bounds!.height).toBeLessThanOrEqual(viewport.height - 32 + 1);
+        expect(bounds!.height).toBeLessThanOrEqual(index === 1 ? 585 : viewport.height - 32 + 1);
       }
       const imageBox = (await cards.first().locator(':scope > :nth-child(2)').boundingBox())!;
       expect(imageBox.width / imageBox.height).toBeCloseTo(0.2, 2);
       const shell = page.locator('.feed-card__video-shell');
-      expect((await shell.boundingBox())!.width).toBeCloseTo(expectedWidth);
+      // Fitted Reels retain 4:5 proportions and cap their height at viewport - 32px.
+      const expectedVideoWidth = Math.min(expectedWidth, 468, (viewport.height - 32) * 4 / 5);
+      const actualVideoWidth = (await shell.boundingBox())!.width;
+      expect(Math.abs(actualVideoWidth - expectedVideoWidth)).toBeLessThan(0.6);
       await shell.scrollIntoViewIfNeeded();
       const media = shell.locator('video');
       await expect(media).toHaveCSS('object-fit', 'contain');
@@ -369,7 +458,7 @@ test('hiding suggested folders grows portraits and fitting remains an independen
     expect(bounds.height).toBeCloseTo(height, 0);
   }
   await expectFrame(0, 470, 587.5);
-  await expectFrame(1, 470, 2350);
+  await expectFrame(1, 468, 585);
   await expectFrame(2, 470, 587.5);
   let dialog = await openDisplayPreferences(page);
   await expect(dialog.getByRole('switch', { name: 'Fit tall media to screen', exact: true })).toHaveAttribute('aria-checked', 'false');
@@ -378,7 +467,7 @@ test('hiding suggested folders grows portraits and fitting remains an independen
   await dialog.getByRole('button', { name: 'Done', exact: true }).click();
   await expect(dialog).toHaveCount(0);
   await expectFrame(0, 600, 750);
-  await expectFrame(1, 600, 3000);
+  await expectFrame(1, 468, 585);
   await expectFrame(2, 600, 750);
   await page.setViewportSize({ width: 1280, height: 600 });
   await expectFrame(0, 600, 750);
@@ -390,7 +479,7 @@ test('hiding suggested folders grows portraits and fitting remains an independen
   await dialog.getByRole('button', { name: 'Done', exact: true }).click();
   await expect(dialog).toHaveCount(0);
   await expectFrame(0, 550.4, 688);
-  await expectFrame(1, 600, 688);
+  await expectFrame(1, 468, 585);
   await expectFrame(2, 600, 688);
   await page.reload();
   await expect(cards).toHaveCount(3);
@@ -403,7 +492,7 @@ test('hiding suggested folders grows portraits and fitting remains an independen
   await dialog.getByRole('button', { name: 'Done', exact: true }).click();
   await expect(dialog).toHaveCount(0);
   await expectFrame(0, 470, 587.5);
-  await expectFrame(1, 470, 688);
+  await expectFrame(1, 468, 585);
   await expectFrame(2, 470, 587.5);
 
   dialog = await openDisplayPreferences(page);
@@ -413,7 +502,7 @@ test('hiding suggested folders grows portraits and fitting remains an independen
   await page.reload();
   await expect(cards).toHaveCount(3);
   await expectFrame(0, 470, 587.5);
-  await expectFrame(1, 470, 2350);
+  await expectFrame(1, 468, 585);
   await expectFrame(2, 470, 587.5);
   expect(await page.evaluate(() => localStorage.getItem('foldergram-fit-tall-media-to-screen'))).toBe('false');
   expect(writes).toEqual([]);
@@ -440,8 +529,8 @@ for (const height of [640, 720]) {
       expect(frame.width).toBeCloseTo(before.width);
       expect(frame.height).toBeCloseTo(before.height);
     }
-    // The oversized video still shrinks, even though the photo and carousel need no change.
-    expect((await page.locator('.feed-card__video-shell').boundingBox())!.height).toBeCloseTo(688);
+    // Reels keep their 585px preview when the viewport has sufficient height.
+    expect((await page.locator('.feed-card__video-shell').boundingBox())!.height).toBeCloseTo(585, 0);
   });
 }
 
@@ -476,8 +565,8 @@ for (const scenario of [
       const fittedHeight = height <= 720 ? height : 688;
       await expect.poll(async () => (await frames[0].boundingBox())!.height).toBeCloseTo(fittedHeight, 1);
       await expect.poll(async () => (await frames[0].boundingBox())!.width).toBeCloseTo(fittedHeight * scenario.width / scenario.height, 1);
-      await expect.poll(async () => (await frames[1].boundingBox())!.height).toBeCloseTo(688);
-      await expect.poll(async () => (await frames[1].boundingBox())!.width).toBeCloseTo(width);
+      await expect.poll(async () => (await frames[1].boundingBox())!.height).toBeCloseTo(Math.min(width, 468) * 5 / 4, 0);
+      await expect.poll(async () => (await frames[1].boundingBox())!.width).toBeCloseTo(Math.min(width, 468), 0);
       await expect.poll(async () => (await frames[2].boundingBox())!.height).toBeCloseTo(fittedHeight);
       await expect.poll(async () => (await frames[2].boundingBox())!.width).toBeCloseTo(width);
     }
@@ -808,7 +897,7 @@ test('Home starts playback only for the selected visible streaming video', async
   await expect.poll(() => page.locator('.feed-card__player .local-video-feedback__cover').last()
     .evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
   await expect(videos.first()).toBeInViewport({ ratio: 0.4 });
-  await expect(videos.last()).toBeInViewport({ ratio: 0.4 });
+  // Fixed-height previews may put the second video below the autoplay threshold.
   await expect.poll(() => videos.evaluateAll(elements => elements.filter(element =>
     !(element as HTMLVideoElement).paused && (element as HTMLVideoElement).currentTime > 0.3).length)).toBe(1);
   const maximumPlaying = await videos.evaluateAll(async elements => {
@@ -822,6 +911,9 @@ test('Home starts playback only for the selected visible streaming video', async
   });
   expect(maximumPlaying).toBe(1);
   await page.screenshot({ path: test.info().outputPath('streaming-home-desktop.png') });
+  await videos.last().scrollIntoViewIfNeeded();
+  await expect.poll(() => videos.last().evaluate(video => !(video as HTMLVideoElement).paused)).toBe(true);
+  await expect(videos.first()).toHaveJSProperty('paused', true);
   await page.setViewportSize({ width: 390, height: 450 });
   await videos.last().evaluate(media => media.scrollIntoView({ block: 'center' }));
   await expect(videos.last()).toHaveJSProperty('paused', false);
@@ -1646,7 +1738,27 @@ for (const theme of ['light', 'dark'] as const) {
   });
 }
 
-test('very tall home videos play at their original aspect ratio', async ({ page }) => {
+test('Home keeps desktop sidebar across portrait and tablet breakpoints', async ({ page }) => {
+  await mockGallery(page, 'dark');
+  await page.goto('/');
+  const sidebar = page.locator('.app-shell > aside.sidebar');
+  const mobileNav = page.locator('.mobile-nav');
+  const content = page.locator('.app-shell__content');
+
+  for (const width of [768, 900, 960, 979, 980]) {
+    await page.setViewportSize({ width, height: 1500 });
+    await expect(sidebar, `Desktop sidebar missing at ${width}px`).toBeVisible();
+    await expect(mobileNav).toBeHidden();
+    const bounds = (await content.boundingBox())!;
+    expect(bounds.x, `Home content should reserve sidebar space at ${width}px`).toBeGreaterThan(70);
+  }
+
+  await page.setViewportSize({ width: 767, height: 1500 });
+  await expect(sidebar).toBeHidden();
+  await expect(mobileNav).toBeVisible();
+});
+
+test('very tall home videos are cropped into bounded previews while opening the original Reel', async ({ page }) => {
   await mockGallery(page, 'light');
   await page.setViewportSize({ width: 1280, height: 720 });
   const encodedClip = await readFile(new URL('./fixtures/tall-feed-video.mp4.base64', import.meta.url), 'utf8');
@@ -1665,19 +1777,285 @@ test('very tall home videos play at their original aspect ratio', async ({ page 
   const media = shell.locator('video');
   await shell.scrollIntoViewIfNeeded();
   const bounds = (await shell.boundingBox())!;
-  expect(bounds.width / bounds.height).toBeCloseTo(0.2, 2);
+  expect(bounds.height).toBeCloseTo(585, 0);
   const viewportHeight = page.viewportSize()!.height;
-  expect(viewportHeight / bounds.height).toBeLessThan(0.55);
+  expect(await media.evaluate(el => getComputedStyle(el).objectFit)).toBe('cover');
   const player = shell.locator('media-player');
   await expect(player).toHaveAttribute('data-playing', '');
 
+  await page.route('**/api/reels?*', route => route.fulfill({
+    json: { items: [video], page: 1, limit: 6, total: 1, hasMore: false }
+  }));
   const x = bounds.x + bounds.width / 2;
   const y = viewportHeight / 2;
   await page.mouse.click(x, y);
-  await expect(media).toHaveJSProperty('paused', true);
-  await page.mouse.click(x, y);
-  await expect(player).toHaveAttribute('data-playing', '');
+  await expect(page).toHaveURL(new RegExp(`/reels/${video.id}\\?from=home`));
+  await expect(page.locator('.app__reel-modal-layer')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Close' })).toBeVisible();
+  await page.getByRole('button', { name: 'Close' }).click();
+  await expect(page).toHaveURL('/');
 });
+
+test('Home Reel overlay preserves mounted cards, exact scroll position, and Back/Forward after navigating Reels', async ({ page }) => {
+  await mockGallery(page, 'dark');
+  await page.setViewportSize({ width: 1440, height: 786 });
+  const clip = await readFile(new URL('./fixtures/feed-video.mp4', import.meta.url));
+  await page.route('**/previews/feed-video.mp4', route => route.fulfill({ contentType: 'video/mp4', body: clip }));
+  const items = Array.from({ length: 16 }, (_, index) => ({
+    ...panorama,
+    id: index + 1,
+    filename: `video-${index + 1}.mp4`,
+    mediaType: 'video',
+    width: index % 3 === 0 ? 1920 : index % 3 === 1 ? 1080 : 1080,
+    height: index % 3 === 0 ? 1080 : index % 3 === 1 ? 1080 : 1920,
+    durationMs: 1000,
+    previewUrl: '/previews/feed-video.mp4'
+  }));
+  await page.route('**/api/feed?*', route => route.fulfill({
+    json: { items, page: 1, limit: 24, total: items.length, hasMore: false }
+  }));
+  await page.route('**/api/reels?*', route => route.fulfill({
+    json: { items, page: 1, limit: 24, total: items.length, hasMore: false }
+  }));
+  await page.goto('/');
+  const cards = page.locator('.feed-card__video-shell');
+  await expect(cards).toHaveCount(16);
+  for (const index of [0, 1, 2]) {
+    const shell = cards.nth(index);
+    const dimensions = (await shell.boundingBox())!;
+    expect(dimensions.height).toBeCloseTo(585, 0);
+    expect(await shell.locator('video').evaluate(el => getComputedStyle(el).objectFit)).toBe('cover');
+  }
+  await cards.nth(9).scrollIntoViewIfNeeded();
+  const originalY = await page.evaluate(() => scrollY);
+  const originalTop = (await cards.nth(9).boundingBox())!.y;
+  await cards.nth(9).click({ position: { x: 130, y: 140 } });
+  await expect(page).toHaveURL(/\/reels\/10\?from=home/);
+  await expect(page.locator('.app__reel-modal-layer')).toBeVisible();
+  await expect(page.locator('.reels-view--home-overlay .reels-view__layout')).toHaveCSS('--reels-rail-adjustment', 'calc(1.5rem - 10px)');
+  await expect(page.locator('.feed-card__video-shell')).toHaveCount(16);
+  await page.getByRole('button', { name: 'Next reel' }).click();
+  await expect(page).toHaveURL(/\/reels\/11\?from=home/);
+  await page.getByRole('button', { name: 'Close' }).click();
+  await expect(page).toHaveURL('/');
+  await expect(page.locator('.app__reel-modal-layer')).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => scrollY)).toBe(originalY);
+  expect((await cards.nth(9).boundingBox())!.y).toBeCloseTo(originalTop, 0);
+  await page.goForward();
+  await expect(page).toHaveURL(/\/reels\/11\?from=home/);
+  await expect(page.locator('.app__reel-modal-layer')).toBeVisible();
+  await page.goBack();
+  await expect(page).toHaveURL('/');
+  await expect.poll(() => page.evaluate(() => scrollY)).toBe(originalY);
+});
+
+// Realistic six-item cursor pages: the Home anchor (8) returns on page two,
+// and a duplicate-only page three must not halt pagination of 1,000 candidates.
+for (const viewport of [
+  { width: 1440, height: 786 },
+  { width: 1080, height: 1778 },
+  { width: 390, height: 844 }
+]) {
+  test(`Home Reel paging and independent history sessions with 1,000 videos at ${viewport.width}×${viewport.height}`, async ({ page }) => {
+    await mockGallery(page, 'dark');
+    await page.setViewportSize(viewport);
+    const clip = await readFile(new URL('./fixtures/feed-video.mp4', import.meta.url));
+    await page.route('**/previews/feed-video.mp4', route => route.fulfill({ contentType: 'video/mp4', body: clip }));
+    const video = (id: number) => ({
+      ...panorama, id, filename: `reel-${id}.mp4`, mediaType: 'video',
+      width: 1080, height: 1920, durationMs: 1000, previewUrl: '/previews/feed-video.mp4'
+    });
+    await page.route('**/api/status', route => route.fulfill({ json: {
+      folders: 1, indexedImages: 0, indexedVideos: 1000,
+      scan: { isScanning: false, lastCompletedScan: { id: 1 } },
+      storage: { available: true, reason: null },
+      libraryIndex: { rebuildRequired: false, reason: null, ignoredRootMediaCount: 0 },
+      preferences: { defaultHomeFeedMode: 'recent', defaultReelsFeedMode: 'random' },
+      storiesMigration: { hasLegacyStoriesCandidates: false, decisionPending: false }
+    } }));
+    await page.route('**/api/feed?*', route => route.fulfill({
+      json: { items: [1, 2, 8, 4, 25, 6].map(video), page: 1, limit: 24, total: 6, hasMore: false }
+    }));
+    await page.route('**/api/posts/*', route => {
+      const id = Number(new URL(route.request().url()).pathname.split('/').at(-1));
+      return route.fulfill({ json: video(id) });
+    });
+    const reelRequests: Array<{ page: number; seed: string | null }> = [];
+    await page.route('**/api/reels?*', route => {
+      const params = new URL(route.request().url()).searchParams;
+      const nextPage = params.get('cursor')?.replace('cursor-', '');
+      const pageNumber = Number(nextPage ?? params.get('page') ?? 1);
+      const seed = params.get('seed');
+      reelRequests.push({ page: pageNumber, seed });
+      const ids = pageNumber === 3
+        ? [7, 8, 9, 10, 11, 12]
+        : Array.from({ length: Math.min(6, 1000 - (pageNumber - (pageNumber > 3 ? 2 : 1)) * 6) }, (_, index) =>
+          (pageNumber - (pageNumber > 3 ? 2 : 1)) * 6 + index + 1);
+      return route.fulfill({ json: {
+        mode: 'random', items: ids.map(video), page: pageNumber, limit: 6,
+        total: 1000, hasMore: pageNumber < 168,
+        nextCursor: pageNumber < 168 ? `cursor-${pageNumber + 1}` : null
+      } });
+    });
+    await page.goto('/');
+    const homeCards = page.locator('.feed-card__video-shell');
+    await expect(homeCards).toHaveCount(6);
+    await homeCards.nth(2).evaluate(element => element.scrollIntoView({ block: 'center' }));
+    await expect(homeCards.nth(2)).toHaveAttribute('role', 'button');
+    const homeY = await page.evaluate(() => scrollY);
+    await homeCards.nth(2).click({ position: { x: 100, y: 120 } });
+    await expect(page).toHaveURL(/\/reels\/8\?from=home/);
+    const sessionA = await page.evaluate(() => history.state.reelSessionKey as string);
+    expect(sessionA).toMatch(/^home:/);
+    const deck = page.locator('.app__reel-modal-layer .reel-deck');
+    const panelIds = async () => deck.locator('.reel-deck__panel').evaluateAll(panels =>
+      panels.map(panel => Number(panel.getAttribute('data-reel-id'))));
+    await expect.poll(panelIds).toEqual([8, 1, 2, 3, 4, 5, 6]);
+
+    // Advance across multiple six-item pages rather than merely testing page one.
+    const expected = [1, 2, 3, 4, 5, 6, 7, ...Array.from({ length: 17 }, (_, index) => index + 9)];
+    for (const id of expected) {
+      await page.waitForTimeout(160); // allow the deck's scroll settle lock to clear
+      if (viewport.width >= 768) {
+        await page.getByRole('button', { name: 'Next reel' }).click();
+      } else {
+        await page.mouse.move(viewport.width / 2, viewport.height / 2);
+        await page.mouse.wheel(0, 320);
+      }
+      await expect(page).toHaveURL(new RegExp(`/reels/${id}\\?from=home`));
+      const ids = await panelIds();
+      expect(new Set(ids).size).toBe(ids.length);
+      expect(await deck.locator('.reel-player-card').count()).toBeLessThanOrEqual(5);
+      await expect(deck.locator('.reel-player-card__surface[role="button"]')).toHaveCount(1);
+    }
+    expect(reelRequests.map(request => request.page)).toEqual(expect.arrayContaining([1, 2, 3, 4]));
+    expect(new Set(reelRequests.map(request => request.seed)).size).toBe(1);
+    const queueA = await panelIds();
+    expect(queueA.filter(id => id === 8)).toHaveLength(1);
+
+    // Back retains the mounted Home and Forward restores the original cursor/seed.
+    const requestsBeforeForward = reelRequests.length;
+    await page.getByRole('button', { name: 'Close' }).click();
+    await expect(page).toHaveURL('/');
+    await expect.poll(() => page.evaluate(() => scrollY)).toBe(homeY);
+    await page.goForward();
+    await expect(page).toHaveURL(/\/reels\/25\?from=home/);
+    expect(await page.evaluate(() => history.state.reelSessionKey)).toBe(sessionA);
+    await expect.poll(panelIds).toEqual(queueA);
+    expect(reelRequests).toHaveLength(requestsBeforeForward);
+    await page.getByRole('button', { name: 'Close' }).click();
+    await expect(page).toHaveURL('/');
+
+    // A new explicit Home opening is never a resurrection of that queue,
+    // even when its video was already present in the previous session.
+    await homeCards.nth(4).evaluate(element => element.scrollIntoView({ block: 'center' }));
+    await expect(homeCards.nth(4)).toHaveAttribute('role', 'button');
+    await homeCards.nth(4).click({ position: { x: 100, y: 120 } });
+    await expect(page).toHaveURL(/\/reels\/25\?from=home/);
+    const sessionB = await page.evaluate(() => history.state.reelSessionKey as string);
+    expect(sessionB).not.toBe(sessionA);
+    await expect.poll(panelIds).toEqual([25, 1, 2, 3, 4, 5, 6]);
+    expect(reelRequests.length).toBeGreaterThan(requestsBeforeForward);
+    expect(reelRequests.at(-1)?.seed).not.toBe(reelRequests[0]?.seed);
+    await page.getByRole('button', { name: 'Close' }).click();
+    await expect(page).toHaveURL('/');
+  });
+}
+
+for (const browseA of [false, true]) {
+  test(`direct history jump restores Home Reel session ${browseA ? 'after browsing' : 'with identical video URL'} without unmounting`, async ({ page }) => {
+    await mockGallery(page, 'dark');
+    await page.setViewportSize({ width: 1440, height: 786 });
+    const clip = await readFile(new URL('./fixtures/feed-video.mp4', import.meta.url));
+    await page.route('**/previews/feed-video.mp4', route => route.fulfill({ contentType: 'video/mp4', body: clip }));
+    const video = (id: number) => ({
+      ...panorama, id, filename: `reel-${id}.mp4`, mediaType: 'video',
+      width: 1080, height: 1920, durationMs: 1000, previewUrl: '/previews/feed-video.mp4'
+    });
+    await page.route('**/api/status', route => route.fulfill({ json: {
+      folders: 1, indexedImages: 0, indexedVideos: 1000,
+      scan: { isScanning: false, lastCompletedScan: { id: 1 } },
+      storage: { available: true, reason: null },
+      libraryIndex: { rebuildRequired: false, reason: null, ignoredRootMediaCount: 0 },
+      preferences: { defaultHomeFeedMode: 'recent', defaultReelsFeedMode: 'random' },
+      storiesMigration: { hasLegacyStoriesCandidates: false, decisionPending: false }
+    } }));
+    await page.route('**/api/feed?*', route => route.fulfill({
+      json: { items: [video(8)], page: 1, limit: 24, total: 1, hasMore: false }
+    }));
+    await page.route('**/api/posts/*', route =>
+      route.fulfill({ json: video(Number(new URL(route.request().url()).pathname.split('/').at(-1))) }));
+    const requests: Array<{ seed: string; page: number }> = [];
+    let seedA: string | null = null;
+    await page.route('**/api/reels?*', route => {
+      const params = new URL(route.request().url()).searchParams;
+      const seed = params.get('seed')!;
+      const pageNumber = Number(params.get('cursor')?.replace('page-', '') ?? params.get('page') ?? 1);
+      seedA ??= seed;
+      requests.push({ seed, page: pageNumber });
+      const start = seed === seedA ? 1 : 101;
+      return route.fulfill({ json: {
+        mode: 'random', page: pageNumber, limit: 6, total: 1000, hasMore: pageNumber < 4,
+        nextCursor: pageNumber < 4 ? `page-${pageNumber + 1}` : null,
+        items: Array.from({ length: 6 }, (_, index) => video(start + (pageNumber - 1) * 6 + index))
+      } });
+    });
+    await page.goto('/');
+    const homeCard = page.locator('.feed-card__video-shell').first();
+    await homeCard.scrollIntoViewIfNeeded();
+    await expect(homeCard).toHaveAttribute('role', 'button');
+    const initialScroll = await page.evaluate(() => scrollY);
+    await homeCard.click({ position: { x: 100, y: 120 } });
+    await expect(page).toHaveURL(/\/reels\/8\?from=home/);
+    const keyA = await page.evaluate(() => history.state.reelSessionKey as string);
+    const deck = page.locator('.reels-view--home-overlay .reel-deck');
+    if (browseA) {
+      await page.getByRole('button', { name: 'Next reel' }).click();
+      await expect(page).toHaveURL(/\/reels\/1\?from=home/);
+    }
+    const aUrl = page.url();
+    const aIds = await deck.locator('.reel-deck__panel').evaluateAll(panels =>
+      panels.map(panel => Number(panel.getAttribute('data-reel-id'))));
+    // Folder and Home create intervening history entries, but jumping directly
+    // from B to A keeps the same ReelsView mounted (and may keep the same URL).
+    await page.locator('.reels-view__metadata').click();
+    await expect(page).toHaveURL(/\/f\/panoramas/);
+    await page.locator('aside.sidebar').getByRole('link', { name: 'Home', exact: true }).click();
+    await expect(page).toHaveURL('/');
+    await expect.poll(() => page.evaluate(() => scrollY)).toBe(0);
+    await homeCard.scrollIntoViewIfNeeded();
+    await expect(homeCard).toHaveAttribute('role', 'button');
+    await homeCard.click({ position: { x: 100, y: 120 } });
+    await expect(page).toHaveURL(/\/reels\/8\?from=home/);
+    const keyB = await page.evaluate(() => history.state.reelSessionKey as string);
+    expect(keyB).not.toBe(keyA);
+    await expect.poll(() => deck.locator('.reel-deck__panel').evaluateAll(panels =>
+      panels.map(panel => Number(panel.getAttribute('data-reel-id'))))).toEqual([8, 101, 102, 103, 104, 105, 106]);
+    const bSeed = requests.at(-1)!.seed;
+    expect(bSeed).not.toBe(seedA);
+    await page.evaluate(() => history.go(-3));
+    await expect(page).toHaveURL(aUrl);
+    await expect.poll(() => page.evaluate(() => history.state.reelSessionKey)).toBe(keyA);
+    await expect.poll(() => deck.locator('.reel-deck__panel').evaluateAll(panels =>
+      panels.map(panel => Number(panel.getAttribute('data-reel-id'))))).toEqual(aIds);
+    await expect(deck.locator('.reel-player-card__surface[role="button"]')).toHaveCount(1);
+    // Cursor continuity after restoration must still use A's seed.
+    const requestCount = requests.length;
+    for (const id of (browseA ? [2, 3, 4, 5, 6] : [1, 2, 3, 4, 5, 6])) {
+      await page.waitForTimeout(160);
+      await page.getByRole('button', { name: 'Next reel' }).click();
+      await expect(page).toHaveURL(new URL(`/reels/${id}?from=home`, page.url()).href);
+    }
+    await expect.poll(() => requests.length).toBeGreaterThan(requestCount);
+    expect(requests.at(-1)!.seed).toBe(seedA);
+    expect(requests.at(-1)!.seed).not.toBe(bSeed);
+    await page.getByRole('button', { name: 'Close' }).click();
+    await expect(page).toHaveURL('/');
+    // The same Home view remains available without scroll/focus contamination.
+    await expect(page.locator('.feed-card__video-shell')).toHaveCount(1);
+    expect(initialScroll).toBeGreaterThanOrEqual(0);
+  });
+}
 
 async function mockReels(page: Page) {
   await mockGallery(page, 'light');
@@ -1691,6 +2069,378 @@ async function mockReels(page: Page) {
     json: { items, page: 1, limit: 24, total: items.length, hasMore: false }
   }));
 }
+
+test('Home Reel overlay traps keyboard focus, isolates background, and restores focus on Close', async ({ page }) => {
+  await mockReels(page);
+  const items = [1, 2, 3].map(id => ({
+    ...panorama, id, filename: `reel-${id}.mp4`, mediaType: 'video',
+    width: 1080, height: 1920, durationMs: 1000, previewUrl: '/previews/feed-video.mp4'
+  }));
+  await page.route('**/api/feed?*', route => route.fulfill({
+    json: { items, page: 1, limit: 24, total: items.length, hasMore: false }
+  }));
+  await page.goto('/');
+  const opener = page.locator('.feed-card__video-shell[role="button"]').first();
+  await opener.scrollIntoViewIfNeeded();
+  await opener.focus();
+  await expect(opener).toBeFocused();
+  await page.keyboard.press('Enter');
+
+  await expect(page).toHaveURL(/\/reels\/\d+\?from=home/);
+  const dialog = page.getByRole('dialog', { name: 'Reels' });
+  const close = dialog.getByRole('button', { name: 'Close' });
+  await expect(close).toBeFocused();
+  await expect(page.locator('.app__background-route')).toHaveAttribute('inert', '');
+  await expect(page.locator('.app-shell > aside.sidebar')).toHaveAttribute('inert', '');
+  await expect(page.locator('.mobile-nav')).toHaveAttribute('inert', '');
+
+  await page.keyboard.press('Shift+Tab');
+  expect(await page.evaluate(() => Boolean(document.activeElement?.closest('.app__reel-modal-layer')))).toBe(true);
+  await page.keyboard.press('Tab');
+  await expect(close).toBeFocused();
+  for (let i = 0; i < 10; i++) {
+    await page.keyboard.press('Tab');
+    expect(await page.evaluate(() => Boolean(document.activeElement?.closest('.app__reel-modal-layer')))).toBe(true);
+  }
+
+  await close.click();
+  await expect(page).toHaveURL('/');
+  await expect(page.locator('.app__background-route')).not.toHaveAttribute('inert', '');
+  await expect(opener).toBeFocused();
+});
+
+test('Home Reel overlay reloads after a source generation changes', async ({ page }) => {
+  await mockReels(page);
+  const items = [1, 2, 3].map(id => ({
+    ...panorama, id, filename: `reel-${id}.mp4`, mediaType: 'video',
+    width: 1080, height: 1920, durationMs: 1000, previewUrl: '/previews/feed-video.mp4'
+  }));
+  await page.route('**/api/feed?*', route => route.fulfill({
+    json: { items, page: 1, limit: 24, total: items.length, hasMore: false }
+  }));
+  let sourceGeneration = 1;
+  let sourceRequests = 0;
+  let reelRequests = 0;
+  await page.route('**/api/sources/status*', route => {
+    sourceRequests++;
+    return route.fulfill({ json: { items: [{
+      id: 9, kind: 'local', name: 'Gallery', enabled: 1, status: 'ready',
+      generation: sourceGeneration, updated_at: '2026-11-24', available: true, syncing: false
+    }] } });
+  });
+  await page.route('**/api/reels?*', route => {
+    reelRequests++;
+    return route.fulfill({ json: { items, page: 1, limit: 24, total: items.length, hasMore: false } });
+  });
+
+  await page.goto('/');
+  await expect.poll(() => sourceRequests).toBeGreaterThan(0);
+  const opener = page.locator('.feed-card__video-shell[role="button"]').first();
+  await opener.scrollIntoViewIfNeeded();
+  await opener.click({ position: { x: 100, y: 120 } });
+  await expect(page).toHaveURL(/\/reels\/\d+\?from=home/);
+  const dialog = page.getByRole('dialog', { name: 'Reels' });
+  await expect(dialog.locator('.reel-deck__panel')).toHaveCount(3);
+  const requestsBeforeChange = reelRequests;
+  const sourcePollBeforeChange = sourceRequests;
+  sourceGeneration = 2;
+
+  await expect.poll(() => sourceRequests, { timeout: 10000 }).toBeGreaterThan(sourcePollBeforeChange);
+  await expect.poll(() => reelRequests, { timeout: 10000 }).toBeGreaterThan(requestsBeforeChange);
+  await expect(dialog.locator('.reel-deck__panel')).toHaveCount(3);
+  const close = dialog.getByRole('button', { name: 'Close' });
+  await expect(close).toBeFocused();
+  await close.click();
+  await expect(page).toHaveURL('/');
+  // The source refresh can replace the original card. Return to a live Home
+  // control or the Home navigation, never the removed Reel dialog/body.
+  await expect.poll(() => page.evaluate(() =>
+    Boolean(document.activeElement?.closest('.app__background-route, .app-shell > .sidebar, .mobile-nav'))
+  )).toBe(true);
+});
+
+test('fitted Home Reel preview stays within a short 480px viewport', async ({ page }) => {
+  await mockGallery(page, 'dark');
+  await page.addInitScript(() => {
+    localStorage.setItem('foldergram-fit-tall-media-to-screen', 'true');
+  });
+  await page.setViewportSize({ width: 1280, height: 480 });
+  await mockPortraitFeed(page);
+  await page.goto('/');
+  const shell = page.locator('.feed-card__video-shell');
+  await expect(shell).toBeVisible();
+  const box = (await shell.boundingBox())!;
+  expect(box.height).toBeLessThanOrEqual(448.5);
+  expect(box.width / box.height).toBeCloseTo(4 / 5, 2);
+  await expect(shell.locator('video')).toHaveCSS('object-fit', 'contain');
+});
+
+for (const viewport of [
+  { width: 900, height: 1200 },
+  { width: 960, height: 1600 },
+  { width: 1080, height: 1778 }
+]) {
+  test(`Home Reel overlay has Instagram-style portrait gutters and controls at ${viewport.width}×${viewport.height}; refresh becomes standalone Reels`, async ({ page }) => {
+    await mockReels(page);
+    await page.setViewportSize(viewport);
+    const clips = [1, 2, 3].map(id => ({
+      ...panorama, id, filename: `reel-${id}.mp4`, mediaType: 'video',
+      width: 1080, height: 1920, durationMs: 1000, previewUrl: '/previews/feed-video.mp4'
+    }));
+    await page.route('**/api/feed?*', route => route.fulfill({
+      json: { items: clips, page: 1, limit: 24, total: clips.length, hasMore: false }
+    }));
+    await page.goto('/');
+
+    const homeVideos = page.locator('.feed-card__video-shell');
+    await expect(homeVideos).toHaveCount(3);
+    const homeBox = (await homeVideos.first().boundingBox())!;
+    expect(Math.abs(homeBox.x + homeBox.width / 2 - viewport.width / 2), 'Home should not drift far to the right').toBeLessThan(40);
+    await homeVideos.first().scrollIntoViewIfNeeded();
+    const activeHomeVideo = page.locator('.feed-card__video-shell[role="button"]').first();
+    await expect(activeHomeVideo).toBeVisible();
+    await activeHomeVideo.click({ position: { x: 130, y: 140 } });
+
+    await expect(page).toHaveURL(/\/reels\/\d+\?from=home/);
+    const openedReelUrl = page.url().split('?')[0]!;
+    await expect(page.locator('.app__reel-modal-layer')).toBeVisible();
+    await expect(page.locator('.app-shell--home')).toBeVisible();
+    const sidebar = page.locator('.app-shell > aside.sidebar');
+    await expect(sidebar).toBeVisible();
+    await expect(sidebar.locator('.sidebar__link').nth(0)).toHaveClass(/router-link-active/);
+    await expect(sidebar.locator('.sidebar__link').nth(1)).not.toHaveClass(/router-link-active/);
+    await expect(page.locator('.reels-view--home-overlay .reels-view__layout')).toHaveCSS('--reels-rail-adjustment', '-1rem');
+    const overlayBox = (await page.locator('.app__reel-modal-layer').boundingBox())!;
+    expect(overlayBox.x).toBeCloseTo(0, 0);
+    expect(overlayBox.width).toBeCloseTo(viewport.width, 0);
+    // The Home sidebar stays mounted for restoration but must not be visible or
+    // interactive while the immersive viewer covers the full viewport.
+    expect(await page.evaluate(() => {
+      const point = document.elementFromPoint(40, 600);
+      return Boolean(point?.closest('aside.sidebar'));
+    })).toBe(false);
+    const close = page.locator('.reels-view__close');
+    await expect(close).toBeVisible();
+    await expect(close).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+    await expect(close.locator('svg')).toBeVisible();
+    const overlayStage = (await page.locator('.reel-player-card__stage').first().boundingBox())!;
+    const overlayRail = (await page.locator('.reels-view__action-rail--desktop').boundingBox())!;
+    const navButtons = page.locator('.reels-view__nav-button');
+    const arrows = (await navButtons.last().boundingBox())!;
+    const closeBox = (await close.boundingBox())!;
+    const closeIcon = (await close.locator('svg').boundingBox())!;
+    // Instagram screenshot: the video has a breathing-space gutter on the
+    // left; actions sit just beside it; arrows and X share the right lane.
+    expect(overlayStage.x / viewport.width).toBeGreaterThan(0.07);
+    expect(overlayStage.x / viewport.width).toBeLessThan(0.17);
+    expect(overlayRail.x - (overlayStage.x + overlayStage.width)).toBeGreaterThanOrEqual(6);
+    expect(overlayRail.x + overlayRail.width).toBeLessThan(arrows.x);
+    expect(Math.abs(closeBox.x + closeBox.width / 2 - arrows.x - arrows.width / 2)).toBeLessThan(5);
+    expect(closeIcon.width).toBeCloseTo(32, 0);
+    expect(closeBox.y).toBeCloseTo(17, 0);
+    const fullViewerCenter = (overlayStage.x + overlayRail.x + overlayRail.width) / 2;
+    expect(Math.abs(fullViewerCenter - viewport.width / 2)).toBeLessThan(75);
+
+    await page.reload();
+    await expect(page).toHaveURL(openedReelUrl);
+    await expect(page.locator('.app-shell--reels')).toBeVisible();
+    await expect(sidebar.locator('.sidebar__link').nth(1)).toHaveClass(/router-link-active/);
+    await expect(page.locator('.app__reel-modal-layer')).toHaveCount(0);
+    await expect(page.locator('.reels-view__close')).toHaveCount(0);
+    const directStage = (await page.locator('.reel-player-card__stage').first().boundingBox())!;
+    expect(directStage.x).toBeGreaterThan(0);
+    expect(directStage.width).toBeGreaterThan(0);
+    // Standalone Reels deliberately reserve sidebar width; the Home overlay
+    // uses the entire viewport and therefore does not share its stage X.
+    expect(overlayStage.x).toBeLessThan(directStage.x);
+  });
+}
+
+test('opening standalone Reels from the sidebar does not create a Home overlay', async ({ page }) => {
+  await mockReels(page);
+  await page.goto('/');
+  await page.locator('aside.sidebar').getByRole('link', { name: /Reels/i }).click();
+  await expect(page).toHaveURL(/\/reels\/1$/);
+  await expect(page.locator('.app-shell--reels')).toBeVisible();
+  await expect(page.locator('.app__reel-modal-layer')).toHaveCount(0);
+  await expect(page.locator('.reels-view__close')).toHaveCount(0);
+});
+
+test('direct Home-origin Reel URL without mounted Home is a standalone Reels page', async ({ page }) => {
+  await mockReels(page);
+  await page.goto('/reels/2?from=home');
+  await expect(page).toHaveURL(/\/reels\/2$/);
+  await expect(page.locator('.app-shell--reels')).toBeVisible();
+  await expect(page.locator('.app__reel-modal-layer')).toHaveCount(0);
+  await expect(page.locator('.reels-view__close')).toHaveCount(0);
+});
+
+test('Reels share the desktop navigation breakpoint at exactly 768px', async ({ page }) => {
+  await mockReels(page);
+  await page.setViewportSize({ width: 768, height: 1200 });
+  await page.goto('/reels/1');
+  await expect(page.locator('.app-shell > aside.sidebar')).toBeVisible();
+  await expect(page.locator('.mobile-nav')).toBeHidden();
+  await expect(page.locator('.reels-view__action-rail--desktop')).toBeVisible();
+  await expect(page.locator('.reels-view__action-rail--mobile')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Next reel' }).click();
+  await expect(page).toHaveURL(/\/reels\/2$/);
+
+  await page.setViewportSize({ width: 767, height: 1200 });
+  await expect(page.locator('.app-shell > aside.sidebar')).toBeHidden();
+  await expect(page.locator('.mobile-nav')).toBeVisible();
+  await expect(page.locator('.reels-view__action-rail--desktop')).toHaveCount(0);
+  await expect(page.locator('.reels-view__action-rail--mobile')).toHaveCount(1);
+});
+
+test('the Reels entry route resolves to a post URL and scrolling updates the URL', async ({ page }) => {
+  await mockReels(page);
+  await page.goto('/reels');
+  await expect(page).toHaveURL(/\/reels\/1$/);
+  await page.getByRole('button', { name: 'Next reel' }).click();
+  await expect(page).toHaveURL(/\/reels\/2$/);
+});
+
+test('landscape Reels resize to their source aspect ratio without exposing the next card', async ({ page }) => {
+  await mockReels(page);
+  await page.setViewportSize({ width: 1080, height: 1778 });
+  const landscapes = [1, 2, 3].map(id => ({
+    ...panorama, id, filename: `landscape-${id}.mp4`, mediaType: 'video',
+    width: 1920, height: 1080, durationMs: 1000, previewUrl: '/previews/feed-video.mp4'
+  }));
+  await page.route('**/api/reels?*', route => route.fulfill({
+    json: { items: landscapes, page: 1, limit: 6, total: 3, hasMore: false }
+  }));
+  await page.goto('/reels/2');
+  const stages = page.locator('.reel-player-card__stage');
+  await expect(page.locator('.reel-player-card__overlay--visible')).toHaveCount(1);
+  await expect.poll(async () => (await stages.nth(1).boundingBox())?.width).toBeGreaterThan(600);
+  const active = (await stages.nth(1).boundingBox())!;
+  expect(active.width / active.height).toBeCloseTo(16 / 9, 1);
+  const next = (await stages.nth(2).boundingBox())!;
+  expect(next.y).toBeGreaterThanOrEqual(1770);
+  await expect(page).toHaveURL(/\/reels\/2$/);
+
+  await page.setViewportSize({ width: 1600, height: 900 });
+  const desktopStage = (await stages.nth(1).boundingBox())!;
+  const actionRail = (await page.locator('.reels-view__action-rail--desktop').boundingBox())!;
+  const arrows = (await page.locator('.reels-view__nav-controls').boundingBox())!;
+  expect(desktopStage.x + desktopStage.width).toBeLessThan(actionRail.x);
+  expect(actionRail.x + actionRail.width).toBeLessThan(arrows.x);
+});
+
+test('mixed aspect ratios preserve all Reel panel positions during fast navigation', async ({ page }) => {
+  await mockReels(page);
+  await page.setViewportSize({ width: 1600, height: 900 });
+  const mixedItems = [
+    { id: 1, width: 1080, height: 1920 },
+    { id: 2, width: 1080, height: 1080 },
+    { id: 3, width: 1920, height: 1080 },
+    { id: 4, width: 1080, height: 1920 }
+  ].map(({ id, width, height }) => ({
+    ...panorama, id, filename: `mixed-${id}.mp4`, mediaType: 'video',
+    width, height, durationMs: 1000, previewUrl: '/previews/feed-video.mp4'
+  }));
+  await page.route('**/api/reels?*', route => route.fulfill({
+    json: { items: mixedItems, page: 1, limit: 6, total: 4, hasMore: false }
+  }));
+  await page.goto('/reels/1');
+  const panels = page.locator('.reel-deck__panel');
+  await expect(panels).toHaveCount(4);
+  const initial = await panels.evaluateAll(elements => elements.map(element => ({
+    top: (element as HTMLElement).offsetTop, height: (element as HTMLElement).offsetHeight
+  })));
+  const next = page.getByRole('button', { name: 'Next reel' });
+  for (const id of [2, 3, 4]) {
+    await next.click();
+    await expect(page).toHaveURL(new RegExp(`/reels/${id}$`));
+    const positions = await panels.evaluateAll(elements => elements.map(element => ({
+      top: (element as HTMLElement).offsetTop, height: (element as HTMLElement).offsetHeight
+    })));
+    expect(positions).toEqual(initial);
+    // The deck deliberately locks navigation while smooth scrolling settles.
+    // A further click should occur after that lock, not during it.
+    await page.waitForTimeout(480);
+  }
+
+  // Stress input during the transition back toward portrait media.
+  await page.mouse.wheel(0, -280);
+  await page.mouse.wheel(0, -280);
+  const afterRapidWheel = await panels.evaluateAll(elements => elements.map(element => ({
+    top: (element as HTMLElement).offsetTop, height: (element as HTMLElement).offsetHeight
+  })));
+  expect(afterRapidWheel).toEqual(initial);
+});
+
+test('portrait desktop keeps the sidebar, stage gutters, and hides previews for square and wide Reels', async ({ page }) => {
+  await mockReels(page);
+  const viewport = { width: 960, height: 1600 };
+  await page.setViewportSize(viewport);
+  const items = [
+    { id: 1, width: 1080, height: 1920 },
+    { id: 2, width: 1080, height: 1080 },
+    { id: 3, width: 1920, height: 1080 },
+    { id: 4, width: 1080, height: 1920 }
+  ].map(({ id, width, height }) => ({
+    ...panorama, id, filename: `mixed-${id}.mp4`, mediaType: 'video',
+    width, height, durationMs: 1000, previewUrl: '/previews/feed-video.mp4'
+  }));
+  await page.route('**/api/reels?*', route => route.fulfill({
+    json: { items, page: 1, limit: 6, total: items.length, hasMore: false }
+  }));
+  await page.goto('/reels/1');
+  const sidebar = page.locator('.app-shell > aside.sidebar');
+  const stages = page.locator('.reel-player-card__stage');
+  const panels = page.locator('.reel-deck__panel');
+  const nextButton = page.getByRole('button', { name: 'Next reel' });
+  await expect(sidebar).toBeVisible();
+  const dockedSidebarWidth = await sidebar.evaluate(element =>
+    parseFloat(getComputedStyle(element).getPropertyValue('--desktop-sidebar-width')) *
+    (parseFloat(getComputedStyle(document.documentElement).fontSize) || 16)
+  );
+  const portraitBox = (await stages.nth(0).boundingBox())!;
+  expect(portraitBox.x).toBeGreaterThanOrEqual(dockedSidebarWidth);
+  expect(portraitBox.y).toBeGreaterThanOrEqual(12);
+  // The portrait panel is shorter, but the incoming square stage remains centered
+  // in its full-height panel and must not peek into the current Reel's viewport.
+  expect((await panels.nth(1).boundingBox())!.y).toBeLessThan(viewport.height);
+  expect((await stages.nth(1).boundingBox())!.y).toBeGreaterThanOrEqual(viewport.height);
+
+  for (const id of [2, 3]) {
+    await nextButton.click();
+    await expect(page).toHaveURL(new RegExp(`/reels/${id}$`));
+    await expect.poll(async () => (await panels.nth(id - 1).boundingBox())?.y).toBeCloseTo(16, -1);
+    const current = (await stages.nth(id - 1).boundingBox())!;
+    const following = (await stages.nth(id).boundingBox())!;
+    expect(current.x).toBeGreaterThanOrEqual(dockedSidebarWidth);
+    expect(current.y).toBeGreaterThanOrEqual(12);
+    expect(current.y + current.height).toBeLessThanOrEqual(viewport.height - 12);
+    expect(following.y).toBeGreaterThanOrEqual(viewport.height);
+    // The action rail belongs beside the Reel, not on top of the navigation arrows.
+    const rail = (await page.locator('.reels-view__action-rail--desktop').boundingBox())!;
+    const arrows = (await page.locator('.reels-view__nav-controls').boundingBox())!;
+    expect(rail.x, `Reel ${id}: action rail should follow stage ending at ${current.x + current.width}`).toBeGreaterThan(current.x + current.width);
+    expect(rail.x + rail.width, `Reel ${id}: action rail must clear arrows starting at ${arrows.x}`).toBeLessThan(arrows.x);
+    await nextButton.click({ trial: true });
+    await page.waitForTimeout(480);
+  }
+
+  // Confirm the same two independent control lanes at the screenshot's
+  // approximate desktop widths, not only at the 960px breakpoint edge.
+  for (const width of [984, 1080]) {
+    await page.setViewportSize({ width, height: viewport.height });
+    for (const id of [2, 3]) {
+      await page.goto(`/reels/${id}`);
+      await expect(page).toHaveURL(new RegExp(`/reels/${id}$`));
+      const stage = (await stages.nth(id - 1).boundingBox())!;
+      const rail = (await page.locator('.reels-view__action-rail--desktop').boundingBox())!;
+      const arrows = (await page.locator('.reels-view__nav-controls').boundingBox())!;
+      expect(rail.x, `${width}px Reel ${id}: rail should clear video`).toBeGreaterThan(stage.x + stage.width);
+      expect(rail.x + rail.width, `${width}px Reel ${id}: rail should clear arrows`).toBeLessThan(arrows.x);
+      await nextButton.click({ trial: true });
+    }
+  }
+});
 
 test('portrait Reels keep the next card in view and separate the two control columns', async ({ page }) => {
   await mockReels(page);
