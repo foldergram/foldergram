@@ -1,10 +1,12 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { DatabaseSync } from 'node:sqlite';
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { getPreviewRelativePath, getThumbnailRelativePath } from '../src/utils/image-utils.js';
+import { createFingerprint, getPreviewRelativePath, getThumbnailRelativePath } from '../src/utils/image-utils.js';
 import {
   isSupportedMetadataExtension,
   parseMetadataContent,
@@ -252,6 +254,110 @@ describe.sequential('metadata file integration with scanner', () => {
     await fs.mkdir(path.dirname(absolutePath), { recursive: true });
     await fs.writeFile(absolutePath, content, 'utf8');
   }
+
+  it.each(['1.3.3', '1.4.0'] as const)('preserves legacy captions when upgrading from %s before scanning sidecars', async (version) => {
+    const { databaseManager } = await import('../src/db/database.js');
+    const { runStartupMigrations } = await import('../src/db/migration.js');
+    databaseManager.close();
+    const databasePath = path.join(tempRoot, 'db', 'gallery.sqlite');
+    // Module initialization may have opened a current-schema test database.
+    // Start this fixture from the released schema, not that database.
+    await fs.rm(path.dirname(databasePath), { recursive: true, force: true });
+    await fs.mkdir(path.dirname(databasePath), { recursive: true });
+    const legacyMigrations = path.join(tempRoot, 'legacy-migrations');
+    const bundledMigrations = fileURLToPath(new URL('../db/migrations/', import.meta.url));
+    await fs.mkdir(legacyMigrations);
+    for (const filename of await fs.readdir(bundledMigrations)) {
+      if (filename.slice(0, 6) <= (version === '1.3.3' ? '000007' : '000011')) {
+        await fs.copyFile(path.join(bundledMigrations, filename), path.join(legacyMigrations, filename));
+      }
+    }
+    runStartupMigrations({ databasePath, migrationsDirectory: legacyMigrations });
+    const media = [
+      ['photo.jpg', 'Manual photo caption', 'image'],
+      ['clip.mp4', 'Manual video caption', 'video'],
+      ['uncaptioned.jpg', null, 'image'],
+      ['imported.jpg', version === '1.4.0' ? 'Imported caption' : null, 'image'],
+      ['carousels/coast/01.jpg', null, 'image'],
+      ['carousels/coast/02.jpg', null, 'image'],
+      ['cleared.jpg', null, 'image']
+    ] as const;
+    const legacy = new DatabaseSync(databasePath);
+    try {
+      expect(legacy.prepare("SELECT version FROM schema_migrations WHERE version = '000012'").get()).toBeUndefined();
+      if (version === '1.3.3') {
+        expect(legacy.prepare('PRAGMA table_info(posts)').all().map(column => column.name)).not.toContain('caption_edited_at');
+      }
+      const source = legacy.prepare("SELECT id FROM media_sources WHERE kind = 'local' AND managed_by = 'environment'").get()!.id as number;
+      legacy.prepare("INSERT INTO folders (id, slug, name, folder_path, source_id) VALUES (10, 'vacation', 'Vacation', 'vacation', ?)").run(source);
+      legacy.prepare("INSERT INTO folders (id, slug, name, folder_path, source_id, role, carousel_owner_folder_id) VALUES (11, 'coast', 'Coast', 'vacation/carousels/coast', ?, 'carousel_source', 10)").run(source);
+      for (const [index, [filename, caption, mediaType]] of media.entries()) {
+        const id = index + 20;
+        const relativePath = 'vacation/' + filename;
+        const isCarousel = filename.startsWith('carousels/');
+        await createSourceFile(relativePath);
+        if (!isCarousel) {
+          await createMetadataFile('vacation/' + path.parse(filename).name + '.txt', filename === 'imported.jpg' ? 'Imported caption' : 'Sidecar ' + filename);
+        }
+        const absolutePath = path.join(appConfig.galleryRoot, relativePath);
+        const stats = await fs.stat(absolutePath);
+        legacy.prepare(`
+          INSERT INTO images (id, folder_id, source_id, filename, extension, relative_path,
+            absolute_path, file_size, width, height, media_type, mime_type, checksum_or_fingerprint,
+            mtime_ms, first_seen_at, sort_timestamp, thumbnail_path, preview_path)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1920, 1080, ?, ?, ?,
+            ?, CURRENT_TIMESTAMP, 1, 'thumb.webp', 'preview.webp')
+        `).run(id, isCarousel ? 11 : 10, source, path.basename(filename), path.extname(filename), relativePath, absolutePath, stats.size,
+          mediaType, mediaType === 'video' ? 'video/mp4' : 'image/jpeg',
+          createFingerprint(relativePath, stats.size, stats.mtimeMs), stats.mtimeMs);
+        if (!isCarousel) {
+          legacy.prepare('INSERT INTO posts (id, folder_id, source_id, source_path, caption, sort_timestamp) VALUES (?, 10, ?, ?, ?, 1)')
+            .run(id, source, relativePath, caption);
+          legacy.prepare('INSERT INTO post_items (post_id, image_id, position) VALUES (?, ?, 1)').run(id, id);
+        }
+      }
+      await createMetadataFile('vacation/carousels/coast/coast.txt', 'Imported carousel');
+      legacy.prepare("INSERT INTO posts (id, folder_id, source_id, source_path, post_type, caption, sort_timestamp) VALUES (30, 10, ?, 'vacation/carousels/coast', 'carousel', 'Manual carousel caption', 1)").run(source);
+      legacy.exec('INSERT INTO post_items (post_id, image_id, position) VALUES (30, 24, 1), (30, 25, 2);');
+      if (version === '1.4.0') {
+        legacy.exec("UPDATE posts SET companion_caption = caption WHERE id = 23; UPDATE images SET caption = 'Imported caption', companion_caption = 'Imported caption' WHERE id = 23;");
+        legacy.prepare('UPDATE posts SET caption_edited_at = ?, companion_caption = ? WHERE id = 26')
+          .run(new Date(Date.now() + 1000).toISOString(), 'Sidecar cleared.jpg');
+        legacy.exec("UPDATE images SET companion_caption = 'Sidecar cleared.jpg' WHERE id = 26;");
+      }
+    } finally {
+      legacy.close();
+    }
+
+    try {
+      await scannerService.scanAll('manual');
+      expect(postRepository.findById(20)?.caption).toBe('Manual photo caption');
+      expect(postRepository.findById(21)?.caption).toBe('Manual video caption');
+      expect(postRepository.findById(22)?.caption).toBe('Sidecar uncaptioned.jpg');
+      expect(postRepository.findById(23)?.caption).toBe('Imported caption');
+      expect(postRepository.findById(23)?.caption_edited_at).toBeNull();
+      expect(postRepository.findById(26)?.caption).toBe(version === '1.4.0' ? null : 'Sidecar cleared.jpg');
+      expect(postRepository.findById(20)?.caption_edited_at).not.toBeNull();
+      expect(postRepository.findById(20)?.companion_caption).toBe('Sidecar photo.jpg');
+      expect(postRepository.findById(30)).toMatchObject({ caption: 'Manual carousel caption', companion_caption: 'Imported carousel' });
+      expect(postRepository.findById(30)?.caption_edited_at).not.toBeNull();
+      await scannerService.scanAll('manual');
+      expect(postRepository.findById(20)?.caption).toBe('Manual photo caption');
+      expect(postRepository.findById(30)?.caption).toBe('Manual carousel caption');
+      await createMetadataFile('vacation/photo.txt', 'Updated sidecar');
+      const later = new Date(Date.now() + 1000);
+      await fs.utimes(path.join(appConfig.galleryRoot, 'vacation/photo.txt'), later, later);
+      await createMetadataFile('vacation/carousels/coast/coast.txt', 'Updated carousel sidecar');
+      await fs.utimes(path.join(appConfig.galleryRoot, 'vacation/carousels/coast/coast.txt'), later, later);
+      await scannerService.scanAll('manual');
+      expect(postRepository.findById(20)?.caption).toBe('Updated sidecar');
+      expect(postRepository.findById(20)?.caption_edited_at).toBeNull();
+      expect(postRepository.findById(30)?.caption).toBe('Updated carousel sidecar');
+      expect(postRepository.findById(30)?.caption_edited_at).toBeNull();
+    } finally {
+      databaseManager.close();
+    }
+  });
 
   it('1. indexes media with a valid metadata file and populates caption and taken_at', async () => {
     maintenanceRepository.resetLibraryIndex();

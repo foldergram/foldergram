@@ -273,6 +273,12 @@ The detail view includes:
 After deleting the last post in a folder, the standalone detail view returns to Library.
 A modal detail view closes back to the page beneath it.
 
+### Companion captions and upgrades
+
+Local `.txt` and `.nfo` companion files can supply captions during scans. Existing custom captions without recorded provenance are protected when upgrading from older versions; an older companion file will not overwrite them. Changed companion caption text can replace a protected caption when the file's modification time is newer than the recorded edit time (the upgrade time for legacy captions). Posts without saved captions or recorded manual edits continue to import companion captions normally. Older releases did not distinguish a deliberately cleared caption from one that was never set; such empty legacy captions cannot be identified during the upgrade.
+
+If a caption was already overwritten by a v1.4.0 scan, upgrading cannot restore the previous text. Restore it from a pre-scan backup or edit it again in Foldergram.
+
 ## Saved posts, likes, and collections
 
 Foldergram has two saved-items storage modes:
