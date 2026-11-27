@@ -24,6 +24,7 @@
         :video-preparation="videoPreparation"
         :next-video-playback-url="item.id === activeReelId ? items[index + 1]?.videoPlaybackUrl ?? undefined : undefined"
         :external-metadata="externalMetadata"
+        @video-ready="onVideoReady"
       >
         <template v-if="item.id === activeReelId" #mobile-action-rail>
           <slot
@@ -69,7 +70,11 @@ const props = defineProps<{
 const emit = defineEmits<{
   activeChange: [id: number];
   prefetch: [activeIndex: number];
+  videoReady: [id: number];
 }>();
+  function onVideoReady(id: number) {
+    emit('videoReady', id);
+  }
 
 const scrollerElement = ref<HTMLElement | null>(null);
 const panelElements = new Map<number, HTMLElement>();
@@ -461,3 +466,4 @@ defineExpose({
       animation: none;
     }
   }
+  </style>
