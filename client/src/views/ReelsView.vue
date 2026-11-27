@@ -15,10 +15,6 @@
       <p class="reels-view__message">{{ reelsStore.error }}</p>
     </section>
 
-    <section v-else-if="showLoadingState" class="reels-view__skeleton" role="status" :aria-label="t('reels.view.loadingTitle')">
-      <div class="reels-view__skeleton-stage" aria-hidden="true" />
-      <p class="reels-view__skeleton-text">{{ t('reels.view.loadingDescription') }}</p>
-  </section>
 
     <section v-else-if="reelsStore.initialized && reelsStore.items.length === 0" class="reels-view__message-card">
       <p class="reels-view__eyebrow">{{ t('nav.reels') }}</p>
@@ -42,6 +38,7 @@
           :external-metadata="showExternalMetadata"
           @active-change="handleActiveChange"
           @prefetch="handlePrefetch"
+          @video-ready="onVideoReady"
         >
           <template #mobile-action-rail="{ item }">
             <ReelActionRail
@@ -67,6 +64,10 @@
             </ReelActionRail>
           </template>
         </ReelDeck>
+        <section v-if="showSkeletonOverlay" class="reels-view__skeleton" role="status" :aria-label="t('reels.view.loadingTitle')">
+          <div class="reels-view__skeleton-stage" aria-hidden="true" />
+          <p class="reels-view__skeleton-text">{{ t('reels.view.loadingDescription') }}</p>
+          </section>
         <div v-if="!isMobileViewport" ref="metadataGutter" class="reels-view__metadata-gutter">
           <RouterLink
             v-if="showExternalMetadata && activeItem"
@@ -234,6 +235,21 @@ const activeIndex = computed(() => reelsStore.items.findIndex((item) => item.id 
 const canGoPrevious = computed(() => activeIndex.value > 0);
 const canGoNext = computed(() => activeIndex.value >= 0 && (activeIndex.value < reelsStore.items.length - 1 || reelsStore.hasMore));
 const showLoadingState = computed(() => reelsStore.isInitialLoading);
+  const readyReelIds = ref(new Set<number>());
+  const isInitialVideoReady = ref(false);
+  const showSkeletonOverlay = computed(() => showLoadingState.value || !isInitialVideoReady.value);
+
+  function onVideoReady(reelId: number) {
+    readyReelIds.value.add(reelId);
+    if (reelId === reelsStore.activeReelId) isInitialVideoReady.value = true;
+  }
+
+  watch(
+    () => reelsStore.activeReelId,
+    (activeId) => {
+      if (activeId !== null && readyReelIds.value.has(activeId)) isInitialVideoReady.value = true;
+    }
+);
 let pendingDeckRouteId: string | null = null;
 let latestRouteRequest = 0;
 let loadingLinkedReel = false;
@@ -297,6 +313,8 @@ function closeViewer() {
 
 async function openLinkedReel(value: string) {
   const request = ++latestRouteRequest;
+  readyReelIds.value.clear();
+  isInitialVideoReady.value = false;
   loadingLinkedReel = true;
   reelsStore.error = null;
   const id = Number(value);
@@ -324,6 +342,8 @@ async function openLinkedReel(value: string) {
 }
 
 async function openReelsEntry() {
+  readyReelIds.value.clear();
+  isInitialVideoReady.value = false;
   const request = ++latestRouteRequest;
   // A cancelled deep-link load must not keep scroll-to-URL updates disabled.
   loadingLinkedReel = false;
@@ -948,18 +968,17 @@ watch(activeItem, (item) => {
   line-height: 1.6;
   color: var(--muted);
 }
-  
-  .reels-view__skeleton {
+.reels-view__skeleton {  
+  position: absolute;
+    inset: 0;
+    z-index: 2;
     display: grid;
     place-items: center;
-    height: 100%;
-    min-height: 100%;
-    padding: 0 0.75rem;
+  background: var(--bg);
   }
-
-  .reels-view__skeleton-stage {
-    width: min(24.4rem, 100%, calc((100dvh - 1.5rem) * 9 / 16));
-    aspect-ratio: 9 / 16;
+.reels-view__skeleton-stage {
+  width: var(--reels-active-stage-width);
+    height: var(--reels-active-stage-height);
     border-radius: 1rem;
     background: linear-gradient(100deg, var(--surface) 40%, color-mix(in srgb, var(--text) 8%, var(--surface)) 50%, var(--surface) 60%);
     background-size: 200% 100%;
