@@ -5,8 +5,8 @@ description: Environment variables, excluded-folder rules, path behavior, and sc
 
 # Configuration
 
-For source installs, Foldergram reads `.env` from the repository root and
-validates it in `server/src/config/env.ts`.
+For source installs, set environment variables in `.env` at the repository
+root. Restart Foldergram after changing them.
 
 In the default Docker Compose setup, the container uses the image's built-in
 production defaults plus the mounted `./data/...` volumes. The source-install

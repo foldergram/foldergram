@@ -1,15 +1,16 @@
 ---
 title: Features
-description: Verified product features and UI behaviors in the current Foldergram app.
+description: Browse your library, organize posts, play videos, and share selected folders.
 ---
 
 # Features
 
-This page documents what the current repository actually implements.
+Explore the main views and controls in Foldergram. For first-time setup, start
+with [Quick Start](./quick-start.md).
 
 ## Home
 
-The home view is the primary feed surface.
+Home shows posts from your enabled sources in a scrollable feed.
 
 It includes:
 
@@ -64,9 +65,9 @@ General Settings and its Save Changes button.
 
 | Mode | What it does |
 | --- | --- |
-| Recent | "Newest posts first, with lighter runs from the same app folder." |
-| Rediscover | "Older posts resurface when they are worth another look." |
-| Random | "A fresh shuffle that stays steady while you browse." |
+| Recent | Newest posts first. |
+| Rediscover | Older posts from your library. |
+| Random | Shuffled posts, keeping the same order while you browse. |
 
 ## Reels
 
@@ -87,13 +88,12 @@ It includes:
 
 | Mode | What it does |
 | --- | --- |
-| Recommended | "Affinity-ranked mix." It scores videos from a bounded candidate window using freshness, likes, recent folder affinity, portrait fit, duration fit, and a deterministic seed, then reduces immediate repeats from the same folder when alternatives exist. |
-| Recent | "Newest videos first." Pages continue from an opaque cursor so tied timestamps cannot duplicate or skip videos. |
-| Random | "Stable session shuffle." The same seed keeps the same order across pages, and changing the seed starts a new queue. |
+| Recommended | A selection based on your likes, recently visited folders, and video properties, with fewer consecutive videos from one folder. |
+| Recent | Newest videos first. |
+| Random | Shuffled videos, keeping the same order for the current session. |
 
-For large libraries, Recommended describes its bounded session queue in
-`total`/`hasMore` rather than promising every video in one session. Starting a
-new Reels session with a new seed rotates the discovery sample.
+Recommended selects part of a large library for each session. Starting a new
+session can surface different videos.
 
 ## Video playback
 
@@ -430,9 +430,9 @@ The selected language also has one extra layer:
 - changing the language updates the current browser immediately
 - saving `General Settings` stores that language in the app database as the default for browsers without a local override
 
-## What is intentionally missing
+## Scope and limitations
 
-The current repository does **not** implement:
+Foldergram does not support:
 
 - uploads from the UI
 - comments

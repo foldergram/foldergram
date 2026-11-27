@@ -6,9 +6,10 @@ fixture=$(mktemp -d)
 trap 'rm -rf -- "$fixture"' EXIT
 mkdir -p "$fixture/repo" "$fixture/deploy" "$fixture/docs" "$fixture/bin"
 real_node=$(command -v node)
+real_rsync=$(command -v rsync)
 ln -s "$real_node" "$fixture/bin/node"
 
-git -C "$fixture/repo" init -q
+git -C "$fixture/repo" init -q --initial-branch=main
 git -C "$fixture/repo" config user.email deploy-test@example.invalid
 git -C "$fixture/repo" config user.name 'Deployment test'
 printf '.env\ndata/\nnode_modules/\nserver/dist/\nclient/dist/\ndocs/.vitepress/dist/\n' > "$fixture/repo/.gitignore"
@@ -43,6 +44,7 @@ PY
 cat > "$fixture/bin/pnpm" <<'MOCK'
 #!/usr/bin/env bash
 set -eu
+printf '%s\n' "$1" >> "$TEST_FIXTURE/pnpm-calls"
 case "$1" in
   install) mkdir -p node_modules; cp version node_modules/runtime ;;
   build)
@@ -51,7 +53,15 @@ case "$1" in
     cp version server/dist/index.js
     cp version client/dist/index.html
     ;;
-  build:docs) mkdir -p docs/.vitepress/dist; cp version docs/.vitepress/dist/index.html ;;
+  build:docs)
+    [[ ! -f $TEST_FIXTURE/fail-docs-build ]]
+    mkdir -p docs/.vitepress/dist
+    if [[ ! -f $TEST_FIXTURE/missing-docs-output ]]; then
+      cp version docs/.vitepress/dist/index.html
+      mkdir -p docs/.vitepress/dist/assets
+      printf 'new asset\n' > docs/.vitepress/dist/assets/site.css
+    fi
+    ;;
   *) exit 1 ;;
 esac
 MOCK
@@ -75,8 +85,27 @@ set -eu
 if [[ -f $TEST_FIXTURE/fail-health && $(cat "$FOLDERGRAM_DEPLOY_ROOT/app/version") == new ]]; then exit 22; fi
 printf '{"ok":true,"storage":{"available":true,"usingInMemoryDatabase":false}}\n'
 MOCK
-chmod +x "$fixture/bin/pnpm" "$fixture/bin/pm2" "$fixture/bin/curl"
+cat > "$fixture/bin/rsync" <<'MOCK'
+#!/usr/bin/env bash
+set -eu
+if [[ ${!#} == "$FOLDERGRAM_DOCS_ROOT/" ]]; then
+  if [[ -f $TEST_FIXTURE/fail-docs-copy ]]; then
+    rm "$TEST_FIXTURE/fail-docs-copy"
+    printf 'partial copy\n' > "$FOLDERGRAM_DOCS_ROOT/index.html"
+    exit 23
+  fi
+  if [[ -f $TEST_FIXTURE/cancel-docs-copy ]]; then
+    rm "$TEST_FIXTURE/cancel-docs-copy"
+    printf 'interrupted copy\n' > "$FOLDERGRAM_DOCS_ROOT/index.html"
+    kill -TERM "$PPID"
+    exit 143
+  fi
+fi
+exec "$TEST_REAL_RSYNC" "$@"
+MOCK
+chmod +x "$fixture/bin/pnpm" "$fixture/bin/pm2" "$fixture/bin/curl" "$fixture/bin/rsync"
 export TEST_FIXTURE=$fixture
+export TEST_REAL_RSYNC=$real_rsync
 export FOLDERGRAM_DEPLOY_ROOT=$fixture/deploy
 export FOLDERGRAM_DOCS_ROOT=$fixture/docs
 export FOLDERGRAM_NODE_BIN=$fixture/bin
@@ -85,10 +114,11 @@ export FOLDERGRAM_HEALTH_DELAY=0
 
 assert_state() {
   local expected=$1
+  local expected_docs=${2:-$expected}
   [[ $(cat "$fixture/deploy/app/version") == "$expected" ]]
   [[ $(cat "$fixture/deploy/app/server/dist/index.js") == "$expected" ]]
   [[ $(cat "$fixture/deploy/app/node_modules/runtime") == "$expected" ]]
-  [[ $(cat "$fixture/docs/index.html") == "$expected" ]]
+  [[ $(cat "$fixture/docs/index.html") == "$expected_docs" ]]
   [[ $(cat "$fixture/deploy/app/data/gallery/photo.jpg") == primary-original ]]
   [[ $(cat "$fixture/deploy/app/data/external-gallery/photo.jpg") == secondary-original ]]
   grep -q '^PUBLIC_DEMO_MODE=1$' "$fixture/deploy/app/.env"
@@ -139,3 +169,75 @@ assert_state old
 [[ $(find "$fixture/deploy" -maxdepth 1 -name 'deploy-backup' | wc -l) == 1 ]]
 [[ -z $(find "$fixture/deploy" -maxdepth 1 \( -name '.release.*' -o -name '.deploy-backup.*' \) -print) ]]
 printf 'Deployment checks passed: tag validation, build failure, cancellation, schema rollback, persistent data, and single-backup replacement.\n'
+
+# Manual docs publishing must leave the running release and its backup alone.
+cp "$fixture/pm2-calls" "$fixture/pm2-before-docs"
+cp "$fixture/deploy/app/data/db/gallery.sqlite" "$fixture/db-before-docs"
+cp "$fixture/deploy/app/.env" "$fixture/env-before-docs"
+cp -a "$fixture/deploy/deploy-backup" "$fixture/release-backup-before-docs"
+: > "$fixture/pnpm-calls"
+
+assert_docs_isolation() {
+  [[ $(git -C "$fixture/deploy/app" rev-parse HEAD) == "$old_commit" ]]
+  [[ -z $(git -C "$fixture/deploy/app" status --porcelain) ]]
+  cmp "$fixture/pm2-calls" "$fixture/pm2-before-docs"
+  cmp "$fixture/deploy/app/data/db/gallery.sqlite" "$fixture/db-before-docs"
+  cmp "$fixture/deploy/app/.env" "$fixture/env-before-docs"
+  diff -qr "$fixture/deploy/deploy-backup" "$fixture/release-backup-before-docs"
+  [[ -z $(find "$fixture/deploy" -maxdepth 1 \( -name '.docs.*' -o -name '.docs-backup.*' \) -print) ]]
+}
+
+for command in "deploy-docs $new_commit; echo unsafe" 'deploy-docs main' "deploy-docs $new_commit extra"; do
+  if SSH_ORIGINAL_COMMAND="$command" bash "$script" > "$fixture/invalid-docs.log" 2>&1; then exit 1; fi
+done
+if SSH_ORIGINAL_COMMAND="deploy-docs $old_commit" bash "$script" > "$fixture/stale-docs.log" 2>&1; then exit 1; fi
+[[ ! -s $fixture/pnpm-calls ]]
+assert_state old
+assert_docs_isolation
+
+if (
+  flock -n 9 || exit 1
+  SSH_ORIGINAL_COMMAND="deploy-docs $new_commit" bash "$script"
+  # Keep this shell alive so reopening fd 9 in the child cannot release its lock.
+  exit "$?"
+) 9> "$fixture/deploy/.deploy.lock" > "$fixture/locked-docs.log" 2>&1; then exit 1; fi
+[[ ! -s $fixture/pnpm-calls ]]
+assert_state old
+assert_docs_isolation
+
+for failure in fail-docs-build missing-docs-output; do
+  touch "$fixture/$failure"
+  if SSH_ORIGINAL_COMMAND="deploy-docs $new_commit" bash "$script" > "$fixture/$failure.log" 2>&1; then exit 1; fi
+  assert_state old
+  assert_docs_isolation
+  rm "$fixture/$failure"
+done
+
+printf 'old asset\n' > "$fixture/docs/obsolete.css"
+for failure in fail-docs-copy cancel-docs-copy; do
+  touch "$fixture/$failure"
+  if SSH_ORIGINAL_COMMAND="deploy-docs $new_commit" bash "$script" > "$fixture/$failure.log" 2>&1; then exit 1; fi
+  assert_state old
+  [[ $(cat "$fixture/docs/obsolete.css") == 'old asset' ]]
+  [[ $(cat "$fixture/deploy/docs-backup/index.html") == old ]]
+  assert_docs_isolation
+done
+
+SSH_ORIGINAL_COMMAND="deploy-docs $new_commit" bash "$script" > "$fixture/docs-success.log" 2>&1
+assert_state old new
+[[ ! -e $fixture/docs/obsolete.css ]]
+[[ -r $fixture/docs/assets/site.css ]]
+[[ $(cat "$fixture/deploy/docs-backup/index.html") == old ]]
+assert_docs_isolation
+[[ $(grep -c '^build:docs$' "$fixture/pnpm-calls") -gt 0 ]]
+if grep -qx build "$fixture/pnpm-calls"; then exit 1; fi
+
+bash "$script" docs "$new_commit" > "$fixture/docs-repeat.log" 2>&1
+assert_state old new
+[[ $(cat "$fixture/deploy/docs-backup/index.html") == new ]]
+assert_docs_isolation
+
+# The next tagged release replaces the manually published docs as usual.
+bash "$script" v1.0.0 "$old_commit" > "$fixture/release-after-docs.log" 2>&1
+assert_state old
+printf 'Manual docs checks passed: main-only commits, command validation, shared locking, build failure, missing output, copy rollback, cancellation, repeat publishing, and release isolation.\n'

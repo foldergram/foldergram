@@ -1,6 +1,6 @@
 ---
 title: FAQ
-description: Short answers to common questions about Foldergram's actual scope and behavior.
+description: Answers about organizing media, scanning, playback, sharing, and access.
 ---
 
 # FAQ
@@ -13,9 +13,12 @@ No. Foldergram is self-hosted and local-first. It can optionally connect to your
 
 Foldergram does not upload your media. For local sources, originals stay in the configured gallery root. With the optional [Immich integration](./immich.md), originals remain on your Immich server. Foldergram synchronizes selected remote metadata into SQLite and fetches thumbnails, previews and video playback files on demand through the Immich API. Original downloads are optional and disabled by default.
 
-## Does it scan files directly during API requests?
+## Do I need to scan the library every time I open Foldergram?
 
-Local filesystem scanning runs as a separate service. Local browsing reads SQLite and derivative files, generating missing derivatives on demand in lazy mode. Immich metadata synchronization also runs separately; remote media requests can fetch files from Immich or its private Foldergram cache. During Immich outages, affected sources show an unavailable state with Retry while local content remains usable.
+No. Foldergram saves the library index and uses it when you browse or restart
+the app. After adding, moving, or removing local files, run **Scan for changes**
+from **Settings → Scan & Library**. A fresh installation scans automatically.
+Immich connections have their own sync controls in **Settings → Sources**.
 
 ## Are files in the gallery root indexed?
 
@@ -66,15 +69,14 @@ Changing env-backed rules requires a restart. Changing custom rules in
 
 ## Are likes shared with other users?
 
-Admin and viewer sessions share SQLite likes for the current library.
+Admins and viewers share the library's likes, which are saved on the server.
 
 Anonymous public sessions do not write to SQLite likes. They use browser-local
 favorites only.
 
 ## Are saved posts and collections shared with other users?
 
-Admin and viewer sessions use shared SQLite collections for the current
-library.
+Admins and viewers share the library's saved posts and collections.
 
 Anonymous public sessions use browser-local saved posts and collections stored
 in `localStorage`.
@@ -102,7 +104,7 @@ scans continue.
 
 It has optional role-based password protection for the app instance.
 
-The current implementation supports:
+You can configure:
 
 - an `admin` password with full access
 - an optional `viewer` password with browse-only access and shared likes
@@ -178,10 +180,10 @@ local-origin mutation check is an additional safeguard around mutating routes.
 
 ## Does the app support remote multi-user access?
 
-Not as a documented or hardened product target in the current repository.
-
-The intended scope is still a single-user or shared-household local deployment,
-not a full multi-user media portal.
+Foldergram provides shared admin and viewer passwords and folder-specific
+shares. It does not provide individual user accounts or separate libraries
+and permissions for each person. Read [Security](./security.md) before making
+an instance accessible outside your household or trusted network.
 
 ## Can anyone browse the app anonymously?
 
@@ -190,6 +192,14 @@ Yes, if an admin enables `viewer_access_mode=public` from Settings.
 In that mode, visitors can browse immediately and keep favorites only in the
 current browser, alongside browser-local saved collections. Admin-only controls
 still require unlocking with the admin password.
+
+## Where can I get help or share feedback?
+
+Join the [Foldergram Discord server](https://discord.gg/XPMu6b2NjB) for community help and general questions. Use [GitHub Discussions](https://github.com/foldergram/foldergram/discussions) for longer discussions and [GitHub Issues](https://github.com/foldergram/foldergram/issues) for bug reports.
+
+## How can I support Foldergram?
+
+You can support ongoing development [on Patreon](https://www.patreon.com/sajjadalis). GitHub stars, contributions, bug reports, and sharing Foldergram are also appreciated.
 
 ## How do I create a post with several photos or videos?
 

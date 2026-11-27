@@ -1,6 +1,6 @@
 ---
 title: Troubleshooting
-description: Common Foldergram issues and the exact implementation details behind them.
+description: Diagnose and resolve storage, scanning, playback, and access problems.
 ---
 
 # Troubleshooting

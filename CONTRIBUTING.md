@@ -118,6 +118,15 @@ GitHub loads PR templates from the default branch. Maintainers should synchroniz
 
 ## Pull Requests
 
+The public documentation under `docs/` is for people installing and using
+Foldergram and for developers preparing contributions. Write around a reader's
+task, with steps they can follow and outcomes they can check. Keep
+project-hosting procedures and release operations in the
+[deployment guide](scripts/DEPLOYMENT.md), and keep experimental validation
+reports alongside the relevant code or tests. API and architecture references
+can explain implementation details when they help a developer use or change
+the system.
+
 - Confirm the base branch is `develop`, unless a maintainer explicitly requested a release, hotfix, or contributor-guidance PR against `main`.
 - Link the related issue or discussion when one exists.
 - Explain the user-visible behavior change clearly.

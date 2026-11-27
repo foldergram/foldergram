@@ -58,7 +58,9 @@ export default defineConfig({
       { text: 'Demo', link: 'https://demo.foldergram.app/' }
     ],
     socialLinks: [
-      { icon: 'github', link: 'https://github.com/foldergram/foldergram' }
+      { icon: 'github', link: 'https://github.com/foldergram/foldergram' },
+      { icon: 'discord', link: 'https://discord.gg/XPMu6b2NjB', ariaLabel: 'Join Discord' },
+      { icon: 'patreon', link: 'https://www.patreon.com/sajjadalis', ariaLabel: 'Support on Patreon' }
     ],
     sidebar: [
       {

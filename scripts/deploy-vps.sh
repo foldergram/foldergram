@@ -12,15 +12,17 @@ if [[ -n ${SSH_ORIGINAL_COMMAND+x} ]]; then
   fi
   if [[ $SSH_ORIGINAL_COMMAND =~ ^deploy\ (v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?)\ ([0-9a-f]{40})$ ]]; then
     set -- "${BASH_REMATCH[1]}" "${BASH_REMATCH[3]}"
+  elif [[ $SSH_ORIGINAL_COMMAND =~ ^deploy-docs\ ([0-9a-f]{40})$ ]]; then
+    set -- docs "${BASH_REMATCH[1]}"
   else
-    fail 'only check or deploy <version-tag> <commit-sha> is allowed'
+    fail 'only check, deploy <version-tag> <commit-sha>, or deploy-docs <commit-sha> is allowed'
   fi
 fi
 
-[[ $# == 2 ]] || fail 'expected a version tag and commit SHA'
+[[ $# == 2 ]] || fail 'expected a version tag (or docs) and commit SHA'
 tag=$1
 commit=$2
-[[ $tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$ ]] || fail 'invalid version tag'
+[[ $tag == docs || $tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$ ]] || fail 'invalid deployment target'
 [[ $commit =~ ^[0-9a-f]{40}$ ]] || fail 'invalid commit SHA'
 
 deploy_root=${FOLDERGRAM_DEPLOY_ROOT:-/srv/foldergram}
@@ -33,12 +35,71 @@ health_url=${FOLDERGRAM_HEALTH_URL:-http://127.0.0.1:4141/api/health}
 health_attempts=${FOLDERGRAM_HEALTH_ATTEMPTS:-30}
 health_delay=${FOLDERGRAM_HEALTH_DELAY:-2}
 export PATH="$node_bin:/usr/local/bin:/usr/bin:/bin"
-[[ -d $app_root/.git && -f $app_root/.env && -f $app_root/data/db/gallery.sqlite ]] || fail 'application layout is incomplete'
-[[ -d $docs_root && -f $ecosystem && -x $node_bin/node ]] || fail 'deployment configuration is incomplete'
+[[ -d $app_root/.git && -d $docs_root && -x $node_bin/node ]] || fail 'deployment configuration is incomplete'
+if [[ $tag != docs ]]; then
+  [[ -f $app_root/.env && -f $app_root/data/db/gallery.sqlite && -f $ecosystem ]] || fail 'application layout is incomplete'
+fi
 [[ -z $(git -C "$app_root" status --porcelain) ]] || fail 'server checkout has uncommitted changes'
 
 exec 9> "$deploy_root/.deploy.lock"
 flock -n 9 || fail 'another deployment is running'
+
+if [[ $tag == docs ]]; then
+  docs_stage=
+  docs_backup_work=
+  docs_publishing=0
+  docs_backup_root=$deploy_root/docs-backup
+
+  cleanup_docs() {
+    [[ -z $docs_stage ]] || rm -rf -- "$docs_stage"
+    [[ -z $docs_backup_work ]] || rm -rf -- "$docs_backup_work"
+  }
+
+  rollback_docs() {
+    local status=${1:-$?}
+    trap - ERR HUP INT TERM
+    if [[ $docs_publishing == 1 ]]; then
+      printf 'Restoring the previous documentation.\n' >&2
+      if ! rsync -ac --delete "$docs_backup_root/" "$docs_root/"; then
+        printf 'Documentation recovery is incomplete. Backup: %s\n' "$docs_backup_root" >&2
+      fi
+    fi
+    exit "$status"
+  }
+
+  trap cleanup_docs EXIT
+  trap rollback_docs ERR
+  trap 'rollback_docs 130' INT
+  trap 'rollback_docs 143' HUP TERM
+
+  git -C "$app_root" fetch --no-tags origin refs/heads/main
+  resolved=$(git -C "$app_root" rev-parse --verify 'FETCH_HEAD^{commit}')
+  [[ $resolved == "$commit" ]] || fail 'main no longer matches the workflow commit; run the workflow again'
+  if git -C "$app_root" ls-tree -r --name-only "$commit" -- .env data | grep -vE '^data/(.*/)?\.gitkeep$'; then
+    fail 'documentation source tracks files in .env or data/'
+  fi
+
+  docs_stage=$(mktemp -d "$deploy_root/.docs.XXXXXX")
+  git -C "$app_root" archive "$commit" | tar -x -C "$docs_stage"
+  (
+    cd "$docs_stage"
+    CI=1 pnpm install --frozen-lockfile --prod=false
+    pnpm build:docs
+  )
+  [[ -f $docs_stage/docs/.vitepress/dist/index.html ]] || fail 'documentation build output is incomplete'
+
+  docs_backup_work=$(mktemp -d "$deploy_root/.docs-backup.XXXXXX")
+  rsync -a "$docs_root/" "$docs_backup_work/"
+  rm -rf -- "$docs_backup_root"
+  mv "$docs_backup_work" "$docs_backup_root"
+  docs_backup_work=
+
+  docs_publishing=1
+  rsync -ac --delete --chmod=D755,F644 "$docs_stage/docs/.vitepress/dist/" "$docs_root/"
+  docs_publishing=0
+  printf 'Deployed docs from main (%s); rollback backup: %s\n' "$commit" "$docs_backup_root"
+  exit 0
+fi
 
 stage=
 backup_work=

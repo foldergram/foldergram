@@ -31,7 +31,7 @@ features:
       width: "36"
       height: "36"
     title: Fast feed-style browsing
-    details: Runtime reads come from SQLite and pre-generated derivatives instead of live filesystem walks. Pagination, lazy loading, and three feed modes keep browsing snappy.
+    details: Browse your indexed library in Recent, Rediscover, or Random order. More posts load as you scroll, without rescanning your folders for every page.
   - icon:
       src: /icons/media.svg
       width: "36"
@@ -54,8 +54,8 @@ features:
 <div class="cs-feature-icon">
 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
 </div>
-<h3>What ships today</h3>
-<p>Home (Recent, Rediscover, Random feed modes), Reels, Explore, Library, Places, Collections, Trash, Folder pages, post detail and modal, Likes, saved posts, Moments or Highlights, folder stories, Settings, and local scan and rebuild tooling.</p>
+<h3>Browse and organize your library</h3>
+<p>Scroll through photos and videos in Home, watch videos in Reels, and find albums in Library. Save posts into collections, browse GPS-tagged photos by place, or share selected folders with other people.</p>
 </div>
 
 <div class="cs-feature">
@@ -63,7 +63,7 @@ features:
 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
 </div>
 <h3>How indexing works</h3>
-<p>Foldergram walks <code>GALLERY_ROOT</code> recursively, skipping hidden paths. Files directly at the gallery root are ignored, while ordinary nested folders that directly contain supported media become separate albums. In the default reserved modes, <code>stories/</code> descendants provide stories and highlights, and media in <code>carousels/Post name/</code> becomes a post in its owning App Folder instead of making those reserved descendants separate albums; a valid carousel child can also qualify a carousel-only owner as an App Folder.</p>
+<p>Put photos and videos in subfolders of your gallery, then scan them into Foldergram. Ordinary, non-hidden folders with supported media directly inside become albums. By default, <code>stories/</code> provides folder stories and <code>carousels/Post name/</code> groups media into posts in the owning album; these reserved folders do not become separate albums. Files placed directly in the gallery root are ignored.</p>
 </div>
 
 <div class="cs-feature">
@@ -71,7 +71,7 @@ features:
 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
 </div>
 <h3>Formats and storage</h3>
-<p>Images: <code>.jpg</code>, <code>.jpeg</code>, <code>.png</code>, <code>.webp</code>, <code>.gif</code>, <code>.avif</code>. Videos: <code>.mp4</code>, <code>.mov</code>, <code>.m4v</code>, <code>.webm</code>, <code>.mkv</code>. Originals are never moved. SQLite stores metadata. Thumbnails and previews are written under <code>thumbnails/</code> and <code>previews/</code>.</p>
+<p>Browse common photo and video formats, including JPEG, PNG, WebP, GIF, AVIF, MP4, MOV, and WebM. Foldergram indexes originals in place and stores its database, thumbnails, previews, and temporary video cache separately.</p>
 </div>
 
 <div class="cs-feature">
@@ -91,13 +91,13 @@ features:
 <div class="cs-feature">
 <div class="cs-feature-step">1</div>
 <h3>Discover folders</h3>
-<p>Walk the gallery tree, skip hidden paths, and collect every non-hidden folder that directly contains supported media files. In reserved carousel mode, a folder also qualifies when its <code>carousels/</code> directory has an immediate child containing supported media directly.</p>
+<p>Point Foldergram at a local gallery and run a scan. It finds photos and videos in subfolders and adds those folders as albums.</p>
 </div>
 
 <div class="cs-feature">
 <div class="cs-feature-step">2</div>
 <h3>Index posts</h3>
-<p>Store normalized paths, media metadata, EXIF timestamps, stable sort order, optional place assignments, and playback strategy in SQLite. Missing files are soft-deleted rather than hard-removed.</p>
+<p>The scan saves your library index so you can browse without rescanning every time. Capture dates help order your posts, and GPS metadata can be used to group photos by place.</p>
 </div>
 
 <div class="cs-feature">
@@ -108,8 +108,8 @@ features:
 
 <div class="cs-feature">
 <div class="cs-feature-step">4</div>
-<h3>Serve fast reads</h3>
-<p>Feed, folder, reels, explore, likes, and moments pages all read from SQLite and serve derivative URLs — no filesystem walk per request.</p>
+<h3>Browse your library</h3>
+<p>Open the feed, explore folders, or watch videos in Reels. Run another scan after adding, moving, or removing local media to bring the library up to date.</p>
 </div>
 
 <div class="cs-feature">
@@ -125,6 +125,12 @@ features:
 </div>
 
 </div>
+
+## Community and support
+
+Join our [Discord community](https://discord.gg/XPMu6b2NjB) to ask questions, share ideas, and connect with other Foldergram users. For longer discussions or bug reports, visit [GitHub Discussions](https://github.com/foldergram/foldergram/discussions) or [GitHub Issues](https://github.com/foldergram/foldergram/issues).
+
+If you enjoy Foldergram, consider [supporting its development on Patreon](https://www.patreon.com/sajjadalis). Your support helps keep the project actively maintained and moving forward.
 
 <section class="featured-on" aria-labelledby="featured-on-title">
   <p id="featured-on-title" class="featured-on-title">Featured on</p>
