@@ -75,7 +75,9 @@ export const useReelsStore = defineStore('reels', {
     openReelRequestId: 0
   }),
   getters: {
-    activeItem: (state) => state.items.find((item) => item.id === state.activeReelId) ?? state.items[0] ?? null
+    activeItem: (state) => state.items.find((item) => item.id === state.activeReelId) ?? state.items[0] ?? null,
+    isInitialLoading: (state) => state.loading && !state.initialized,
+    isLoadingMore: (state) => state.loading && state.initialized && state.items.length > 0
   },
   actions: {
     syncModeWithDefault(force = false) {
