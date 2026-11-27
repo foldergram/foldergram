@@ -35,9 +35,15 @@
       </ReelPlayerCard>
     </div>
 
-    <div v-if="loading && items.length > 0" class="reel-deck__status" role="status" aria-live="polite">
-      {{ t('reels.view.loadingMore') }}
-    </div>
+    <div
+      v-if="loading && items.length > 0"
+      class="reel-deck__panel"
+      :style="{ '--reel-item-ratio': lastRatio }"
+      role="status"
+      :aria-label="t('reels.view.loadingMore')"
+  >
+      <div class="reel-deck__skeleton" aria-hidden="true" />
+  </div>
   </section>
 </template>
 
@@ -426,12 +432,32 @@ defineExpose({
   }
 }
 
-.reel-deck__status {
-  padding: 0.75rem 0 1.5rem;
-  text-align: center;
-  font-size: 0.78rem;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  color: rgba(255, 255, 255, 0.68);
+.reel-deck__skeleton {
+  width: min(100%, calc(100cqh * var(--reel-item-ratio)));
+  aspect-ratio: var(--reel-item-ratio);
+  max-height: 100%;
+  border-radius: 1rem;
+  background: linear-gradient(100deg, var(--surface) 40%, color-mix(in srgb, var(--text) 8%, var(--surface)) 50%, var(--surface) 60%);
+  background-size: 200% 100%;
+  animation: reels-skeleton-shimmer 1.4s ease infinite;
 }
-</style>
+
+  @keyframes reels-skeleton-shimmer {
+    from { background-position: 200% 0; }
+    to { background-position: -200% 0; }
+  }
+
+  @media (max-width: 767.98px) {
+    .reel-deck__skeleton {
+      width: 100%;
+      height: 100%;
+      aspect-ratio: auto;
+      border-radius: 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .reel-deck__skeleton {
+      animation: none;
+    }
+  }
