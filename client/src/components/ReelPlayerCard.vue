@@ -152,7 +152,18 @@ const props = defineProps<{
   videoPreparation?: ReelVideoPreparation;
   externalMetadata?: boolean;
 }>();
+const emit = defineEmits<{
+  videoReady: [reelId: number];
+}>();
 
+  const videoReadyEmitted = ref(false);
+
+  function emitVideoReady() {
+    if (videoReadyEmitted.value) return;
+    videoReadyEmitted.value = true;
+    emit('videoReady', props.item.id);
+  }
+  
 const { t } = useI18n();
 const appStore = useAppStore();
 const videoMuteStorage = createVideoMuteStorage(() => appStore.videoMuted);
@@ -287,21 +298,31 @@ function bindPlayerEventListeners(player: MediaPlayerElement | null) {
   const handlePause = () => {
     isPaused.value = props.active;
   };
+  const handleCanPlay = () => {
+    handleReady();
+    emitVideoReady();
+  };
+  const handleVideoFailed = () => {
+    emitVideoReady();
+  };
 
   player.addEventListener('loaded-metadata', handleReady);
-  player.addEventListener('can-play', handleReady);
+  player.addEventListener('can-play', handleCanPlay);
+  player.addEventListener('error', handleVideoFailed);
   player.addEventListener('play', handlePlay);
   player.addEventListener('pause', handlePause);
 
   removePlayerEventListeners = () => {
     player.removeEventListener('loaded-metadata', handleReady);
-    player.removeEventListener('can-play', handleReady);
+    player.removeEventListener('can-play', handleCanPlay);
+    player.removeEventListener('error', handleVideoFailed);
     player.removeEventListener('play', handlePlay);
     player.removeEventListener('pause', handlePause);
   };
 
   if (player.hasAttribute('data-can-play')) {
     void syncPlayback();
+    emitVideoReady();
   }
 }
 
@@ -378,7 +399,14 @@ watch(
     resetAutoplayRetry();
     isUsingOriginalFallback.value = false;
     isPaused.value = false;
+    videoReadyEmitted.value = false;
   }
+);
+  watch(
+    () => streaming.state.value.failed,
+    (failed) => {
+      if (failed) emitVideoReady();
+    }
 );
 
 watch(
