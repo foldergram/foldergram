@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => ({
   watcher: null as FSWatcher | null,
   ready: Promise.resolve(),
   config: {
-    isDevelopment: true, galleryRoot: '', galleryExcludedFolders: [], managedGalleryRelativeIgnores: []
+    isDevelopment: true, galleryWatchEnabled: true, galleryRoot: '', galleryExcludedFolders: [], managedGalleryRelativeIgnores: []
   }
 }));
 

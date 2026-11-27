@@ -25,6 +25,7 @@ yourself.
 | `DATA_DIR` | unset | Optional alias that falls back into `DATA_ROOT` resolution when `DATA_ROOT` is absent. |
 | `GALLERY_ROOT` | `DATA_ROOT/gallery` | Primary media root. Add other locations in **Settings → Sources**. |
 | `GALLERY_EXCLUDED_FOLDERS` | unset | Comma-separated folder exclusion rules. Names match anywhere in the gallery tree; values with a slash match one exact path relative to each local source root. |
+| `GALLERY_WATCH_ENABLED` | `false` | Opt in to automatic filesystem scans in development after a manual scan or rebuild. Must be `true` or `false`; ignored in production. |
 | `DB_DIR` | `./data/db` | SQLite directory. Database file is `gallery.sqlite`, and startup Dbmate migrations run against it automatically when the directory is available. |
 | `THUMBNAILS_DIR` | `./data/thumbnails` | Generated thumbnail output root. |
 | `PREVIEWS_DIR` | `./data/previews` | Generated preview output root. |
@@ -37,7 +38,7 @@ yourself.
 | `HEIC_ENABLED` | unset | Optional override for experimental local HEIC/HEIF imports. Either `true` or `false` takes precedence over the saved setting and locks the toggle. |
 | `DERIVATIVE_MODE` | `eager` | Generate derivatives during scans or lazily on the first protected derivative request. |
 | `LOG_VERBOSE` | `0` | Truthy values are `1`, `true`, `yes`, and `on`. |
-| `SCAN_MEDIA_ERROR_MODE` | `skip` | `skip` reports supported-media scan failures and continues. `fail` aborts on the first such error. |
+| `SCAN_MEDIA_ERROR_MODE` | `skip` | `skip` reports media and subtree directory-read failures and continues. `fail` aborts on the first such error. Source-root read failures always stop the scan. |
 | `SCAN_DISCOVERY_CONCURRENCY` | `4` | Discovery concurrency, validated from `1` to `32`. |
 | `SCAN_DERIVATIVE_CONCURRENCY` | `4` | Derivative concurrency, validated from `1` to `32`. |
 | `PUBLIC_DEMO_MODE` | `0` | Blocks API writes for read-only demos. Streaming can still open and close playback sessions. |
@@ -251,7 +252,8 @@ This works alongside both rule sources without changing them. The marker name
 is fixed: there is no environment variable or Settings control to configure it,
 and the file contents are ignored. A marker directly in `GALLERY_ROOT` is ignored.
 
-In development mode, adding or removing a marker requests a debounced full scan,
+With development watching enabled (`GALLERY_WATCH_ENABLED=true`), adding or
+removing a marker requests a debounced full scan,
 as does replacing a marker with a symlink or replacing a symlink with a regular
 marker file. Content-only changes do not request a scan.
 In Docker or other production deployments, run a manual full scan after changing
@@ -373,6 +375,9 @@ Behavior:
 
 - `skip` is the default
 - `skip` reports supported-media failures during stat, metadata, derivative generation, and derivative-migration repair work, then continues scanning the rest of the library
+- directory read failures below a source root also report an error and skip that subtree; its existing indexed media, avatars, and folder scan state are preserved while readable sibling folders continue through indexing and derivative generation
+- story capsules and carousel post directories are skipped independently; incomplete discovery defers carousel history transfers and keeps a carousel folder-mode change pending until a later complete directory scan
+- a source-root read failure always stops the scan; unreadable content can be retried on the next scan
 - scans with skipped media finish as `completed_with_errors` instead of `completed`
 - admin-facing scan details keep a short sample in SQLite and point to the full per-run report under `<DATA_ROOT>/scan-errors/`
 - `fail` preserves fail-fast behavior for those same scan-time media errors

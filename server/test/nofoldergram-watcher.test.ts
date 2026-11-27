@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   readMarkerState: vi.fn().mockResolvedValue(false),
   config: {
     isDevelopment: true,
+    galleryWatchEnabled: true,
     galleryRoot: '/gallery',
     galleryExcludedFolders: ['EnvBlocked'],
     managedGalleryRelativeIgnores: ['thumbnails']
@@ -47,6 +48,7 @@ describe('exclusion marker watcher events', () => {
     mocks.readMarkerState.mockReset().mockResolvedValue(false);
     mocks.getSetting.mockReturnValue('SettingsBlocked');
     mocks.config.isDevelopment = true;
+    mocks.config.galleryWatchEnabled = true;
     mocks.watch.mockReturnValue({ on: mocks.on, close: mocks.close });
     mocks.on.mockImplementation((name, callback) => {
       if (name === 'ready') callback();
@@ -179,5 +181,18 @@ describe('exclusion marker watcher events', () => {
     mocks.config.isDevelopment = false;
     await watcherService.start();
     expect(mocks.watch).not.toHaveBeenCalled();
+  });
+
+  it('keeps pasted folders unindexed when development watching is disabled', async () => {
+    await watcherService.stop();
+    mocks.watch.mockClear();
+    mocks.config.galleryWatchEnabled = false;
+
+    await watcherService.start();
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(mocks.watch).not.toHaveBeenCalled();
+    expect(mocks.scanAll).not.toHaveBeenCalled();
+    expect(mocks.scanChangedPaths).not.toHaveBeenCalled();
   });
 });

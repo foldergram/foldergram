@@ -94,7 +94,7 @@ async function bootstrap(): Promise<void> {
       return;
     }
 
-    if (startupAction === "idle" && appConfig.isDevelopment) {
+    if (startupAction === "idle" && appConfig.isDevelopment && appConfig.galleryWatchEnabled) {
       log.info(
         "Gallery watcher idle until a user-triggered scan or rebuild starts it",
       );

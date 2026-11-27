@@ -52,7 +52,7 @@ Connect your Immich folders and albums to enjoy Foldergram's browsing experience
 - Settings split into `General Settings` for Home/Reels defaults, language selection, stories and carousel folder modes, and excluded folders, plus `Scan & Library` for scan and rebuild actions.
 - Phase-aware scan progress for first indexing, derivative migration, and rebuilds.
 - A web app manifest plus production service worker registration.
-- A debounced filesystem watcher in development mode only.
+- An optional debounced filesystem watcher in development mode, disabled by default.
 - No multi-user accounts, cloud uploads, comments, messaging, or notifications. Local sources need no remote APIs; the optional [Immich integration](docs/immich.md) synchronizes remote metadata and fetches media through its read-only API.
 
 ## How It Works
@@ -272,6 +272,7 @@ demand and must be writable when skip mode produces scan reports.
 | `DERIVATIVE_MODE`             | `eager`             | Generate derivatives during scans or lazily on first request.             |
 | `LOG_VERBOSE`                 | `0`                 | Truthy values are `1`, `true`, `yes`, and `on`.                           |
 | `SCAN_MEDIA_ERROR_MODE`       | `skip`              | Use `skip` to report supported-media failures and continue, or `fail`.    |
+| `GALLERY_WATCH_ENABLED`       | `false`             | Opt in to automatic gallery scans in development after a manual scan or rebuild. Production never watches. |
 | `SCAN_DISCOVERY_CONCURRENCY`  | `4`                 | Folder discovery concurrency.                                             |
 | `SCAN_DERIVATIVE_CONCURRENCY` | `4`                 | Derivative generation concurrency.                                        |
 | `PUBLIC_DEMO_MODE`            | `0`                 | Blocks library changes in public demos and allows video playback.        |
@@ -329,6 +330,7 @@ derivatives follow the usual retention and cleanup rules.
 - `DERIVATIVE_MODE=eager` generates thumbnails and any required previews during scans.
 - `DERIVATIVE_MODE=lazy` generates those files when first requested and saves them for later.
 - `SCAN_MEDIA_ERROR_MODE=skip` reports supported image and video processing failures, skips those files, and lets the scan finish as `completed_with_errors`.
+- Directory read failures below a source root also preserve the skipped subtree's index and let readable sibling folders finish indexing and generating derivatives. Source-root read failures still stop the scan.
 - `SCAN_MEDIA_ERROR_MODE=fail` preserves fail-fast behavior for those same scan-time media errors.
 - When a scan records skipped media failures, Foldergram stores a short sample in SQLite, writes the full per-run report under `<DATA_ROOT>/scan-errors/`, and shows that report path in the admin Settings view.
 
