@@ -74,8 +74,11 @@ user performs a rebuild.
 
 ## Watcher behavior
 
-The development-only chokidar watcher starts after an admin scan or rebuild
-and batches changes with a `700ms` debounce. It runs outside request handling.
+Gallery watching is disabled by default, including in development. Set
+`GALLERY_WATCH_ENABLED=true` to opt in to the development-only chokidar watcher.
+When enabled, it starts after an admin scan or rebuild and batches changes with
+a `700ms` debounce. It runs outside request handling. Production never starts
+the watcher.
 
 Directory additions and removals trigger a full rescan. Media changes and
 companion `.txt` or `.nfo` additions, edits, and removals use the incremental

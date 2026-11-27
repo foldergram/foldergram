@@ -82,7 +82,8 @@ the marker and scanning again reactivates matching records with their existing
 identity and sort order. Originals remain untouched, and generated derivatives
 follow the existing retention and cleanup behavior.
 
-The development watcher requests one debounced full scan when markers are added
+When enabled with `GALLERY_WATCH_ENABLED=true`, the development watcher requests
+one debounced full scan when markers are added
 or removed, including atomic replacements that change whether the marker is a
 regular file. Changing its contents or replacing a regular marker with another
 regular file does not request a scan. Docker and other production deployments
@@ -214,6 +215,25 @@ During a full scan, Foldergram:
 10. Performs deferred stale-derivative cleanup after successful scans.
 11. Writes scan status to `scan_runs` and, when needed, a per-run full scan error report.
 
+In the default `SCAN_MEDIA_ERROR_MODE=skip` mode, a directory read failure below
+the source root is reported while readable sibling folders continue through
+indexing and derivative generation. Foldergram preserves indexed content and
+scan state for the skipped subtree, including its stories and carousels, rather
+than treating unreadable files as removed. A later scan retries those folders.
+The run finishes as `completed_with_errors` when readable media remains; the
+existing confirmation requirement for an unexpectedly empty source still applies.
+A source-root read failure or
+`SCAN_MEDIA_ERROR_MODE=fail` still stops the scan without reconciling removals
+from an incomplete discovery.
+
+Reserved story capsules and carousel post directories are handled independently,
+so one unreadable child does not skip its readable siblings. All observed
+carousel destinations remain available for ownership validation. When directory
+discovery is incomplete, carousel renames and transfers of post history are
+deferred until a later complete scan; existing memberships and history are
+preserved. Readable existing posts can still update their contents. A selected
+carousel folder-mode change remains pending until directory discovery completes.
+
 Library activity shows the latest scan separately from earlier scan issues.
 Acknowledge saves the displayed issues as reviewed in SQLite's existing
 `app_settings` table. These acknowledgements apply to the whole instance across
@@ -263,8 +283,10 @@ while more folders are found.
 
 ## Incremental scans and watching
 
-The project includes a chokidar watcher for development. It batches changes with
-a `700ms` debounce window and chooses between:
+Gallery watching is off by default. Development installs can enable the chokidar
+watcher with `GALLERY_WATCH_ENABLED=true`; production does not watch the gallery.
+When enabled after a manual scan or rebuild, it batches changes with a `700ms`
+debounce window and chooses between:
 
 - a full rescan for directory add/remove events
 - an incremental scan for file-level changes

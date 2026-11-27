@@ -1,4 +1,4 @@
-import type { Stats } from 'node:fs';
+import type { Dirent, Stats } from 'node:fs';
 import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
 import { performance } from 'node:perf_hooks';
@@ -206,6 +206,22 @@ interface CarouselDiscovery {
   posts: PendingCarouselPost[];
   scopes: Array<{ folderId: number; rootPath: string; activePaths: string[] }>;
 }
+
+interface CarouselReconciliationResult {
+  preservedPaths: string[];
+  deferredPostOwners: Map<number, number>;
+}
+
+class ScanDirectoryReadError extends Error {
+  readonly code?: string;
+
+  constructor(readonly directoryPath: string, cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause });
+    this.code = (cause as NodeJS.ErrnoException | null)?.code;
+  }
+}
+
+type UnreadableFolderHandler = (relativePath: string, error: ScanDirectoryReadError) => Promise<void>;
 
 class SourcePathAccessError extends Error {
   constructor(targetPath: string, cause: unknown) {
@@ -655,6 +671,21 @@ class ScannerService {
 
   private scanTask<T>(task: () => Promise<T>): Promise<T> {
     return this.activeOperation?.run(task) ?? task();
+  }
+
+  private readScanDirectory(directoryPath: string): Promise<Dirent[]> {
+    return this.scanTask(async () => {
+      try {
+        return await fs.readdir(directoryPath, { withFileTypes: true });
+      } catch (error) {
+        throw new ScanDirectoryReadError(directoryPath, error);
+      }
+    });
+  }
+
+  private async handleUnreadableFolder(relativePath: string, error: unknown, onUnreadableFolder: UnreadableFolderHandler): Promise<void> {
+    if (!(error instanceof ScanDirectoryReadError) || appConfig.scanMediaErrorMode === 'fail') throw error;
+    await onUnreadableFolder(relativePath, error);
   }
 
   private async runDiscoveryTasks<T>(items: T[], task: (item: T) => Promise<void>): Promise<void> {
@@ -1152,7 +1183,9 @@ class ScannerService {
     }
 
     const sampleLimit = Math.max(0, MAX_SCAN_ERROR_TEXT_LENGTH - reportNotice.length);
-    summary.error_text = `${errors.sampleText.slice(0, sampleLimit)}${reportNotice}`;
+    const errorText = summary.error_text && !errors.sampleText.includes(summary.error_text)
+      ? `${summary.error_text}\n${errors.sampleText}` : errors.sampleText;
+    summary.error_text = `${errorText.slice(0, sampleLimit)}${reportNotice}`;
   }
 
   private async applyScanWarnings(summary: ScanSummary, warnings: ScanErrorCollector): Promise<void> {
@@ -1262,6 +1295,7 @@ class ScannerService {
     context: ImageProcessingContext,
     currentAbsolutePath: string,
     onSourceFolder: (sourceFolder: SourceFolderCandidate) => Promise<boolean>,
+    onUnreadableFolder: UnreadableFolderHandler,
     currentRelativePath: string | null = null,
     treatStoriesAsFolders = this.shouldTreatStoriesAsFolders(),
     treatCarouselsAsFolders = this.shouldTreatCarouselsAsFolders(),
@@ -1277,7 +1311,7 @@ class ScannerService {
       currentFolder: currentRelativePath ? normalizePath(currentRelativePath) : ROOT_DISCOVERY_LABEL
     });
 
-    const entries = await this.scanTask(() => fs.readdir(currentAbsolutePath, { withFileTypes: true }));
+    const entries = await this.readScanDirectory(currentAbsolutePath);
 
     if (currentRelativePath && hasExclusionMarker(entries)) {
       onIntentionalExclusion(currentRelativePath);
@@ -1344,16 +1378,21 @@ class ScannerService {
         continue;
       }
 
-      await this.walkMediaSourceFolders(
-        context,
-        childDirectory.absolutePath,
-        onSourceFolder,
-        childDirectory.relativePath,
-        treatStoriesAsFolders,
-        treatCarouselsAsFolders,
-        excludedFolderRules,
-        onIntentionalExclusion
-      );
+      try {
+        await this.walkMediaSourceFolders(
+          context,
+          childDirectory.absolutePath,
+          onSourceFolder,
+          onUnreadableFolder,
+          childDirectory.relativePath,
+          treatStoriesAsFolders,
+          treatCarouselsAsFolders,
+          excludedFolderRules,
+          onIntentionalExclusion
+        );
+      } catch (error) {
+        await this.handleUnreadableFolder(childDirectory.relativePath, error, onUnreadableFolder);
+      }
     }
   }
 
@@ -1386,7 +1425,7 @@ class ScannerService {
   ): Promise<SourceFolderScanResult> {
     const sourceFolderPath = normalizePath(sourceFolder.relativePath);
     const folderStartedAt = performance.now();
-    const entries = await this.scanTask(() => fs.readdir(sourceFolder.absolutePath, { withFileTypes: true }));
+    const entries = await this.readScanDirectory(sourceFolder.absolutePath);
 
     if (hasExclusionMarker(entries)) {
       return this.clearIndexedFolder(sourceFolderPath);
@@ -1537,7 +1576,7 @@ class ScannerService {
       return [];
     }
 
-    const entries = await this.scanTask(() => fs.readdir(currentAbsolutePath, { withFileTypes: true }));
+    const entries = await this.readScanDirectory(currentAbsolutePath);
 
     if (hasExclusionMarker(entries)) {
       return [];
@@ -1581,9 +1620,10 @@ class ScannerService {
     errors: ScanErrorCollector,
     options: FullScanOptions,
     context: ImageProcessingContext,
-    excludedFolderRules: string[]
+    excludedFolderRules: string[],
+    onUnreadableFolder: UnreadableFolderHandler
   ): Promise<SourceFolderScanResult[]> {
-    const ownerEntries = await this.scanTask(() => fs.readdir(sourceFolder.absolutePath, { withFileTypes: true }));
+    const ownerEntries = await this.readScanDirectory(sourceFolder.absolutePath);
 
     if (hasExclusionMarker(ownerEntries)) {
       return [];
@@ -1609,7 +1649,13 @@ class ScannerService {
 
     const storiesAbsolutePath = path.join(sourceFolder.absolutePath, storiesDirectory.name);
     const storiesRelativePath = normalizePath(`${sourceFolder.relativePath}/${storiesDirectory.name}`);
-    const storiesEntries = await this.scanTask(() => fs.readdir(storiesAbsolutePath, { withFileTypes: true }));
+    let storiesEntries: Dirent[];
+    try {
+      storiesEntries = await this.readScanDirectory(storiesAbsolutePath);
+    } catch (error) {
+      await this.handleUnreadableFolder(storiesRelativePath, error, onUnreadableFolder);
+      return [];
+    }
 
     if (hasExclusionMarker(storiesEntries)) {
       return [];
@@ -1705,12 +1751,18 @@ class ScannerService {
       }
 
       const startedAt = performance.now();
-      const nestedFiles = await this.collectRecursiveMediaFiles(
-        context,
-        path.join(storiesAbsolutePath, entry.name),
-        capsuleRelativePath,
-        excludedFolderRules
-      );
+      let nestedFiles: IndexedFileReference[];
+      try {
+        nestedFiles = await this.collectRecursiveMediaFiles(
+          context,
+          path.join(storiesAbsolutePath, entry.name),
+          capsuleRelativePath,
+          excludedFolderRules
+        );
+      } catch (error) {
+        await this.handleUnreadableFolder(capsuleRelativePath, error, onUnreadableFolder);
+        continue;
+      }
       if (nestedFiles.length === 0) {
         continue;
       }
@@ -1768,9 +1820,10 @@ class ScannerService {
     options: FullScanOptions,
     context: ImageProcessingContext,
     discovery: CarouselDiscovery,
-    excludedFolderRules: string[]
+    excludedFolderRules: string[],
+    onUnreadableFolder: UnreadableFolderHandler
   ): Promise<ReservedCarouselScanResult> {
-    const ownerEntries = await this.scanTask(() => fs.readdir(sourceFolder.absolutePath, { withFileTypes: true }));
+    const ownerEntries = await this.readScanDirectory(sourceFolder.absolutePath);
 
     if (hasExclusionMarker(ownerEntries)) {
       return { ownerFolder: null, results: [] };
@@ -1796,7 +1849,13 @@ class ScannerService {
 
     const carouselsAbsolutePath = path.join(sourceFolder.absolutePath, carouselsDirectory.name);
     const carouselsRelativePath = normalizePath(`${sourceFolder.relativePath}/${carouselsDirectory.name}`);
-    const carouselsEntries = await this.scanTask(() => fs.readdir(carouselsAbsolutePath, { withFileTypes: true }));
+    let carouselsEntries: Dirent[];
+    try {
+      carouselsEntries = await this.readScanDirectory(carouselsAbsolutePath);
+    } catch (error) {
+      await this.handleUnreadableFolder(carouselsRelativePath, error, onUnreadableFolder);
+      return { ownerFolder: null, results: [] };
+    }
 
     if (hasExclusionMarker(carouselsEntries)) {
       const ownerFolder = existingFolders.find((folder) => (
@@ -1845,19 +1904,32 @@ class ScannerService {
       const postRelativePath = normalizePath(`${carouselsRelativePath}/${postEntry.name}`);
       const postAbsolutePath = path.join(carouselsAbsolutePath, postEntry.name);
 
-      const postDirEntries = await this.scanTask(() => fs.readdir(postAbsolutePath, { withFileTypes: true }));
+      let postDirEntries: Dirent[];
+      try {
+        postDirEntries = await this.readScanDirectory(postAbsolutePath);
+      } catch (error) {
+        await this.handleUnreadableFolder(postRelativePath, error, onUnreadableFolder);
+        activeCarouselPostPaths.push(postRelativePath);
+        continue;
+      }
 
       if (hasExclusionMarker(postDirEntries)) continue;
 
       const nestedDirs = postDirEntries.filter((e) => e.isDirectory() && !e.name.startsWith('.'));
       for (const nestedDir of nestedDirs) {
         const nestedRelPath = normalizePath(`${postRelativePath}/${nestedDir.name}`);
-        const nestedMedia = await this.collectRecursiveMediaFiles(
-          context,
-          path.join(postAbsolutePath, nestedDir.name),
-          nestedRelPath,
-          excludedFolderRules
-        );
+        let nestedMedia: IndexedFileReference[];
+        try {
+          nestedMedia = await this.collectRecursiveMediaFiles(
+            context,
+            path.join(postAbsolutePath, nestedDir.name),
+            nestedRelPath,
+            excludedFolderRules
+          );
+        } catch (error) {
+          await this.handleUnreadableFolder(nestedRelPath, error, onUnreadableFolder);
+          continue;
+        }
         if (nestedMedia.length > 0) {
           await warnings.add(
             formatScanError(nestedRelPath, 'Nested media subfolders inside carousel post directories are ignored.')
@@ -2033,10 +2105,17 @@ class ScannerService {
     }
   }
 
-  private async reconcileCarouselPosts(discovery: CarouselDiscovery, context: ImageProcessingContext): Promise<void> {
+  private async reconcileCarouselPosts(
+    discovery: CarouselDiscovery,
+    context: ImageProcessingContext,
+    unreadableFolderPaths: string[]
+  ): Promise<CarouselReconciliationResult> {
     const ownersByImage = new Map<number, number>();
     const destinationsByPost = new Map<number, Set<string>>();
     const sourceExists = new Map<number, boolean>();
+    const preservedPaths = new Set<string>(unreadableFolderPaths);
+    const deferredPostOwners = new Map<number, number>();
+    const discoveryIncomplete = unreadableFolderPaths.length > 0;
 
     // Discover every destination before any carousel can replace its memberships.
     // Otherwise the first directory visited could claim a split post's history.
@@ -2050,6 +2129,7 @@ class ScannerService {
         destinationsByPost.set(owner.id, destinations);
         if (
           owner.source_path !== pending.sourcePath &&
+          !discoveryIncomplete &&
           findReservedCarouselsOwnerPath(owner.source_path) !== null &&
           !sourceExists.has(owner.id)
         ) {
@@ -2075,7 +2155,7 @@ class ScannerService {
       let existingPost = postRepository.findByExactImageIds(imageIds) ?? destinationPost;
       if (!existingPost) {
         const previousPost = postRepository.findByUnambiguousImageMembership(imageIds);
-        if (previousPost && sourceExists.get(previousPost.id) === false) existingPost = previousPost;
+        if (previousPost && (discoveryIncomplete || sourceExists.get(previousPost.id) === false)) existingPost = previousPost;
       }
       if (destinationPost && existingPost && destinationPost.id !== existingPost.id) {
         throw new Error(
@@ -2091,6 +2171,18 @@ class ScannerService {
           `Cannot safely reconcile ${pending.sourcePath}: its slides already belong to a different indexed post. ` +
           'Keep existing posts separate and use a directory name that has not been indexed for a renamed carousel.'
         );
+      }
+      const destinationIncomplete = matchesRelativeRoot(pending.sourcePath, unreadableFolderPaths) ||
+        unreadableFolderPaths.some(folderPath => matchesRelativeRoot(folderPath, [pending.sourcePath]));
+      if (destinationIncomplete || (discoveryIncomplete && existingPost && existingPost.source_path !== pending.sourcePath)) {
+        // An unread destination can hide another part of a renamed/split post.
+        // Keep the observed destinations in validation above, but defer transfers.
+        preservedPaths.add(pending.sourcePath);
+        if (existingPost) {
+          preservedPaths.add(existingPost.source_path);
+          deferredPostOwners.set(existingPost.id, existingPost.folder_id);
+        }
+        continue;
       }
       plans.push({ pending, existingPost });
     }
@@ -2135,9 +2227,12 @@ class ScannerService {
         isTrashed: 0
       }, pending.images.map((image, index) => ({ imageId: image.id, position: index + 1 })));
     }
+    const deferredPostIds = new Set(deferredPostOwners.keys());
     for (const scope of discovery.scopes) {
-      postRepository.softDeleteMissingReservedCarousels(scope.folderId, scope.rootPath, scope.activePaths);
+      if (matchesRelativeRoot(scope.rootPath, unreadableFolderPaths)) continue;
+      postRepository.softDeleteMissingReservedCarousels(scope.folderId, scope.rootPath, [...scope.activePaths, ...preservedPaths], deferredPostIds);
     }
+    return { preservedPaths: [...preservedPaths], deferredPostOwners };
   }
 
   private async scanIndexedFolderFiles({
@@ -2597,6 +2692,7 @@ class ScannerService {
     );
 
     let sourceStatus: string | undefined;
+    let discoveryComplete = false;
     const operation = this.activeOperation;
     const repairKey = this.repairSettingKey(source.id);
     const eager = appConfig.derivativeMode !== 'lazy';
@@ -2746,6 +2842,16 @@ class ScannerService {
       };
 
       const carouselDiscovery: CarouselDiscovery = { posts: [], scopes: [] };
+      const unreadableFolderPaths: string[] = [];
+      const onUnreadableFolder: UnreadableFolderHandler = async (relativePath, error) => {
+        unreadableFolderPaths.push(relativePath);
+        const failedPath = getRelativeGalleryPath(checkedRoot, error.directoryPath);
+        const detail = formatScanError(failedPath, `${error.message}. Indexed content in ${relativePath} was preserved.`, {
+          sourcePath: error.directoryPath
+        });
+        await errors.add(detail);
+        log.error('Skipped unreadable gallery subtree', detail);
+      };
       await this.walkMediaSourceFolders(imageProcessingContext, checkedRoot, async (sourceFolder) => {
         discoveredSourceFolders += 1;
         const result = await this.scanSourceFolder(
@@ -2772,7 +2878,8 @@ class ScannerService {
             errors,
             options,
             imageProcessingContext,
-            excludedFolderRules
+            excludedFolderRules,
+            onUnreadableFolder
           );
 
           for (const storyResult of storyResults) {
@@ -2793,7 +2900,8 @@ class ScannerService {
             options,
             imageProcessingContext,
             carouselDiscovery,
-            excludedFolderRules
+            excludedFolderRules,
+            onUnreadableFolder
           );
           const ownerFolder = carouselScan.ownerFolder ?? result.folder;
           const carouselResults = carouselScan.results;
@@ -2814,7 +2922,7 @@ class ScannerService {
         });
         this.logProgress('folder');
         return result.discoveredDirectImages;
-      }, null, treatStoriesAsFolders, treatCarouselsAsFolders, excludedFolderRules, (excluded, exact) => {
+      }, onUnreadableFolder, null, treatStoriesAsFolders, treatCarouselsAsFolders, excludedFolderRules, (excluded, exact) => {
         if (indexedFolderPaths.has(excluded) || (!exact && [...indexedFolderPaths].some(folderPath => folderPath.startsWith(excluded + '/')))) {
           imageProcessingContext.intentionalExclusion = true;
         }
@@ -2826,8 +2934,33 @@ class ScannerService {
         !imageProcessingContext.intentionalExclusion &&
         (source.asset_count > 0 || imageRepository.hasIndexedAssets(source.id));
       if (emptyRequiresReview) throw new LocalPathError('The indexed location appears empty. Confirm before applying the empty scan.', 'empty_review');
-      if (treatCarouselsAsFolders) postRepository.softDeleteReservedCarouselsForLegacyMode(source.id);
-      await this.reconcileCarouselPosts(carouselDiscovery, imageProcessingContext);
+      if (treatCarouselsAsFolders) postRepository.softDeleteReservedCarouselsForLegacyMode(source.id, unreadableFolderPaths);
+      const { preservedPaths, deferredPostOwners } = await this.reconcileCarouselPosts(carouselDiscovery, imageProcessingContext, unreadableFolderPaths);
+      discoveryComplete = unreadableFolderPaths.length === 0;
+
+      // Preserve unreadable scopes and deferred carousel history, including owners
+      // with no readable direct media or carousel siblings in this run.
+      if (preservedPaths.length > 0 || deferredPostOwners.size > 0) {
+        const folders = folderRepository.getAll(source.id);
+        // A normal post's source path is a file, so preserve its owner by ID.
+        const preservedOwners = new Set(deferredPostOwners.values());
+        for (const folder of folders) {
+          if (!matchesRelativeRoot(folder.folder_path, preservedPaths)) continue;
+          imageProcessingContext.removals.delete(folder.id);
+          discoveredFolderIds.add(folder.id);
+          activeFolderPaths.add(folder.folder_path);
+          if (folder.carousel_owner_folder_id !== null) preservedOwners.add(folder.carousel_owner_folder_id);
+          if (folder.story_owner_folder_id !== null) preservedOwners.add(folder.story_owner_folder_id);
+        }
+        for (const folder of folders) {
+          if (!preservedOwners.has(folder.id)) continue;
+          if (!discoveredFolderIds.has(folder.id) && imageRepository.countByFolder(folder.id) > 0) {
+            imageProcessingContext.removals.set(folder.id, []);
+          }
+          discoveredFolderIds.add(folder.id);
+          activeFolderPaths.add(folder.folder_path);
+        }
+      }
       await operation?.checkpoint();
       summary.removed_files += this.applyPendingRemovals(imageProcessingContext);
 
@@ -2887,10 +3020,10 @@ class ScannerService {
           key: LAST_SUCCESSFUL_GALLERY_ROOT_SETTING_KEY,
           value: normalizePath(source.config.rootPath)
         },
-        {
+        ...(discoveryComplete ? [{
           key: CAROUSELS_APPLIED_MODE_SETTING_KEY,
           value: serializeTreatCarouselsAsFoldersSetting(treatCarouselsAsFolders)
-        }
+        }] : [])
       ]);
     }
 

@@ -32,7 +32,7 @@ class WatcherService {
   }
 
   async start(): Promise<void> {
-    if (this.watcher || !appConfig.isDevelopment) {
+    if (this.watcher || !appConfig.isDevelopment || !appConfig.galleryWatchEnabled) {
       return;
     }
 

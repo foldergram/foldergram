@@ -2,14 +2,17 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   AVIF_METADATA_REPAIR_VERSION_SETTING_KEY,
+  CAROUSELS_APPLIED_MODE_SETTING_KEY,
+  CAROUSELS_MIGRATION_DECISION_SETTING_KEY,
   DERIVATIVE_STORAGE_LAYOUT_VERSION_SETTING_KEY,
   DERIVATIVE_STORAGE_MIGRATION_COMPLETE_AT_SETTING_KEY,
   DERIVATIVE_STORAGE_MIGRATION_CURSOR_SETTING_KEY,
-  LAST_SUCCESSFUL_GALLERY_ROOT_SETTING_KEY
+  LAST_SUCCESSFUL_GALLERY_ROOT_SETTING_KEY,
+  TREAT_CAROUSELS_AS_FOLDERS_SETTING_KEY
 } from '../src/constants/app-setting-keys.js';
 import { getPreviewPathForAssetKey, getThumbnailPathForAssetKey } from '../src/utils/derivative-paths.js';
 import { createFingerprint, getMediaTypeFromExtension, getMimeTypeFromExtension, getPreviewRelativePath, getThumbnailRelativePath } from '../src/utils/image-utils.js';
@@ -95,10 +98,13 @@ describe.sequential('quick rescans and selective video previews', () => {
     maintenanceRepository.resetLibraryIndex();
     for (const key of [
       AVIF_METADATA_REPAIR_VERSION_SETTING_KEY,
+      CAROUSELS_APPLIED_MODE_SETTING_KEY,
+      CAROUSELS_MIGRATION_DECISION_SETTING_KEY,
       DERIVATIVE_STORAGE_LAYOUT_VERSION_SETTING_KEY,
       DERIVATIVE_STORAGE_MIGRATION_COMPLETE_AT_SETTING_KEY,
       DERIVATIVE_STORAGE_MIGRATION_CURSOR_SETTING_KEY,
-      LAST_SUCCESSFUL_GALLERY_ROOT_SETTING_KEY
+      LAST_SUCCESSFUL_GALLERY_ROOT_SETTING_KEY,
+      TREAT_CAROUSELS_AS_FOLDERS_SETTING_KEY
     ]) {
       appSettingsRepository.remove(key);
     }
@@ -168,11 +174,372 @@ describe.sequential('quick rescans and selective video previews', () => {
     await fs.rm(tempRoot, { recursive: true, force: true });
   });
 
+  afterEach(() => {
+    vi.restoreAllMocks();
+    appConfig.scanMediaErrorMode = 'skip';
+    appConfig.derivativeMode = 'eager';
+  });
+
+  function failReadingDirectory(relativePath: string) {
+    const absolutePath = path.join(appConfig.galleryRoot, relativePath);
+    const readdir = fs.readdir.bind(fs);
+    return vi.spyOn(fs, 'readdir').mockImplementation((...args) => {
+      if (String(args[0]) === absolutePath) {
+        return Promise.reject(Object.assign(new Error(`EIO: i/o error, scandir '${absolutePath}'`), {
+          code: 'EIO', syscall: 'scandir', path: absolutePath
+        }));
+      }
+      return readdir(...args);
+    });
+  }
+
+  async function writeMedia(relativePath: string, content = relativePath): Promise<void> {
+    const absolutePath = path.join(appConfig.galleryRoot, relativePath);
+    await fs.mkdir(path.dirname(absolutePath), { recursive: true });
+    await fs.writeFile(absolutePath, content);
+  }
+
   async function scan(repairUnchangedDerivatives: boolean) {
     const result = await scannerService.scanAll('manual', { repairUnchangedDerivatives });
     expect(result?.status).toBe('completed');
     return imageRepository.getByRelativePath('album/clip.mp4')!;
   }
+
+  it('reconciles moves and generates posters outside an unreadable subtree without deleting its index', async () => {
+    const { likeRepository, folderScanStateRepository } = await import('../src/db/repositories.js');
+    for (const [relativePath, size] of [
+      ['incoming/moved.mp4', 2048], ['broken/deep/keep.jpg', 512], ['album/removed.jpg', 256]
+    ] as const) {
+      await fs.mkdir(path.dirname(path.join(appConfig.galleryRoot, relativePath)), { recursive: true });
+      await fs.writeFile(path.join(appConfig.galleryRoot, relativePath), Buffer.alloc(size));
+    }
+    await scan(false);
+    const movedBefore = imageRepository.getByRelativePath('incoming/moved.mp4')!;
+    const protectedBefore = imageRepository.getByRelativePath('broken/deep/keep.jpg')!;
+    const protectedFolder = folderRepository.getAll().find(folder => folder.id === protectedBefore.folder_id)!;
+    const protectedState = folderScanStateRepository.getAll().find(state => state.folder_path === protectedFolder.folder_path);
+    likeRepository.upsert(movedBefore.id);
+    await fs.rename(path.join(appConfig.galleryRoot, movedBefore.relative_path), path.join(appConfig.galleryRoot, 'album/moved.mp4'));
+    await fs.rm(path.join(appConfig.galleryRoot, 'incoming'), { recursive: true });
+    await fs.rm(path.join(appConfig.galleryRoot, 'album/removed.jpg'));
+    await fs.rm(path.join(appConfig.galleryRoot, protectedBefore.relative_path));
+    await fs.mkdir(path.join(appConfig.galleryRoot, 'z-new'));
+    await fs.writeFile(path.join(appConfig.galleryRoot, 'z-new/new.mp4'), Buffer.alloc(4096));
+    generateDerivativesMock.mockClear();
+    const failure = failReadingDirectory('broken');
+
+    const result = await scannerService.scanAll('manual', { repairUnchangedDerivatives: false });
+
+    expect(result?.status).toBe('completed_with_errors');
+    expect(result?.error_text).toContain('EIO');
+    expect(result?.error_text).toContain('broken');
+    expect(result?.removed_files).toBe(1);
+    const moved = imageRepository.getByRelativePath('album/moved.mp4')!;
+    expect(moved).toMatchObject({ id: movedBefore.id, asset_key: movedBefore.asset_key, sort_timestamp: movedBefore.sort_timestamp });
+    expect(imageRepository.getByRelativePath(movedBefore.relative_path)).toBeUndefined();
+    expect(likeRepository.getByImageId(moved.id)).toBeDefined();
+    expect(imageRepository.getByRelativePath(protectedBefore.relative_path)?.is_deleted).toBe(0);
+    expect(folderRepository.getAll().find(folder => folder.id === protectedFolder.id)?.avatar_image_id).toBe(protectedFolder.avatar_image_id);
+    expect(folderScanStateRepository.getAll().find(state => state.folder_path === protectedFolder.folder_path)).toEqual(protectedState);
+    const added = imageRepository.getByRelativePath('z-new/new.mp4')!;
+    await expect(fs.readFile(path.join(appConfig.thumbnailsDir, added.thumbnail_path), 'utf8')).resolves.toBe('thumbnail:z-new/new.mp4');
+
+    failure.mockRestore();
+    expect((await scannerService.scanAll('manual', { repairUnchangedDerivatives: false }))?.status).toBe('completed');
+    expect(imageRepository.getByRelativePath(protectedBefore.relative_path)?.is_deleted).toBe(1);
+  });
+
+  it.each(['stories/trip/nested', 'carousels/trip'])('preserves reserved media when %s cannot be read', async (unreadable) => {
+    const { postRepository } = await import('../src/db/repositories.js');
+    const reservedPath = `album/${unreadable}/keep.jpg`;
+    await fs.mkdir(path.dirname(path.join(appConfig.galleryRoot, reservedPath)), { recursive: true });
+    await fs.writeFile(path.join(appConfig.galleryRoot, reservedPath), 'reserved');
+    await scan(false);
+    const before = imageRepository.getByRelativePath(reservedPath)!;
+    const postBefore = postRepository.findByImageId(before.id);
+    const albumBefore = folderRepository.getAll().find(folder => folder.folder_path === 'album')!;
+    await fs.rm(path.join(appConfig.galleryRoot, reservedPath));
+    failReadingDirectory(`album/${unreadable}`);
+
+    const result = await scannerService.scanAll('manual', { repairUnchangedDerivatives: false });
+
+    expect(result?.status).toBe('completed_with_errors');
+    expect(imageRepository.getByRelativePath(reservedPath)).toMatchObject({ id: before.id, is_deleted: 0 });
+    expect(postRepository.findByImageId(before.id)).toEqual(postBefore);
+    expect(folderRepository.getAll().find(folder => folder.id === albumBefore.id)?.avatar_image_id).toBe(albumBefore.avatar_image_id);
+  });
+
+  it('repairs posters left by an aborted discovery even when a different subtree is still unreadable', async () => {
+    await scan(false);
+    await fs.mkdir(path.join(appConfig.galleryRoot, 'z-broken'));
+    await fs.writeFile(path.join(appConfig.galleryRoot, 'album/new.mp4'), Buffer.alloc(2048));
+    appConfig.scanMediaErrorMode = 'fail';
+    failReadingDirectory('z-broken');
+    expect((await scannerService.scanAll('manual', { repairUnchangedDerivatives: false }))?.status).toBe('failed');
+    const partial = imageRepository.getByRelativePath('album/new.mp4')!;
+    expect(partial).toBeDefined();
+    await expect(fs.stat(path.join(appConfig.thumbnailsDir, partial.thumbnail_path))).rejects.toMatchObject({ code: 'ENOENT' });
+    appConfig.scanMediaErrorMode = 'skip';
+
+    const recovered = await scannerService.scanAll('manual', { repairUnchangedDerivatives: false });
+
+    expect(recovered?.status).toBe('completed_with_errors');
+    expect(imageRepository.getByRelativePath(partial.relative_path)?.id).toBe(partial.id);
+    await expect(fs.readFile(path.join(appConfig.thumbnailsDir, partial.thumbnail_path), 'utf8')).resolves.toBe('thumbnail:album/new.mp4');
+  });
+
+  it('preserves unreadable carousel posts during a switch to normal folders', async () => {
+    const { TREAT_CAROUSELS_AS_FOLDERS_SETTING_KEY } = await import('../src/constants/app-setting-keys.js');
+    const { postRepository } = await import('../src/db/repositories.js');
+    const relativePath = 'album/carousels/trip/keep.jpg';
+    await fs.mkdir(path.dirname(path.join(appConfig.galleryRoot, relativePath)), { recursive: true });
+    await fs.writeFile(path.join(appConfig.galleryRoot, relativePath), 'carousel');
+    await scan(false);
+    const image = imageRepository.getByRelativePath(relativePath)!;
+    const post = postRepository.findByImageId(image.id)!;
+    const failure = failReadingDirectory('album/carousels/trip');
+    appSettingsRepository.set(TREAT_CAROUSELS_AS_FOLDERS_SETTING_KEY, '1');
+    try {
+      expect((await scannerService.scanAll('manual', { repairUnchangedDerivatives: false }))?.status).toBe('completed_with_errors');
+      expect(postRepository.findByImageId(image.id)).toEqual(post);
+      expect(imageRepository.getByRelativePath(relativePath)?.is_deleted).toBe(0);
+    } finally {
+      failure.mockRestore();
+      appSettingsRepository.remove(TREAT_CAROUSELS_AS_FOLDERS_SETTING_KEY);
+    }
+  });
+
+  it.each(['later-sibling', 'destination'])('keeps split carousel history through an unreadable %s and recovery', async (failedScope) => {
+    const { postRepository, likeRepository, collectionRepository } = await import('../src/db/repositories.js');
+    const original = 'album/carousels/original';
+    const renamed = 'album/carousels/a-renamed';
+    const destination = 'z-other/carousels/new';
+    for (let index = 1; index <= 3; index++) await writeMedia(`${original}/${index}.jpg`);
+    await scan(false);
+    const post = postRepository.findBySourcePath(original)!;
+    const originalIds = postRepository.listImageRecords(post.id).map(image => image.id);
+    postRepository.updateCaption(post.id, 'Original history');
+    likeRepository.upsert(post.id);
+    const collection = collectionRepository.create(`Original collection ${failedScope}`);
+    collectionRepository.addItem(collection.id, post.id);
+    await fs.rename(path.join(appConfig.galleryRoot, original), path.join(appConfig.galleryRoot, renamed));
+    await writeMedia(`${destination}/new.jpg`);
+    await fs.rename(path.join(appConfig.galleryRoot, renamed, '1.jpg'), path.join(appConfig.galleryRoot, destination, '1.jpg'));
+    await fs.mkdir(path.join(appConfig.galleryRoot, 'album/carousels/z-broken'));
+    const failure = failReadingDirectory(failedScope === 'destination' ? renamed : 'album/carousels/z-broken');
+
+    const assertHistory = () => {
+      expect(postRepository.findById(post.id)).toMatchObject({ source_path: original, caption: 'Original history', is_deleted: 0 });
+      expect(postRepository.listImageRecords(post.id).map(image => image.id)).toEqual(originalIds);
+      expect(likeRepository.getByImageId(post.id)).toBeDefined();
+      expect(collectionRepository.listCollectionImages(collection.slug, 1, 10).map(image => image.id)).toContain(post.id);
+    };
+    const result = await scannerService.scanAll('manual', { repairUnchangedDerivatives: false });
+    expect(result?.status).toBe(failedScope === 'destination' ? 'completed_with_errors' : 'failed');
+    if (failedScope === 'later-sibling') expect(result?.error_text).toContain('multiple carousel destinations');
+    assertHistory();
+    failure.mockRestore();
+    expect((await scannerService.scanAll('manual', { repairUnchangedDerivatives: false }))?.status).toBe('failed');
+    assertHistory();
+  });
+
+  it('defers carousel history transfers until all directories can be discovered', async () => {
+    const { postRepository, likeRepository } = await import('../src/db/repositories.js');
+    const original = 'album/carousels/original';
+    const destination = 'album/carousels/renamed';
+    for (let index = 1; index <= 3; index++) await writeMedia(`${original}/${index}.jpg`);
+    await scan(false);
+    const post = postRepository.findBySourcePath(original)!;
+    const originalIds = postRepository.listImageRecords(post.id).map(image => image.id);
+    postRepository.updateCaption(post.id, 'Keep history');
+    likeRepository.upsert(post.id);
+    await fs.rename(path.join(appConfig.galleryRoot, original), path.join(appConfig.galleryRoot, destination));
+    await fs.mkdir(path.join(appConfig.galleryRoot, 'z-broken'));
+    const failure = failReadingDirectory('z-broken');
+    await writeMedia('album/added.jpg');
+
+    const partial = await scannerService.scanAll('manual', { repairUnchangedDerivatives: false });
+    expect(partial?.status).toBe('completed_with_errors');
+    expect(postRepository.findById(post.id)).toMatchObject({ source_path: original, caption: 'Keep history', is_deleted: 0 });
+    expect(postRepository.listImageRecords(post.id).map(image => image.id)).toEqual(originalIds);
+    const added = imageRepository.getByRelativePath('album/added.jpg')!;
+    await expect(fs.stat(path.join(appConfig.thumbnailsDir, added.thumbnail_path))).resolves.toBeDefined();
+    failure.mockRestore();
+
+    expect((await scannerService.scanAll('manual', { repairUnchangedDerivatives: false }))?.status).toBe('completed');
+    expect(postRepository.findById(post.id)).toMatchObject({ source_path: destination, caption: 'Keep history', is_deleted: 0 });
+    expect(postRepository.listImageRecords(post.id).map(image => image.id)).toEqual(originalIds);
+    expect(likeRepository.getByImageId(post.id)).toBeDefined();
+  });
+
+  it.each(['eager', 'lazy'].flatMap(mode =>
+    ['removed-folder', 'retained-folder', 'removed-sibling'].map(origin => [mode, origin] as const)
+  ))('keeps a deferred normal post visible in %s mode with a %s origin', async (mode, origin) => {
+    const { postRepository, likeRepository, collectionRepository } = await import('../src/db/repositories.js');
+    appConfig.derivativeMode = mode as 'eager' | 'lazy';
+    const source = 'incoming/keep.jpg';
+    const destination = 'z-owner/carousels/trip/keep.jpg';
+    await writeMedia(source);
+    if (origin === 'retained-folder') await writeMedia('incoming/other.jpg');
+    if (origin === 'removed-sibling') await writeMedia('incoming/removed.jpg');
+    await scan(false);
+    const before = imageRepository.getByRelativePath(source)!;
+    const post = postRepository.findByImageId(before.id)!;
+    postRepository.updateCaption(post.id, 'Keep normal history');
+    likeRepository.upsert(post.id);
+    const collection = collectionRepository.create(`Normal history ${mode} ${origin}`);
+    collectionRepository.addItem(collection.id, post.id);
+    await fs.mkdir(path.dirname(path.join(appConfig.galleryRoot, destination)), { recursive: true });
+    await fs.rename(path.join(appConfig.galleryRoot, source), path.join(appConfig.galleryRoot, destination));
+    if (origin === 'removed-sibling') await fs.rm(path.join(appConfig.galleryRoot, 'incoming/removed.jpg'));
+    if (origin !== 'retained-folder') await fs.rmdir(path.join(appConfig.galleryRoot, 'incoming'));
+    await fs.mkdir(path.join(appConfig.galleryRoot, 'zz-broken'));
+    const failure = failReadingDirectory('zz-broken');
+
+    const assertVisibleHistory = (sourcePath: string, folderId: number) => {
+      expect(postRepository.findById(post.id)).toMatchObject({
+        source_path: sourcePath, folder_id: folderId, caption: 'Keep normal history',
+        is_deleted: 0, sort_timestamp: post.sort_timestamp
+      });
+      expect(postRepository.listImageRecords(post.id).map(image => image.id)).toEqual([before.id]);
+      expect(likeRepository.getByImageId(post.id)).toBeDefined();
+      expect(postRepository.listFeed(1, 100).map(item => item.id)).toContain(post.id);
+      expect(collectionRepository.listCollectionImages(collection.slug, 1, 10).map(item => item.id)).toEqual([post.id]);
+    };
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const result = await scannerService.scanAll('manual', { repairUnchangedDerivatives: false });
+      expect(result?.status).toBe('completed_with_errors');
+      assertVisibleHistory(source, post.folder_id);
+      expect(imageRepository.getByRelativePath(destination)).toMatchObject({ id: before.id, is_deleted: 0 });
+      if (origin === 'retained-folder') expect(imageRepository.getByRelativePath('incoming/other.jpg')?.is_deleted).toBe(0);
+      if (origin === 'removed-sibling') {
+        expect(imageRepository.getByRelativePath('incoming/removed.jpg')?.is_deleted).toBe(1);
+        expect(result?.removed_files).toBe(attempt === 0 ? 1 : 0);
+      }
+    }
+    failure.mockRestore();
+
+    expect((await scannerService.scanAll('manual', { repairUnchangedDerivatives: false }))?.status).toBe('completed');
+    const targetOwner = folderRepository.getAll().find(folder => folder.folder_path === 'z-owner')!;
+    assertVisibleHistory('z-owner/carousels/trip', targetOwner.id);
+    expect(folderRepository.getAllSummaries().some(folder => folder.folder_path === 'incoming')).toBe(origin === 'retained-folder');
+  });
+
+  it.each(['stories', 'carousels'])('finishes readable %s siblings, including additions and removals', async (kind) => {
+    const { postRepository } = await import('../src/db/repositories.js');
+    const prefix = `album/${kind}`;
+    for (const relativePath of [
+      `${prefix}/a-readable/keep.jpg`, `${prefix}/a-readable/remove.jpg`,
+      `${prefix}/b-broken/keep.jpg`, `${prefix}/c-removed/old.jpg`
+    ]) await writeMedia(relativePath);
+    await scan(false);
+    const readableImage = imageRepository.getByRelativePath(`${prefix}/a-readable/keep.jpg`)!;
+    const previousPost = postRepository.findByImageId(readableImage.id);
+    const protectedImage = imageRepository.getByRelativePath(`${prefix}/b-broken/keep.jpg`)!;
+    const protectedPost = postRepository.findByImageId(protectedImage.id);
+    await fs.rm(path.join(appConfig.galleryRoot, `${prefix}/a-readable/remove.jpg`));
+    await fs.rm(path.join(appConfig.galleryRoot, `${prefix}/c-removed`), { recursive: true });
+    await writeMedia(`${prefix}/a-readable/added.jpg`);
+    await writeMedia(`${prefix}/z-new/new.jpg`);
+    failReadingDirectory(`${prefix}/b-broken`);
+
+    const result = await scannerService.scanAll('manual', { repairUnchangedDerivatives: false });
+    expect(result?.status).toBe('completed_with_errors');
+    expect(result?.scanned_files).toBe(4);
+    expect(result?.new_files).toBe(2);
+    expect(result?.removed_files).toBe(2);
+    expect(result?.error_text).toContain(`Indexed content in ${prefix}/b-broken was preserved`);
+    expect(imageRepository.getByRelativePath(`${prefix}/a-readable/remove.jpg`)?.is_deleted).toBe(1);
+    expect(imageRepository.getByRelativePath(`${prefix}/c-removed/old.jpg`)?.is_deleted).toBe(1);
+    expect(imageRepository.getByRelativePath(protectedImage.relative_path)?.is_deleted).toBe(0);
+    expect(postRepository.findByImageId(protectedImage.id)).toEqual(protectedPost);
+    const added = imageRepository.getByRelativePath(`${prefix}/a-readable/added.jpg`)!;
+    const newSibling = imageRepository.getByRelativePath(`${prefix}/z-new/new.jpg`)!;
+    for (const image of [added, newSibling]) {
+      await expect(fs.stat(path.join(appConfig.thumbnailsDir, image.thumbnail_path))).resolves.toBeDefined();
+    }
+    if (kind === 'carousels') {
+      const updatedPost = postRepository.findBySourcePath(`${prefix}/a-readable`)!;
+      expect(updatedPost.id).toBe(previousPost?.id);
+      expect(postRepository.listImageRecords(updatedPost.id).map(image => image.id).sort()).toEqual([readableImage.id, added.id].sort());
+      expect(postRepository.findBySourcePath(`${prefix}/z-new`)?.is_deleted).toBe(0);
+    }
+  });
+
+  it.each(['stories', 'carousels'])('continues the other reserved tree when the %s root is unreadable', async (unreadable) => {
+    const { postRepository } = await import('../src/db/repositories.js');
+    for (const kind of ['stories', 'carousels']) await writeMedia(`album/${kind}/existing/keep.jpg`);
+    await scan(false);
+    const protectedImage = imageRepository.getByRelativePath(`album/${unreadable}/existing/keep.jpg`)!;
+    const protectedPost = postRepository.findByImageId(protectedImage.id);
+    const readable = unreadable === 'stories' ? 'carousels' : 'stories';
+    const addedPath = `album/${readable}/new/added.jpg`;
+    await writeMedia(addedPath);
+    failReadingDirectory(`album/${unreadable}`);
+
+    expect((await scannerService.scanAll('manual', { repairUnchangedDerivatives: false }))?.status).toBe('completed_with_errors');
+    expect(imageRepository.getByRelativePath(addedPath)?.is_deleted).toBe(0);
+    expect(imageRepository.getByRelativePath(protectedImage.relative_path)?.is_deleted).toBe(0);
+    expect(postRepository.findByImageId(protectedImage.id)).toEqual(protectedPost);
+  });
+
+  it.each([false, true])('preserves an unreadable carousel owner while reconciling missing direct media=%s', async (removeDirectMedia) => {
+    const { postRepository } = await import('../src/db/repositories.js');
+    const relativePath = 'z-owner/carousels/trip/keep.jpg';
+    await writeMedia(relativePath);
+    if (removeDirectMedia) await writeMedia('z-owner/removed.jpg');
+    await scan(false);
+    const image = imageRepository.getByRelativePath(relativePath)!;
+    const post = postRepository.findByImageId(image.id)!;
+    const owner = folderRepository.getAll().find(folder => folder.id === post.folder_id)!;
+    if (removeDirectMedia) await fs.rm(path.join(appConfig.galleryRoot, 'z-owner/removed.jpg'));
+    failReadingDirectory('z-owner/carousels/trip');
+
+    expect((await scannerService.scanAll('manual', { repairUnchangedDerivatives: false }))?.status).toBe('completed_with_errors');
+    expect(postRepository.findById(post.id)).toEqual(post);
+    expect(imageRepository.getByRelativePath(relativePath)?.is_deleted).toBe(0);
+    if (removeDirectMedia) expect(imageRepository.getByRelativePath('z-owner/removed.jpg')?.is_deleted).toBe(1);
+    else expect(folderRepository.getAll().find(folder => folder.id === owner.id)?.avatar_image_id).toBe(owner.avatar_image_id);
+  });
+
+  it.each([false, true])('keeps an incomplete carousel mode transition pending from normal folders=%s', async (initialMode) => {
+    const { galleryService } = await import('../src/services/gallery-service.js');
+    const selectedMode = !initialMode;
+    const relativePath = 'album/carousels/trip/keep.jpg';
+    appSettingsRepository.set(TREAT_CAROUSELS_AS_FOLDERS_SETTING_KEY, initialMode ? '1' : '0');
+    appSettingsRepository.set(CAROUSELS_MIGRATION_DECISION_SETTING_KEY, initialMode ? 'restore' : 'carousels');
+    await writeMedia(relativePath);
+    await scan(false);
+    const previousRole = folderRepository.getAll().find(folder => folder.folder_path === 'album/carousels/trip')?.role;
+    expect(appSettingsRepository.get(CAROUSELS_APPLIED_MODE_SETTING_KEY)).toBe(initialMode ? '1' : '0');
+    appSettingsRepository.set(TREAT_CAROUSELS_AS_FOLDERS_SETTING_KEY, selectedMode ? '1' : '0');
+    const failure = failReadingDirectory('album/carousels/trip');
+
+    const partial = await scannerService.scanAll('manual', { repairUnchangedDerivatives: false });
+    expect(partial?.status).toBe('completed_with_errors');
+    expect(folderRepository.getAll().find(folder => folder.folder_path === 'album/carousels/trip')?.role).toBe(previousRole);
+    expect(appSettingsRepository.get(CAROUSELS_APPLIED_MODE_SETTING_KEY)).toBe(initialMode ? '1' : '0');
+    expect(galleryService.getStatus().carouselsMigration.reconciliationPending).toBe(true);
+    failure.mockRestore();
+
+    expect((await scannerService.scanAll('manual', { repairUnchangedDerivatives: false }))?.status).toBe('completed');
+    expect(appSettingsRepository.get(CAROUSELS_APPLIED_MODE_SETTING_KEY)).toBe(selectedMode ? '1' : '0');
+    expect(galleryService.getStatus().carouselsMigration.reconciliationPending).toBe(false);
+    expect(folderRepository.getAll().find(folder => folder.folder_path === 'album/carousels/trip')?.role).toBe(selectedMode ? 'normal' : 'carousel_source');
+  });
+
+  it.each(['root', 'strict'] as const)('aborts a %s directory failure without applying removals', async (mode) => {
+    const before = await scan(false);
+    await fs.rm(path.join(appConfig.galleryRoot, before.relative_path));
+    if (mode === 'strict') appConfig.scanMediaErrorMode = 'fail';
+    failReadingDirectory(mode === 'root' ? '' : 'album');
+
+    const result = await scannerService.scanAll('manual', { repairUnchangedDerivatives: false });
+
+    expect(result?.status).toBe('failed');
+    expect(result?.error_text).toContain('EIO');
+    expect(imageRepository.getByRelativePath(before.relative_path)?.is_deleted).toBe(0);
+  });
 
   it('drains discovery before pausing and preserves unvisited content when cancelled', async () => {
     await fs.mkdir(path.join(appConfig.galleryRoot, 'later'));

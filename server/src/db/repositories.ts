@@ -2286,16 +2286,21 @@ export const postRepository = {
     return removedCount;
   },
 
-  softDeleteMissingReservedCarousels(folderId: number, carouselsRootPath: string, activeSourcePaths: string[]): number {
+  softDeleteMissingReservedCarousels(
+    folderId: number,
+    carouselsRootPath: string,
+    activeSourcePaths: string[],
+    preservedPostIds: ReadonlySet<number> = new Set<number>()
+  ): number {
     const normalizedPrefix = `${normalizePath(carouselsRootPath)}/`;
     const rows = database
-      .prepare(`SELECT source_path FROM posts WHERE source_id IN (${LOCAL_SOURCE_IDS_SQL}) AND folder_id = ? AND is_deleted = 0 AND substr(source_path, 1, length(?)) = ?`)
-      .all(folderId, normalizedPrefix, normalizedPrefix) as Array<{ source_path: string }>;
+      .prepare(`SELECT id, source_path FROM posts WHERE source_id IN (${LOCAL_SOURCE_IDS_SQL}) AND folder_id = ? AND is_deleted = 0 AND substr(source_path, 1, length(?)) = ?`)
+      .all(folderId, normalizedPrefix, normalizedPrefix) as Array<{ id: number; source_path: string }>;
     const active = new Set(activeSourcePaths.map((sourcePath) => normalizePath(sourcePath)));
     let removedCount = 0;
 
     for (const row of rows) {
-      if (!active.has(normalizePath(row.source_path))) {
+      if (!active.has(normalizePath(row.source_path)) && !preservedPostIds.has(row.id)) {
         this.softDeletePostBySourcePath(row.source_path, folderSourceId(folderId));
         removedCount += 1;
       }
@@ -2304,7 +2309,7 @@ export const postRepository = {
     return removedCount;
   },
 
-  softDeleteReservedCarouselsForLegacyMode(sourceId = primaryLocalSource().id): number {
+  softDeleteReservedCarouselsForLegacyMode(sourceId = primaryLocalSource().id, preservedPaths: string[] = []): number {
     const deletedAt = nowIso();
     const result = database.prepare(`
       UPDATE posts
@@ -2312,13 +2317,18 @@ export const postRepository = {
           deleted_at = COALESCE(deleted_at, ?),
           updated_at = ?
       WHERE source_id = ? AND is_deleted = 0
+        AND NOT EXISTS (
+          SELECT 1 FROM json_each(?) AS preserved
+          WHERE posts.source_path = preserved.value
+            OR substr(posts.source_path, 1, length(preserved.value) + 1) = preserved.value || '/'
+        )
         AND EXISTS (
           SELECT 1
           FROM folders
           WHERE folders.id = posts.folder_id
             AND LOWER(posts.source_path) LIKE LOWER(folders.folder_path || '/carousels/%')
         )
-    `).run(deletedAt, deletedAt, sourceId);
+    `).run(deletedAt, deletedAt, sourceId, JSON.stringify(preservedPaths));
 
     return Number(result.changes ?? 0);
   },

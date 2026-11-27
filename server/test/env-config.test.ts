@@ -16,6 +16,7 @@ describe.sequential('derivative mode env config', () => {
     vi.stubEnv('DB_DIR', path.join(tempRoot, 'db'));
     vi.stubEnv('THUMBNAILS_DIR', path.join(tempRoot, 'thumbnails'));
     vi.stubEnv('PREVIEWS_DIR', path.join(tempRoot, 'previews'));
+    vi.stubEnv('GALLERY_WATCH_ENABLED', undefined);
   }
 
   beforeAll(async () => {
@@ -48,6 +49,15 @@ describe.sequential('derivative mode env config', () => {
     expect(appConfig.scanMediaErrorMode).toBe('skip');
     expect(appConfig.scanErrorReportDir).toBe(path.join(tempRoot, 'data', 'scan-errors'));
     expect(appConfig.galleryExcludedFolders).toEqual([]);
+    expect(appConfig.galleryWatchEnabled).toBe(false);
+  });
+
+  it('allows development gallery watching to be enabled explicitly', async () => {
+    await stubBaseEnv();
+    vi.stubEnv('GALLERY_WATCH_ENABLED', 'true');
+    const { appConfig } = await import('../src/config/env.js') as EnvModule;
+
+    expect(appConfig.galleryWatchEnabled).toBe(true);
   });
 
   it('allows strict scan failure on media errors when requested', async () => {
