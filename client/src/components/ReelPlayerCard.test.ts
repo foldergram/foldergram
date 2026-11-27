@@ -396,4 +396,66 @@ describe('ReelPlayerCard', () => {
     expect(player.pauseCallCount).toBe(0);
     expect(wrapper.find('.reel-player-card__pause-indicator').exists()).toBe(false);
   });
+
+it('emits video-ready when the media player can play', async () => {
+  const wrapper = mount(ReelPlayerCard, {
+    props: {
+      item: createFeedItem(7),
+      folder: createFolder(),
+      active: true
+    },
+    global: {
+      stubs: globalStubs
+    },
+  });
+  await flushPromises();
+  expect(wrapper.emitted('videoReady')).toBeUndefined();
+
+  getPlayerElement(wrapper).dispatchEvent(new Event('can-play'));
+  await flushPromises();
+
+  expect(wrapper.emitted('videoReady')).toEqual([[7]]);
+});
+
+
+  it('emits video-ready when the media player errors', async () => {
+    const wrapper = mount(ReelPlayerCard, {
+      props: {
+        item: createFeedItem(7),
+        folder: createFolder(),
+        active: true
+      },
+      global: {
+        stubs: globalStubs
+      },
+    });
+    await flushPromises();
+    expect(wrapper.emitted('videoReady')).toBeUndefined();
+
+    getPlayerElement(wrapper).dispatchEvent(new Event('error'));
+    await flushPromises();
+
+    expect(wrapper.emitted('videoReady')).toEqual([[7]]);
+  });
+
+  it('emits video-ready only once when can-play fires more than once', async () => {
+    const wrapper = mount(ReelPlayerCard, {
+      props: {
+        item: createFeedItem(7),
+        folder: createFolder(),
+        active: true
+      },
+      global: {
+        stubs: globalStubs
+      },
+    });
+    await flushPromises();
+
+    const player = getPlayerElement(wrapper);
+    player.dispatchEvent(new Event('can-play'));
+    player.dispatchEvent(new Event('can-play'));
+    await flushPromises();
+
+    expect(wrapper.emitted('videoReady')).toEqual([[7]]);
+  });
 });
