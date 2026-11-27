@@ -1,0 +1,84 @@
+name: Deploy docs
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy docs from main
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: foldergram-vps-production
+      cancel-in-progress: false
+    permissions:
+      contents: read
+
+    steps:
+      - name: Require main
+        shell: bash
+        run: |
+          if [[ $GITHUB_REF != refs/heads/main ]]; then
+            printf '::error::Run this workflow from main.\n'
+            exit 1
+          fi
+
+      - name: Check out documentation commit
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.4
+          cache: pnpm
+
+      - name: Install deployment verification tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends rsync
+
+      - name: Test deployment recovery
+        run: bash scripts/test-deploy-vps.sh
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build documentation
+        run: pnpm build:docs
+
+      - name: Deploy documentation over SSH
+        env:
+          VPS_HOST: ${{ vars.VPS_HOST }}
+          VPS_PORT: ${{ vars.VPS_PORT }}
+          VPS_USER: ${{ vars.VPS_USER }}
+          VPS_KNOWN_HOSTS: ${{ vars.VPS_KNOWN_HOSTS }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in VPS_HOST VPS_PORT VPS_USER VPS_KNOWN_HOSTS VPS_SSH_KEY; do
+            if [[ -z ${!name} ]]; then
+              printf '::error::Missing repository Actions setting: %s\n' "$name"
+              exit 1
+            fi
+          done
+          [[ $VPS_PORT =~ ^[0-9]+$ ]]
+          commit=$(git rev-parse HEAD)
+          ssh_dir=$(mktemp -d "$RUNNER_TEMP/foldergram-ssh.XXXXXX")
+          trap 'rm -rf -- "$ssh_dir"' EXIT
+          chmod 0700 "$ssh_dir"
+          printf '%s\n' "$VPS_SSH_KEY" > "$ssh_dir/key"
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
+          chmod 0600 "$ssh_dir/key" "$ssh_dir/known_hosts"
+          ssh -F /dev/null -i "$ssh_dir/key" \
+            -o IdentitiesOnly=yes -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$ssh_dir/known_hosts" \
+            -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=6 \
+            -p "$VPS_PORT" "$VPS_USER@$VPS_HOST" "deploy-docs $commit"

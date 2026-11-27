@@ -5,14 +5,19 @@ description: The indexing model, storage layout, scan lifecycle, and feed logic 
 
 # How It Works
 
+This page explains how Foldergram turns folders into albums and posts, what a
+scan changes, and how media is prepared for viewing. For setup instructions,
+start with [Quick Start](./quick-start.md).
+
 ## Architecture at a glance
 
-Foldergram has two deliberate layers:
+For local galleries, indexing and browsing have separate roles:
 
-1. A scanner/indexer that walks the gallery tree, updates SQLite, and generates derivatives.
-2. A runtime API and SPA that read indexed data from SQLite and serve static derivative assets.
+1. A scan discovers media, updates the SQLite index, and prepares thumbnails and any required previews.
+2. The app reads that saved index while you browse. Media requests serve cached files or originals, or prepare missing previews and video segments when needed.
 
-That separation is the core performance decision in the project.
+Opening a feed or folder does not run a new discovery scan. After changing
+files on disk, run a scan to update the saved index.
 
 ## Source discovery model
 

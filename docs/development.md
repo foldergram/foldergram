@@ -1,192 +1,178 @@
 ---
 title: Development
-description: Workspace scripts, local ports, watcher behavior, tests, and docs deployment details.
+description: Set up a local checkout, run tests, and prepare code or documentation changes.
 ---
 
 # Development
 
-## Workspace layout
+Use this guide to run Foldergram locally and test changes before opening a pull
+request. For a self-hosted installation, follow [Installation](./installation.md).
+Read [Contributing](https://github.com/foldergram/foldergram/blob/main/CONTRIBUTING.md)
+for branch rules and changes that need discussion first.
 
-```text
-.
-├─ client/
-├─ docs/
-├─ server/
-├─ data/
-├─ scripts/
-├─ package.json
-└─ pnpm-workspace.yaml
+## Set up a local checkout
+
+You need Node.js 22 and the pnpm version pinned in the root `package.json`
+(currently 10.28.0). Install FFmpeg and FFprobe to work on video playback,
+animated AVIF processing, or the media integration tests.
+
+From a fresh checkout, install the locked dependencies and create your local
+configuration:
+
+```bash
+pnpm install --frozen-lockfile
+cp .env.example .env
 ```
 
-## Root scripts
+If you already have a `.env`, keep it rather than copying over it. Use a
+disposable gallery, database, and media caches for development. Check
+`DATA_ROOT`, `GALLERY_ROOT`, `DB_DIR`, `THUMBNAILS_DIR`, `PREVIEWS_DIR`, and
+`HLS_CACHE_DIR` before starting the server. The example sets some paths
+explicitly, so changing `DATA_ROOT` alone may leave those overrides in place.
 
-| Command | What it runs |
+Start the development servers:
+
+```bash
+pnpm dev
+```
+
+| Service | Local address |
 | --- | --- |
-| `pnpm dev` | Server, client, and docs dev servers together |
-| `pnpm dev:server` | Server only |
-| `pnpm dev:client` | Client only |
-| `pnpm dev:docs` | VitePress docs only |
-| `pnpm build` | Server build plus client build |
-| `pnpm migrate` | Run pending server database migrations without starting the app |
-| `pnpm start` | Production server start |
-| `pnpm build:docs` | VitePress docs build |
-| `pnpm rescan` | Manual server rescan script |
-| `pnpm test` | Server and client Vitest suites |
-| `pnpm test:browser` | Client Chromium layout and contrast regressions |
+| App | `http://localhost:4141` |
+| API | `http://localhost:4140` |
+| Documentation | `http://localhost:4145` |
 
-## Default ports
+The app tries ports `4141` through `4144` if its preferred port is busy. The
+docs server also chooses another port when needed; check the terminal for the
+address. The app's development server forwards API and media requests to the
+backend, so open the app address to test the UI.
 
-| Service | Port |
+Starting the server applies pending database migrations and scans a new
+library. Existing libraries reuse their index. Read [Troubleshooting](./troubleshooting.md)
+if startup fails or storage is unavailable.
+
+## Find the code you need
+
+| Path | Contents |
 | --- | --- |
-| Vite client | prefers `4141`, with automatic fallback through `4144` |
-| API server | `4140` |
-| VitePress docs | prefers `4145`, with automatic fallback to the next free port |
+| `client/src/` | Vue components, views, stores, and API helpers |
+| `client/src/locales/` | Translated UI text |
+| `client/e2e/` | Playwright browser tests |
+| `server/src/` | API routes, scanning, media processing, and storage services |
+| `server/test/` | Server unit and integration tests |
+| `docs/` | This VitePress documentation site |
+| `scripts/` | Workspace commands and deployment scripts |
 
-## Dev proxy behavior
+[How It Works](./how-it-works.md) explains indexing and media handling.
+The [API reference](./api.md) documents requests, responses, and access rules.
 
-The Vite client proxies these paths to the backend:
+## Run one development server
 
-- `/api`
-- `/thumbnails`
-- `/previews`
+Use these commands from the repository root when you only need part of the
+workspace:
 
-That keeps the browser pointed at the Vite dev server while backend assets still
-come from Express.
+| Command | Starts |
+| --- | --- |
+| `pnpm dev:server` | API server |
+| `pnpm dev:client` | App development server |
+| `pnpm dev:docs` | Documentation preview |
 
-The Vite client automatically stays within the reserved `4141-4144` range. That
-lets it move off `4141` without stepping onto the backend or docs ports.
+UI work normally needs both the client and server. Documentation work only
+needs `pnpm dev:docs`.
 
-## Startup sequence
+## Refresh the development gallery
 
-At boot, the server process:
+After adding or moving test media, open **Settings → Scan & Library** and run
+**Scan for changes**. Gallery watching is off by default.
 
-1. runs Dbmate migrations for `gallery.sqlite`
-2. creates the Express app
-3. listens on `DEV_SERVER_PORT`
-4. asks the scanner whether startup should scan, stay idle, or block for rebuild
+To scan automatically during development, set `GALLERY_WATCH_ENABLED=true` in
+`.env` and restart the server. The watcher starts after an admin scan or
+rebuild. Directory additions and removals trigger a full scan; ordinary file
+changes use an incremental scan. Production does not start the watcher.
 
-If `DB_DIR` is unavailable, Foldergram skips migrations for that run and uses
-an in-memory SQLite database instead.
+Use a disposable gallery when testing scans, rebuilds, source removal, or file
+deletion. These actions can change indexed state or remove files.
 
-If the scanner decides startup should be blocked because the gallery root
-changed and relocation validation failed, Foldergram defers scanning until the
-user performs a rebuild.
+## Run tests and builds
 
-## Watcher behavior
-
-Gallery watching is disabled by default, including in development. Set
-`GALLERY_WATCH_ENABLED=true` to opt in to the development-only chokidar watcher.
-When enabled, it starts after an admin scan or rebuild and batches changes with
-a `700ms` debounce. It runs outside request handling. Production never starts
-the watcher.
-
-Directory additions and removals trigger a full rescan. Media changes and
-companion `.txt` or `.nfo` additions, edits, and removals use the incremental
-scan path. Companion file changes in reserved carousel or story folders fall
-back to a full rescan.
-
-## Tests
-
-Run the server and client unit and integration tests from the repository root:
+Run server and client tests together:
 
 ```bash
 pnpm test
 ```
 
-Browser tests run in Chromium and cover navigation, layout, and media
-playback. Install Chromium once, then run the suite:
+To work on one area, use `pnpm test:server` or `pnpm test:client`. You can also
+run one test file, for example:
+
+```bash
+pnpm --filter @foldergram/server exec vitest run --config vitest.config.ts test/carousel-posts-feature.test.ts
+pnpm --filter @foldergram/client exec vitest run src/api/http.test.ts
+```
+
+Server integration tests use temporary galleries and databases. Follow those
+fixtures when adding tests that import server configuration or database code.
+Keep server tests serialized because they change process environment and
+module state. Immich tests use a fake server; they do not need a live instance.
+Media tests can be skipped when FFmpeg or FFprobe is unavailable, so check the
+test summary when verifying a media change.
+
+For UI, navigation, theme, or playback changes, run the browser suite too:
 
 ```bash
 pnpm --filter @foldergram/client exec playwright install chromium
 pnpm test:browser
 ```
 
-The suite builds the client and starts a temporary preview on `127.0.0.1:4173`.
-It uses mock API responses, sample images, and a short video fixture with audio,
-so it does not start the backend or read your gallery. Failure screenshots and traces are saved in
-`client/test-results/`. To use an existing Chrome or Chromium installation, set
-`PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` to its executable path.
+Playwright builds the client and starts a preview on `127.0.0.1:4173` with
+mocked APIs. It does not need a running backend or access to your gallery.
+Failure screenshots and traces are saved in `client/test-results/`. To use an
+existing Chromium installation, set `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`.
 
-### Video streaming benchmark
+Before submitting app code, run `pnpm test` and `pnpm build`. For documentation
+changes, run `pnpm build:docs` and check the links and examples you changed.
+There is no configured lint or formatting command.
 
-With FFmpeg and FFprobe installed, run the benchmark from the repository root.
+### Measure video streaming performance
+
+With FFmpeg and FFprobe installed, run the small benchmark:
 
 ```bash
 pnpm --filter @foldergram/server exec tsx test/video-streaming-benchmark.ts --smoke
 ```
 
-The command makes a temporary library with generated videos and uses one
-encoder. It measures database updates, page requests, preview cleanup, and
-streaming starts and seeks. Omit `--smoke` to test with 50,000 photo records and
-51 videos. Add `--output=/path/to/new-report.json` to save the results to a new file.
+It creates a temporary gallery and generated videos. Omit `--smoke` for the
+larger workload of 50,000 photo records and 51 videos. Use
+`--output=/path/to/new-report.json` to save the results.
 
-## Schema migrations
+## Change the database schema
 
-Foldergram keeps two schema references in sync:
+Update `server/src/db/schema.ts` and add a new, ordered Dbmate migration under
+`server/db/migrations/`. Never rewrite a released migration. Test a fresh
+database and an upgrade from the previous schema, including preservation of
+existing data.
 
-- `server/src/db/schema.ts` for the current readable schema snapshot
-- `server/db/migrations/*.sql` for ordered Dbmate migrations
+Use `pnpm migrate` to apply pending migrations to your development database
+without starting the app.
 
-When you change the schema:
+## Change UI text
 
-- update `server/src/db/schema.ts`
-- add a new SQL migration under `server/db/migrations`
-- do not edit an already released migration; add a new one instead
+Keep app-owned text in `client/src/locales/`. Add keys to `en.json` and keep
+`de.json`, `es.json`, and `zh.json` aligned. Use the existing i18n helpers in
+components, including for accessible labels. The client test suite checks
+locale key parity.
 
-Use `pnpm migrate` to apply pending migrations without starting the app.
+Browser preferences, such as language, appearance, and video mute state, can
+persist between local sessions. Check both browser overrides and saved app
+defaults when testing preference changes. Development unregisters the production
+service worker to prevent it from serving stale app files.
 
-## Client preferences and service workers
+## Work on the documentation
 
-Browser preferences, including theme overrides, language, video mute state,
-and Home display options, are stored in `localStorage`. Instance defaults for
-theme, accent color, and app language are saved in SQLite. Browser theme and
-language overrides take precedence over the corresponding instance defaults.
+Edit the Markdown files under `docs/` and preview them with `pnpm dev:docs`.
+Run `pnpm build:docs` before submitting; the build checks internal links as well
+as generating the site.
 
-Development unregisters existing service workers to avoid stale assets.
-Production registers `/sw.js` when the browser supports service workers.
-
-## Client localization
-
-Foldergram's client locale files live in `client/src/locales/`.
-
-- `en.json` is the canonical locale tree for app-owned UI copy
-- `es.json`, `zh.json`, and `de.json` are shipped locales and must stay key-aligned with `en.json`
-- `index.ts` resolves local overrides, saved app defaults, and browser locales, registers Vue I18n, and syncs `document.documentElement.lang`
-- the client Vitest suite validates locale key parity against `en.json`
-
-## Docs workflow
-
-The docs workspace is standard VitePress:
-
-```bash
-pnpm dev:docs
-pnpm build:docs
-```
-
-The release workflow in `.github/workflows/publish-ghcr.yml` runs when a tag
-matching `v*.*.*` is pushed. It builds `linux/amd64` and `linux/arm64` images
-and publishes them to GHCR and Docker Hub. After publishing succeeds, the
-workflow runs `pnpm build:docs` and deploys `docs/.vitepress/dist`.
-
-## Production app behavior
-
-In production mode, the Express app serves `client/dist` and falls back to the
-SPA entry for non-API routes. Thumbnails and previews continue to be served as
-static files from their configured directories.
-
-## Carousel verification
-
-Carousel regressions live in `server/test/carousel-posts-feature.test.ts`
-and `server/test/migration-bootstrap.test.ts`. Changes should cover discovery,
-item ordering, stable post identity, mutations, and metadata preservation
-during migration.
-
-## Immich integration validation
-
-`server/test/immich-integration.test.ts` uses a fake Immich server and isolated
-temporary storage. Use this fixture for changes to source synchronization,
-media delivery, and failure handling.
-
-For manual checks against a live Immich instance, use a separate data root
-and an empty local gallery. Never point test runs at a production database
-or gallery.
+Write for the reader's task: explain what to configure or do, what result to
+expect, and any relevant limitations. Keep user guides focused on operating
+Foldergram. Use the API and architecture references for technical detail that
+helps integrations or code changes.

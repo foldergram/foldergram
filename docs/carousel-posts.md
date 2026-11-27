@@ -48,6 +48,23 @@ Items use a case-insensitive natural filename sort, so `2-photo.jpg` sorts befor
 
 Renaming files can reorder a post after the next scan without replacing its caption, likes, or saved state. If more than 20 supported files exist, Foldergram uses the first 20 after sorting and reports a warning.
 
+## Item ordering
+
+Each child folder under `carousels/` is a separate post with its own ordered
+slides. Files from different child folders are never mixed into one sequence.
+In the example above, `Coast` and `City Night` are two posts; filename prefixes
+control the slide order within each one.
+
+The order of those posts in the app is separate from their slide order:
+
+- **Inside a carousel:** files follow the [filename ordering](#filename-ordering) described above. The first file is the post cover.
+- **In an album:** posts follow **Newest First** or **Oldest First**, set in **Settings → General Settings**, using their saved post dates.
+- **In Home:** the selected **Recent**, **Rediscover**, or **Random** feed mode controls how posts are presented.
+
+Prefixing carousel folder names with `01-` or `02-` does not set their order in
+the album or feed. Use prefixes on the files inside a carousel to arrange its
+slides, then run **Scan for changes** to apply the new order.
+
 ## Renaming and moving carousel posts
 
 You can rename a carousel child folder and add, remove, or replace slides before running a full scan. Foldergram preserves the post ID, caption, likes, saved state, collection membership, and sort date when surviving indexed slides identify one existing post, remain together in one destination, and its old directory is gone. Safe slide matching requires unchanged file size and modification time. If every slide is replaced or no slide can be matched safely, post identity may not be preserved.
@@ -77,14 +94,11 @@ In the viewer, Download original, Open original, dimensions, file size, format, 
 
 Carousel photos and videos fit within the same viewer layout as single posts. Wide and tall slides keep their proportions, with black space where needed, and switching slides does not resize the viewer. Feed cards use the first slide's aspect ratio.
 
-## Item ordering
+## Search behavior
 
-Carousel slides are sorted deterministically using natural numeric filename comparison. Numbers embedded in filenames sort numerically (e.g. `slide1.jpg`, `slide2.jpg`, `slide10.jpg`). Case variants and Unicode accents use canonical Unicode NFKD normalization and deterministic code-point tie breaking, ensuring the identical slide sequence across discovery runs and platforms.
-
-## Search behavior and deduplication
-
-When searching for media in the feed, queries match against filenames, captions, and folder paths across all carousel slides.
-If multiple slides in a carousel match the search query, the carousel appears exactly once in search results, ranked by the highest-scoring matching slide. The first position (representative slide) is displayed as the cover card, and pagination remains stable without duplicate posts across page boundaries.
+Search matches filenames, captions, and folder paths across all items in a
+carousel. The post appears once even when several items match, and its first
+item remains the cover shown in results.
 
 ## Reels and mixed videos
 
@@ -97,7 +111,8 @@ Carousel videos follow the same playback rules as the rest of the library.
 When the player offers **HD**, you can switch sources and keep your place.
 See [video playback](./features.md#video-playback).
 
-Swiping or navigating through slides isolates video controls so that dragging the time slider or tapping player buttons does not trigger slide changes, and unmounting or switching slides pauses background playback cleanly.
+You can use the video controls without changing slides. Switching to another
+item pauses the previous video.
 
 Videos inside multi-item carousels do not appear in Reels or contribute to Reels counts. A child folder with exactly one video becomes a normal single-video post, so that fallback post may appear in Reels.
 

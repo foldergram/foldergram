@@ -5,7 +5,10 @@ description: Backend endpoints, parameters, response shapes, and mutation rules 
 
 # API
 
-All documented routes come from `server/src/routes/api.ts`.
+Use this reference to integrate with Foldergram or work on its client and
+server. Request paths are relative to your Foldergram instance, for example
+`http://localhost:4141/api/health`. Check the authentication and mutation
+requirements below before calling protected routes.
 
 ## Base paths
 

@@ -5,10 +5,10 @@ description: Supported formats, derivative generation rules, and video playback 
 
 # Media Processing
 
-Foldergram generates derivatives so feed and detail views can stay fast without
-touching original files on every request. Depending on configuration, those
-derivatives are either created during scans or lazily on first request and then
-cached on disk.
+Foldergram creates thumbnails and, when needed, preview copies for browsing.
+These generated files are called derivatives. They can be prepared during a
+scan or on first viewing, then cached on disk. This page explains which formats
+are supported and how processing affects playback, storage, and scan time.
 
 ## Supported formats
 
@@ -133,7 +133,7 @@ affected. These photos follow the same import setting, limits, and WebP viewing
 as `.heic` files, and keep their original name and bytes. Their original
 downloads use the `image/heic` MIME type.
 
-The prototype accepts 8-bit SDR HEVC stills, including grid-composed stills
+Experimental HEIC support accepts 8-bit SDR HEVC stills, including grid-composed stills
 and files with recognized thumbnail or auxiliary items. It renders the primary
 image to sRGB WebP. The worker handles container orientation first and uses
 EXIF orientation when there is no container rotation or mirror transform.
@@ -152,8 +152,9 @@ Decoding takes CPU and temporary memory. Browsing reuses saved WebP outputs.
 Replacing a file or rebuilding its derivatives can trigger another decode. See
 [configuration](./configuration.md#optional-heic-tuning) for worker limits. A
 busy worker queue can return a temporary error. Invalid or unsupported media is
-reported in scan diagnostics. See the [prototype validation record](./heic-prototype-validation.md)
-for fixture results, the native comparison, and pending release checks.
+reported in scan diagnostics. Contributors investigating decoder support can
+read the [HEIC validation notes](https://github.com/foldergram/foldergram/blob/main/server/test/heic-prototype-validation.md)
+for tested samples, performance measurements, and remaining validation work.
 
 ## Animated AVIF handling
 

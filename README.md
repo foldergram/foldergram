@@ -17,6 +17,8 @@
 [![Node.js Version](https://img.shields.io/badge/Node.js-22%20LTS-green?style=flat-square&logo=nodedotjs)](https://nodejs.org/)
 [![Vue 3](https://img.shields.io/badge/Vue.js-3-4fc08d?style=flat-square&logo=vuedotjs)](https://vuejs.org/)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg?style=flat-square)](https://www.gnu.org/licenses/agpl-3.0)
+[![Discord](https://img.shields.io/badge/Discord-Join%20the%20community-5865F2?style=flat-square&logo=discord&logoColor=white)](https://discord.gg/XPMu6b2NjB)
+[![Patreon](https://img.shields.io/badge/Patreon-Support%20development-F96854?style=flat-square&logo=patreon&logoColor=white)](https://www.patreon.com/sajjadalis)
 
 [Website](https://foldergram.app/) • [Documentation](https://docs.foldergram.app/) • [Live Demo](https://demo.foldergram.app/) • [Features](#features) • [Installation](#installation) • [Configuration](#configuration) • [Tech Stack](#tech-stack) • [Contributing](CONTRIBUTING.md)
 
@@ -431,6 +433,16 @@ Start contribution branches from the latest `develop` and target `develop` in yo
 For major features or changes to core behavior such as scanning, indexing, access, or storage, please open an issue or discussion first so we can agree on the approach before you invest time in an implementation.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for local setup, project guidelines, and tips for preparing a pull request.
+
+## Community
+
+Join our [Discord server](https://discord.gg/XPMu6b2NjB) to ask questions, share ideas, and connect with other Foldergram users. You can also use [GitHub Discussions](https://github.com/foldergram/foldergram/discussions) for feature discussions and longer conversations, or [GitHub Issues](https://github.com/foldergram/foldergram/issues) to report bugs.
+
+## Support Foldergram
+
+If you enjoy using Foldergram, consider [supporting its development on Patreon](https://www.patreon.com/sajjadalis). Your support helps me dedicate more time to maintenance, improvements, and new features.
+
+Thank you to everyone who supports, contributes to, and shares Foldergram.
 
 ---
 

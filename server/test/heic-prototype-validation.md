@@ -1,5 +1,9 @@
 # Local HEIC and HEIF prototype validation
 
+Contributor reference: these prototype measurements record the tested fixtures
+and remaining validation work. For settings and supported inputs, use the
+[HEIC guide](../../docs/media-processing.md#experimental-local-heic-and-heif).
+
 ## Backend decision
 
 Keep automatic discovery disabled by default. The opt-in implementation uses

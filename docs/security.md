@@ -1,13 +1,13 @@
 ---
 title: Security
-description: The real security posture of Foldergram, including admin/viewer/public access control, mutation trust checks, and local-only caveats.
+description: Password protection, folder shares, network exposure, and the limits to consider when hosting Foldergram.
 ---
 
 # Security
 
 Foldergram is built for local-first, self-hosted browsing. The optional [Immich integration](./immich.md) uses an encrypted API credential and a server-side media proxy; remote cache access remains subject to authentication, membership, source visibility and share grants.
-Its security model is intentionally narrow even though it now supports an
-optional admin/viewer/public access gate for homelab and LAN use.
+You can enable password protection for a homelab or LAN installation. The
+access controls below apply to the library, generated media, and shared folders.
 
 ## What Foldergram assumes
 
@@ -146,8 +146,8 @@ Foldergram does not serve arbitrary filesystem paths from the client.
 `GET /api/originals/:id`:
 
 - looks up the physical media asset by its numeric `images.id`
-- resolves the stored absolute path
-- confirms that path is still within `GALLERY_ROOT`
+- resolves its path within the local source it belongs to
+- rejects paths outside the source's resolved root and symbolic links beneath that root
 - confirms the file still exists
 
 ### Scan error reports
@@ -251,14 +251,3 @@ If a mutating request omits both `Origin` and `Referer`, the middleware still
 accepts it as long as `x-foldergram-intent: 1` is present. That is acceptable
 for the current local-only model, but it is one reason these checks should not
 be described as a full remote-hardening story.
-
-## What Foldergram does not try to be
-
-Foldergram is not attempting to be:
-
-- a cloud photo product
-- a multi-user NAS portal
-- a public media server with account management
-- a zero-trust network service
-
-The implementation is much closer to a private local gallery with a browser UI.
