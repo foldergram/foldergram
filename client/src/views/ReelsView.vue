@@ -15,11 +15,10 @@
       <p class="reels-view__message">{{ reelsStore.error }}</p>
     </section>
 
-    <section v-else-if="showLoadingState" class="reels-view__message-card">
-      <p class="reels-view__eyebrow">{{ t('nav.reels') }}</p>
-      <h1 class="reels-view__title">{{ t('reels.view.loadingTitle') }}</h1>
-      <p class="reels-view__message">{{ t('reels.view.loadingDescription') }}</p>
-    </section>
+    <section v-else-if="showLoadingState" class="reels-view__skeleton" role="status" :aria-label="t('reels.view.loadingTitle')">
+      <div class="reels-view__skeleton-stage" aria-hidden="true" />
+      <p class="reels-view__skeleton-text">{{ t('reels.view.loadingDescription') }}</p>
+  </section>
 
     <section v-else-if="reelsStore.initialized && reelsStore.items.length === 0" class="reels-view__message-card">
       <p class="reels-view__eyebrow">{{ t('nav.reels') }}</p>
@@ -234,7 +233,7 @@ const activeFolderTitle = computed(() => {
 const activeIndex = computed(() => reelsStore.items.findIndex((item) => item.id === reelsStore.activeReelId));
 const canGoPrevious = computed(() => activeIndex.value > 0);
 const canGoNext = computed(() => activeIndex.value >= 0 && (activeIndex.value < reelsStore.items.length - 1 || reelsStore.hasMore));
-const showLoadingState = computed(() => reelsStore.loading && !reelsStore.initialized);
+const showLoadingState = computed(() => reelsStore.isInitialLoading);
 let pendingDeckRouteId: string | null = null;
 let latestRouteRequest = 0;
 let loadingLinkedReel = false;
@@ -949,6 +948,56 @@ watch(activeItem, (item) => {
   line-height: 1.6;
   color: var(--muted);
 }
+  
+  .reels-view__skeleton {
+    display: grid;
+    place-items: center;
+    height: 100%;
+    min-height: 100%;
+    padding: 0 0.75rem;
+  }
+
+  .reels-view__skeleton-stage {
+    width: min(24.4rem, 100%, calc((100dvh - 1.5rem) * 9 / 16));
+    aspect-ratio: 9 / 16;
+    border-radius: 1rem;
+    background: linear-gradient(100deg, var(--surface) 40%, color-mix(in srgb, var(--text) 8%, var(--surface)) 50%, var(--surface) 60%);
+    background-size: 200% 100%;
+    animation: reels-skeleton-shimmer 1.4s ease infinite;
+  }  
+
+  .reels-view__skeleton-text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+  }
+
+  @keyframes reels-skeleton-shimmer {
+    from { background-position: 200% 0; }
+    to { background-position: -200% 0; }
+  }
+
+  @media (max-width: 767.98px) {
+    .reels-view__skeleton {
+      padding: 0;
+    }
+
+    .reels-view__skeleton-stage {
+      width: 100%;
+      height: 100%;
+      aspect-ratio: auto;
+      border-radius: 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .reels-view__skeleton-stage {
+      animation: none;
+    }
+  }
 
 @media (max-width: 767.98px) {
   .reels-view__layout {
