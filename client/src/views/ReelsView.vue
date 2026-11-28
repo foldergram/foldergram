@@ -977,9 +977,16 @@ watch(activeItem, (item) => {
   background: var(--bg);
   }
 .reels-view__skeleton-stage {
-  width: var(--reels-active-stage-width);
-    height: var(--reels-active-stage-height);
-    border-radius: 1rem;
+  /* Same sizing as the player stage, so the placeholder never jumps when the video appears. */
+  width: min(
+    calc(100% - var(--reel-stage-inline-gap, 1.25rem)),
+    calc(var(--reels-active-block-limit) * var(--reels-active-stage-ratio))
+  );
+  height: auto;
+  max-height: min(100%, var(--reels-active-block-limit));
+  max-width: 100%;
+  aspect-ratio: var(--reels-active-stage-ratio);
+  border-radius: 1rem;
     background: linear-gradient(100deg, var(--surface) 40%, color-mix(in srgb, var(--text) 8%, var(--surface)) 50%, var(--surface) 60%);
     background-size: 200% 100%;
     animation: reels-skeleton-shimmer 1.4s ease infinite;
