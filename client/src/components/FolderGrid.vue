@@ -1,10 +1,14 @@
 <template>
-  <section class="grid gap-[1px]" :class="columns === 'three' ? 'grid-cols-3' : 'grid-cols-3 md:grid-cols-4'">
-    <RouterLink v-for="item in items" :key="item.id" custom :to="buildImageRoute(item.id, 'sourceKind' in item && item.sourceKind === 'immich')" v-slot="{ href, navigate }">
+  <section
+    ref="gridElement"
+    :class="isJustified ? 'flex flex-wrap items-start gap-[4px]' : ['grid gap-[1px]', columns === 'three' ? 'grid-cols-3' : 'grid-cols-3 md:grid-cols-4']"
+  >
+    <RouterLink v-for="(item, index) in items" :key="item.id" custom :to="buildImageRoute(item.id, 'sourceKind' in item && item.sourceKind === 'immich')" v-slot="{ href, navigate }">
       <a
         :href="href"
         class="group relative overflow-hidden bg-surface-alt"
-        :class="variant === 'reels' ? 'aspect-[9/14]' : variant === 'posts' ? 'aspect-[3/4]' : 'aspect-square'"
+        :class="isJustified ? 'shrink-0' : variant === 'reels' ? 'aspect-[9/14]' : variant === 'posts' ? 'aspect-[3/4]' : 'aspect-square'"
+        :style="isJustified ? tileStyles[index] : undefined"
         @click="handleImageNavigation($event, navigate)"
         :aria-label="item.postType === 'carousel' ? t('post.carousel.open', { count: item.itemCount ?? item.mediaItems?.length ?? 0 }) : undefined"
       >
@@ -13,7 +17,8 @@
           :alt="item.filename"
           loading="lazy"
           :retry-while="appStore.isScanning"
-          class="h-full w-full object-cover group-hover:scale-[1.03] group-hover:opacity-90"
+          class="h-full w-full group-hover:opacity-90"
+          :class="isJustified ? 'object-contain' : 'object-cover group-hover:scale-[1.03]'"
           style="transition: transform 0.22s ease, opacity 0.22s ease;"
         />
         <div v-if="item.mediaType === 'video'" class="absolute inset-x-0 top-0 flex items-center justify-between px-2 py-2 text-white pointer-events-none bg-[linear-gradient(180deg,rgba(10,14,24,0.72)_0%,rgba(10,14,24,0)_100%)]">
@@ -36,12 +41,15 @@
 </template>
 
 <script setup lang="ts">
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { RouterLink, useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 
+import { useJustifiedAlbumGridPreference } from '../composables/useJustifiedAlbumGridPreference';
 import { useAppStore } from '../stores/app';
 import type { FeedItem, SharedFeedItem } from '../types/api';
 import { formatMediaDuration } from '../utils/media';
+import { justifiedTiles } from '../utils/justified-grid';
 import ResilientImage from './ResilientImage.vue';
 
 const props = withDefaults(
@@ -50,17 +58,50 @@ const props = withDefaults(
     variant?: 'square' | 'posts' | 'reels';
     columns?: 'adaptive' | 'three';
     sharedSlug?: string | null;
+    albumGrid?: boolean;
   }>(),
   {
     variant: 'square',
     columns: 'adaptive',
-    sharedSlug: null
+    sharedSlug: null,
+    albumGrid: false
   }
 );
 
 const appStore = useAppStore();
 const route = useRoute();
 const { t } = useI18n();
+const { enabled: justifiedEnabled } = useJustifiedAlbumGridPreference();
+const gridElement = ref<HTMLElement | null>(null);
+const gridWidth = ref(0);
+const isJustified = computed(() => props.albumGrid && props.variant === 'posts' && justifiedEnabled.value && gridWidth.value > 0);
+const tileStyles = computed(() => {
+  if (!isJustified.value) return [];
+  const target = Math.max(112, Math.min(220, gridWidth.value / 3.5));
+  return justifiedTiles(props.items, gridWidth.value, target, 4)
+    .map(tile => ({ width: `${tile.width}px`, height: `${tile.height}px` }));
+});
+let observer: ResizeObserver | undefined;
+
+function measureGrid() {
+  gridWidth.value = gridElement.value?.clientWidth ?? 0;
+}
+
+onMounted(() => {
+  if (!props.albumGrid) return;
+  measureGrid();
+  if (typeof ResizeObserver !== 'undefined' && gridElement.value) {
+    observer = new ResizeObserver(measureGrid);
+    observer.observe(gridElement.value);
+  } else {
+    window.addEventListener('resize', measureGrid);
+  }
+});
+
+onBeforeUnmount(() => {
+  observer?.disconnect();
+  window.removeEventListener('resize', measureGrid);
+});
 
 function buildImageRoute(id: number, useAlbumRoute: boolean) {
   if (props.sharedSlug) {

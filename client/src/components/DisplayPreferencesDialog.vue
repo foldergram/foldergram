@@ -46,6 +46,23 @@
       />
     </div>
 
+    <div class="mt-6 flex items-start justify-between gap-5">
+      <div class="min-w-0">
+        <p :id="`${id}-grid-label`" class="m-0 font-semibold">{{ t('displayPreferences.justifiedAlbumGrid.label') }}</p>
+        <p :id="`${id}-grid-help`" class="mt-2 mb-0 text-[0.85rem] text-muted">{{ t('displayPreferences.justifiedAlbumGrid.description') }}</p>
+      </div>
+      <button
+        class="display-preferences-switch shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent"
+        :class="{ 'display-preferences-switch--on': justifiedAlbumGridEnabled }"
+        type="button"
+        role="switch"
+        :aria-checked="justifiedAlbumGridEnabled"
+        :aria-labelledby="`${id}-grid-label`"
+        :aria-describedby="`${id}-grid-help`"
+        @click="toggleJustifiedAlbumGrid"
+      />
+    </div>
+
     <p v-if="hasSaveFailure" class="mt-5 mb-0 text-[0.85rem] text-text" role="alert">{{ t('displayPreferences.sessionOnly') }}</p>
     <p v-else class="mt-5 mb-0 min-h-6 text-[0.85rem] text-accent-strong" role="status">{{ saved ? t('displayPreferences.saved') : '' }}</p>
     <div class="mt-5 flex justify-end">
@@ -59,6 +76,7 @@ import { computed, onBeforeUnmount, onMounted, ref, useId } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useSuggestedFoldersPreference } from '../composables/useSuggestedFoldersPreference';
 import { useFitTallMediaPreference } from '../composables/useFitTallMediaPreference';
+import { useJustifiedAlbumGridPreference } from '../composables/useJustifiedAlbumGridPreference';
 import { useAppearanceStore } from '../stores/appearance';
 import BrowserAppearanceSelect from './BrowserAppearanceSelect.vue';
 
@@ -69,8 +87,9 @@ const dialog = ref<HTMLDialogElement | null>(null);
 const saved = ref(false);
 const { enabled, saveFailed, setEnabled } = useSuggestedFoldersPreference();
 const { enabled: fitTallMediaEnabled, saveFailed: fitTallMediaSaveFailed, setEnabled: setFitTallMediaEnabled } = useFitTallMediaPreference();
+const { enabled: justifiedAlbumGridEnabled, saveFailed: justifiedAlbumGridSaveFailed, setEnabled: setJustifiedAlbumGridEnabled } = useJustifiedAlbumGridPreference();
 const appearance = useAppearanceStore();
-const hasSaveFailure = computed(() => saveFailed.value || fitTallMediaSaveFailed.value || appearance.browserSaveFailed);
+const hasSaveFailure = computed(() => saveFailed.value || fitTallMediaSaveFailed.value || justifiedAlbumGridSaveFailed.value || appearance.browserSaveFailed);
 
 function toggleSuggestedFolders() {
   saved.value = setEnabled(!enabled.value);
@@ -78,6 +97,10 @@ function toggleSuggestedFolders() {
 
 function toggleFitTallMedia() {
   saved.value = setFitTallMediaEnabled(!fitTallMediaEnabled.value);
+}
+
+function toggleJustifiedAlbumGrid() {
+  saved.value = setJustifiedAlbumGridEnabled(!justifiedAlbumGridEnabled.value);
 }
 
 function handleBackdropClick(event: MouseEvent) {

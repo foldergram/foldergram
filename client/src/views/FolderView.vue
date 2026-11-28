@@ -167,6 +167,7 @@
             <FolderGrid
               v-else
               :items="displayedItems"
+              album-grid
               :variant="activeTab === 'reels' ? 'reels' : 'posts'"
             />
             <div class="pt-6">
