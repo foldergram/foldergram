@@ -54,7 +54,7 @@ vi.mock('../components/ReelDeck.vue', async () => {
           default: false
         }
       },
-      emits: ['active-change', 'prefetch'],
+      emits: ['active-change', 'prefetch', 'video-ready'],
       setup(props, { emit, expose, slots }) {
         expose({
           goToPrevious: deckControls.goToPrevious,
@@ -87,6 +87,22 @@ vi.mock('../components/ReelDeck.vue', async () => {
                 onClick: () => emit('prefetch', 1)
               },
               'emit prefetch'
+            ),
+            h(
+              'button',
+              {
+                'data-test': 'emit-video-ready',
+                onClick: () => emit('video-ready', activeItem()?.id ?? null)
+              },
+              'emit video ready'
+            ),
+            h(
+              'button',
+              {
+                'data-test': 'emit-video-ready-other',
+                onClick: () => emit('video-ready', (props.items[1] as FeedItem | undefined)?.id ?? null)
+              },
+              'emit other video ready'
             )
           ]);
       }
@@ -582,6 +598,53 @@ describe('ReelsView', () => {
     expect(deckControls.navigateByWheel).toHaveBeenCalledTimes(1);
 
     sidebar.remove();
+    wrapper.unmount();
+  });
+
+  it('keeps the skeleton overlay up while the loaded feed video is not ready yet', async () => {
+    const reelsStore = useReelsStore();
+    vi.spyOn(reelsStore, 'loadInitial').mockResolvedValue(undefined);
+
+    const wrapper = mount(ReelsView);
+    await flushPromises();
+
+    expect(wrapper.find('.reels-view__skeleton').exists()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it('hides the skeleton overlay only once the active reel reports ready', async () => {
+    const reelsStore = useReelsStore();
+    vi.spyOn(reelsStore, 'loadInitial').mockResolvedValue(undefined);
+
+    const wrapper = mount(ReelsView);
+    await flushPromises();
+
+    expect(wrapper.find('.reels-view__skeleton').exists()).toBe(true);
+
+    await wrapper.get('[data-test="emit-video-ready-other"]').trigger('click');
+    await flushPromises();
+    expect(wrapper.find('.reels-view__skeleton').exists()).toBe(true);
+
+    await wrapper.get('[data-test="emit-video-ready"]').trigger('click');
+    await flushPromises();
+    expect(wrapper.find('.reels-view__skeleton').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('hides the skeleton overlay when navigation lands on an already-ready reel', async () => {
+    const reelsStore = useReelsStore();
+    vi.spyOn(reelsStore, 'loadInitial').mockResolvedValue(undefined);
+
+    const wrapper = mount(ReelsView);
+    await flushPromises();
+
+    await wrapper.get('[data-test="emit-video-ready-other"]').trigger('click');
+    await flushPromises();
+    expect(wrapper.find('.reels-view__skeleton').exists()).toBe(true);
+
+    await wrapper.get('[data-test="emit-active-change"]').trigger('click');
+    await flushPromises();
+    expect(wrapper.find('.reels-view__skeleton').exists()).toBe(false);
     wrapper.unmount();
   });
 });
