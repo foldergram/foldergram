@@ -66,7 +66,8 @@ const POST_SOURCE_COLUMNS_SQL = `
     (SELECT kind FROM media_sources WHERE id=posts.source_id) AS sourceKind,
     (SELECT name FROM media_sources WHERE id=posts.source_id) AS sourceName,
     (SELECT CASE WHEN kind='local' THEN COALESCE(json_extract(config_json,'$.readOnlyOriginals'),0)=0 ELSE 0 END FROM media_sources WHERE id=posts.source_id) AS canWriteOriginals,
-    (SELECT CASE WHEN kind='local' THEN 1 ELSE COALESCE(json_extract(config_json,'$.allowOriginals'),0) END FROM media_sources WHERE id=posts.source_id) AS originalDownloadsAllowed
+    (SELECT CASE WHEN kind='local' THEN 1 ELSE COALESCE(json_extract(config_json,'$.allowOriginals'),0) END FROM media_sources WHERE id=posts.source_id) AS originalDownloadsAllowed,
+    (SELECT CASE WHEN kind='immich' AND json_extract(config_json,'$.homeFeedImageQuality')='high' THEN 'high' ELSE 'standard' END FROM media_sources WHERE id=posts.source_id) AS homeFeedImageQuality
 `;
 const folderSourceId = (folderId: number): number => {
   const folder = database.prepare('SELECT source_id FROM folders WHERE id = ?').get(folderId) as { source_id: number } | undefined;

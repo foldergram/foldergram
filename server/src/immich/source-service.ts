@@ -16,6 +16,7 @@ export const selectionSchema = z.object({
     exclusions: z.array(z.string().min(1).max(4096)).max(500).default([]),
     includeUnfiled: z.boolean().default(false),
     allowOriginals: z.boolean().default(false),
+    homeFeedImageQuality: z.enum(['standard', 'high']).default('standard'),
     intervalMinutes: z.number().int().min(0).max(525600).refine(n => n === 0 || n >= 5, 'Use zero or at least five minutes.').default(0)
 });
 export const sourceInputSchema = z.object({ name: z.string().trim().min(1).max(100), serverUrl: z.string().max(2048), apiKey: z.string().trim().min(1).max(4096).optional(), enabled: z.boolean().default(true), selection: selectionSchema });
@@ -131,7 +132,7 @@ function persistSource(input: z.infer<typeof sourceInputSchema>, url: string, ma
         catch { /* A replacement key can repair lost encryption state. */ }
     }
     const encrypted = credentialChanged && input.apiKey ? encryptCredential(input.apiKey) : existing!.api_key_ciphertext;
-    const contentSelection = ({ allowOriginals, intervalMinutes, initializedModes, ...content }: Selection) => JSON.stringify(content);
+    const contentSelection = ({ allowOriginals, homeFeedImageQuality, intervalMinutes, initializedModes, ...content }: Selection) => JSON.stringify(content);
     if (existing) {
         const connectionChanged = credentialChanged || existing.server_url !== url;
         const selectionChanged = contentSelection(input.selection) !== contentSelection(selectionSchema.parse(JSON.parse(existing.config_json)));

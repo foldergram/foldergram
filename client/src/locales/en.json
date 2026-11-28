@@ -127,6 +127,12 @@
     "description": "Manage the local folders and Immich libraries shown in Foldergram.",
     "connect": "Connect a source",
     "connectImmich": "Connect Immich",
+    "immichImageQuality": {
+      "label": "Home feed image quality",
+      "standard": "Standard (default)",
+      "high": "High Quality",
+      "description": "High Quality loads previews for still photos in Home, falling back to thumbnails when needed. Previews use more bandwidth and cache space."
+    },
     "syncNow": "Sync now",
     "edit": "Edit",
     "local": {

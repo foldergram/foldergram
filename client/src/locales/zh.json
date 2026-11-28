@@ -127,6 +127,12 @@
     "description": "管理 Foldergram 中显示的本地文件夹和 Immich 媒体库。",
     "connect": "连接来源",
     "connectImmich": "连接 Immich",
+    "immichImageQuality": {
+      "label": "首页动态图片质量",
+      "standard": "标准（默认）",
+      "high": "高质量",
+      "description": "高质量模式在首页动态中加载静态照片预览，必要时回退到缩略图。预览会占用更多带宽和缓存空间。"
+    },
     "syncNow": "立即同步",
     "edit": "编辑",
     "local": {

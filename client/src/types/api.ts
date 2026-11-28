@@ -84,6 +84,7 @@ export interface FeedItem {
   sourceKind?: 'local' | 'immich';
   sourceName?: string;
   canWriteOriginals?: boolean;
+  homeFeedImageQuality?: 'standard' | 'high';
   originalDownloadsAllowed?: boolean;
   id: number;
   folderId: number;

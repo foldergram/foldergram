@@ -302,6 +302,7 @@ export interface FeedImage {
   sourceName?: string;
   canWriteOriginals?: boolean;
   originalDownloadsAllowed?: boolean;
+  homeFeedImageQuality?: 'standard' | 'high';
   id: number;
   folderId: number;
   folderSlug: string;

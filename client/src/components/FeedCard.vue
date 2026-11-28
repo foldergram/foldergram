@@ -102,6 +102,7 @@
     >
       <ResilientImage
         :src="homeImageSrc"
+        :fallback-src="homeImageFallback"
         :alt="item.filename"
         loading="lazy"
         :retry-while="appStore.isScanning"
@@ -655,7 +656,20 @@ function observeMediaFrameWidth() {
 
 watch([feedCardElement, isHomeContext, () => props.fitTallMedia], observeMediaFrameWidth, { flush: 'post' });
 
-const homeImageSrc = computed(() => (props.item.isAnimated ? props.item.previewUrl : props.item.thumbnailUrl));
+const prefersHighQualityHomeImage = computed(() =>
+  isHomeContext.value && props.item.sourceKind === 'immich' && props.item.mediaType === 'image' &&
+  !props.item.isAnimated && props.item.homeFeedImageQuality === 'high'
+);
+const homeImageSrc = computed(() => props.item.isAnimated
+  ? props.item.previewUrl
+  : prefersHighQualityHomeImage.value
+    ? props.item.previewUrl || props.item.thumbnailUrl
+    : props.item.thumbnailUrl
+);
+const homeImageFallback = computed(() => prefersHighQualityHomeImage.value && props.item.previewUrl
+  ? props.item.thumbnailUrl
+  : null
+);
 const activeMediaImageId = computed(() =>
   isCarousel.value
     ? props.item.mediaItems?.[carouselIndex.value]?.imageId ?? props.item.id
