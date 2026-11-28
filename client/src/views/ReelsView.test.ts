@@ -54,7 +54,7 @@ vi.mock('../components/ReelDeck.vue', async () => {
           default: false
         }
       },
-      emits: ['active-change', 'prefetch', 'video-ready'],
+      emits: ['active-change', 'prefetch'],
       setup(props, { emit, expose, slots }) {
         expose({
           goToPrevious: deckControls.goToPrevious,
@@ -87,22 +87,6 @@ vi.mock('../components/ReelDeck.vue', async () => {
                 onClick: () => emit('prefetch', 1)
               },
               'emit prefetch'
-            ),
-            h(
-              'button',
-              {
-                'data-test': 'emit-video-ready',
-                onClick: () => emit('video-ready', activeItem()?.id ?? null)
-              },
-              'emit video ready'
-            ),
-            h(
-              'button',
-              {
-                'data-test': 'emit-video-ready-other',
-                onClick: () => emit('video-ready', (props.items[1] as FeedItem | undefined)?.id ?? null)
-              },
-              'emit other video ready'
             )
           ]);
       }
@@ -601,50 +585,19 @@ describe('ReelsView', () => {
     wrapper.unmount();
   });
 
-  it('keeps the skeleton overlay up while the loaded feed video is not ready yet', async () => {
+  it('keeps the deck mounted during initial loading so players can become ready', async () => {
     const reelsStore = useReelsStore();
-    vi.spyOn(reelsStore, 'loadInitial').mockResolvedValue(undefined);
-
+    reelsStore.$patch({ items: [], activeReelId: null, initialized: false, loading: true });
+    let finishLoading!: () => void;
+    vi.spyOn(reelsStore, 'loadInitial').mockImplementation(() => new Promise(resolve => { finishLoading = resolve; }));
     const wrapper = mount(ReelsView);
     await flushPromises();
-
-    expect(wrapper.find('.reels-view__skeleton').exists()).toBe(true);
-    wrapper.unmount();
-  });
-
-  it('hides the skeleton overlay only once the active reel reports ready', async () => {
-    const reelsStore = useReelsStore();
-    vi.spyOn(reelsStore, 'loadInitial').mockResolvedValue(undefined);
-
-    const wrapper = mount(ReelsView);
+    expect(wrapper.find('[data-test="reel-deck"]').exists()).toBe(true);
+    reelsStore.$patch({ items: [createFeedItem(101, 'alpha', 'Alpha')], activeReelId: 101, initialized: true, loading: false });
+    finishLoading();
     await flushPromises();
-
-    expect(wrapper.find('.reels-view__skeleton').exists()).toBe(true);
-
-    await wrapper.get('[data-test="emit-video-ready-other"]').trigger('click');
-    await flushPromises();
-    expect(wrapper.find('.reels-view__skeleton').exists()).toBe(true);
-
-    await wrapper.get('[data-test="emit-video-ready"]').trigger('click');
-    await flushPromises();
-    expect(wrapper.find('.reels-view__skeleton').exists()).toBe(false);
-    wrapper.unmount();
-  });
-
-  it('hides the skeleton overlay when navigation lands on an already-ready reel', async () => {
-    const reelsStore = useReelsStore();
-    vi.spyOn(reelsStore, 'loadInitial').mockResolvedValue(undefined);
-
-    const wrapper = mount(ReelsView);
-    await flushPromises();
-
-    await wrapper.get('[data-test="emit-video-ready-other"]').trigger('click');
-    await flushPromises();
-    expect(wrapper.find('.reels-view__skeleton').exists()).toBe(true);
-
-    await wrapper.get('[data-test="emit-active-change"]').trigger('click');
-    await flushPromises();
-    expect(wrapper.find('.reels-view__skeleton').exists()).toBe(false);
+    expect(wrapper.find('[data-test="reel-deck"]').exists()).toBe(true);
+    expect(wrapper.find('.reels-view__message-card').exists()).toBe(false);
     wrapper.unmount();
   });
 });

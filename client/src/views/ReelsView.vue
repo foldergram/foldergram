@@ -38,7 +38,6 @@
           :external-metadata="showExternalMetadata"
           @active-change="handleActiveChange"
           @prefetch="handlePrefetch"
-          @video-ready="onVideoReady"
         >
           <template #mobile-action-rail="{ item }">
             <ReelActionRail
@@ -64,10 +63,6 @@
             </ReelActionRail>
           </template>
         </ReelDeck>
-        <section v-if="showSkeletonOverlay" class="reels-view__skeleton" role="status" :aria-label="t('reels.view.loadingTitle')">
-          <div class="reels-view__skeleton-stage" aria-hidden="true" />
-          <p class="reels-view__skeleton-text">{{ t('reels.view.loadingDescription') }}</p>
-          </section>
         <div v-if="!isMobileViewport" ref="metadataGutter" class="reels-view__metadata-gutter">
           <RouterLink
             v-if="showExternalMetadata && activeItem"
@@ -234,22 +229,6 @@ const activeFolderTitle = computed(() => {
 const activeIndex = computed(() => reelsStore.items.findIndex((item) => item.id === reelsStore.activeReelId));
 const canGoPrevious = computed(() => activeIndex.value > 0);
 const canGoNext = computed(() => activeIndex.value >= 0 && (activeIndex.value < reelsStore.items.length - 1 || reelsStore.hasMore));
-const showLoadingState = computed(() => reelsStore.isInitialLoading);
-  const readyReelIds = ref(new Set<number>());
-  const isInitialVideoReady = ref(false);
-  const showSkeletonOverlay = computed(() => showLoadingState.value || !isInitialVideoReady.value);
-
-  function onVideoReady(reelId: number) {
-    readyReelIds.value.add(reelId);
-    if (reelId === reelsStore.activeReelId) isInitialVideoReady.value = true;
-  }
-
-  watch(
-    () => reelsStore.activeReelId,
-    (activeId) => {
-      if (activeId !== null && readyReelIds.value.has(activeId)) isInitialVideoReady.value = true;
-    }
-);
 let pendingDeckRouteId: string | null = null;
 let latestRouteRequest = 0;
 let loadingLinkedReel = false;
@@ -313,8 +292,6 @@ function closeViewer() {
 
 async function openLinkedReel(value: string) {
   const request = ++latestRouteRequest;
-  readyReelIds.value.clear();
-  isInitialVideoReady.value = false;
   loadingLinkedReel = true;
   reelsStore.error = null;
   const id = Number(value);
@@ -342,8 +319,6 @@ async function openLinkedReel(value: string) {
 }
 
 async function openReelsEntry() {
-  readyReelIds.value.clear();
-  isInitialVideoReady.value = false;
   const request = ++latestRouteRequest;
   // A cancelled deep-link load must not keep scroll-to-URL updates disabled.
   loadingLinkedReel = false;
@@ -968,63 +943,6 @@ watch(activeItem, (item) => {
   line-height: 1.6;
   color: var(--muted);
 }
-.reels-view__skeleton {  
-  position: absolute;
-    inset: 0;
-    z-index: 2;
-    display: grid;
-    place-items: center;
-  background: var(--bg);
-  }
-.reels-view__skeleton-stage {
-  /* Same sizing as the player stage, so the placeholder never jumps when the video appears. */
-  width: min(
-    calc(100% - var(--reel-stage-inline-gap, 1.25rem)),
-    calc(var(--reels-active-block-limit) * var(--reels-active-stage-ratio))
-  );
-  height: auto;
-  max-height: min(100%, var(--reels-active-block-limit));
-  max-width: 100%;
-  aspect-ratio: var(--reels-active-stage-ratio);
-  border-radius: 1rem;
-    background: linear-gradient(100deg, var(--surface) 40%, color-mix(in srgb, var(--text) 8%, var(--surface)) 50%, var(--surface) 60%);
-    background-size: 200% 100%;
-    animation: reels-skeleton-shimmer 1.4s ease infinite;
-  }  
-
-  .reels-view__skeleton-text {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip: rect(0, 0, 0, 0);
-    white-space: nowrap;
-  }
-
-  @keyframes reels-skeleton-shimmer {
-    from { background-position: 200% 0; }
-    to { background-position: -200% 0; }
-  }
-
-  @media (max-width: 767.98px) {
-    .reels-view__skeleton {
-      padding: 0;
-    }
-
-    .reels-view__skeleton-stage {
-      width: 100%;
-      height: 100%;
-      aspect-ratio: auto;
-      border-radius: 0;
-    }
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .reels-view__skeleton-stage {
-      animation: none;
-    }
-  }
-
 @media (max-width: 767.98px) {
   .reels-view__layout {
     display: block;

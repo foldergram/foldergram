@@ -1,5 +1,6 @@
 import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { flushPromises } from '@vue/test-utils';
 
 import * as galleryApi from '../api/gallery';
 import type { AppStatus, FeedItem } from '../types/api';
@@ -208,6 +209,78 @@ describe('reels store', () => {
     await reelsStore.openReel(99);
     expect(fetchImageSpy).toHaveBeenCalledTimes(1);
     expect(reelsStore.items.map((item) => item.id)).toEqual([99, 11, 12]);
+  });
+
+  it('keeps an out-of-page requested Reel active while its details are pending', async () => {
+    vi.spyOn(galleryApi, 'fetchReels').mockResolvedValue({
+      items: [createFeedItem(1)], page: 1, limit: 6, total: 1, hasMore: false
+    });
+    let resolveDetail!: (item: Awaited<ReturnType<typeof galleryApi.fetchImage>>) => void;
+    vi.spyOn(galleryApi, 'fetchImage').mockImplementation(() => new Promise(resolve => { resolveDetail = resolve; }));
+    const store = useReelsStore();
+    const opening = store.openReel(8);
+    await flushPromises();
+    expect(store.items.map(item => item.id)).toEqual([1]);
+    expect(store.activeReelId).toBe(8);
+    expect(store.activeItem).toBeNull();
+    resolveDetail(createFeedItem(8) as Awaited<ReturnType<typeof galleryApi.fetchImage>>);
+    expect(await opening).toBe(true);
+    expect(store.activeItem?.id).toBe(8);
+  });
+
+  it('restores a usable queue when an initial out-of-page anchor is cancelled', async () => {
+    vi.spyOn(galleryApi, 'fetchReels').mockResolvedValue({
+      items: [createFeedItem(1)], page: 1, limit: 6, total: 1, hasMore: false
+    });
+    let resolveDetail!: (item: Awaited<ReturnType<typeof galleryApi.fetchImage>>) => void;
+    vi.spyOn(galleryApi, 'fetchImage').mockImplementation(() => new Promise(resolve => { resolveDetail = resolve; }));
+    const store = useReelsStore();
+    const opening = store.openReel(8);
+    await flushPromises();
+    store.invalidatePendingOpenReel();
+    await store.loadInitial();
+    expect(store.activeItem?.id).toBe(1);
+    resolveDetail(createFeedItem(8) as Awaited<ReturnType<typeof galleryApi.fetchImage>>);
+    expect(await opening).toBe(false);
+    expect(store.items.map(item => item.id)).toEqual([1]);
+  });
+
+  it('reselects an unresolved anchor after closing and restoring its initialized Home queue', async () => {
+    useAppStore().$patch({ stats: createAppStatus('random') });
+    const fetchReelsSpy = vi.spyOn(galleryApi, 'fetchReels').mockResolvedValue({
+      mode: 'random', items: [createFeedItem(1)], page: 1, limit: 6, total: 1, hasMore: false
+    });
+    const originalDetail = Promise.withResolvers<Awaited<ReturnType<typeof galleryApi.fetchImage>>>();
+    const restoredDetail = Promise.withResolvers<Awaited<ReturnType<typeof galleryApi.fetchImage>>>();
+    vi.spyOn(galleryApi, 'fetchImage')
+      .mockImplementationOnce(() => originalDetail.promise)
+      .mockImplementationOnce(() => restoredDetail.promise);
+    const store = useReelsStore();
+    store.activateSession('home:pending');
+    const originalOpen = store.openReel(8);
+    await flushPromises();
+
+    store.pauseSession();
+    store.activateSession('standalone');
+    store.activateSession('home:pending');
+    expect(store.initialized).toBe(true);
+    expect(store.activeReelId).toBe(1);
+
+    const restoredOpen = store.openReel(8);
+    await flushPromises();
+    expect(fetchReelsSpy).toHaveBeenCalledTimes(1);
+    expect(store.activeReelId).toBe(8);
+    expect(store.activeItem).toBeNull();
+
+    originalDetail.resolve(createFeedItem(8) as Awaited<ReturnType<typeof galleryApi.fetchImage>>);
+    expect(await originalOpen).toBe(false);
+    expect(store.items.map(item => item.id)).toEqual([1]);
+    expect(store.activeItem).toBeNull();
+
+    restoredDetail.resolve(createFeedItem(8) as Awaited<ReturnType<typeof galleryApi.fetchImage>>);
+    expect(await restoredOpen).toBe(true);
+    expect(store.activeItem?.id).toBe(8);
+    expect(store.items.map(item => item.id)).toEqual([8, 1]);
   });
 
   it('never lets an older deep-link request override a newer Reel', async () => {

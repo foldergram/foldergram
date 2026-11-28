@@ -7,8 +7,12 @@
     :aria-label="t('reels.view.feedAria')"
     @scroll="handleScroll"
   >
+    <div v-if="!items.length || awaitingActiveItem" class="reel-deck__panel reel-deck__panel--portrait" style="--reel-item-ratio: 0.5625">
+      <ReelStage :width="9" :height="16"><ReelSkeleton /></ReelStage>
+    </div>
     <div
       v-for="(item, index) in items"
+      v-show="!awaitingActiveItem"
       :key="item.id"
       :ref="setPanelRef(item.id)"
       class="reel-deck__panel"
@@ -24,7 +28,6 @@
         :video-preparation="videoPreparation"
         :next-video-playback-url="item.id === activeReelId ? items[index + 1]?.videoPlaybackUrl ?? undefined : undefined"
         :external-metadata="externalMetadata"
-        @video-ready="onVideoReady"
       >
         <template v-if="item.id === activeReelId" #mobile-action-rail>
           <slot
@@ -39,12 +42,13 @@
     <div
       v-if="loading && items.length > 0"
       class="reel-deck__panel"
+      :class="{ 'reel-deck__panel--portrait': lastItem && lastItem.height > lastItem.width }"
       :style="{ '--reel-item-ratio': lastRatio }"
       role="status"
       :aria-label="t('reels.view.loadingMore')"
-  >
-      <div class="reel-deck__skeleton" aria-hidden="true" />
-  </div>
+    >
+      <ReelStage :width="lastItem?.width ?? 9" :height="lastItem?.height ?? 16"><ReelSkeleton :loading-more="true" /></ReelStage>
+    </div>
   </section>
 </template>
 
@@ -56,6 +60,8 @@ import type { FeedItem, FolderSummary } from '../types/api';
 import { ReelVideoPreparation } from '../utils/local-video-provider';
 import { getActiveReelId, shouldPrefetchReels } from '../utils/reels';
 import ReelPlayerCard from './ReelPlayerCard.vue';
+import ReelStage from './ReelStage.vue';
+import ReelSkeleton from './ReelSkeleton.vue';
 
 const { t } = useI18n();
 
@@ -70,11 +76,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   activeChange: [id: number];
   prefetch: [activeIndex: number];
-  videoReady: [id: number];
 }>();
-  function onVideoReady(id: number) {
-    emit('videoReady', id);
-  }
 
 const scrollerElement = ref<HTMLElement | null>(null);
 const panelElements = new Map<number, HTMLElement>();
@@ -86,6 +88,7 @@ const renderedActiveIndex = computed(() => {
   const index = props.items.findIndex(item => item.id === props.activeReelId);
   return index >= 0 ? index : 0;
 });
+const awaitingActiveItem = computed(() => props.activeReelId !== null && !props.items.some(item => item.id === props.activeReelId));
 const lastItem = computed(() => props.items.at(-1) ?? null);
 const lastRatio = computed(() => lastItem.value && lastItem.value.width > 0 && lastItem.value.height > 0
   ? lastItem.value.width / lastItem.value.height
@@ -117,7 +120,7 @@ function updateActiveReel() {
   scrollFrame = 0;
 
   const scroller = scrollerElement.value;
-  if (!scroller || props.items.length === 0) {
+  if (!scroller || props.items.length === 0 || awaitingActiveItem.value) {
     return;
   }
 
@@ -437,33 +440,4 @@ defineExpose({
   }
 }
 
-.reel-deck__skeleton {
-  width: min(100%, calc(100cqh * var(--reel-item-ratio)));
-  aspect-ratio: var(--reel-item-ratio);
-  max-height: 100%;
-  border-radius: 1rem;
-  background: linear-gradient(100deg, var(--surface) 40%, color-mix(in srgb, var(--text) 8%, var(--surface)) 50%, var(--surface) 60%);
-  background-size: 200% 100%;
-  animation: reels-skeleton-shimmer 1.4s ease infinite;
-}
-
-  @keyframes reels-skeleton-shimmer {
-    from { background-position: 200% 0; }
-    to { background-position: -200% 0; }
-  }
-
-  @media (max-width: 767.98px) {
-    .reel-deck__skeleton {
-      width: 100%;
-      height: 100%;
-      aspect-ratio: auto;
-      border-radius: 0;
-    }
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .reel-deck__skeleton {
-      animation: none;
-    }
-  }
-  </style>
+</style>
