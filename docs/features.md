@@ -61,6 +61,12 @@ the other switch unchanged. With fitting off, tall posts can require scrolling.
 Mobile feed sizing stays the same. These browser preferences are separate from
 General Settings and its Save Changes button.
 
+**Justified album grid** is off by default. Enable it in **More → Display preferences**
+to preserve media aspect ratios in albums and app-folders, with complete rows
+filling the available width. The preference is saved in the current browser.
+Turn it off to restore the standard Instagram-style layout. Reels keep their
+dedicated layout.
+
 ### Feed mode behavior
 
 | Mode | What it does |

@@ -94,6 +94,10 @@
       "label": "Vorgeschlagene Ordner auf dem Desktop anzeigen",
       "description": "Zeigt vorgeschlagene Ordner neben dem Start-Feed auf breiten Bildschirmen. Wenn du dies ausschaltest, erhält der Feed mehr Platz."
     },
+    "justifiedAlbumGrid": {
+      "label": "Bündiges Albumraster",
+      "description": "Behält die Seitenverhältnisse der Fotos in Alben und App-Ordnern bei, statt sie auf einheitliche Kacheln zuzuschneiden."
+    },
     "fitTallMedia": {
       "label": "Hohe Medien an den Bildschirm anpassen",
       "description": "Verkleinert nur Medien, die höher als das Desktop-Fenster sind. Funktioniert mit und ohne vorgeschlagene Ordner."

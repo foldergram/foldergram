@@ -197,7 +197,8 @@ for (const theme of ['light', 'dark'] as const) {
 
 for (const preference of [
   { key: 'foldergram-show-suggested-folders-on-desktop', label: 'Show suggested folders on desktop', initial: true },
-  { key: 'foldergram-fit-tall-media-to-screen', label: 'Fit tall media to screen', initial: false }
+  { key: 'foldergram-fit-tall-media-to-screen', label: 'Fit tall media to screen', initial: false },
+  { key: 'foldergram-justified-album-grid', label: 'Justified album grid', initial: false }
 ]) {
   test(`display preferences explain blocked storage and recover for ${preference.label}`, async ({ page }) => {
     await mockGallery(page);
@@ -223,6 +224,73 @@ for (const preference of [
     await dialog.getByRole('switch', { name: preference.label, exact: true }).click();
     await expect(dialog.getByRole('alert')).toHaveCount(0);
     await expect(dialog.getByRole('status')).toHaveText('Saved in this browser.');
+  });
+}
+
+for (const width of [390, 1280]) {
+  test(`optional justified album grid preserves aspect ratios at ${width}px`, async ({ page }) => {
+    await mockGallery(page, 'light');
+    await page.setViewportSize({ width, height: 720 });
+    const dimensions = [[6000, 1000], [1500, 1000], [1000, 1500], [1000, 1000], [1600, 900], [800, 1000]];
+    const palette = [['#a8ccd4', '#527d93'], ['#f2cda1', '#b55b42'], ['#d8d9b5', '#56765e'], ['#bfcbe3', '#52618e'], ['#f3c8b9', '#9c6471'], ['#b8d9cf', '#42837b']];
+    const images = dimensions.map(([w, h], index) => ({
+      ...panorama, id: index + 1, filename: `fixture-${index + 1}.jpg`, width: w, height: h,
+      thumbnailUrl: `/thumbnails/fixture-${index + 1}.svg`, previewUrl: `/previews/fixture-${index + 1}.svg`
+    }));
+    await page.route(/\/api\/folders\/panoramas\/images(?:\?|$)/, route => route.fulfill({
+      json: { items: images, page: 1, limit: 24, total: images.length, hasMore: false, folder: { ...folder, imageCount: images.length } }
+    }));
+    await page.route(/\/(?:thumbnails|previews)\/fixture-\d+\.svg$/, route => {
+      const index = Number(new URL(route.request().url()).pathname.match(/fixture-(\d+)/)![1]) - 1;
+      const [w, h] = dimensions[index];
+      const [sky, mountain] = palette[index];
+      return route.fulfill({ contentType: 'image/svg+xml', body: `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 300 200" preserveAspectRatio="none"><rect width="300" height="200" fill="${sky}"/><circle cx="${50 + index * 35}" cy="50" r="22" fill="#fff2d2"/><path d="M0 155L74 73 132 139 196 56 300 155V200H0Z" fill="${mountain}"/><path d="M0 175Q70 145 150 180T300 160V200H0Z" fill="#243746" opacity=".65"/></svg>` });
+    });
+    await page.goto('/f/panoramas');
+    const tile = page.locator('main a[href="/post/1"]').last();
+    const tiles = images.map(item => page.locator(`main a[href="/post/${item.id}"]`).last());
+    for (const [index, link] of tiles.entries()) {
+      await link.scrollIntoViewIfNeeded();
+      await expect(link.locator('img')).toHaveAttribute('data-loaded', 'true');
+      await expect(link.locator('img')).toHaveAttribute('alt', images[index].filename);
+    }
+    await expect(tile).toBeVisible();
+    await expect.poll(async () => {
+      const box = (await tile.boundingBox())!;
+      return box.width / box.height;
+    }).toBeCloseTo(3 / 4, 1);
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.screenshot({ path: test.info().outputPath('album-standard.png'), fullPage: true });
+
+    let dialog = await openDisplayPreferences(page);
+    const toggle = dialog.getByRole('switch', { name: 'Justified album grid', exact: true });
+    await expect(toggle).toHaveAttribute('aria-checked', 'false');
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-checked', 'true');
+    await dialog.screenshot({ path: test.info().outputPath('album-display-preferences.png') });
+    await dialog.getByRole('button', { name: 'Done', exact: true }).click();
+    for (const [index, link] of tiles.entries()) {
+      const [w, h] = dimensions[index];
+      await expect.poll(async () => {
+        const box = (await link.boundingBox())!;
+        return box.width / box.height;
+      }).toBeCloseTo(w / h, 1);
+    }
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.screenshot({ path: test.info().outputPath('album-justified.png'), fullPage: true });
+    await page.reload();
+    await expect.poll(async () => {
+      const box = (await tile.boundingBox())!;
+      return box.width / box.height;
+    }).toBeCloseTo(6, 1);
+
+    dialog = await openDisplayPreferences(page);
+    await dialog.getByRole('switch', { name: 'Justified album grid', exact: true }).click();
+    await dialog.getByRole('button', { name: 'Done', exact: true }).click();
+    await expect.poll(async () => {
+      const box = (await tile.boundingBox())!;
+      return box.width / box.height;
+    }).toBeCloseTo(3 / 4, 1);
   });
 }
 

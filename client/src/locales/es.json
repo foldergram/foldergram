@@ -94,6 +94,10 @@
       "label": "Mostrar carpetas sugeridas en escritorio",
       "description": "Muestra carpetas sugeridas junto a Inicio en pantallas anchas. Desactivar esta opción da más espacio al feed."
     },
+    "justifiedAlbumGrid": {
+      "label": "Cuadrícula de álbum justificada",
+      "description": "Conserva las proporciones de las fotos en álbumes y carpetas de la aplicación en lugar de recortarlas en mosaicos uniformes."
+    },
     "fitTallMedia": {
       "label": "Ajustar contenido vertical a la pantalla",
       "description": "Reduce solo el contenido que supera la altura de la ventana de escritorio. Funciona con o sin carpetas sugeridas."

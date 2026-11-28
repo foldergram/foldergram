@@ -94,6 +94,10 @@
       "label": "Show suggested folders on desktop",
       "description": "Show suggested folders beside Home on wider screens. Turning this off gives the feed more room."
     },
+    "justifiedAlbumGrid": {
+      "label": "Justified album grid",
+      "description": "Preserve photo proportions in albums and app-folders instead of cropping them into uniform tiles."
+    },
     "fitTallMedia": {
       "label": "Fit tall media to screen",
       "description": "Shrink only media taller than the desktop window. Works with or without suggested folders."

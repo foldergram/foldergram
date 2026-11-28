@@ -31,7 +31,7 @@
           :description="t('share.emptyDescription')"
         />
         <section v-else class="grid gap-5">
-          <FolderGrid :items="shareStore.images" variant="posts" :shared-slug="slug" />
+          <FolderGrid :items="shareStore.images" variant="posts" :shared-slug="slug" album-grid />
           <InfiniteLoader :loading="shareStore.loading" :has-more="shareStore.hasMore" @load-more="loadMore" />
         </section>
       </section>
