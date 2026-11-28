@@ -75,7 +75,9 @@ export const useReelsStore = defineStore('reels', {
     openReelRequestId: 0
   }),
   getters: {
-    activeItem: (state) => state.items.find((item) => item.id === state.activeReelId) ?? state.items[0] ?? null
+    activeItem: (state) => state.items.find((item) => item.id === state.activeReelId) ?? (state.activeReelId === null ? state.items[0] ?? null : null),
+    isInitialLoading: (state) => state.loading && !state.initialized,
+    isLoadingMore: (state) => state.loading && state.initialized && state.items.length > 0
   },
   actions: {
     syncModeWithDefault(force = false) {
@@ -109,6 +111,10 @@ export const useReelsStore = defineStore('reels', {
 
     invalidatePendingOpenReel() {
       this.openReelRequestId += 1;
+      // Cancelling an unresolved anchor must leave a usable cached queue.
+      if (this.activeReelId !== null && !this.items.some(item => item.id === this.activeReelId)) {
+        this.activeReelId = this.items[0]?.id ?? null;
+      }
     },
 
     saveSession() {
@@ -179,7 +185,7 @@ export const useReelsStore = defineStore('reels', {
       this.invalidatePendingOpenReel();
     },
 
-    async loadInitial(force = false) {
+    async loadInitial(force = false, anchorId: number | null = null) {
       const modeChanged = this.syncModeWithDefault(force);
       const queueRequiresSeed = this.mode !== 'recent';
       const queueMatchesMode = this.loadedMode === this.mode && (!queueRequiresSeed || this.seed !== null);
@@ -197,7 +203,9 @@ export const useReelsStore = defineStore('reels', {
       this.loading = false;
       this.error = null;
       this.initialized = false;
-      this.activeReelId = null;
+      // A deep link may be absent from page one. Keep it selected while
+      // fetching details so another Reel cannot play behind its placeholder.
+      this.activeReelId = anchorId;
       await this.loadMore();
     },
 
@@ -291,12 +299,14 @@ export const useReelsStore = defineStore('reels', {
       }
 
       if (!this.initialized) {
-        await this.loadInitial();
+        await this.loadInitial(false, id);
         if (openRequestId !== this.openReelRequestId) return false;
       }
 
       let item = this.items.find((reel) => reel.id === id);
       if (!item) {
+        // Restored queues are already initialized but can still lack this anchor.
+        this.activeReelId = id;
         const detail = await fetchImage(id, 'video');
         // A completed older request must never replace a newer URL's active Reel.
         if (openRequestId !== this.openReelRequestId) return false;

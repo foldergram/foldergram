@@ -2031,6 +2031,9 @@ for (const browseA of [false, true]) {
     expect(keyB).not.toBe(keyA);
     await expect.poll(() => deck.locator('.reel-deck__panel').evaluateAll(panels =>
       panels.map(panel => Number(panel.getAttribute('data-reel-id'))))).toEqual([8, 101, 102, 103, 104, 105, 106]);
+    const retainedVideo = deck.locator('[data-reel-id="8"] video');
+    await expect.poll(() => retainedVideo.evaluate((video: HTMLVideoElement) => video.readyState)).toBeGreaterThanOrEqual(3);
+    const retainedHandle = await retainedVideo.elementHandle();
     const bSeed = requests.at(-1)!.seed;
     expect(bSeed).not.toBe(seedA);
     await page.evaluate(() => history.go(-3));
@@ -2039,6 +2042,18 @@ for (const browseA of [false, true]) {
     await expect.poll(() => deck.locator('.reel-deck__panel').evaluateAll(panels =>
       panels.map(panel => Number(panel.getAttribute('data-reel-id'))))).toEqual(aIds);
     await expect(deck.locator('.reel-player-card__surface[role="button"]')).toHaveCount(1);
+    if (!browseA) {
+      expect(await retainedVideo.evaluate((video, retained) => video === retained, retainedHandle)).toBe(true);
+      await expect.poll(() => retainedVideo.evaluate((video: HTMLVideoElement) => !video.paused)).toBe(true);
+    }
+    await expect(reelLoading(page)).toHaveCount(0);
+    const activeSurface = deck.locator('.reel-player-card__surface[role="button"]');
+    const activeVideo = activeSurface.locator('video');
+    await expect(activeSurface.locator('media-player')).toHaveAttribute('data-playing', '');
+    await activeSurface.click({ position: { x: 100, y: 100 } });
+    await expect.poll(() => activeVideo.evaluate((video: HTMLVideoElement) => video.paused)).toBe(true);
+    await activeSurface.click({ position: { x: 100, y: 100 } });
+    await expect.poll(() => activeVideo.evaluate((video: HTMLVideoElement) => !video.paused)).toBe(true);
     // Cursor continuity after restoration must still use A's seed.
     const requestCount = requests.length;
     for (const id of (browseA ? [2, 3, 4, 5, 6] : [1, 2, 3, 4, 5, 6])) {
@@ -2703,3 +2718,193 @@ for (const folderCount of [1500, 5000, 10000]) {
     expect(requests.every(url => Number(url.searchParams.get('limit')) <= 50)).toBe(true);
   });
 }
+
+// Use actual media responses: player events alone miss provider/source failures.
+const reelLoading = (page: Page) => page.locator('.reels-view__skeleton, .reel-skeleton[role="status"]');
+const deferred = () => {
+  let resolve!: () => void;
+  const promise = new Promise<void>(done => { resolve = done; });
+  return { promise, resolve };
+};
+
+for (const viewport of [{ width: 1440, height: 900 }, { width: 1080, height: 1778 }, { width: 390, height: 844 }]) {
+  for (const home of [false, true]) {
+    test(`Reel loading matches the actual stage at ${viewport.width}×${viewport.height}, home=${home}`, async ({ page }) => {
+      await mockGallery(page, 'dark');
+      await page.setViewportSize(viewport);
+      const clip = await readFile(new URL('./fixtures/feed-video.mp4', import.meta.url));
+      await page.route('**/previews/home.mp4', route => route.fulfill({ contentType: 'video/mp4', body: clip }));
+      for (const [width, height] of [[1080, 1920], [1080, 1080], [1920, 1080]]) {
+        const mediaGate = deferred();
+        const requested = deferred();
+        const item = { ...panorama, id: 8, mediaType: 'video', filename: 'reel-8.mp4', width, height,
+          previewUrl: `/previews/loading-${width}-${height}.mp4` };
+        await page.route(`**${item.previewUrl}`, async route => {
+          requested.resolve();
+          await mediaGate.promise;
+          await route.fulfill({ contentType: 'video/mp4', body: clip });
+        });
+        await page.route('**/api/reels?*', route => route.fulfill({ json: {
+          items: [item], page: 1, limit: 6, total: 1, hasMore: false
+        } }));
+        await page.route('**/api/feed?*', route => route.fulfill({ json: {
+          items: [{ ...item, previewUrl: '/previews/home.mp4' }], page: 1, limit: 24, total: 1, hasMore: false
+        } }));
+        try {
+          if (home) {
+            await page.goto('/');
+            const opener = page.locator('.feed-card__video-shell[role="button"]').first();
+            await expect(opener).toBeVisible();
+            await opener.click({ position: { x: 100, y: 120 } });
+          } else await page.goto('/reels/8');
+          await requested.promise;
+          const stage = page.locator('[data-reel-id="8"] .reel-player-card__stage');
+          await expect(stage).toBeVisible();
+          await expect(reelLoading(page)).toHaveCount(1);
+          const skeleton = page.locator('.reels-view__skeleton-stage, .reel-skeleton').first();
+          const before = (await skeleton.boundingBox())!;
+          const player = (await stage.boundingBox())!;
+          for (const key of ['x', 'y', 'width', 'height'] as const) {
+            expect(Math.abs(before[key] - player[key]), `${key}: skeleton must cover the actual stage`).toBeLessThan(1);
+          }
+          const motion = await skeleton.evaluate(element => ({
+            background: getComputedStyle(element).backgroundImage,
+            animation: getComputedStyle(element).animationName
+          }));
+          expect(motion).toEqual({ background: 'none', animation: 'none' });
+          await expect(skeleton.locator('.reel-skeleton__avatar')).toHaveCSS('animation-name', /^reel-skeleton-pulse/);
+          await page.emulateMedia({ reducedMotion: 'reduce' });
+          await expect(skeleton.locator('.reel-skeleton__avatar')).toHaveCSS('animation-name', 'none');
+          await page.screenshot({ path: test.info().outputPath(`loading-${width}-${height}.png`) });
+          await page.emulateMedia({ reducedMotion: 'no-preference' });
+          mediaGate.resolve();
+          await expect(reelLoading(page)).toHaveCount(0);
+          await expect.poll(() => stage.locator('video').evaluate((video: HTMLVideoElement) => !video.paused && video.readyState >= 3)).toBe(true);
+          const after = (await stage.boundingBox())!;
+          expect(after).toEqual(player);
+        } finally { mediaGate.resolve(); }
+      }
+    });
+  }
+}
+
+for (const restoreHistory of [false, true]) {
+  test(`Reel loading waits for a delayed Home anchor outside page one${restoreHistory ? ' after Close and Forward' : ''} and autoplays it`, async ({ page }) => {
+    await mockGallery(page, 'dark');
+    const clip = await readFile(new URL('./fixtures/feed-video.mp4', import.meta.url));
+    const details = deferred();
+    const detailRequested = deferred();
+    const restoredDetailRequested = deferred();
+    let detailRequests = 0;
+    let reelRequests = 0;
+    const media = deferred();
+    const mediaRequested = deferred();
+    const item = (id: number) => ({ ...panorama, id, mediaType: 'video', filename: `reel-${id}.mp4`,
+      width: 1080, height: 1920, previewUrl: '/previews/home.mp4' });
+    await page.route('**/previews/home.mp4', route => route.fulfill({ contentType: 'video/mp4', body: clip }));
+    await page.route('**/api/feed?*', route => route.fulfill({ json: { items: [item(8)], page: 1, limit: 24, total: 1, hasMore: false } }));
+    await page.route('**/api/reels?*', route => {
+      reelRequests++;
+      return route.fulfill({ json: { items: [1, 2, 3, 4, 5, 6].map(item), page: 1, limit: 6, total: 6, hasMore: false } });
+    });
+    await page.route('**/api/posts/8?*', async route => {
+      detailRequests++;
+      if (detailRequests === 1) detailRequested.resolve();
+      else restoredDetailRequested.resolve();
+      await details.promise;
+      await route.fulfill({ json: { ...item(8), previewUrl: '/previews/anchor.mp4' } });
+    });
+    await page.route('**/previews/anchor.mp4', async route => {
+      mediaRequested.resolve();
+      await media.promise;
+      await route.fulfill({ contentType: 'video/mp4', body: clip });
+    });
+    try {
+      await page.goto('/');
+      const opener = page.locator('.feed-card__video-shell[role="button"]').first();
+      await expect(opener).toBeVisible();
+      await opener.click({ position: { x: 100, y: 120 } });
+      await detailRequested.promise;
+      if (restoreHistory) {
+        const sessionKey = await page.evaluate(() => history.state.reelSessionKey);
+        await page.getByRole('button', { name: 'Close', exact: true }).click();
+        await expect(page).toHaveURL('/');
+        await page.goForward();
+        await expect(page).toHaveURL(/\/reels\/8\?from=home/);
+        await restoredDetailRequested.promise;
+        expect(await page.evaluate(() => history.state.reelSessionKey)).toBe(sessionKey);
+        expect(reelRequests).toBe(1);
+      }
+      // Allow the first-page media to finish; it must not complete this transition.
+      await page.waitForTimeout(500);
+      await expect(reelLoading(page)).toHaveCount(1);
+      expect(await page.locator('.reel-deck video').evaluateAll(videos => videos.some(video => !(video as HTMLVideoElement).paused))).toBe(false);
+      details.resolve();
+      await mediaRequested.promise;
+      const anchor = page.locator('[data-reel-id="8"] video');
+      await expect.poll(() => anchor.evaluate((video: HTMLVideoElement) => video.readyState)).toBe(0);
+      await expect(reelLoading(page)).toHaveCount(1);
+      expect(await page.locator('.reel-deck video').evaluateAll(videos => videos.some(video => !(video as HTMLVideoElement).paused))).toBe(false);
+      media.resolve();
+      await expect(reelLoading(page)).toHaveCount(0);
+      await expect.poll(() => anchor.evaluate((video: HTMLVideoElement) => !video.paused && video.readyState >= 3)).toBe(true);
+    } finally { details.resolve(); media.resolve(); }
+  });
+}
+
+for (const originalFails of [false, true]) {
+  test(`Reel loading handles real legacy preview 404, original fails=${originalFails}`, async ({ page }) => {
+    await mockGallery(page, 'dark');
+    const clip = await readFile(new URL('./fixtures/feed-video.mp4', import.meta.url));
+    const original = deferred();
+    const originalRequested = deferred();
+    let originalRequests = 0;
+    await page.route('**/api/reels?*', route => route.fulfill({ json: { items: [{ ...panorama, id: 8,
+      mediaType: 'video', filename: 'missing.mp4', width: 1080, height: 1920, previewUrl: '/previews/missing.mp4'
+    }], page: 1, limit: 6, total: 1, hasMore: false } }));
+    await page.route('**/previews/missing.mp4', route => route.fulfill({ status: 404, body: '' }));
+    await page.route('**/api/originals/8', async route => {
+      originalRequests++;
+      originalRequested.resolve();
+      await original.promise;
+      await route.fulfill(originalFails ? { status: 404, body: '' } : { contentType: 'video/mp4', body: clip });
+    });
+    try {
+      await page.goto('/reels/8');
+      await originalRequested.promise;
+      await expect(reelLoading(page)).toHaveCount(1);
+      original.resolve();
+      await expect(reelLoading(page)).toHaveCount(0);
+      if (originalFails) {
+        await expect(page.getByRole('alert')).toHaveText('This video could not be played.');
+        const requestsBeforeRetry = originalRequests;
+        await page.getByRole('button', { name: 'Retry playback', exact: true }).click();
+        await expect.poll(() => originalRequests).toBeGreaterThan(requestsBeforeRetry);
+        await expect(page.getByRole('alert')).toBeVisible();
+      } else {
+        await expect.poll(() => page.locator('.reel-deck video').evaluate((video: HTMLVideoElement) => !video.paused && video.readyState >= 3)).toBe(true);
+      }
+    } finally { original.resolve(); }
+  });
+}
+
+
+test('Reel loading exposes streaming failures and retries the real endpoint', async ({ page }) => {
+  await mockGallery(page, 'dark');
+  await page.route('**/api/reels?*', route => route.fulfill({ json: {
+    items: [{ ...panorama, id: 8, mediaType: 'video', width: 1080, height: 1920,
+      videoPlaybackUrl: '/api/videos/8/playback' }], page: 1, limit: 6, total: 1, hasMore: false
+  } }));
+  let requests = 0;
+  await page.route('**/api/videos/8/playback', route => {
+    requests++;
+    return route.fulfill({ status: 404, json: { message: 'Unavailable' } });
+  });
+  await page.goto('/reels/8');
+  await expect(page.getByRole('alert')).toHaveText('This video could not be played.');
+  await expect(reelLoading(page)).toHaveCount(0);
+  const before = requests;
+  await page.getByRole('button', { name: 'Retry playback', exact: true }).click();
+  await expect.poll(() => requests).toBeGreaterThan(before);
+  await expect(page.getByRole('alert')).toBeVisible();
+});

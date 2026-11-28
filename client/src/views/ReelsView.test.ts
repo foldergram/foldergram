@@ -584,4 +584,20 @@ describe('ReelsView', () => {
     sidebar.remove();
     wrapper.unmount();
   });
+
+  it('keeps the deck mounted during initial loading so players can become ready', async () => {
+    const reelsStore = useReelsStore();
+    reelsStore.$patch({ items: [], activeReelId: null, initialized: false, loading: true });
+    let finishLoading!: () => void;
+    vi.spyOn(reelsStore, 'loadInitial').mockImplementation(() => new Promise(resolve => { finishLoading = resolve; }));
+    const wrapper = mount(ReelsView);
+    await flushPromises();
+    expect(wrapper.find('[data-test="reel-deck"]').exists()).toBe(true);
+    reelsStore.$patch({ items: [createFeedItem(101, 'alpha', 'Alpha')], activeReelId: 101, initialized: true, loading: false });
+    finishLoading();
+    await flushPromises();
+    expect(wrapper.find('[data-test="reel-deck"]').exists()).toBe(true);
+    expect(wrapper.find('.reels-view__message-card').exists()).toBe(false);
+    wrapper.unmount();
+  });
 });

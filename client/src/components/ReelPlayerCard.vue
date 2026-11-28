@@ -1,127 +1,126 @@
 <template>
-  <article class="reel-player-card" :class="{ 'reel-player-card--external-metadata': externalMetadata, 'reel-player-card--portrait': item.height > item.width }" :style="{ '--reel-item-ratio': item.width > 0 && item.height > 0 ? item.width / item.height : 9 / 16 }">
-    <div class="reel-player-card__stage">
-      <div
-        class="reel-player-card__surface"
-        :aria-label="active ? t('post.viewer.togglePlayback') : undefined"
-        :role="active ? 'button' : undefined"
-        :tabindex="active ? 0 : -1"
-        @click="handleSurfaceClick"
-        @keydown="handleSurfaceKeydown"
+  <ReelStage :width="item.width" :height="item.height" :class="{ 'reel-player-card--external-metadata': externalMetadata }">
+    <div
+      class="reel-player-card__surface"
+      :aria-label="active ? t('post.viewer.togglePlayback') : undefined"
+      :role="active ? 'button' : undefined"
+      :tabindex="active ? 0 : -1"
+      @click="handleSurfaceClick"
+      @keydown="handleSurfaceKeydown"
+    >
+      <media-player
+        ref="playerElement"
+        class="reel-player-card__player"
+        :src.prop="streaming.source.value ?? videoSource"
+        :title.prop="item.filename"
+        :fullscreenOrientation.prop="'none'"
+        :playsInline.prop="true"
+        :muted.prop="appStore.videoMuted"
+        :storage.prop="videoMuteStorage"
+        :loop.prop="true"
+        :load="playerLoadMode"
+        preload="metadata"
+        @media-mute-request="appStore.setVideoMuted(true)"
+        @media-unmute-request="appStore.setVideoMuted(false)"
+        @media-volume-change-request="appStore.setVideoMuted($event.detail === 0)"
       >
-        <media-player
-          ref="playerElement"
-          class="reel-player-card__player"
-          :src.prop="streaming.source.value ?? videoSource"
-          :title.prop="item.filename"
-          :fullscreenOrientation.prop="'none'"
-          :playsInline.prop="true"
-          :muted.prop="appStore.videoMuted"
-          :storage.prop="videoMuteStorage"
-          :loop.prop="true"
-          :load="playerLoadMode"
-          preload="metadata"
-          @media-mute-request="appStore.setVideoMuted(true)"
-          @media-unmute-request="appStore.setVideoMuted(false)"
-          @media-volume-change-request="appStore.setVideoMuted($event.detail === 0)"
-        >
-          <media-provider :loaders.prop="streaming.loaders" />
-          <LocalVideoFeedback
-            v-if="streaming.source.value"
-            :poster="item.thumbnailUrl"
-            :active="active"
-            :state="streaming.state.value"
-            :spinner-delay="REEL_LOADING_SPINNER_DELAY_MS"
-            @retry="streaming.play"
-          />
-          <media-poster
-            v-else
-            :src.prop="item.thumbnailUrl"
-            :alt.prop="item.filename"
-          />
-          <!-- TikTok-style bottom seek bar -->
-          <div class="reel-player-card__seekbar-shell">
-            <media-time-slider
-              class="reel-player-card__seekbar"
-              :aria-label="t('media.seekVideo')"
-              @click.stop
-              @pointerdown.stop
-              @pointerup.stop
-            >
-              <div class="reel-player-card__seekbar-track" />
-              <div class="reel-player-card__seekbar-track reel-player-card__seekbar-progress" />
-              <div class="reel-player-card__seekbar-track reel-player-card__seekbar-fill" />
-              <div class="reel-player-card__seekbar-thumb" />
-            </media-time-slider>
-          </div>
-        </media-player>
+        <media-provider :loaders.prop="streaming.loaders" />
+        <LocalVideoFeedback
+          v-if="streaming.source.value || legacyFailed"
+          :poster="item.thumbnailUrl"
+          :active="active"
+          :state="streaming.source.value ? streaming.state.value : { pending: false, hasFrame: false, failed: legacyFailed }"
+          :spinner-delay="REEL_LOADING_SPINNER_DELAY_MS"
+          @retry="retryPlayback"
+        />
+        <media-poster
+          v-else
+          :src.prop="item.thumbnailUrl"
+          :alt.prop="item.filename"
+        />
+        <!-- TikTok-style bottom seek bar -->
+        <div class="reel-player-card__seekbar-shell">
+          <media-time-slider
+            class="reel-player-card__seekbar"
+            :aria-label="t('media.seekVideo')"
+            @click.stop
+            @pointerdown.stop
+            @pointerup.stop
+          >
+            <div class="reel-player-card__seekbar-track" />
+            <div class="reel-player-card__seekbar-track reel-player-card__seekbar-progress" />
+            <div class="reel-player-card__seekbar-track reel-player-card__seekbar-fill" />
+            <div class="reel-player-card__seekbar-thumb" />
+          </media-time-slider>
+        </div>
+      </media-player>
 
-        <div
-          v-if="showPausedIndicator && !streaming.state.value.pending && !streaming.state.value.failed"
-          class="reel-player-card__pause-indicator"
-          aria-hidden="true"
-        >
-          <span class="reel-player-card__pause-icon i-fluent-play-20-filled" />
+      <div
+        v-if="showPausedIndicator && !streaming.state.value.pending && !playbackFailed"
+        class="reel-player-card__pause-indicator"
+        aria-hidden="true"
+      >
+        <span class="reel-player-card__pause-icon i-fluent-play-20-filled" />
+      </div>
+
+      <div class="reel-player-card__bottom-fade" aria-hidden="true" />
+
+      <div
+        class="reel-player-card__overlay"
+        :class="{ 'reel-player-card__overlay--visible': active }"
+      >
+        <div v-if="!externalMetadata" class="reel-player-card__copy">
+          <RouterLink
+            class="reel-player-card__folder-row reel-player-card__folder-link"
+            :to="{ name: 'folder', params: { slug: item.folderSlug } }"
+            :aria-label="t('post.viewer.openFolder')"
+            @click.stop
+          >
+            <Avatar
+              class="reel-player-card__avatar"
+              :name="displayFolderTitle"
+              :src="folder ? folder.avatarUrl : item.folderAvatarUrl ?? null"
+            />
+            <div class="reel-player-card__text">
+              <strong class="reel-player-card__folder-name">
+                {{ displayFolderTitle }}
+              </strong>
+              <p class="reel-player-card__folder-description">
+                {{ folderDescription }}
+              </p>
+            </div>
+          </RouterLink>
         </div>
 
-        <div class="reel-player-card__bottom-fade" aria-hidden="true" />
-
-        <div
-          class="reel-player-card__overlay"
-          :class="{ 'reel-player-card__overlay--visible': active }"
-        >
-          <div v-if="!externalMetadata" class="reel-player-card__copy">
-            <RouterLink
-              class="reel-player-card__folder-row reel-player-card__folder-link"
-              :to="{ name: 'folder', params: { slug: item.folderSlug } }"
-              :aria-label="t('post.viewer.openFolder')"
-              @click.stop
-            >
-              <Avatar
-                class="reel-player-card__avatar"
-                :name="displayFolderTitle"
-                :src="folder ? folder.avatarUrl : item.folderAvatarUrl ?? null"
-              />
-              <div class="reel-player-card__text">
-                <strong class="reel-player-card__folder-name">
-                  {{ displayFolderTitle }}
-                </strong>
-                <p class="reel-player-card__folder-description">
-                  {{ folderDescription }}
-                </p>
-              </div>
-            </RouterLink>
+        <div class="reel-player-card__controls">
+          <div
+            v-if="$slots['mobile-action-rail']"
+            class="reel-player-card__mobile-actions"
+          >
+            <slot name="mobile-action-rail" />
           </div>
 
-          <div class="reel-player-card__controls">
-            <div
-              v-if="$slots['mobile-action-rail']"
-              class="reel-player-card__mobile-actions"
-            >
-              <slot name="mobile-action-rail" />
-            </div>
-
-            <button
-              class="reel-player-card__sound-button"
-              type="button"
-              :aria-label="appStore.videoMuted ? t('media.enableSound') : t('media.muteSound')"
-              @click.stop="toggleSound"
-            >
-              <span
-                class="reel-player-card__sound-icon"
-                :class="
-                  appStore.videoMuted
-                    ? 'i-fluent-speaker-mute-16-regular'
-                    : 'i-fluent-speaker-2-16-regular'
-                "
-                aria-hidden="true"
-              />
-            </button>
-          </div>
+          <button
+            class="reel-player-card__sound-button"
+            type="button"
+            :aria-label="appStore.videoMuted ? t('media.enableSound') : t('media.muteSound')"
+            @click.stop="toggleSound"
+          >
+            <span
+              class="reel-player-card__sound-icon"
+              :class="
+                appStore.videoMuted
+                  ? 'i-fluent-speaker-mute-16-regular'
+                  : 'i-fluent-speaker-2-16-regular'
+              "
+              aria-hidden="true"
+            />
+          </button>
         </div>
       </div>
     </div>
-  </article>
+    <ReelSkeleton v-if="active && !videoReady && !playbackFailed" />
+  </ReelStage>
 </template>
 
 <script setup lang="ts">
@@ -142,6 +141,8 @@ import { getOriginalMediaUrl } from '../utils/original-media';
 import { applyVideoMutePreference, createVideoMuteStorage } from '../utils/video-mute';
 import Avatar from './Avatar.vue';
 import LocalVideoFeedback from './LocalVideoFeedback.vue';
+import ReelStage from './ReelStage.vue';
+import ReelSkeleton from './ReelSkeleton.vue';
 import { useLocalVideoPlayback } from '../composables/useLocalVideoPlayback';
 
 const props = defineProps<{
@@ -152,7 +153,10 @@ const props = defineProps<{
   videoPreparation?: ReelVideoPreparation;
   externalMetadata?: boolean;
 }>();
-
+// Readiness belongs to this mounted player and its current media source.
+// Retained history entries keep it; remounts and source changes reset it.
+const videoReady = ref(false);
+const legacyFailed = ref(false);
 const { t } = useI18n();
 const appStore = useAppStore();
 const videoMuteStorage = createVideoMuteStorage(() => appStore.videoMuted);
@@ -165,6 +169,7 @@ const streaming = useLocalVideoPlayback(() => props.item.videoPlaybackUrl, {
 });
 useNativeVideoMuteSync(playerElement, () => appStore.videoMuted, (muted) => appStore.setVideoMuted(muted));
 const isPaused = ref(false);
+let userPaused = false;
 const isUsingOriginalFallback = ref(false);
 const playerLoadMode = computed(() => (props.active ? 'eager' : 'visible'));
 const originalMediaId = computed(() => props.item.mediaItems?.[0]?.imageId ?? props.item.id);
@@ -173,6 +178,7 @@ const videoSource = computed<PlayerSrc>(() => ({
   src: currentVideoSrc.value,
   type: 'video/mp4'
 }));
+const playbackFailed = computed(() => legacyFailed.value || streaming.state.value.failed);
 const showPausedIndicator = computed(() => props.active && isPaused.value);
 const displayFolderTitle = computed(() => formatFolderTitle(props.folder ?? props.item, appStore.nestedFolderTitleFormat));
 const folderDescription = computed(() => {
@@ -229,7 +235,7 @@ function syncMuted(player: MediaPlayerElement, muted: boolean) {
 }
 
 async function syncPlayback() {
-  if (streaming.source.value) return;
+  if (streaming.source.value || legacyFailed.value) return;
   const player = playerElement.value;
   if (!player) {
     return;
@@ -245,20 +251,23 @@ async function syncPlayback() {
     return;
   }
 
+  if (userPaused) return;
   syncMuted(player, appStore.videoMuted);
 
   try {
     await player.play();
+    if (userPaused || !props.active) return;
+    // Vidstack can ignore a native pause during a loop seek. Resume the
+    // legacy provider when its cached paused state no longer matches it.
+    const video = player.querySelector('video');
+    if (video?.paused) await video.play();
     resetAutoplayRetry();
     isPaused.value = false;
     return;
   } catch {
     if (appStore.videoMuted) {
-      if (!isUsingOriginalFallback.value && autoplayRetryAttempts >= MAX_AUTOPLAY_RETRIES) {
-        switchToOriginalFallback();
-        return;
-      }
-
+      // A pending download is not a failed preview. Native source errors
+      // trigger original fallback; can-play retries autoplay when data arrives.
       scheduleAutoplayRetry();
       return;
     }
@@ -276,9 +285,10 @@ function bindPlayerEventListeners(player: MediaPlayerElement | null) {
   const handleReady = () => {
     if (!props.item.videoPlaybackUrl) void syncPlayback();
   };
-  const handlePlay = () => {
-    isPaused.value = false;
-    if (!props.active) {
+  const handlePlay = (event: Event) => {
+    isPaused.value = props.active && userPaused;
+    if (!props.active || userPaused) {
+      if (event.target instanceof HTMLVideoElement) event.target.pause();
       void player.pause().catch(() => {
         // Ignore pause rejections before the provider is ready.
       });
@@ -287,22 +297,58 @@ function bindPlayerEventListeners(player: MediaPlayerElement | null) {
   const handlePause = () => {
     isPaused.value = props.active;
   };
+  const handleCanPlay = () => {
+    handleReady();
+    videoReady.value = true;
+  };
+  const handleVideoFailed = (event: Event) => {
+    if (props.item.videoPlaybackUrl) return;
+    // Typed legacy sources use <source>. Its HTTP/decode errors do not bubble
+    // and may leave video.error null, so Vidstack emits no player error.
+    const trigger = (event as Event & { trigger?: Event }).trigger;
+    const target = trigger?.target ?? event.target;
+    if (target instanceof HTMLSourceElement || target instanceof HTMLVideoElement) {
+      const src = target instanceof HTMLSourceElement ? target.src : target.currentSrc;
+      if (src !== new URL(currentVideoSrc.value, window.location.href).href) return;
+    } else if (target !== player) return;
 
+    if (!isUsingOriginalFallback.value) switchToOriginalFallback();
+    else {
+      resetAutoplayRetry();
+      legacyFailed.value = true;
+    }
+  };
+
+  const handleLoadStart = () => { videoReady.value = false; };
+  player.addEventListener('load-start', handleLoadStart);
   player.addEventListener('loaded-metadata', handleReady);
-  player.addEventListener('can-play', handleReady);
-  player.addEventListener('play', handlePlay);
+  player.addEventListener('can-play', handleCanPlay);
+  player.addEventListener('error', handleVideoFailed, true);
+  player.addEventListener('play', handlePlay, true);
   player.addEventListener('pause', handlePause);
 
   removePlayerEventListeners = () => {
+    player.removeEventListener('load-start', handleLoadStart);
     player.removeEventListener('loaded-metadata', handleReady);
-    player.removeEventListener('can-play', handleReady);
-    player.removeEventListener('play', handlePlay);
+    player.removeEventListener('can-play', handleCanPlay);
+    player.removeEventListener('error', handleVideoFailed, true);
+    player.removeEventListener('play', handlePlay, true);
     player.removeEventListener('pause', handlePause);
   };
 
   if (player.hasAttribute('data-can-play')) {
     void syncPlayback();
+    videoReady.value = true;
   }
+}
+
+async function retryPlayback() {
+  if (streaming.source.value) return streaming.play();
+  userPaused = false;
+  legacyFailed.value = false;
+  videoReady.value = false;
+  resetAutoplayRetry();
+  isUsingOriginalFallback.value = false;
 }
 
 async function toggleSound() {
@@ -316,7 +362,8 @@ async function toggleSound() {
 
   syncMuted(player, nextMuted);
 
-  if (player.paused) {
+  if (userPaused || player.paused) {
+    userPaused = false;
     if (streaming.source.value) await streaming.play();
     else await syncPlayback();
   }
@@ -332,12 +379,15 @@ async function handleSurfaceClick(event?: MouseEvent) {
     return;
   }
 
-  if (player.paused) {
+  if (userPaused || player.paused) {
+    userPaused = false;
     if (streaming.source.value) await streaming.play();
     else await syncPlayback();
     return;
   }
 
+  userPaused = true;
+  resetAutoplayRetry();
   isPaused.value = true;
   void player.pause().catch(() => {
     // Ignore pause rejections before the provider is ready.
@@ -365,6 +415,7 @@ watch(
   () => props.active,
   (active) => {
     if (active) {
+      userPaused = false;
       resetAutoplayRetry();
     }
 
@@ -373,14 +424,16 @@ watch(
 );
 
 watch(
-  () => props.item.id,
+  [() => props.item.id, () => props.item.previewUrl, () => props.item.videoPlaybackUrl, originalMediaId],
   () => {
     resetAutoplayRetry();
     isUsingOriginalFallback.value = false;
+    userPaused = false;
     isPaused.value = false;
+    videoReady.value = false;
+    legacyFailed.value = false;
   }
 );
-
 watch(
   () => appStore.videoMuted,
   (videoMuted) => {
@@ -394,12 +447,16 @@ watch(
 );
 
 watch(playerElement, (player) => {
+  videoReady.value = false;
+  legacyFailed.value = false;
   bindPlayerEventListeners(player);
 });
 
 watch(
-  currentVideoSrc,
+  () => streaming.source.value?.src ?? currentVideoSrc.value,
   () => {
+    videoReady.value = false;
+    legacyFailed.value = false;
     if (!props.active) {
       return;
     }
@@ -426,36 +483,6 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.reel-player-card {
-  --reel-stage-max-width: 24.4rem;
-  --reel-stage-max-height: calc(var(--reel-stage-max-width) * 16 / 9);
-  display: grid;
-  place-items: center;
-  box-sizing: border-box;
-  width: 100%;
-  height: 100%;
-  padding: calc(var(--reel-stage-gap, 0.75rem) / 2) 0;
-}
-
-.reel-player-card__stage {
-  position: relative;
-  justify-self: center;
-  align-self: center;
-  /* This Reel, not the active Reel, controls its own stage dimensions. */
-  width: min(
-    calc(100% - var(--reel-stage-inline-gap, 1.25rem)),
-    calc(var(--reel-item-block-limit, calc(100cqh - 2rem)) * var(--reel-item-ratio))
-  );
-  height: auto;
-  max-height: min(100%, var(--reel-item-block-limit, calc(100cqh - 2rem)));
-  max-width: 100%;
-  aspect-ratio: var(--reel-item-ratio, 9 / 16);
-  overflow: hidden;
-  border-radius: 0.6rem;
-  background: #000;
-  box-shadow: none;
-}
-
 .reel-player-card__surface {
   position: relative;
   display: block;
@@ -650,26 +677,7 @@ onBeforeUnmount(() => {
   height: 1rem;
 }
 
-@media (min-width: 768px) and (orientation: portrait) {
-  .reel-player-card--portrait {
-    --reel-item-block-limit: calc(88cqh - var(--reel-deck-top-inset, 1rem) - var(--reel-deck-panel-gap, 2rem));
-  }
-}
-
 @media (max-width: 767.98px) {
-  .reel-player-card {
-    --reel-stage-gap: 0;
-    padding: 0;
-  }
-
-  .reel-player-card__stage {
-    width: 100%;
-    max-width: none;
-    height: 100%;
-    max-height: none;
-    border-radius: 0;
-  }
-
   .reel-player-card__overlay {
     display: block;
     padding: 0 4.85rem 1rem 1rem;

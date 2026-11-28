@@ -7,8 +7,12 @@
     :aria-label="t('reels.view.feedAria')"
     @scroll="handleScroll"
   >
+    <div v-if="!items.length || awaitingActiveItem" class="reel-deck__panel reel-deck__panel--portrait" style="--reel-item-ratio: 0.5625">
+      <ReelStage :width="9" :height="16"><ReelSkeleton /></ReelStage>
+    </div>
     <div
       v-for="(item, index) in items"
+      v-show="!awaitingActiveItem"
       :key="item.id"
       :ref="setPanelRef(item.id)"
       class="reel-deck__panel"
@@ -35,8 +39,15 @@
       </ReelPlayerCard>
     </div>
 
-    <div v-if="loading && items.length > 0" class="reel-deck__status" role="status" aria-live="polite">
-      {{ t('reels.view.loadingMore') }}
+    <div
+      v-if="loading && items.length > 0"
+      class="reel-deck__panel"
+      :class="{ 'reel-deck__panel--portrait': lastItem && lastItem.height > lastItem.width }"
+      :style="{ '--reel-item-ratio': lastRatio }"
+      role="status"
+      :aria-label="t('reels.view.loadingMore')"
+    >
+      <ReelStage :width="lastItem?.width ?? 9" :height="lastItem?.height ?? 16"><ReelSkeleton :loading-more="true" /></ReelStage>
     </div>
   </section>
 </template>
@@ -49,6 +60,8 @@ import type { FeedItem, FolderSummary } from '../types/api';
 import { ReelVideoPreparation } from '../utils/local-video-provider';
 import { getActiveReelId, shouldPrefetchReels } from '../utils/reels';
 import ReelPlayerCard from './ReelPlayerCard.vue';
+import ReelStage from './ReelStage.vue';
+import ReelSkeleton from './ReelSkeleton.vue';
 
 const { t } = useI18n();
 
@@ -75,6 +88,7 @@ const renderedActiveIndex = computed(() => {
   const index = props.items.findIndex(item => item.id === props.activeReelId);
   return index >= 0 ? index : 0;
 });
+const awaitingActiveItem = computed(() => props.activeReelId !== null && !props.items.some(item => item.id === props.activeReelId));
 const lastItem = computed(() => props.items.at(-1) ?? null);
 const lastRatio = computed(() => lastItem.value && lastItem.value.width > 0 && lastItem.value.height > 0
   ? lastItem.value.width / lastItem.value.height
@@ -106,7 +120,7 @@ function updateActiveReel() {
   scrollFrame = 0;
 
   const scroller = scrollerElement.value;
-  if (!scroller || props.items.length === 0) {
+  if (!scroller || props.items.length === 0 || awaitingActiveItem.value) {
     return;
   }
 
@@ -426,12 +440,4 @@ defineExpose({
   }
 }
 
-.reel-deck__status {
-  padding: 0.75rem 0 1.5rem;
-  text-align: center;
-  font-size: 0.78rem;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  color: rgba(255, 255, 255, 0.68);
-}
 </style>

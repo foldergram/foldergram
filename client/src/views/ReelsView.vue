@@ -15,11 +15,6 @@
       <p class="reels-view__message">{{ reelsStore.error }}</p>
     </section>
 
-    <section v-else-if="showLoadingState" class="reels-view__message-card">
-      <p class="reels-view__eyebrow">{{ t('nav.reels') }}</p>
-      <h1 class="reels-view__title">{{ t('reels.view.loadingTitle') }}</h1>
-      <p class="reels-view__message">{{ t('reels.view.loadingDescription') }}</p>
-    </section>
 
     <section v-else-if="reelsStore.initialized && reelsStore.items.length === 0" class="reels-view__message-card">
       <p class="reels-view__eyebrow">{{ t('nav.reels') }}</p>
@@ -234,7 +229,6 @@ const activeFolderTitle = computed(() => {
 const activeIndex = computed(() => reelsStore.items.findIndex((item) => item.id === reelsStore.activeReelId));
 const canGoPrevious = computed(() => activeIndex.value > 0);
 const canGoNext = computed(() => activeIndex.value >= 0 && (activeIndex.value < reelsStore.items.length - 1 || reelsStore.hasMore));
-const showLoadingState = computed(() => reelsStore.loading && !reelsStore.initialized);
 let pendingDeckRouteId: string | null = null;
 let latestRouteRequest = 0;
 let loadingLinkedReel = false;
@@ -949,7 +943,6 @@ watch(activeItem, (item) => {
   line-height: 1.6;
   color: var(--muted);
 }
-
 @media (max-width: 767.98px) {
   .reels-view__layout {
     display: block;

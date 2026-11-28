@@ -216,6 +216,12 @@ describe('ReelPlayerCard', () => {
     expect(player.paused).toBe(true);
     expect(wrapper.find('.reel-player-card__pause-indicator').exists()).toBe(true);
 
+    // Browsers can report can-play again while buffered media loops/settles.
+    player.dispatchEvent(new Event('can-play'));
+    player.dispatchEvent(new Event('play'));
+    await flushPromises();
+    expect(player.paused).toBe(true);
+
     await wrapper.get('.reel-player-card__surface').trigger('click');
     await flushPromises();
 
@@ -328,7 +334,7 @@ describe('ReelPlayerCard', () => {
     reloaded.unmount();
   });
 
-  it('falls back to the original video when preview autoplay keeps failing', async () => {
+  it('keeps waiting for a slow preview after bounded autoplay retries', async () => {
     vi.useFakeTimers();
     nextPlayFailures = 4;
 
@@ -349,9 +355,11 @@ describe('ReelPlayerCard', () => {
     await flushPromises();
 
     const player = getPlayerElement(wrapper);
-    expect((player.src as { src?: string } | null)?.src).toBe('/api/originals/7');
+    expect((player.src as { src?: string } | null)?.src).toBe('/previews/7.mp4');
+    expect(wrapper.find('.reel-skeleton').exists()).toBe(true);
     expect(player.playCallCount).toBeGreaterThan(1);
 
+    wrapper.unmount();
     vi.useRealTimers();
   });
 
@@ -395,5 +403,62 @@ describe('ReelPlayerCard', () => {
 
     expect(player.pauseCallCount).toBe(0);
     expect(wrapper.find('.reel-player-card__pause-indicator').exists()).toBe(false);
+  });
+
+  it('keeps readiness on activation but resets it for changed media and remounted players', async () => {
+    const item = createFeedItem(7);
+    const wrapper = mount(ReelPlayerCard, {
+      props: { item, folder: createFolder(), active: true },
+      global: { stubs: globalStubs }
+    });
+    await flushPromises();
+    expect(wrapper.find('.reel-skeleton').exists()).toBe(true);
+    getPlayerElement(wrapper).dispatchEvent(new Event('can-play'));
+    await flushPromises();
+    expect(wrapper.find('.reel-skeleton').exists()).toBe(false);
+    await wrapper.setProps({ active: false });
+    await wrapper.setProps({ active: true });
+    expect(wrapper.find('.reel-skeleton').exists()).toBe(false);
+
+    await wrapper.setProps({ item: { ...item, caption: 'Updated caption' } });
+    expect(wrapper.find('.reel-skeleton').exists()).toBe(false);
+
+    // The same post ID may receive a new preview or streaming endpoint.
+    await wrapper.setProps({ item: { ...item, previewUrl: '/previews/replaced.mp4' } });
+    expect(wrapper.find('.reel-skeleton').exists()).toBe(true);
+    getPlayerElement(wrapper).dispatchEvent(new Event('can-play'));
+    await flushPromises();
+    await wrapper.setProps({ item: { ...item, videoPlaybackUrl: '/api/videos/7/playback' } });
+    expect(wrapper.find('.reel-skeleton').exists()).toBe(true);
+    wrapper.unmount();
+
+    const remounted = mount(ReelPlayerCard, {
+      props: { item, folder: createFolder(), active: true },
+      global: { stubs: globalStubs }
+    });
+    await flushPromises();
+    expect(remounted.find('.reel-skeleton').exists()).toBe(true);
+    remounted.unmount();
+  });
+
+  it('keeps loading during original fallback and exposes terminal errors with retry', async () => {
+    const wrapper = mount(ReelPlayerCard, {
+      props: { item: createFeedItem(7), folder: createFolder(), active: true },
+      global: { stubs: globalStubs }
+    });
+    await flushPromises();
+    const player = getPlayerElement(wrapper);
+    player.dispatchEvent(new Event('error'));
+    await flushPromises();
+    expect((player.src as { src: string }).src).toBe('/api/originals/7');
+    expect(wrapper.find('.reel-skeleton').exists()).toBe(true);
+    player.dispatchEvent(new Event('error'));
+    await flushPromises();
+    expect(wrapper.find('.reel-skeleton').exists()).toBe(false);
+    expect(wrapper.get('[role="alert"]').text()).toContain('could not be played');
+    await wrapper.get('.local-video-feedback__error button').trigger('click');
+    expect(wrapper.find('.reel-skeleton').exists()).toBe(true);
+    expect((player.src as { src: string }).src).toBe('/previews/7.mp4');
+    wrapper.unmount();
   });
 });
