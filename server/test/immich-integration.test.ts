@@ -290,6 +290,23 @@ describe.sequential('optional Immich sources', () => {
         expect(sources.listSources()[0].selection.initializedModes).toEqual(['albums', 'folders']);
         expect(feed().total).toBe(3);
     });
+    it('defaults old Immich sources to Standard and updates Home feed quality without hiding indexed media', async () => {
+        const id = add('albums');
+        await sources.syncSource(id);
+        const source = sources.listSources()[0];
+        expect(source.selection.homeFeedImageQuality).toBe('standard');
+        const { homeFeedImageQuality, ...legacySelection } = source.selection;
+        manager.databaseManager.connection.prepare('UPDATE media_sources SET config_json=? WHERE id=?').run(JSON.stringify(legacySelection), id);
+        expect(sources.listSources()[0].selection.homeFeedImageQuality).toBe('standard');
+        const before = feed().items.map(item => item.id);
+        expect(before.length).toBeGreaterThan(0);
+        expect(feed().items.every(item => item.homeFeedImageQuality === 'standard')).toBe(true);
+        sources.saveSource(sources.sourceInputSchema.parse({ name: source.name, serverUrl: base, selection: { ...source.selection, homeFeedImageQuality: 'high' } }), id);
+        expect(sources.listSources()[0].selection.homeFeedImageQuality).toBe('high');
+        expect(feed().items.map(item => item.id)).toEqual(before);
+        expect(feed().items.every(item => item.homeFeedImageQuality === 'high')).toBe(true);
+        expect(sources.selectionSchema.safeParse({ homeFeedImageQuality: 'invalid' }).success).toBe(false);
+    });
     it('preserves the index after partial failures, retries, then reconciles memberships, visibility, deletions and moves', async () => {
         const id = add();
         await sources.syncSource(id);

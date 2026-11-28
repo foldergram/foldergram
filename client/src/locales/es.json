@@ -127,6 +127,12 @@
     "description": "Administra las carpetas locales y las bibliotecas de Immich que aparecen en Foldergram.",
     "connect": "Conectar una fuente",
     "connectImmich": "Conectar Immich",
+    "immichImageQuality": {
+      "label": "Calidad de imagen en Inicio",
+      "standard": "Estándar (predeterminada)",
+      "high": "Alta calidad",
+      "description": "La alta calidad carga vistas previas de fotos fijas en Inicio y usa miniaturas cuando es necesario. Las vistas previas consumen más ancho de banda y espacio de caché."
+    },
     "syncNow": "Sincronizar ahora",
     "edit": "Editar",
     "local": {

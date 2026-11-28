@@ -179,6 +179,35 @@ describe('FeedCard', () => {
     );
   });
 
+  it('uses Immich previews with thumbnail fallback only for opted-in Home still photos', async () => {
+    const local = createImageItem(808);
+    const remote: FeedItem = { ...local, sourceKind: 'immich' };
+    const wrapper = mount(FeedCard, {
+      props: { item: remote, avatarUrl: null, context: 'home' },
+      global: { stubs: globalStubs }
+    });
+    const image = () => wrapper.get('[data-test="resilient-image"]');
+    expect(image().attributes('src')).toBe(remote.thumbnailUrl);
+    expect(image().attributes('fallback-src')).toBeUndefined();
+    const high: FeedItem = { ...remote, homeFeedImageQuality: 'high' };
+    await wrapper.setProps({ item: high });
+    expect(image().attributes('src')).toBe(remote.previewUrl);
+    expect(image().attributes('fallback-src')).toBe(remote.thumbnailUrl);
+    expect(image().attributes('loading')).toBe('lazy');
+    await wrapper.setProps({ item: { ...high, previewUrl: '' } });
+    expect(image().attributes('src')).toBe(remote.thumbnailUrl);
+    await wrapper.setProps({ item: high, context: 'default' });
+    expect(image().attributes('src')).toBe(remote.thumbnailUrl);
+    await wrapper.setProps({ context: 'home', item: { ...high, homeFeedImageQuality: 'standard' } });
+    expect(image().attributes('src')).toBe(remote.thumbnailUrl);
+    await wrapper.setProps({ item: { ...local, homeFeedImageQuality: 'high' } });
+    expect(image().attributes('src')).toBe(local.thumbnailUrl);
+    await wrapper.setProps({ item: { ...high, isAnimated: true } });
+    expect(image().attributes('src')).toBe(remote.previewUrl);
+    expect(image().attributes('fallback-src')).toBeUndefined();
+    wrapper.unmount();
+  });
+
   it('hides the menu original action when Immich original downloads are disabled', async () => {
     const wrapper = mount(FeedCard, {
       props: { item: { ...createImageItem(807), sourceId: 1, originalDownloadsAllowed: false }, avatarUrl: null },

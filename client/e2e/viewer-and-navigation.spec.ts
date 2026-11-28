@@ -226,6 +226,38 @@ for (const preference of [
   });
 }
 
+test('Immich Home still photos use the configured quality and fall back on failed previews', async ({ page }) => {
+  await mockGallery(page);
+  let quality: 'standard' | 'high' = 'standard';
+  let failPreview = false;
+  let previewRequests = 0;
+  await page.route('**/api/feed?*', route => route.fulfill({
+    json: { items: [{ ...panorama, sourceKind: 'immich', homeFeedImageQuality: quality }], page: 1, limit: 24, total: 1, hasMore: false }
+  }));
+  await page.route('**/previews/panorama.svg', route => {
+    previewRequests++;
+    return failPreview ? route.fulfill({ status: 503 }) : route.fallback();
+  });
+  const photo = page.locator('main article img[alt="panorama.jpg"]');
+  await page.goto('/');
+  await expect(photo).toHaveAttribute('src', '/thumbnails/panorama.svg');
+  await expect(photo).toHaveAttribute('data-loaded', 'true');
+  expect(previewRequests).toBe(0);
+
+  quality = 'high';
+  await page.reload();
+  await expect(photo).toHaveAttribute('src', '/previews/panorama.svg');
+  await expect(photo).toHaveAttribute('data-loaded', 'true');
+  expect(previewRequests).toBeGreaterThan(0);
+
+  failPreview = true;
+  const beforeFailure = previewRequests;
+  await page.reload();
+  await expect(photo).toHaveAttribute('src', '/thumbnails/panorama.svg');
+  await expect(photo).toHaveAttribute('data-loaded', 'true');
+  expect(previewRequests).toBeGreaterThan(beforeFailure);
+});
+
 test('browser themes explain failed writes and failed resets without changing instance settings', async ({ page }) => {
   await mockGallery(page);
   await page.route('**/api/appearance', route => route.fulfill({ json: { theme: 'dark', accent: 'blue' } }));

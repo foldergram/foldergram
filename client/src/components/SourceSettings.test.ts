@@ -220,6 +220,37 @@ describe('Immich source settings', () => {
         expect(button('Edit connection').exists()).toBe(true);
     });
 
+    it('defaults new Immich sources to Standard and saves the selected quality', async () => {
+        await connect();
+        const quality = wrapper!.get('[data-test="home-feed-image-quality"]');
+        expect((quality.element as HTMLSelectElement).value).toBe('standard');
+        await quality.setValue('high');
+        await wrapper!.find('form').trigger('submit');
+        await flushPromises();
+        expect(savedBody().selection.homeFeedImageQuality).toBe('high');
+    });
+
+    it('restores and updates the saved quality, with Standard for older sources', async () => {
+        sources = [savedSource({ selection: { ...emptySelection(), mode: 'albums', albumIds: ['family'] } })];
+        wrapper = mount(SourceSettings);
+        await flushPromises();
+        await button('Edit').trigger('click');
+        await flushPromises();
+        expect((wrapper.get('[data-test="home-feed-image-quality"]').element as HTMLSelectElement).value).toBe('standard');
+        wrapper.unmount();
+        sources = [savedSource({ selection: { ...emptySelection(), mode: 'albums', albumIds: ['family'], homeFeedImageQuality: 'high' } })];
+        wrapper = mount(SourceSettings);
+        await flushPromises();
+        await button('Edit').trigger('click');
+        await flushPromises();
+        const quality = wrapper.get('[data-test="home-feed-image-quality"]');
+        expect((quality.element as HTMLSelectElement).value).toBe('high');
+        await quality.setValue('standard');
+        await wrapper.find('form').trigger('submit');
+        await flushPromises();
+        expect(savedBody('PATCH').selection.homeFeedImageQuality).toBe('standard');
+    });
+
     it('retains saved selections and advanced settings when editing, including after key rotation', async () => {
         sources = [savedSource({ selection: { ...emptySelection(), mode: 'albums', albumIds: ['family'], exclusions: ['/photos/private'], intervalMinutes: 60 } })];
         wrapper = mount(SourceSettings);

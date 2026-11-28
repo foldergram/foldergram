@@ -194,6 +194,14 @@
               <label class="grid gap-2">Source name<input v-model="form.name" required maxlength="100" class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-text focus:outline-accent" /></label>
               <label class="grid gap-2">Sync interval in minutes<input v-model.number="form.selection.intervalMinutes" type="number" min="0" max="525600" class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-text focus:outline-accent" /><span class="text-xs text-muted">0 for manual sync, or at least 5 minutes.</span></label>
               <label class="flex items-start gap-3"><input v-model="form.selection.allowOriginals" type="checkbox" class="mt-1 accent-accent" /><span>Allow original downloads<span class="block text-xs text-muted">Requires asset.download permission.</span></span></label>
+              <label class="grid gap-2">
+                {{ t('sources.immichImageQuality.label') }}
+                <select v-model="form.selection.homeFeedImageQuality" data-test="home-feed-image-quality" class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-text focus:outline-accent">
+                  <option value="standard">{{ t('sources.immichImageQuality.standard') }}</option>
+                  <option value="high">{{ t('sources.immichImageQuality.high') }}</option>
+                </select>
+                <span class="text-xs text-muted">{{ t('sources.immichImageQuality.description') }}</span>
+              </label>
               <label class="grid gap-2">Exclude folder paths, one per line<textarea v-model="exclusionText" rows="3" placeholder="/photos/folder-to-skip" class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-text focus:outline-accent" /><span class="text-xs text-muted">Includes subfolders. Applies to Folders; selected albums can still contain this media.</span></label>
               <details>
                 <summary class="cursor-pointer text-muted">Add a folder or album manually</summary>
@@ -253,6 +261,7 @@ interface Selection {
     exclusions: string[];
     includeUnfiled: boolean;
     allowOriginals: boolean;
+    homeFeedImageQuality: 'standard' | 'high';
     intervalMinutes: number;
 }
 interface SourceBase {
@@ -300,7 +309,7 @@ const pathCheck = ref<{ ignoredRootMediaCount: number; partial: boolean } | null
 const emit = defineEmits<{ 'manage-local-exclusions': [] }>();
 const sources = ref<Source[]>([]), error = ref(''), notice = ref(''), busy = ref(false), formOpen = ref(false), apiKey = ref(''), editingId = ref<number | null>(null), environmentManaged = ref(false), detection = ref<Detection | null>(null);
 const sourcesLoaded = ref(false), initialLoading = ref(true);
-const initial = () => ({ name: 'Immich', serverUrl: '', enabled: true, selection: { mode: 'folders' as Selection['mode'], initializedModes: [], roots: [], albumIds: [], exclusions: [], includeUnfiled: false, allowOriginals: false, intervalMinutes: 0 } as Selection });
+const initial = () => ({ name: 'Immich', serverUrl: '', enabled: true, selection: { mode: 'folders' as Selection['mode'], initializedModes: [], roots: [], albumIds: [], exclusions: [], includeUnfiled: false, allowOriginals: false, homeFeedImageQuality: 'standard', intervalMinutes: 0 } as Selection });
 const form = ref(initial()), manualLibrary = ref(''), manualRoot = ref(''), manualAlbum = ref(''), exclusionText = ref('');
 const step = ref<'connection' | 'content'>('connection'), selectionSearch = ref(''), selectionInitialized = ref(false);
 const formHeading = ref<HTMLElement | null>(null);
@@ -428,6 +437,7 @@ function newSource() {
 function edit(source: ImmichSource, section: 'connection' | 'content' = 'content') {
     resetFormState();
     form.value = { name: source.name, serverUrl: source.server_url, enabled: Boolean(source.enabled), selection: JSON.parse(JSON.stringify(source.selection)) };
+    form.value.selection.homeFeedImageQuality ??= 'standard';
     // Older sources have no initialization markers. Keep active selections and
     // infer that an empty, inactive category has not been configured yet.
     form.value.selection.initializedModes ??= [

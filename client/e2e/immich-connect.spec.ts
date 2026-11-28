@@ -109,11 +109,19 @@ for (const viewport of [{ name: 'desktop', width: 1440, height: 1000 }, { name: 
       await archive.uncheck();
       await family.uncheck();
       await expect(page.getByText('1 folder · 1 album selected', { exact: true })).toBeVisible();
+      const advanced = page.locator('[data-test="advanced-options"]');
+      await advanced.locator(':scope > summary').click();
+      const quality = page.locator('[data-test="home-feed-image-quality"]');
+      await expect(quality).toHaveValue('standard');
+      await quality.selectOption('high');
+      await expect(quality).toHaveValue('high');
+      await advanced.screenshot({ path: test.info().outputPath('home-feed-image-quality.png') });
       await page.getByRole('button', { name: 'Connect and sync', exact: true }).click();
       await expect(page.getByText('Source saved. Synchronization is running in the background.')).toBeVisible();
       expect(saves).toHaveLength(1);
       expect(saves[0].selection.roots).toEqual([{ libraryId: 'library', path: '/photos' }]);
       expect(saves[0].selection.albumIds).toEqual(['holiday']);
+      expect(saves[0].selection.homeFeedImageQuality).toBe('high');
 
       // Reproduce a saved source from before inactive categories had defaults.
       sources[0].selection = { mode: 'albums', roots: [], albumIds: ['family'], exclusions: [], includeUnfiled: false, allowOriginals: false, intervalMinutes: 0 };
@@ -137,6 +145,7 @@ for (const viewport of [{ name: 'desktop', width: 1440, height: 1000 }, { name: 
       expect(saves[1].selection.roots).toEqual([{ libraryId: 'library', path: '/photos' }, { libraryId: 'archive', path: '/archive' }]);
       expect(saves[1].selection.albumIds).toEqual(['family']);
       expect(saves[1].selection.initializedModes).toEqual(['albums', 'folders']);
+      expect(saves[1].selection.homeFeedImageQuality).toBe('standard');
 
       const previousChecks = checks.length;
       await page.getByRole('button', { name: 'Edit connection', exact: true }).click();

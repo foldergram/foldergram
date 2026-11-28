@@ -127,6 +127,12 @@
     "description": "Verwalte die lokalen Ordner und Immich-Bibliotheken in Foldergram.",
     "connect": "Quelle verbinden",
     "connectImmich": "Immich verbinden",
+    "immichImageQuality": {
+      "label": "Bildqualität im Start-Feed",
+      "standard": "Standard (Standardwert)",
+      "high": "Hohe Qualität",
+      "description": "Hohe Qualität lädt Vorschauen für Fotos auf der Startseite und verwendet bei Bedarf Miniaturbilder. Vorschauen benötigen mehr Bandbreite und Cache-Speicher."
+    },
     "syncNow": "Jetzt synchronisieren",
     "edit": "Bearbeiten",
     "local": {
